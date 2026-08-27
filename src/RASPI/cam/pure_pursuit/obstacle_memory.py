@@ -192,6 +192,16 @@ class ObstacleMemory:
                 passed = True
                 continue
             if not (0.0 <= o.x < C.BEV_W and 0.0 <= o.y < C.BEV_H):
+                # Salida del frame BEV. Si fue por ABAJO (y >= BEV_H) y cerca de
+                # la columna del robot, el robot lo rebasó -> PASADO (dispara
+                # recuperando). Con ds_px grande la lata salta de y<behind_y a
+                # y>=BEV_H en un frame sin tocar el check de arriba -- ese hueco
+                # dejaba "pasado" sin dispararse nunca. Salidas por lados/arriba
+                # = ruido de rotación, NO es un rebase.
+                half_w = getattr(C, "OBS_MEM_BEHIND_X_HALFWIDTH", 90.0)
+                if o.y >= C.BEV_H and abs(o.x - self.rx) < half_w:
+                    self.last_prune_reason = f"PASADO(borde) y={o.y:.0f} conf={o.conf:.2f}"
+                    passed = True
                 continue
             kept.append(o)
         self._obs = kept

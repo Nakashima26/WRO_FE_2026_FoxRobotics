@@ -191,13 +191,15 @@ OBS_MEM_MATCH_PX   = 75.0    # radio para fusionar una detección nueva con una 
 OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
-OBS_MEM_BEHIND_PAD = 40     # px: tirar el obstáculo (y disparar "pasado") solo cuando
-                              # queda BIEN detrás del robot (bev_y > robot_y + pad). En 1
-                              # disparaba "pasado" apenas el centro de la lata cruzaba 1px
-                              # el origen del robot -- pero el chasis tiene largo, la lata
-                              # aún estaba debajo/al lado. El clear prematuro de memoria
-                              # a media esquiva es lo que hacía que el carro se
-                              # enderezara encima de la lata. 40px ≈ 80mm de margen.
+OBS_MEM_BEHIND_PAD = 12     # px: tirar el obstáculo (y disparar "pasado") cuando
+                              # queda detrás del robot (bev_y > robot_y + pad).
+                              # OJO: robot_y=380 y BEV_H=400 -> solo hay 20px de BEV
+                              # por debajo del robot. Con pad=40 el umbral (420) caía
+                              # FUERA del frame: el obstáculo se salía por abajo (y>=400)
+                              # y se descartaba en silencio SIN disparar "pasado" (0
+                              # eventos en todo un run). 12 deja el umbral en 392 < 400,
+                              # así "pasado" sí alcanza a dispararse. Ver también el
+                              # fallback por salida de frame en obstacle_memory._prune().
 
 # ── Arranque: rampa de velocidad asumida para el arrastre de la memoria ──
 # _advance() acredita ROBOT_SPEED_MMS completos desde el frame 1, pero el carro
@@ -207,6 +209,10 @@ OBS_MEM_BEHIND_PAD = 40     # px: tirar el obstáculo (y disparar "pasado") solo
 # tiempo (acumulado, NO se reinicia en cada giro).
 OBS_MEM_LAUNCH_RAMP_S = 1.2
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
+OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
+                                      # del BEV, se cuenta como "pasada" solo si
+                                      # |x - robot_x| < esto (rebase real, no
+                                      # ruido de rotación que la saca de lado)
 OBS_MEM_DEDUPE_PX  = 55.0    # red de seguridad secundaria si igual se duplica -- ver OBS_MEM_MATCH_PX
                               # (mismo riesgo de confundir obstáculos de esquina: se
                               # queda deliberadamente por debajo de OBS_MEM_MATCH_PX)
