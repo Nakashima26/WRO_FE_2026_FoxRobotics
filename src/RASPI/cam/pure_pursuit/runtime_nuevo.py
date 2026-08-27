@@ -545,6 +545,15 @@ class PPRuntime:
 
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
                 print(f"[DIR] fija={self.turn_dir_tracker.direction} interior={interior}", flush=True)
+                # Vuelca el estado interno de la memoria rodante a stdout (antes
+                # solo iba al HUD de pantalla vía _annotate). Permite medir en
+                # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx
+                # = aún enfrente) antes de soltarse, y si `pasado` salió por
+                # cruce real de y (PASADO) o por decaimiento de confianza
+                # (BAJA_CONF, que NO manda recuperando).
+                print(f"[MEMDBG] closest={self.memory.debug_closest()} "
+                      f"prune={self.memory.last_prune_reason} "
+                      f"all={self.memory.debug_all()}", flush=True)
 
                 t_ser = time.perf_counter()
                 timing_ms["ser"] = (t_ser - t_bev) * 1000.0
