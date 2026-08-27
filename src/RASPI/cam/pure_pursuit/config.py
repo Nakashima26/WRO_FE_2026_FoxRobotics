@@ -239,6 +239,17 @@ OBS_MEM_TURN_DEADZONE_DEG = 4.0
 OBS_MEM_TURN_FLOOR_DEG    = 12.0
 OBS_MEM_TURN_SCALE_MIN    = 0.3
 
+# ── Rebase LATERAL (obstacle_memory._prune) ──
+# En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el
+# mapa rota con el heading y la lata cruza el eje del robot al lado opuesto
+# de la esquiva. Ése es el momento de RECUPERANDO (enderezar y seguir), no
+# cuando la lata cruza detrás en Y (que con mucho ángulo pasa ~1s después,
+# con el carro ya sobregirado hacia la pared -- confirmado run5/run6).
+OBS_MEM_LATERAL_MARGIN_PX  = 8.0    # px que la lata debe cruzar PASADO el eje
+OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
+                                      # (la lata sigue a la altura del carro,
+                                      # no muy adelante todavía)
+
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
 OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
                                       # del BEV, se cuenta como "pasada" solo si

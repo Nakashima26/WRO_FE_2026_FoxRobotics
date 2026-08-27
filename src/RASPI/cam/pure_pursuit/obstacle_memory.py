@@ -28,13 +28,18 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf", "beyond", "_cls_vote", "_cls_votes")
+    __slots__ = ("x", "y", "color", "conf", "x0", "beyond", "_cls_vote", "_cls_votes")
 
     def __init__(self, x: float, y: float, color: str, conf: float):
         self.x = x
         self.y = y
         self.color = color
         self.conf = conf
+        # x cuando se detectó por primera vez -- para el "rebase lateral" en
+        # _prune(): solo cuenta como pasada de lado si la lata CRUZÓ el eje del
+        # robot (empezó del lado de esquiva y terminó del otro), no si ya
+        # estaba del otro lado desde el principio.
+        self.x0 = x
         # Clasificación respecto a la línea de esquina (ver
         # ObstacleMemory.classify_and_split()): None = aún sin veredicto,
         # True = más allá (siguiente recta), False = mía (recta actual).
@@ -181,6 +186,8 @@ class ObstacleMemory:
         específicamente por quedar detrás del robot ("evento pasado").
         """
         behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
+        lat_margin = getattr(C, "OBS_MEM_LATERAL_MARGIN_PX", 8.0)
+        lat_y_band = getattr(C, "OBS_MEM_LATERAL_Y_BAND_PX", 140.0)
         kept: list[_Obs] = []
         passed = False
         for o in self._obs:
@@ -189,6 +196,31 @@ class ObstacleMemory:
                 continue                             # perdido de vista, no rebasado
             if o.y > behind_y:                       # ya quedó detrás del robot
                 self.last_prune_reason = f"PASADO y={o.y:.0f}>{behind_y} conf={o.conf:.2f}"
+                passed = True
+                continue
+            # ── Rebase LATERAL: en una esquiva de ángulo el carro pasa la lata
+            # de LADO, no de frente. El mapa rota con el heading, así que si la
+            # lata CRUZÓ el eje del robot al lado opuesto de la esquiva
+            # (Red se rebasa por su derecha -> la lata queda a la IZQUIERDA del
+            # robot; Green al revés) y sigue a la altura del robot (no muy
+            # adelante), el carro ya la libró -> PASADO / RECUPERANDO ya.
+            # Requiere que la lata haya EMPEZADO del lado de esquiva o centrada
+            # (o.x0), para no disparar sobre una lata que siempre estuvo del
+            # otro lado. A mayor ángulo de giro cruza antes -> recuperando entra
+            # antes, que es justo lo que se quiere.
+            crossed = (
+                (o.color == "Red"
+                 and o.x0 >= self.rx - lat_margin
+                 and o.x < self.rx - lat_margin)
+                or
+                (o.color == "Green"
+                 and o.x0 <= self.rx + lat_margin
+                 and o.x > self.rx + lat_margin)
+            )
+            if crossed and o.y > self.ry - lat_y_band:
+                self.last_prune_reason = (
+                    f"PASADO(lat) x={o.x:.0f} x0={o.x0:.0f} y={o.y:.0f} conf={o.conf:.2f}"
+                )
                 passed = True
                 continue
             if not (0.0 <= o.x < C.BEV_W and 0.0 <= o.y < C.BEV_H):
