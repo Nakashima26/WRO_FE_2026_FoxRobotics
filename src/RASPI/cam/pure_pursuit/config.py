@@ -100,9 +100,15 @@ FLOOR_COLOR_RANGES = [
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
-CENTERLINE_RAMP_PX   = 140   # horizonte de anticipo: empieza a abrir el path
+CENTERLINE_RAMP_PX   = 200   # horizonte de anticipo: empieza a abrir el path
                              # hacia el lado de paso a esta distancia Y de la lata
-                             # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX)
+                             # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX).
+                             # Subido de 140 -> 200: en pista la esquiva no
+                             # arrancaba hasta que la lata estaba a ~1 radio de
+                             # inflado, forzando un volantazo tardío. 200 da
+                             # ~120 mm más de anticipo para mover el path de lado
+                             # gradualmente. NO capa el steer máximo (volantazo
+                             # sigue disponible cuando la lata está cerca).
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
@@ -167,7 +173,13 @@ FRONT_CHECK_HALFWIDTH_PX = 30    # medio-ancho del "carril" frontal revisado,
 # Atenuación de steer por distancia — misma escala
 STEER_DIST_GAIN_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
 STEER_DIST_GAIN_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
-STEER_DIST_GAIN_MIN     = 0.5
+STEER_DIST_GAIN_MIN     = 0.8   # subido de 0.5: la atenuación de steer en la
+                                  # zona lejana (110-250px) hacía que el carro
+                                  # casi no se moviera de lado hasta tener la
+                                  # lata encima, y luego esquivara de volantazo.
+                                  # 0.8 deja la reacción lejana casi a fuerza
+                                  # completa. Dentro de 110px sigue siendo 1.0
+                                  # (volantazo intacto).
 
 
 # ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
@@ -191,15 +203,20 @@ OBS_MEM_MATCH_PX   = 75.0    # radio para fusionar una detección nueva con una 
 OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
-OBS_MEM_BEHIND_PAD = 12     # px: tirar el obstáculo (y disparar "pasado") cuando
-                              # queda detrás del robot (bev_y > robot_y + pad).
-                              # OJO: robot_y=380 y BEV_H=400 -> solo hay 20px de BEV
-                              # por debajo del robot. Con pad=40 el umbral (420) caía
-                              # FUERA del frame: el obstáculo se salía por abajo (y>=400)
-                              # y se descartaba en silencio SIN disparar "pasado" (0
-                              # eventos en todo un run). 12 deja el umbral en 392 < 400,
-                              # así "pasado" sí alcanza a dispararse. Ver también el
-                              # fallback por salida de frame en obstacle_memory._prune().
+OBS_MEM_BEHIND_PAD = -18    # px: tirar el obstáculo (y disparar "pasado" ->
+                              # RECUPERANDO en el ESP32) cuando bev_y > robot_y + pad.
+                              # NEGATIVO a propósito: umbral en 380-18 = 362, o sea
+                              # dispara cuando el CENTRO de la lata pasa ~18px por
+                              # DELANTE del eje del robot (el morro ya la rebasó).
+                              # En pista RECUPERANDO entraba tarde: con pad=12
+                              # (umbral 392) la lata ya estaba "debajo" del carro y
+                              # éste ya cruzado 45° -> el countersteer no alcanzaba
+                              # a enderezar antes de la pared. -18 lo adelanta ~0.3s.
+                              # Costo en esquiva ~nulo: a y=362 la lata ya casi no
+                              # influye en las filas del path adelante (_ramp_weight
+                              # ~0.14). OJO robot_y=380, BEV_H=400: no bajar de
+                              # ~-19 sin revisar; el fallback y>=BEV_H de _prune()
+                              # cubre el caso de que se salte el umbral por abajo.
 
 # ── Arranque: rampa de velocidad asumida para el arrastre de la memoria ──
 # _advance() acredita ROBOT_SPEED_MMS completos desde el frame 1, pero el carro
