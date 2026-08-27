@@ -283,10 +283,12 @@ class ObstacleMemory:
         new_obs     : obstáculos detectados este frame en coords BEV
         dt_s        : segundos transcurridos desde el update anterior
         heading_deg : ángulo del IMU (anguloGyro del ESP32) o None si no llegó
-        estado      : est= del ACK del ESP32 ('S'/'G'/'R') o None. En 'R'
-                      (reversa) el carro NO avanza -> no arrastrar la memoria
-                      hacia el robot (si no, empuja las latas "detrás" mientras
-                      el carro se aleja de ellas de espaldas).
+        estado      : est= del ACK del ESP32 ('S'=recto, 'G'=giro de esquina,
+                      'R'=RECUPERANDO). Se acepta por compatibilidad; hoy no
+                      cambia el avance porque en RECUPERANDO el carro SIGUE
+                      avanzando (corrige heading e va derecho, sin visión), y
+                      en 'G' runtime_nuevo ya apaga la memoria aparte. El carro
+                      no tiene reversa.
         """
         self._elapsed_s += dt_s if dt_s > 0 else 0.0
 
@@ -300,10 +302,6 @@ class ObstacleMemory:
             self._prev_heading = heading_deg
 
         ds_px = (C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX if dt_s > 0 else 0.0
-
-        # Reversa: el avance asumido no aplica (y de hecho sería al revés).
-        if estado == "R":
-            ds_px = 0.0
 
         # Rampa de arranque: los primeros OBS_MEM_LAUNCH_RAMP_S el carro sale de
         # 0 (y girando en el sitio), no a ROBOT_SPEED_MMS -- escalar el arrastre
