@@ -225,6 +225,20 @@ OBS_MEM_BEHIND_PAD = -18    # px: tirar el obstáculo (y disparar "pasado" ->
 # rebase -> "pasado" falso en el rojo de inicio. Rampa lineal 0->1 sobre este
 # tiempo (acumulado, NO se reinicia en cada giro).
 OBS_MEM_LAUNCH_RAMP_S = 1.2
+
+# ── Freno de ds_px por giro (obstacle_memory.update) ──
+# En una esquiva de mucho ángulo el carro ROTA pero casi no avanza de frente.
+# ds_px asume ROBOT_SPEED_MMS fijo -> sobre-marcha la lata hacia atrás ->
+# PASADO/RECUPERANDO dispara con la lata todavía al lado (entra tarde por
+# geometría). Se escala ds_px según |dheading| por frame:
+#   |dheading| <= DEADZONE  -> factor 1.0 (recta / curva suave, sin cambio)
+#   |dheading| >= FLOOR     -> factor SCALE_MIN (latiguazo)
+#   entre medias            -> lineal
+# Valores de pista (run5): recta ~1-3°/frame, latiguazo de esquiva ~11°/frame.
+OBS_MEM_TURN_DEADZONE_DEG = 4.0
+OBS_MEM_TURN_FLOOR_DEG    = 12.0
+OBS_MEM_TURN_SCALE_MIN    = 0.3
+
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
 OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
                                       # del BEV, se cuenta como "pasada" solo si

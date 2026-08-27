@@ -258,6 +258,15 @@ class ObstacleMemory:
         """
         self._elapsed_s += dt_s if dt_s > 0 else 0.0
 
+        # Delta de heading de este frame -- se usa para (a) escalar ds_px
+        # (freno por giro, abajo) y (b) rotar el mapa en _advance().
+        if heading_deg is not None and self._prev_heading is not None:
+            dheading = heading_deg - self._prev_heading
+        else:
+            dheading = 0.0
+        if heading_deg is not None:
+            self._prev_heading = heading_deg
+
         ds_px = (C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX if dt_s > 0 else 0.0
 
         # Reversa: el avance asumido no aplica (y de hecho sería al revés).
@@ -271,12 +280,20 @@ class ObstacleMemory:
         if ramp_s > 0.0 and self._elapsed_s < ramp_s:
             ds_px *= self._elapsed_s / ramp_s
 
-        if heading_deg is not None and self._prev_heading is not None:
-            dheading = heading_deg - self._prev_heading
-        else:
-            dheading = 0.0
-        if heading_deg is not None:
-            self._prev_heading = heading_deg
+        # Freno por giro: en un latiguazo de esquiva el carro ROTA pero casi no
+        # avanza de frente. El avance forward asumido (ROBOT_SPEED_MMS fijo)
+        # sobre-marcha la lata hacia atras y dispara PASADO/RECUPERANDO cuando
+        # fisicamente la lata sigue AL LADO del carro, no detras -- por eso
+        # "recuperando entra tarde" en esquivas de mucho angulo (confirmado en
+        # pista, run5: lata y=293->378 en 0.5s mientras el carro solo giraba).
+        # Escala ds_px hacia abajo segun |dheading| de este frame: giro suave
+        # (recta) -> 1.0 intacto; latiguazo -> hasta OBS_MEM_TURN_SCALE_MIN.
+        dz = getattr(C, "OBS_MEM_TURN_DEADZONE_DEG", 4.0)
+        fl = getattr(C, "OBS_MEM_TURN_FLOOR_DEG", 12.0)
+        mn = getattr(C, "OBS_MEM_TURN_SCALE_MIN", 0.3)
+        if fl > dz:
+            frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
+            ds_px *= 1.0 - (1.0 - mn) * frac
 
         self._advance(ds_px, dheading)
         self._merge(new_obs)
