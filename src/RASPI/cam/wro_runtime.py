@@ -244,8 +244,13 @@ class SerialLink:
 		self.port = port
 		self.baudrate = baudrate
 		self.fd = None
-		self._queue = Queue(maxsize=4)
+		# Cola grande: si el hilo aún no drena (settle inicial) los primeros
+		# mensajes NO se deben perder (maxsize=4 los tiraba en silencio ->
+		# el ESP32 arrancaba sin comandos -> wall-PID de fallback = "el carro
+		# avanza y no le entran datos de la Pi").
+		self._queue = Queue(maxsize=256)
 		self._last_rx = ""
+		self._ready = threading.Event()   # se activa cuando el UART está listo
 		self._thread = threading.Thread(target=self._run, daemon=True)
 		self._thread.start()
 
@@ -274,7 +279,12 @@ class SerialLink:
 
 			termios.tcsetattr(self.fd, termios.TCSANOW,
 			                   [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
-			time.sleep(1.0)
+			time.sleep(0.5)   # settle de línea / boot del ESP32
+			try:
+				termios.tcflush(self.fd, termios.TCIOFLUSH)   # descarta basura de arranque
+			except Exception:
+				pass
+			self._ready.set()   # a partir de aquí open() deja de bloquear
 			print(f"[SERIAL] UART abierto en {self.port} @ {self.baudrate}", flush=True)
 			# El READY lo manda run() DESPUES del warmup de camara (ver
 			# IntegratedRuntime.run / PPRuntime.run). Antes se enviaba aqui
@@ -312,8 +322,17 @@ class SerialLink:
 			except Exception:
 				pass
 
-	def open(self):
-		pass
+	def open(self, timeout: float = 5.0) -> bool:
+		"""Bloquea hasta que el hilo del UART terminó el setup + settle.
+
+		ANTES era un no-op: run() seguía al warmup y al loop mientras el hilo
+		seguía en su sleep inicial, así que los primeros comandos V2 se
+		encolaban y se perdían (cola de 4) y el ESP32 rodaba sin datos.
+		"""
+		ok = self._ready.wait(timeout=timeout)
+		if not ok:
+			print("[SERIAL] open() timeout: el UART no quedó listo a tiempo", flush=True)
+		return ok
 
 	def send_line(self, line: str):
 		try:

@@ -250,7 +250,11 @@ class PPRuntime:
     # ── Loop principal ────────────────────────────────────────────────────────
 
     def run(self, on_ready=None):
-        self.serial_link.open()
+        # BLOQUEA hasta que el UART está listo (antes era no-op y el loop
+        # arrancaba mandando V2 al vacío ~1.5 s -> el ESP32 rodaba en su
+        # fallback wall-PID = "el carro avanza y no le entran datos").
+        if self.serial_link.open():
+            print("[SERIAL] UART listo.", flush=True)
         self._start_capture()
 
         # Warmup de cámara (esperar exposición automática estabilizada)
@@ -270,10 +274,19 @@ class PPRuntime:
         # con la cámara aún calentando. Ahora el único READY sale de aquí, ya
         # con la visión lista. El ×3 cubre que se pierda el primer byte al
         # arrancar el UART.
-        for _ in range(3):
+        # READY + espera del ACK: no arrancar el loop de control hasta que el
+        # ESP32 confirme que recibió (o timeout ~2 s). Antes se mandaba y se
+        # entraba al loop de una -> los primeros frames iban antes de que el
+        # ESP32 saliera de setup().
+        ack_ok = False
+        for _ in range(6):
             self.serial_link.send_line("READY")
-            time.sleep(0.05)
-        print("[INFO] READY enviado al ESP32.", flush=True)
+            time.sleep(0.15)
+            rx = self.serial_link.try_readline()
+            if rx and "ACK:READY" in rx:
+                ack_ok = True
+                break
+        print(f"[INFO] READY enviado al ESP32 (ack={'sí' if ack_ok else 'NO'}).", flush=True)
 
         if on_ready is not None:
             on_ready()
