@@ -721,7 +721,12 @@ def main():
     )
 
     runtime = PPRuntime(cfg)   # abre la cámara AQUÍ, antes del botón
-    runtime.run(on_ready=led_on, wait_start=wait_start)
+    try:
+        runtime.run(on_ready=led_on, wait_start=wait_start)
+    except KeyboardInterrupt:
+        # SIGTERM (systemctl stop/restart) o Ctrl-C: run() ya corrió su
+        # finally (cerró video/serial). Salir sin escupir traceback.
+        print("[INFO] Detenido (SIGTERM/SIGINT).", flush=True)
 
 
 if __name__ == "__main__":
