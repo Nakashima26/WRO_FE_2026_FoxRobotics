@@ -23,7 +23,7 @@ from vision import Vision
 
 WOOD_LOWER = np.array([5, 25, 40])
 WOOD_UPPER = np.array([35, 180, 255])
-OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.mp4$")
+OUTPUT_PATTERN = re.compile(r"^orillas(\d+)\.(?:mp4|avi)$")
 CAM_FRAME_PATH = "/tmp/wro_cam_frame.jpg"
 
 
@@ -73,7 +73,12 @@ class ThreadedFrameGrabber:
 
 
 def create_writer(output_path: str, frame_width: int, frame_height: int, fps: float):
-	fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+	# MJPG en .avi: cada frame es un JPEG independiente y el .avi escribe los
+	# frames de forma progresiva -> si el proceso muere sin cerrar (congelado,
+	# brownout, SIGKILL) el archivo QUEDA REPRODUCIBLE hasta donde alcanzó a
+	# escribir. mp4v en .mp4 no: el índice (moov) se escribe solo en release()
+	# y sin él ffmpeg/VLC no abren nada (se perdieron orillas37..373).
+	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 	return cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
 
 
@@ -126,18 +131,18 @@ def next_output_path(directory: Path) -> Path:
 	directory.mkdir(parents=True, exist_ok=True)
 
 	highest_index = 0
-	for candidate in directory.glob("orillas*.mp4"):
+	for candidate in directory.iterdir():
 		match = OUTPUT_PATTERN.match(candidate.name)
 		if match:
 			highest_index = max(highest_index, int(match.group(1)))
 
-	return directory / f"orillas{highest_index + 1}.mp4"
+	return directory / f"orillas{highest_index + 1}.avi"
 
 
 def resolve_output_path(output_path: str | None) -> Path:
 	if output_path:
 		path = Path(output_path)
-		if path.suffix.lower() == ".mp4" and OUTPUT_PATTERN.match(path.name):
+		if path.suffix.lower() in (".mp4", ".avi") and OUTPUT_PATTERN.match(path.name):
 			return next_output_path(path.parent)
 		if path.is_dir() or not path.suffix:
 			return next_output_path(path)

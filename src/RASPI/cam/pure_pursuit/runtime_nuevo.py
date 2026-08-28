@@ -634,6 +634,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def main():
+    # ── SIGTERM/SIGINT -> salida limpia ──────────────────────────────────────
+    # systemctl stop/restart manda SIGTERM; por defecto Python termina el
+    # proceso SIN correr los bloques finally -> el video (y el serial) quedan
+    # sin cerrar. Convertir la señal en KeyboardInterrupt hace que el
+    # try/finally de run() sí corra y el AsyncVideoWriter finalice el archivo.
+    import signal as _signal
+
+    def _term(_signum, _frame):
+        raise KeyboardInterrupt
+
+    _signal.signal(_signal.SIGTERM, _term)
+    _signal.signal(_signal.SIGINT, _term)
+
     # ── GPIO: LED de encendido + esperar botón (igual que wro_runtime.py) ────
     _gpio = None
     try:
