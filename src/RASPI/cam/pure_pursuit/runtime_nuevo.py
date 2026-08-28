@@ -249,7 +249,7 @@ class PPRuntime:
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
-    def run(self, on_ready=None, wait_start=None):
+    def run(self, on_ready=None, should_start=None):
         # BLOQUEA hasta que el UART está listo (antes era no-op y el loop
         # arrancaba mandando V2 al vacío ~1.5 s -> el ESP32 rodaba en su
         # fallback wall-PID = "el carro avanza y no le entran datos").
@@ -258,8 +258,6 @@ class PPRuntime:
         self._start_capture()
 
         # Warmup de cámara (esperar exposición automática estabilizada).
-        # Ocurre ANTES del botón -> la exposición se estabiliza mientras el
-        # usuario acomoda el carro, no después de arrancar.
         print(f"[INFO] Calentando cámara ({self.cfg.warmup_frames} frames)...", flush=True)
         warmed = 0
         while warmed < self.cfg.warmup_frames:
@@ -270,28 +268,18 @@ class PPRuntime:
                 time.sleep(0.01)
         print("[INFO] Cámara estabilizada.", flush=True)
 
-        # ── ESPERA DEL BOTÓN aquí ── con cámara + serial + warmup ya listos.
-        # Tras el botón, READY sale y el loop arranca en ~1 frame (antes eran
-        # ~2 s de init post-botón y el carro se comía 10-15 cm sin steer).
-        if wait_start is not None:
-            wait_start()
+        # ── ARRANQUE EN CALIENTE ──────────────────────────────────────────────
+        # El loop de abajo corre YA (visión, detección, centerline, memoria,
+        # grabación) pero DESARMADO: no manda comandos al ESP32 hasta que
+        # should_start() da True (botón + start-delay). Así, al soltar GO:
+        #   • la lata de enfrente ya está detectada y en memoria
+        #   • el steer ya rampó a su valor (slew) -> esquiva desde el frame 1
+        #   • el .avi ya lleva ~1 s grabando
+        # en vez de arrancar la cámara/pipeline en frío con el carro encima.
+        armed = False
+        ready_ack = False
 
-        # READY + espera del ACK: el ESP32 solo arranca a rodar cuando recibe
-        # este READY (su "GO"). Se manda DESPUÉS del botón y de la visión lista.
-        ack_ok = False
-        for _ in range(6):
-            self.serial_link.send_line("READY")
-            time.sleep(0.15)
-            rx = self.serial_link.try_readline()
-            if rx and "ACK:READY" in rx:
-                ack_ok = True
-                break
-        print(f"[INFO] READY enviado al ESP32 (ack={'sí' if ack_ok else 'NO'}).", flush=True)
-
-        if on_ready is not None:
-            on_ready()
-
-        print("[INFO] Pure Pursuit + memoria runtime iniciado. ESC para detener.", flush=True)
+        print("[INFO] Pure Pursuit + memoria runtime iniciado (desarmado). ESC para detener.", flush=True)
 
         last_fps_time = time.perf_counter()
         fps_count     = 0
@@ -311,6 +299,21 @@ class PPRuntime:
                     time.sleep(0.001)
                     continue
 
+                # ── Armado: botón + start-delay ──────────────────────────────
+                if not armed and (should_start is None or should_start()):
+                    for _ in range(6):
+                        self.serial_link.send_line("READY")
+                        time.sleep(0.12)
+                        rx = self.serial_link.try_readline()
+                        if rx and "ACK:READY" in rx:
+                            ready_ack = True
+                            break
+                    armed = True
+                    self._last_update_t = None   # dt limpio para el 1er frame armado
+                    if on_ready is not None:
+                        on_ready()
+                    print(f"[GPIO] GO — READY enviado (ack={'sí' if ready_ack else 'NO'}).", flush=True)
+
                 # FPS contador
                 fps_count += 1
                 now = time.perf_counter()
@@ -319,8 +322,10 @@ class PPRuntime:
                     fps_count     = 0
                     last_fps_time = now
 
-                # dt para la memoria rodante (tiempo entre frames procesados)
-                if self._last_update_t is None:
+                # dt para la memoria rodante (tiempo entre frames procesados).
+                # DESARMADO -> dt=0: el carro no se mueve, la memoria no debe
+                # "marchar" las latas hacia el robot mientras esperamos el botón.
+                if self._last_update_t is None or not armed:
                     dt_s = 0.0
                 else:
                     dt_s = now - self._last_update_t
@@ -524,12 +529,15 @@ class PPRuntime:
                 t_bev = time.perf_counter()
                 timing_ms["bev"] = (t_bev - t_vis) * 1000.0
 
-                # ── Construir y enviar mensaje serial ────────────────────────
+                # ── Construir y (si armado) enviar mensaje serial ────────────
                 serial_msg = self._build_serial_message(
                     obs_norm, state, len(bev_obstacles), pasado, interior
                 )
-                self.serial_link.send_line(serial_msg)
-                serial_ack = self.serial_link.try_readline()
+                if armed:
+                    self.serial_link.send_line(serial_msg)
+                    serial_ack = self.serial_link.try_readline()
+                else:
+                    serial_ack = None   # desarmado: pipeline corre, carro quieto
 
                 heading = _parse_heading(serial_ack)
                 if heading is not None:
@@ -559,7 +567,7 @@ class PPRuntime:
                     self._is_turning = False
                     print("[MEM] Timeout de giro — memoria de obstáculos reactivada por seguridad.", flush=True)
 
-                log_line = f"TX: {serial_msg}"
+                log_line = ("TX: " if armed else "TX(desarmado): ") + serial_msg
                 if serial_ack:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
@@ -662,9 +670,9 @@ def main():
     _signal.signal(_signal.SIGTERM, _term)
     _signal.signal(_signal.SIGINT, _term)
 
-    # ── GPIO: solo SETUP aquí. La espera del botón se hace DESPUÉS de abrir
-    # cámara + serial + warmup (ver wait_start más abajo), para que el botón
-    # signifique "GO YA" y no "empieza a inicializar ~2 s mientras el carro
+    # ── GPIO: solo SETUP aquí. El botón se sondea DENTRO del loop (should_start)
+    # con el pipeline ya corriendo en caliente -> al soltar GO la esquiva ya
+    # está calculada, en vez de "empieza a inicializar ~2 s mientras el carro
     # ya está rodando y se come 10-15 cm antes del primer steer".
     _gpio = None
     try:
@@ -678,21 +686,28 @@ def main():
     except ImportError:
         print("[GPIO] RPi.GPIO no disponible, omitiendo espera de botón.", flush=True)
 
-    def wait_start():
-        """Bloquea hasta el botón. Se llama con TODO ya caliente (cámara,
-        serial, warmup) -> tras el botón el loop de control arranca en ~1
-        frame, no en ~2 s."""
+    _ss = {"btn_t": None, "announced": False}
+
+    def should_start():
+        """Predicado NO bloqueante: True cuando el botón fue presionado y pasó
+        el start-delay. Mientras devuelve False, run() sigue corriendo TODO el
+        pipeline (visión, detección, centerline, grabación) pero SIN mandar
+        comandos al ESP32 -> al soltar GO la esquiva ya está calculada y el
+        video ya está grabando, en vez de arrancar la cámara/detección en frío
+        con el carro ya encima del obstáculo."""
         if _gpio is None:
-            return
-        print("[GPIO] TODO LISTO. Esperando botón en GPIO17...", flush=True)
-        while _gpio.input(17) == _gpio.LOW:
-            time.sleep(0.02)
-        print("[GPIO] Botón detectado.", flush=True)
+            return True
+        if not _ss["announced"]:
+            print("[GPIO] TODO LISTO (pipeline corriendo). Esperando botón GPIO17...", flush=True)
+            _ss["announced"] = True
+        if _ss["btn_t"] is None:
+            if _gpio.input(17) == _gpio.HIGH:
+                _ss["btn_t"] = time.time()
+                d = max(0.0, float(getattr(args, "start_delay", 1.0)))
+                print(f"[GPIO] Botón detectado. GO en {d:.1f}s (quita la mano)...", flush=True)
+            return False
         d = max(0.0, float(getattr(args, "start_delay", 1.0)))
-        if d > 0.0:
-            print(f"[GPIO] Arrancando en {d:.1f}s (quita la mano)...", flush=True)
-            time.sleep(d)
-        print("[GPIO] GO.", flush=True)
+        return (time.time() - _ss["btn_t"]) >= d
 
     def led_on():
         if _gpio is not None:
@@ -722,7 +737,7 @@ def main():
 
     runtime = PPRuntime(cfg)   # abre la cámara AQUÍ, antes del botón
     try:
-        runtime.run(on_ready=led_on, wait_start=wait_start)
+        runtime.run(on_ready=led_on, should_start=should_start)
     except KeyboardInterrupt:
         # SIGTERM (systemctl stop/restart) o Ctrl-C: run() ya corrió su
         # finally (cerró video/serial). Salir sin escupir traceback.
