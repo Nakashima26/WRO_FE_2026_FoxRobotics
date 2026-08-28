@@ -593,7 +593,7 @@ class PPRuntime:
                     if cv2.waitKey(1) & 0xFF == 27:
                         break
 
-                self._maybe_record(processed_frame, fps)
+                self._maybe_record(combined, fps)   # cámara + BEV/ruta (antes solo cámara)
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
 
                 t_prev_end = time.perf_counter()
