@@ -124,6 +124,13 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
     iox = max(0, min(iox, row_mask.shape[0] - 1))
     pref_min = max(1, C.CENTERLINE_MIN_WIDTH // 2)
 
+    # Clamp del punto de paso: _widest_free_segment elige por ANCHO, así que
+    # cuando el cono está cerca y pegado a un lado, agarra el sliver de piso
+    # pegado a la pared (x lejísimos) en vez del hueco chico justo afuera del
+    # cono -> el path se curla a la pared y el carro sobre-gira. Se limita el
+    # offset lateral respecto al cono a "radio bloqueado + medio carril".
+    off_max = C.OBS_INFLATE_R + getattr(C, "PASS_LANE_MARGIN_PX", 30)
+
     if color == "Red":
         cx_rel = _widest_free_segment(safe_row_mask[iox:], pref_min)
         if cx_rel is None:
@@ -134,13 +141,15 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
         # solo el radio físico de la lata, más chico que lo que free_mask ya
         # bloqueó, así que ese punto caía DENTRO de la propia zona bloqueada
         # (el path terminaba apuntando a la lata en vez de esquivarla).
-        return (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+        cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
+        return int(max(iox + C.OBS_INFLATE_R, min(cx, iox + off_max)))
 
     if color == "Green":
         cx_abs = _widest_free_segment(safe_row_mask[:iox], pref_min)
         if cx_abs is None:
             cx_abs = _widest_free_segment(row_mask[:iox], pref_min)
-        return cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
+        cx = cx_abs if cx_abs is not None else iox - C.OBS_INFLATE_R
+        return int(min(iox - C.OBS_INFLATE_R, max(cx, iox - off_max)))
 
     return None
 

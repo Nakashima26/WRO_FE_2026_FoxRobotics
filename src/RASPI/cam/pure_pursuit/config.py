@@ -119,6 +119,12 @@ OBS_SAFETY_R_PX      = 20    # margen de seguridad adicional (px)
 OBS_INFLATE_R        = OBS_PHYSICAL_R_PX + OBS_SAFETY_R_PX             # ≈ 35 px
 
 OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
+
+# Clamp del punto de paso de obstáculo (_pass_side_cx): el path pasa como
+# máximo a OBS_INFLATE_R + esto del centro del cono. Evita que el trazador
+# agarre el sliver de piso pegado a la pared (elige por ancho) y curle el
+# path -> sobre-giro. ~30 px = medio carril de aire tras la inflación.
+PASS_LANE_MARGIN_PX = 30
 #  Rojo  → el robot debe pasar por la DERECHA → se infla más a la izquierda
 #  Verde → el robot debe pasar por la IZQUIERDA → se infla más a la derecha
 
