@@ -136,19 +136,16 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
 # ── Límite de slew: cuánto puede cambiar el steer entre frames procesados ──
 # En pista el steer saltaba +0.56 -> +0.20 -> +0.79 -> -0.28 (norm.) frame a
-# frame = latigazo. Esto lo capa. 0 desactiva.
-# Subido 12 -> 22: a ~8 fps (CPU throttled) 12°/frame tardaba ~5 frames en
-# llegar al pico -> la esquiva arrancaba tarde y sin fuerza. El latigazo por
-# cambio de signo ya lo cubren el trigger lat-giro + los fixes de memoria.
-PP_STEER_SLEW_DEG = 22.0
+# frame = latigazo. Esto lo capa. 0 desactiva. 12°/frame @ ~15fps ≈ 180°/s,
+# suficiente para esquivar sin dar el volantazo. En grados de steer (pre-norm).
+PP_STEER_SLEW_DEG = 12.0
 
 # Lookahead variable — derivado de la escala de urgencia
-# 45 px saturaba el steer al tope (obs=±1.0) y el carro se pasaba/raspaba,
-# PERO eso era ANTES de arreglar el arranque serial y el trigger lat-giro
-# (RECUPERANDO tardío). 70 px se quedó corto: la geometría solo pedía ~50°
-# con la lata cerca -> esquiva sin fuerza. 55 px = punto medio: pide steer
-# más cerrado close-in sin clavar el tope todo el tiempo.
-LOOKAHEAD_MIN_PX      = 55.0
+# NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
+# con lata cerca -> el carro clavaba el volante, sobrepasaba y raspaba la lata
+# al pasar (confirmado en pista, choque en rojo de inicio y en cada verde).
+# 70 px conserva el "acortar para esquivar" sin pegar el límite.
+LOOKAHEAD_MIN_PX      = 70.0
 LOOKAHEAD_MAX_PX      = 100.0
 LOOKAHEAD_OBS_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
 LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
