@@ -230,6 +230,7 @@ class PPRuntime:
             f"tx: {serial_msg[:55]}",
             f"mem_prune: {prune_reason}",
             f"mem_closest: {self.memory.debug_closest()}",
+            f"mem_geom: {self.memory.debug_geom()}",
             f"mem_all: {self.memory.debug_all()}",
         ]
         if timing_ms is not None:

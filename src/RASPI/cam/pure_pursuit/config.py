@@ -269,6 +269,92 @@ OBS_MEM_PASSED_MIN_AHEAD_PX = 40.0
                                       # (la lata sigue a la altura del carro,
                                       # no muy adelante todavía)
 
+# ── Rebase GEOMÉTRICO (obstacle_memory._prune) — disparo PRIMARIO de RECUPERANDO ──
+# El disparo por ángulo de arriba (OBS_MEM_LAT_TURN_DEG) sólo mira "giré N grados
+# desde que vi la lata" y NO considera a qué distancia (x0,y0) estaba: una lata
+# vista lejos dispara con el mismo giro que una vista cerca -> RECUPERANDO entra
+# antes/después de lo debido según la distancia.
+#
+# Esta rama integra el movimiento del robot desde la PRIMERA vez que se vio la
+# lata, proyectando velocidad constante (ROBOT_SPEED_MMS) sobre el heading del
+# IMU cuadro a cuadro:  forward = Σ v·dt·cos(θrel) ,  lateral vía la rotación del
+# mapa (igual que _advance pero SIN el freno por giro). Dispara "pasado" cuando
+# el robot construyó suficiente hueco lateral respecto a donde apareció la lata
+# (y, opcional, ya se le puso a la par en Y). Así el disparo se adapta solo a
+# la geometría real de cada esquiva.
+RECUP_GEOM_ENABLED   = True
+
+# Hueco lateral (px BEV, EN MAGNITUD — cualquier lado) que debe separar a la
+# lata (posición geométrica gx) del eje del robot para contar la esquiva como
+# hecha. Se usa abs(gx - robot_x): así el disparo NO depende del signo del gyro
+# (la convención del IMU vs. la rotación del mapa en _advance es ambigua leyendo
+# sólo el código; en magnitud, |Σ v·dt·sin θ| es la misma sin importar el signo).
+#   MÁS CHICO  -> RECUPERANDO se lanza ANTES (se exige rodear menos)
+#   MÁS GRANDE -> se lanza DESPUÉS (rodea más)
+# Default = radio de inflado + margen de carril (el "aire" tras la lata que
+# centerline.py ya usa como objetivo de paso).
+RECUP_LAT_CLEAR_PX   = float(OBS_INFLATE_R + PASS_LANE_MARGIN_PX)   # ≈ 69
+
+# Giro mínimo real (|heading_now - heading0|, grados IMU) para habilitar el
+# disparo geométrico. Evita dispararlo por una lata que se detectó de lado sin
+# que haya habido esquiva (el hueco lateral ya existía, no se ganó rodeando).
+#   MÁS CHICO  -> se lanza ANTES
+#   MÁS GRANDE -> exige haber girado más antes de siquiera considerar el disparo
+RECUP_MIN_TURN_DEG   = 8.0
+
+# Ventana en Y (px BEV, por DELANTE del eje del robot) dentro de la cual debe
+# estar la lata (posición geométrica) para permitir el disparo. Evita armar
+# RECUPERANDO cuando la lata TODAVÍA va muy adelante (aún no llegas a su altura).
+# No hay tope por detrás: si ya quedó atrás, con más razón se dispara.
+#   MÁS GRANDE -> se lanza ANTES (tolera la lata más lejos al frente)
+#   MÁS CHICO  -> se lanza DESPUÉS (exige tenerla casi a la par)
+RECUP_ABREAST_AHEAD_PX = 120.0
+
+# Compensación de latencia Pi -> ESP32 (segundos). El pulso pasado=1 tarda en
+# llegar y ejecutarse (round-trip UART + reacción del ESP32; el hold de 3 frames
+# es sólo anti-drop, no suma latencia si no hay pérdida). Antes de evaluar el
+# disparo se proyecta la posición geométrica de la lata v·t hacia el robot ->
+# RECUPERANDO se arma pensando en dónde estará el robot cuando el ESP32 de
+# verdad actúe, no dónde está ahora. Afecta sobre todo el gate en Y / a-la-par
+# (mover recto no cambia el hueco lateral).
+#   MÁS GRANDE -> se lanza ANTES
+# Para medirla: en los logs de la Pi, Δt entre el primer 'TX: ...pasado=1' y el
+# primer 'RX: ACK:V2,...,est=R'.
+RECUP_LATENCY_LEAD_S = 0.08
+
+# ¿Exigir ADEMÁS que el robot ya se haya puesto a la altura de la lata en Y
+# (eje trasero a la par, menos RECUP_FWD_LEAD_PX) antes de disparar?
+#   True  = más estricto -> se lanza DESPUÉS
+#   False = basta el hueco lateral -> se lanza ANTES  (recomendado para esquivas
+#           de mucho ángulo, que es donde RECUPERANDO entraba tarde)
+RECUP_REQUIRE_FWD    = False
+RECUP_FWD_LEAD_PX    = 25.0   # px BEV antes del eje trasero que se permite el
+                               # disparo con RECUP_REQUIRE_FWD=True (análogo a
+                               # OBS_MEM_BEHIND_PAD).
+
+# La rama por ÁNGULO (OBS_MEM_LAT_TURN_DEG) y la de CRUCE DE X quedan como
+# RESPALDO: disparan si el heading aún no llega (heading0=None, p.ej. primera
+# lata antes del 1er ACK) o si RECUP_GEOM_ENABLED=False. False = dejar SÓLO la
+# geométrica (y branch A "cruzó detrás en Y" + borde del BEV como redes).
+RECUP_ANGLE_BACKUP_ENABLED = True
+
+# Red de seguridad "hard bail": aunque la geométrica esté activa, si el carro
+# YA rotó OBS_MEM_LAT_TURN_DEG + esto (grados) desde que vio la lata y la
+# geométrica todavía no disparó (p.ej. su gate 'abreast' la retiene y la lata
+# se va a decaer de memoria sin RECUPERANDO), el disparo por ángulo lo fuerza.
+# Muy por encima del umbral normal -> NO reintroduce el "se activa antes de lo
+# necesario"; sólo evita PERDER el disparo. Súbelo si quieres que la geométrica
+# tenga la última palabra siempre.
+RECUP_ANGLE_SAFETY_EXTRA_DEG = 20.0
+
+# Pegar la posición geométrica (gx,gy) a la detección fresca de cámara cada vez
+# que se re-ve la lata.
+#   False (default) = integración PURA desde (x0,y0): es lo que sigue siendo
+#                     válido cuando la lata sale del cuadro (justo cuando importa).
+#   True            = híbrido: corrige drift de ROBOT_SPEED_MMS pero pierde
+#                     valor si la cámara pierde la lata de cerca.
+RECUP_GEOM_SNAP_ON_SIGHT = False
+
 OBS_MEM_MAX        = 12      # tope de obstáculos recordados (seguridad)
 OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
                                       # del BEV, se cuenta como "pasada" solo si
