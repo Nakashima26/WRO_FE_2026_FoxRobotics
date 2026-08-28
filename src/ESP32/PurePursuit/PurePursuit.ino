@@ -570,6 +570,16 @@ void loop() {
         integralWall  = 0; prevErrorWall  = 0;
         integralGyro  = 0; prevErrorGyro  = 0;
 
+        // Consumir el pulso.  piPasado es un evento de UN frame en la Pi, pero
+        // en el ESP32 se queda en 1 hasta que llega el siguiente mensaje V2
+        // (~70-150 ms) y el loop() corre cientos de veces en ese lapso.  Sin
+        // esto, si RECUPERANDO sale rápido (headingOk ya se cumple porque el
+        // rebase fue casi recto), SIGUIENDO vuelve a entrar a RECUPERANDO en la
+        // iteración siguiente con el MISMO pulso viejo -> rebote de estado y
+        // reseteo repetido de integrales / patada en la derivada del servo.
+        // Un rebase nuevo real llega en otro mensaje y vuelve a poner piPasado=1.
+        piPasado = false;
+
         controlPID(distL, distR);   // ya toma el branch RECUPERANDO (estado ya cambió)
         break;
       }

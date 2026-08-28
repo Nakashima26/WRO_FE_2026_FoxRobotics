@@ -271,9 +271,11 @@ class SerialLink:
 			                   [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
 			time.sleep(1.0)
 			print(f"[SERIAL] UART abierto en {self.port} @ {self.baudrate}", flush=True)
-			for _ in range(3):
-				os.write(self.fd, b"READY,pi=1\n")
-				time.sleep(0.06)
+			# El READY lo manda run() DESPUES del warmup de camara (ver
+			# IntegratedRuntime.run / PPRuntime.run). Antes se enviaba aqui
+			# "READY,pi=1" ~1s tras abrir el UART -- ANTES de que la vision
+			# estuviera lista -- y el ESP32 salia de setup() y arrancaba a rodar
+			# en wall-PID de fallback mientras la Pi seguia calentando la camara.
 		except Exception as exc:
 			self.fd = None
 			print(f"[SERIAL] No se pudo abrir UART ({self.port}): {exc}", flush=True)
@@ -542,6 +544,16 @@ class IntegratedRuntime:
 			else:
 				time.sleep(0.01)
 		print("[INFO] Camara estabilizada.", flush=True)
+
+		# READY explicito: recien ahora que la camara esta lista y el pipeline
+		# va a empezar a mandar control, avisar al ESP32 para que salga de
+		# setup() y arranque motores. x3 por si se pierde el primer byte al
+		# arrancar el UART. (Antes lo mandaba el hilo de SerialLink ~1s tras
+		# abrir el UART, ANTES del warmup.)
+		for _ in range(3):
+			self.serial_link.send_line("READY")
+			time.sleep(0.05)
+		print("[INFO] READY enviado al ESP32.", flush=True)
 
 		if on_ready is not None:
 			on_ready()

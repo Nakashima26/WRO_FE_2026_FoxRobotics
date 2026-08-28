@@ -264,7 +264,15 @@ class PPRuntime:
                 time.sleep(0.01)
         print("[INFO] Cámara estabilizada.", flush=True)
 
-        self.serial_link.send_line("READY")
+        # READY ×3: antes este mensaje lo mandaba TAMBIÉN el hilo de SerialLink
+        # ~1 s después de abrir el UART, es decir ANTES de terminar el warmup —
+        # el ESP32 salía de setup() y empezaba a rodar en wall-PID de fallback
+        # con la cámara aún calentando. Ahora el único READY sale de aquí, ya
+        # con la visión lista. El ×3 cubre que se pierda el primer byte al
+        # arrancar el UART.
+        for _ in range(3):
+            self.serial_link.send_line("READY")
+            time.sleep(0.05)
         print("[INFO] READY enviado al ESP32.", flush=True)
 
         if on_ready is not None:
