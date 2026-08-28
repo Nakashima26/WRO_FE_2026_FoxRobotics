@@ -110,6 +110,13 @@ float PP_WALL_BLEND = .15;
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
+// READY ya llegó PERO todavía no el primer V2. Entre esos dos, controlPID()
+// caía en el fallback wall-PID y setMotor(velocidadMotor) -> el carro rodaba
+// ~0.5 s hacia adelante sin ver el obstáculo. Con este gate el carro NO rueda
+// hasta el primer V2 real de Pure Pursuit.
+bool piFirstV2Received = false;
+unsigned long readyMs = 0;                          // millis() cuando llegó READY
+const unsigned long FIRST_V2_TIMEOUT_MS = 3000;     // si tras READY nunca llega V2, seguir igual
 unsigned long bootStartMs = 0;
 const unsigned long BOOT_WAIT_PI_MS = 1000;
 
@@ -227,6 +234,7 @@ void parsePiMessage(String line) {
     piReadyReceived = true;
     piReady         = true;
     lastPiMsgMs     = millis();
+    if (readyMs == 0) readyMs = millis();
     Serial2.println("ACK:READY");
     return;
   }
@@ -306,7 +314,8 @@ void parsePiMessage(String line) {
       piInteriorPass = false;
     }
 
-    piReady     = true;
+    piReady           = true;
+    piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
@@ -506,7 +515,8 @@ void setup() {
         piReadyReceived = true;
         piReady         = true;
         timeStart = millis();
-        Serial.println("Recibido READY. Iniciando.");
+        readyMs   = millis();
+        Serial.println("Recibido READY. Esperando primer V2...");
       }
     }
     delay(50);
@@ -535,6 +545,19 @@ void loop() {
       return;
     }
     // Pasó el timeout de arranque → continuar de todas formas
+  }
+
+  // READY llegó PERO todavía no el primer V2 -> NO rodar. Si no, controlPID()
+  // cae en el fallback wall-PID y el carro avanza ~0.5 s sin ver el obstáculo.
+  // Con la Pi mandando el primer V2 justo tras READY, esto son unos ms; el
+  // timeout evita quedar atorado para siempre si la Pi muere tras el READY.
+  if (piReadyReceived && !piFirstV2Received
+      && (millis() - readyMs) < FIRST_V2_TIMEOUT_MS) {
+    escribirServo(centroServo);
+    setMotor(0);
+    Serial.println(" | Estado:WAIT_FIRST_V2");
+    delay(10);
+    return;
   }
 
   if (raceFinished) {
