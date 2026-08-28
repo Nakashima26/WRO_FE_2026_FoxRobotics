@@ -127,6 +127,7 @@ class PPRuntime:
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
+        self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -404,7 +405,15 @@ class PPRuntime:
                             # Evento de un solo frame: un obstáculo quedó detrás
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
-                            pasado = self.memory.last_passed
+                            # Se REPITE 3 frames: a 8fps un mensaje serial que se
+                            # pierde retrasaría RECUPERANDO ~0.4s (o lo perdería).
+                            # El ESP32 consume el pulso e ignora las repeticiones
+                            # (ya está en RECUPERANDO).
+                            if self.memory.last_passed:
+                                self._pasado_hold = 3
+                            pasado = self._pasado_hold > 0
+                            if self._pasado_hold > 0:
+                                self._pasado_hold -= 1
                         _t3 = time.perf_counter()
                         bev_timing["mem"] = (_t3 - _t2) * 1000.0
 

@@ -84,6 +84,7 @@ class ObstacleMemory:
         self.ry = robot_y
         self._obs: list[_Obs] = []
         self._prev_heading: float | None = None
+        self._last_dheading: float = 0.0   # Δheading del último update (predicción _prune)
         # Tiempo acumulado de vida de la memoria (suma de dt_s). NO se reinicia
         # en reset() -- es para la rampa de arranque (ver update()), que es un
         # evento de una sola vez al empezar la carrera, no algo por-giro.
@@ -250,9 +251,13 @@ class ObstacleMemory:
             if o.heading0 is not None and self._prev_heading is not None:
                 d = self._prev_heading - o.heading0
                 d = (d + 180.0) % 360.0 - 180.0            # normaliza a [-180,180]
+                # Predicción: a 8fps el heading salta ~12°/frame en un latiguazo;
+                # sumar el Δheading del último frame en la dirección del giro hace
+                # que dispare ~1 frame antes en vez de pasarse del umbral.
+                d_pred = d + math.copysign(abs(self._last_dheading), d) if d != 0 else d
                 turned_ok = (
-                    (o.color == "Red"   and d <= -turn_deg) or
-                    (o.color == "Green" and d >=  turn_deg)
+                    (o.color == "Red"   and d_pred <= -turn_deg) or
+                    (o.color == "Green" and d_pred >=  turn_deg)
                 )
             crossed = (
                 (o.color == "Red"
@@ -349,11 +354,13 @@ class ObstacleMemory:
         self._elapsed_s += dt_s if dt_s > 0 else 0.0
 
         # Delta de heading de este frame -- se usa para (a) escalar ds_px
-        # (freno por giro, abajo) y (b) rotar el mapa en _advance().
+        # (freno por giro, abajo), (b) rotar el mapa en _advance() y (c) la
+        # predicción del rebase lateral por giro en _prune().
         if heading_deg is not None and self._prev_heading is not None:
             dheading = heading_deg - self._prev_heading
         else:
             dheading = 0.0
+        self._last_dheading = dheading
         if heading_deg is not None:
             self._prev_heading = heading_deg
             # Backfill: una lata detectada ANTES de que llegara el primer ACK

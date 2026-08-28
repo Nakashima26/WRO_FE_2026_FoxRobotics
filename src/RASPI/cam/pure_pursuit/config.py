@@ -255,9 +255,11 @@ OBS_MEM_LATERAL_MARGIN_PX  = 8.0    # px que la lata debe cruzar PASADO el eje (
 OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # Rebase lateral PRIMARIO: grados que el carro debe rotar (IMU) desde que vio
 # la lata para contar que ya la rodeó -> PASADO/RECUPERANDO. Perilla de
-# ganancia: más chico = responde con menos giro. 35° ≈ lo que disparó bien
-# en run7 (ang=-42). Mide el giro real, no una x inferida.
-OBS_MEM_LAT_TURN_DEG       = 35.0
+# ganancia: más chico = RECUPERANDO se lanza más rápido (con menos giro).
+# Bajado 35 -> 22: en pista disparaba a ~50° (a 8fps el heading salta ~12°/
+# frame y se pasaba del umbral). 22 + la predicción (+|dheading|, ver
+# _prune) lo lanzan ~20° antes.
+OBS_MEM_LAT_TURN_DEG       = 22.0
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
