@@ -301,18 +301,19 @@ class PPRuntime:
 
                 # ── Armado: botón + start-delay ──────────────────────────────
                 if not armed and (should_start is None or should_start()):
-                    for _ in range(6):
+                    # READY 3x rápido (el ESP32 solo necesita 1 para salir de su
+                    # wait). NO bloquear ~0.7 s esperando ACK: el stream de V2
+                    # que arranca acto seguido mantiene vivo al ESP32, y este
+                    # ya NO rueda hasta el 1er V2 (ver piFirstV2Received .ino).
+                    for _ in range(3):
                         self.serial_link.send_line("READY")
-                        time.sleep(0.12)
-                        rx = self.serial_link.try_readline()
-                        if rx and "ACK:READY" in rx:
-                            ready_ack = True
-                            break
+                        time.sleep(0.03)
+                    ready_ack = "ACK:READY" in (self.serial_link.try_readline() or "")
                     armed = True
                     self._last_update_t = None   # dt limpio para el 1er frame armado
                     if on_ready is not None:
                         on_ready()
-                    print(f"[GPIO] GO — READY enviado (ack={'sí' if ready_ack else 'NO'}).", flush=True)
+                    print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
 
                 # FPS contador
                 fps_count += 1
