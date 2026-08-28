@@ -438,7 +438,19 @@ def detect_centerline(
             edge_hist.append((y, safe_bounds[0], safe_bounds[1]))
             free_cx = (safe_bounds[0] + safe_bounds[1]) // 2
         else:
-            free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
+            # Sin segmento a >= WALL_MARGIN_PX de la pared (vista post-esquiva
+            # apuntando a la pared, triángulo de piso pegado a la esquina).
+            # Antes: centro del hueco crudo -> el path se pegaba al borde.
+            # Ahora: dentro del hueco crudo más ancho, el pixel MÁS LEJOS de
+            # cualquier pared (max distanceTransform) -> se despega lo que la
+            # geometría permita, sin urgencia dura ni pelear con las esquinas.
+            raw_bounds = _widest_free_segment_bounds(row, C.CENTERLINE_MIN_WIDTH)
+            if raw_bounds is not None:
+                lo, hi = raw_bounds
+                sub = dist[y, lo:hi + 1]
+                free_cx = (lo + int(np.argmax(sub))) if sub.size else (lo + hi) // 2
+            else:
+                free_cx = _widest_free_segment(row, C.CENTERLINE_MIN_WIDTH)
 
         best_w = 0.0
         pass_cx: int | None = None
