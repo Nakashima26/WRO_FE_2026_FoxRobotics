@@ -249,7 +249,7 @@ class PPRuntime:
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
-    def run(self, on_ready=None):
+    def run(self, on_ready=None, wait_start=None):
         # BLOQUEA hasta que el UART está listo (antes era no-op y el loop
         # arrancaba mandando V2 al vacío ~1.5 s -> el ESP32 rodaba en su
         # fallback wall-PID = "el carro avanza y no le entran datos").
@@ -257,7 +257,9 @@ class PPRuntime:
             print("[SERIAL] UART listo.", flush=True)
         self._start_capture()
 
-        # Warmup de cámara (esperar exposición automática estabilizada)
+        # Warmup de cámara (esperar exposición automática estabilizada).
+        # Ocurre ANTES del botón -> la exposición se estabiliza mientras el
+        # usuario acomoda el carro, no después de arrancar.
         print(f"[INFO] Calentando cámara ({self.cfg.warmup_frames} frames)...", flush=True)
         warmed = 0
         while warmed < self.cfg.warmup_frames:
@@ -268,16 +270,14 @@ class PPRuntime:
                 time.sleep(0.01)
         print("[INFO] Cámara estabilizada.", flush=True)
 
-        # READY ×3: antes este mensaje lo mandaba TAMBIÉN el hilo de SerialLink
-        # ~1 s después de abrir el UART, es decir ANTES de terminar el warmup —
-        # el ESP32 salía de setup() y empezaba a rodar en wall-PID de fallback
-        # con la cámara aún calentando. Ahora el único READY sale de aquí, ya
-        # con la visión lista. El ×3 cubre que se pierda el primer byte al
-        # arrancar el UART.
-        # READY + espera del ACK: no arrancar el loop de control hasta que el
-        # ESP32 confirme que recibió (o timeout ~2 s). Antes se mandaba y se
-        # entraba al loop de una -> los primeros frames iban antes de que el
-        # ESP32 saliera de setup().
+        # ── ESPERA DEL BOTÓN aquí ── con cámara + serial + warmup ya listos.
+        # Tras el botón, READY sale y el loop arranca en ~1 frame (antes eran
+        # ~2 s de init post-botón y el carro se comía 10-15 cm sin steer).
+        if wait_start is not None:
+            wait_start()
+
+        # READY + espera del ACK: el ESP32 solo arranca a rodar cuando recibe
+        # este READY (su "GO"). Se manda DESPUÉS del botón y de la visión lista.
         ack_ok = False
         for _ in range(6):
             self.serial_link.send_line("READY")
@@ -660,7 +660,10 @@ def main():
     _signal.signal(_signal.SIGTERM, _term)
     _signal.signal(_signal.SIGINT, _term)
 
-    # ── GPIO: LED de encendido + esperar botón (igual que wro_runtime.py) ────
+    # ── GPIO: solo SETUP aquí. La espera del botón se hace DESPUÉS de abrir
+    # cámara + serial + warmup (ver wait_start más abajo), para que el botón
+    # signifique "GO YA" y no "empieza a inicializar ~2 s mientras el carro
+    # ya está rodando y se come 10-15 cm antes del primer steer".
     _gpio = None
     try:
         import RPi.GPIO as GPIO
@@ -670,12 +673,19 @@ def main():
         GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
         GPIO.output(27, GPIO.HIGH)
         print("[GPIO] LED encendido — Pi prendida.", flush=True)
-        print("[GPIO] Esperando botón en GPIO17...", flush=True)
-        while GPIO.input(17) == GPIO.LOW:
-            time.sleep(0.05)
-        print("[GPIO] Botón detectado. Iniciando...", flush=True)
     except ImportError:
         print("[GPIO] RPi.GPIO no disponible, omitiendo espera de botón.", flush=True)
+
+    def wait_start():
+        """Bloquea hasta el botón. Se llama con TODO ya caliente (cámara,
+        serial, warmup) -> tras el botón el loop de control arranca en ~1
+        frame, no en ~2 s."""
+        if _gpio is None:
+            return
+        print("[GPIO] TODO LISTO. Esperando botón en GPIO17...", flush=True)
+        while _gpio.input(17) == _gpio.LOW:
+            time.sleep(0.02)
+        print("[GPIO] Botón detectado. GO.", flush=True)
 
     def led_on():
         if _gpio is not None:
@@ -703,8 +713,8 @@ def main():
         calib_path       = Path(args.calib_path) if args.calib_path else None,
     )
 
-    runtime = PPRuntime(cfg)
-    runtime.run(on_ready=led_on)
+    runtime = PPRuntime(cfg)   # abre la cámara AQUÍ, antes del botón
+    runtime.run(on_ready=led_on, wait_start=wait_start)
 
 
 if __name__ == "__main__":
