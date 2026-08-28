@@ -652,16 +652,12 @@ void loop() {
       if (piPriority) {
         // Reapareció un obstáculo (o uno nuevo) → vuelve a esquivar
         estado = SIGUIENDO;
-      } else if (headingOk || timedOut) {
+      } else if ((headingOk)) {
         // Ya centrado y alineado → visión retoma el control normal.
-        // timedOut: red de seguridad si headingOk nunca se cumple (p.ej. cerca
-        // de una esquina real, donde un lado lee "sin pared" legítimamente y el
-        // wall-PID pelea contra el gyro). Con el disparo geométrico de
-        // RECUPERANDO (más temprano y con el chasis aún cruzado) la duración de
-        // este estado es más variable — el timeout ya NO puede quedar sin usar.
+        // timedOut: red de seguridad si wallOk nunca se cumple (p.ej. cerca
+        // de una esquina real, donde un lado lee "sin pared" legítimamente).
         estado = SIGUIENDO;
       }
-      (void)wallOk;   // calculado para el log de controlPID(), no gatea la salida
       break;
     }
 
