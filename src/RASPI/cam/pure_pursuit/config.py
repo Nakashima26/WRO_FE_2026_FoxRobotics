@@ -259,7 +259,7 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # Bajado 35 -> 22: en pista disparaba a ~50° (a 8fps el heading salta ~12°/
 # frame y se pasaba del umbral). 22 + la predicción (+|dheading|, ver
 # _prune) lo lanzan ~20° antes.
-OBS_MEM_LAT_TURN_DEG       = 22.0
+OBS_MEM_LAT_TURN_DEG       = 29.0
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
