@@ -28,7 +28,8 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf", "x0", "beyond", "_cls_vote", "_cls_votes")
+    __slots__ = ("x", "y", "color", "conf", "x0", "y_min",
+                 "beyond", "_cls_vote", "_cls_votes")
 
     def __init__(self, x: float, y: float, color: str, conf: float):
         self.x = x
@@ -40,6 +41,12 @@ class _Obs:
         # robot (empezó del lado de esquiva y terminó del otro), no si ya
         # estaba del otro lado desde el principio.
         self.x0 = x
+        # y más chica (más adelante) que ha tenido esta lata según DETECCIONES
+        # de cámara (no estima muerta). _prune() solo dispara "PASADO" si la
+        # lata estuvo de verdad adelante en algún momento -- así una detección
+        # espuria que NACE proyectada con y grande (borde inferior del BEV, lata
+        # muy cerca) no dispara RECUPERANDO como si la hubiéramos rebasado.
+        self.y_min = y
         # Clasificación respecto a la línea de esquina (ver
         # ObstacleMemory.classify_and_split()): None = aún sin veredicto,
         # True = más allá (siguiente recta), False = mía (recta actual).
@@ -133,6 +140,7 @@ class ObstacleMemory:
                 # Re-visto: confiar en la posición fresca de la cámara.
                 best.x, best.y = nx, ny
                 best.conf = C.OBS_MEM_REFRESH
+                best.y_min = min(best.y_min, ny)   # detección, no estima
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
                     self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH))
@@ -188,15 +196,25 @@ class ObstacleMemory:
         behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
         lat_margin = getattr(C, "OBS_MEM_LATERAL_MARGIN_PX", 8.0)
         lat_y_band = getattr(C, "OBS_MEM_LATERAL_Y_BAND_PX", 140.0)
+        # Para disparar "PASADO" (RECUPERANDO) exigimos que la lata haya estado
+        # DE VERDAD adelante en algún frame (detección de cámara, y_min chico).
+        # Si nació ya proyectada con y grande -- p.ej. una detección espuria en
+        # el borde inferior del BEV con la lata muy cerca al arrancar -- NO es
+        # un rebase: se descarta en silencio, sin mandar recuperando.
+        ahead_gate = self.ry - getattr(C, "OBS_MEM_PASSED_MIN_AHEAD_PX", 40.0)
         kept: list[_Obs] = []
         passed = False
         for o in self._obs:
             if o.conf < C.OBS_MEM_MIN_CONF:
                 self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue                             # perdido de vista, no rebasado
+            was_ahead = o.y_min < ahead_gate
             if o.y > behind_y:                       # ya quedó detrás del robot
-                self.last_prune_reason = f"PASADO y={o.y:.0f}>{behind_y} conf={o.conf:.2f}"
-                passed = True
+                if was_ahead:
+                    self.last_prune_reason = f"PASADO y={o.y:.0f}>{behind_y} conf={o.conf:.2f}"
+                    passed = True
+                else:
+                    self.last_prune_reason = f"DESCARTE_NO_ADELANTE y={o.y:.0f} ymin={o.y_min:.0f}"
                 continue
             # ── Rebase LATERAL: en una esquiva de ángulo el carro pasa la lata
             # de LADO, no de frente. El mapa rota con el heading, así que si la
@@ -217,7 +235,7 @@ class ObstacleMemory:
                  and o.x0 <= self.rx + lat_margin
                  and o.x > self.rx + lat_margin)
             )
-            if crossed and o.y > self.ry - lat_y_band:
+            if crossed and was_ahead and o.y > self.ry - lat_y_band:
                 self.last_prune_reason = (
                     f"PASADO(lat) x={o.x:.0f} x0={o.x0:.0f} y={o.y:.0f} conf={o.conf:.2f}"
                 )
@@ -231,7 +249,7 @@ class ObstacleMemory:
                 # dejaba "pasado" sin dispararse nunca. Salidas por lados/arriba
                 # = ruido de rotación, NO es un rebase.
                 half_w = getattr(C, "OBS_MEM_BEHIND_X_HALFWIDTH", 90.0)
-                if o.y >= C.BEV_H and abs(o.x - self.rx) < half_w:
+                if o.y >= C.BEV_H and abs(o.x - self.rx) < half_w and was_ahead:
                     self.last_prune_reason = f"PASADO(borde) y={o.y:.0f} conf={o.conf:.2f}"
                     passed = True
                 continue

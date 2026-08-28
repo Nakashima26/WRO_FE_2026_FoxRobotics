@@ -247,6 +247,12 @@ OBS_MEM_TURN_SCALE_MIN    = 0.3
 # con el carro ya sobregirado hacia la pared -- confirmado run5/run6).
 OBS_MEM_LATERAL_MARGIN_PX  = 8.0    # px que la lata debe cruzar PASADO el eje
 OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
+
+# Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
+# verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
+# detección que nace proyectada con y grande (borde inferior del BEV, lata muy
+# cerca al arrancar) NO cuenta como rebase -> se descarta callada.
+OBS_MEM_PASSED_MIN_AHEAD_PX = 40.0
                                       # (la lata sigue a la altura del carro,
                                       # no muy adelante todavía)
 
