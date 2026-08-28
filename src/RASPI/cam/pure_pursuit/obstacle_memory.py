@@ -28,10 +28,11 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf", "x0", "y_min",
+    __slots__ = ("x", "y", "color", "conf", "x0", "y_min", "heading0",
                  "beyond", "_cls_vote", "_cls_votes")
 
-    def __init__(self, x: float, y: float, color: str, conf: float):
+    def __init__(self, x: float, y: float, color: str, conf: float,
+                 heading0: float | None = None):
         self.x = x
         self.y = y
         self.color = color
@@ -41,6 +42,13 @@ class _Obs:
         # robot (empezó del lado de esquiva y terminó del otro), no si ya
         # estaba del otro lado desde el principio.
         self.x0 = x
+        # Heading del carro (IMU) cuando se detectó por primera vez. El rebase
+        # LATERAL primario compara el heading actual contra éste: si el carro
+        # rotó >= OBS_MEM_LAT_TURN_DEG hacia el lado correcto desde que vio la
+        # lata, ya la rodeó -> PASADO/RECUPERANDO. Mide el GIRO REAL del IMU,
+        # no una x inferida frágil -> no le puede ganar la condición por
+        # distancia en un latiguazo.
+        self.heading0 = heading0
         # y más chica (más adelante) que ha tenido esta lata según DETECCIONES
         # de cámara (no estima muerta). _prune() solo dispara "PASADO" si la
         # lata estuvo de verdad adelante en algún momento -- así una detección
@@ -143,7 +151,8 @@ class ObstacleMemory:
                 best.y_min = min(best.y_min, ny)   # detección, no estima
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
-                    self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH))
+                    self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
+                                          heading0=self._prev_heading))
 
     # ── Reduce duplicados fantasma ─────────────────────────────────────────────────────────────────
     def _dedupe(self):
@@ -217,15 +226,31 @@ class ObstacleMemory:
                     self.last_prune_reason = f"DESCARTE_NO_ADELANTE y={o.y:.0f} ymin={o.y_min:.0f}"
                 continue
             # ── Rebase LATERAL: en una esquiva de ángulo el carro pasa la lata
-            # de LADO, no de frente. El mapa rota con el heading, así que si la
-            # lata CRUZÓ el eje del robot al lado opuesto de la esquiva
-            # (Red se rebasa por su derecha -> la lata queda a la IZQUIERDA del
-            # robot; Green al revés) y sigue a la altura del robot (no muy
-            # adelante), el carro ya la libró -> PASADO / RECUPERANDO ya.
-            # Requiere que la lata haya EMPEZADO del lado de esquiva o centrada
-            # (o.x0), para no disparar sobre una lata que siempre estuvo del
-            # otro lado. A mayor ángulo de giro cruza antes -> recuperando entra
-            # antes, que es justo lo que se quiere.
+            # de LADO, no de frente. Dos señales (OR):
+            #
+            #  (a) POR GIRO (primaria): cuánto rotó el carro (IMU) desde que vio
+            #      la lata. Si giró >= OBS_MEM_LAT_TURN_DEG hacia el lado
+            #      correcto (Red -> derecha -> heading baja; Green -> izquierda
+            #      -> heading sube), ya la rodeó. Mide el GIRO REAL, no una x
+            #      inferida -> no le gana la condición por distancia en un
+            #      latiguazo (era el bug de run8: la x rozó el umbral y rebotó,
+            #      ganó "PASADO por y" a ang=-74 = tardísimo).
+            #
+            #  (b) POR CRUCE DE X (respaldo): la lata cruzó el eje del robot al
+            #      lado opuesto. Frágil (la x oscila) pero cubre casos raros.
+            #
+            # Ambas exigen: la lata estuvo adelante (was_ahead) y sigue a la
+            # altura del robot (banda y, no muy adelante).
+            lat_ok_y = o.y > self.ry - lat_y_band
+            turn_deg = getattr(C, "OBS_MEM_LAT_TURN_DEG", 35.0)
+            turned_ok = False
+            if o.heading0 is not None and self._prev_heading is not None:
+                d = self._prev_heading - o.heading0
+                d = (d + 180.0) % 360.0 - 180.0            # normaliza a [-180,180]
+                turned_ok = (
+                    (o.color == "Red"   and d <= -turn_deg) or
+                    (o.color == "Green" and d >=  turn_deg)
+                )
             crossed = (
                 (o.color == "Red"
                  and o.x0 >= self.rx - lat_margin
@@ -235,9 +260,13 @@ class ObstacleMemory:
                  and o.x0 <= self.rx + lat_margin
                  and o.x > self.rx + lat_margin)
             )
-            if crossed and was_ahead and o.y > self.ry - lat_y_band:
+            if was_ahead and lat_ok_y and (turned_ok or crossed):
+                how = "giro" if turned_ok else "x"
                 self.last_prune_reason = (
-                    f"PASADO(lat) x={o.x:.0f} x0={o.x0:.0f} y={o.y:.0f} conf={o.conf:.2f}"
+                    f"PASADO(lat-{how}) x={o.x:.0f} y={o.y:.0f} "
+                    f"h0={o.heading0 if o.heading0 is None else round(o.heading0)} "
+                    f"h={self._prev_heading if self._prev_heading is None else round(self._prev_heading)} "
+                    f"conf={o.conf:.2f}"
                 )
                 passed = True
                 continue
@@ -271,7 +300,13 @@ class ObstacleMemory:
             return "-"
         o = max(self._obs, key=lambda x: x.y)
         behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
-        return f"y={o.y:.0f} conf={o.conf:.2f} falta={behind_y - o.y:+.0f}px"
+        if o.heading0 is not None and self._prev_heading is not None:
+            turned = (self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0
+        else:
+            turned = None
+        return (f"y={o.y:.0f} x={o.x:.0f} conf={o.conf:.2f} "
+                f"falta={behind_y - o.y:+.0f}px "
+                f"ymin={o.y_min:.0f} giro={'?' if turned is None else round(turned)}")
 
     def debug_all(self) -> str:
         """
