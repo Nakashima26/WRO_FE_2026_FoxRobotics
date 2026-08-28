@@ -682,8 +682,8 @@ def main():
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(27, GPIO.OUT)
         GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-        GPIO.output(27, GPIO.HIGH)
-        print("[GPIO] LED encendido — Pi prendida.", flush=True)
+        GPIO.output(27, GPIO.LOW)   # LED APAGADO mientras inicializa (cámara, warmup)
+        print("[GPIO] Inicializando... (LED apagado)", flush=True)
     except ImportError:
         print("[GPIO] RPi.GPIO no disponible, omitiendo espera de botón.", flush=True)
 
@@ -699,7 +699,10 @@ def main():
         if _gpio is None:
             return True
         if not _ss["announced"]:
-            print("[GPIO] TODO LISTO (pipeline corriendo). Esperando botón GPIO17...", flush=True)
+            # Pipeline ya corriendo en caliente -> el carro puede arrancar en
+            # cuanto se pique el botón. LED ENCENDIDO = "listo, pícale".
+            _gpio.output(27, _gpio.HIGH)
+            print("[GPIO] LISTO — LED encendido. Esperando botón GPIO17...", flush=True)
             _ss["announced"] = True
         if _ss["btn_t"] is None:
             if _gpio.input(17) == _gpio.HIGH:
@@ -711,9 +714,11 @@ def main():
         return (time.time() - _ss["btn_t"]) >= d
 
     def led_on():
+        # Se llama en GO (armado). El LED ya está encendido desde "LISTO";
+        # esto solo lo asegura por si acaso.
         if _gpio is not None:
             _gpio.output(27, _gpio.HIGH)
-            print("[GPIO] LED encendido — sistema listo.", flush=True)
+            print("[GPIO] Armado — corriendo.", flush=True)
 
     args = parse_args()
 
