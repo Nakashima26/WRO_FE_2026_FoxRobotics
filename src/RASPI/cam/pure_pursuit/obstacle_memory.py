@@ -220,7 +220,10 @@ class ObstacleMemory:
             was_ahead = o.y_min < ahead_gate
             if o.y > behind_y:                       # ya quedó detrás del robot
                 if was_ahead:
-                    self.last_prune_reason = f"PASADO y={o.y:.0f}>{behind_y} conf={o.conf:.2f}"
+                    self.last_prune_reason = (
+                        f"PASADO y={o.y:.0f}>{behind_y} ymin={o.y_min:.0f} "
+                        f"x0={o.x0:.0f} conf={o.conf:.2f}"
+                    )
                     passed = True
                 else:
                     self.last_prune_reason = f"DESCARTE_NO_ADELANTE y={o.y:.0f} ymin={o.y_min:.0f}"
@@ -353,6 +356,13 @@ class ObstacleMemory:
             dheading = 0.0
         if heading_deg is not None:
             self._prev_heading = heading_deg
+            # Backfill: una lata detectada ANTES de que llegara el primer ACK
+            # del ESP32 nace con heading0=None -> el rebase lateral por giro
+            # queda apagado para ella justo cuando más se necesita (primera lata
+            # del arranque). En cuanto hay heading, se lo asignamos.
+            for _o in self._obs:
+                if _o.heading0 is None:
+                    _o.heading0 = heading_deg
 
         ds_px = (C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX if dt_s > 0 else 0.0
 

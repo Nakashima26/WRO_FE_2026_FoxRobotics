@@ -44,9 +44,17 @@ def map_obstacle_to_bev(
     if result is None:
         return None
     bx, by = result
-    if bev.bev_in_bounds(bx, by):
-        return bx, by
-    return None
+    if not bev.bev_in_bounds(bx, by):
+        return None
+    # Rechaza proyecciones que caen a la altura del robot o MÁS ATRÁS. Con la
+    # lata muy cerca, su bbox llega al borde inferior de la cámara y el "pie"
+    # proyecta detrás del robot -> entraba a la memoria rodante como una lata
+    # ya-rebasada y disparaba RECUPERANDO en falso al arrancar. Una lata real
+    # que estás por rebasar proyecta a y ~360-375, no >= robot_y.
+    y_max = getattr(C, "OBS_PROJ_Y_MAX", C.ROBOT_BEV_Y - 6)
+    if by >= y_max:
+        return None
+    return bx, by
 
 
 # ── Helpers internos ──────────────────────────────────────────────────────────
