@@ -249,7 +249,7 @@ class PPRuntime:
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
-    def run(self, on_ready=None, should_start=None):
+    def run(self, on_ready=None, should_start=None, should_record=None):
         # BLOQUEA hasta que el UART está listo (antes era no-op y el loop
         # arrancaba mandando V2 al vacío ~1.5 s -> el ESP32 rodaba en su
         # fallback wall-PID = "el carro avanza y no le entran datos").
@@ -615,7 +615,12 @@ class PPRuntime:
                     if cv2.waitKey(1) & 0xFF == 27:
                         break
 
-                self._maybe_record(combined, fps)   # cámara + BEV/ruta (antes solo cámara)
+                # Grabación al .avi: solo DESDE que se picó el botón (incluye el
+                # start-delay + la run). El pipeline desarmado corre antes pero
+                # NO se graba -> el archivo no acumula el rato de "esperando
+                # botón". El _write_cam_frame (vista VNC) sí corre siempre.
+                if should_record is None or should_record():
+                    self._maybe_record(combined, fps)
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
 
                 t_prev_end = time.perf_counter()
@@ -720,6 +725,11 @@ def main():
             _gpio.output(27, _gpio.HIGH)
             print("[GPIO] Armado — corriendo.", flush=True)
 
+    def should_record():
+        # Empezar a grabar el .avi cuando se pica el botón (antes del
+        # start-delay), no durante el idle de "esperando botón".
+        return _ss["btn_t"] is not None
+
     args = parse_args()
 
     threaded = True
@@ -743,7 +753,8 @@ def main():
 
     runtime = PPRuntime(cfg)   # abre la cámara AQUÍ, antes del botón
     try:
-        runtime.run(on_ready=led_on, should_start=should_start)
+        runtime.run(on_ready=led_on, should_start=should_start,
+                    should_record=should_record)
     except KeyboardInterrupt:
         # SIGTERM (systemctl stop/restart) o Ctrl-C: run() ya corrió su
         # finally (cerró video/serial). Salir sin escupir traceback.
