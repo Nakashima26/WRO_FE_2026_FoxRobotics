@@ -769,6 +769,19 @@ class PPRuntime:
                 # (rebase de ÁNGULO) lo subió tras detect_centerline. Aquí solo se
                 # emite el hold y se decrementa -- una sola vez por frame, corra o
                 # no el pipeline BEV.
+                # SUPRIMIR si la esquina es inminente: con la línea naranja cerca
+                # (near_y grande), el ESP32 está por girar. Un pasado=1 aquí lo
+                # mete a RECUPERANDO -> en ese estado NO evalúa detectarEsquina()
+                # -> el giro entra ~0.5s tarde y el carro se lleva el cono de la
+                # recta siguiente (orillas420/421). El giro mismo endereza; no
+                # hace falta RECUPERANDO ciego encima.
+                _oy = line_info["Orange"].get("near_y")
+                _corner_soon = (line_info["Orange"].get("seen")
+                                and _oy is not None
+                                and _oy >= getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 300.0))
+                if _corner_soon and self._pasado_hold > 0:
+                    self._pasado_hold = 0
+                    self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
                 pasado = self._pasado_hold > 0
                 if self._pasado_hold > 0:
                     self._pasado_hold -= 1

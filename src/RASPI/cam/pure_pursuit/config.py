@@ -374,6 +374,13 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6
 
+# Suprimir pasado=1 (=> no RECUPERANDO) si la línea naranja está a near_y >= esto
+# en el BEV (robot en y=380, así que 285 = línea a <=~190mm = esquina inminente).
+# En RECUPERANDO el ESP32 no evalúa detectarEsquina() -> un pasado justo antes de
+# la esquina metía el giro ~0.5s tarde y el carro se llevaba el cono de la recta
+# siguiente (orillas420/421). El giro mismo endereza el heading.
+RECUP_SUPPRESS_NEAR_ORANGE_Y = 285.0
+
 # est=G debounce: frames CONSECUTIVOS de est=G en el ACK del ESP32 antes de dar
 # el giro por real y borrar/apagar la memoria de obstáculos. Un est=G espurio
 # (ACK con ruido, "est=G fantasma tras verde") ya NO dispara el wipe de memoria
