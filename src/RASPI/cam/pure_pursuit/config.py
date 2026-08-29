@@ -211,11 +211,12 @@ OBS_MEM_DECAY      = 0.06    # confianza perdida por frame sin re-ver el obstác
                             # 2026-08-28: 0.12->0.06 al doblar fps (~7->~14), mismo decay/seg
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
-OBS_MEM_BEHIND_PAD = -75    # 2026-08-28: -18 -> -75. Con modo "off" RECUPERANDO
-                            # entraba a ang -71 (rojo) / giro 68 (verde): en una
-                            # esquiva el carro pivotea sin avanzar, la y de la
-                            # lata no sube y PASADO y llega tardísimo. behind_y
-                            # baja 362 -> 305 -> dispara ~40px antes.
+OBS_MEM_BEHIND_PAD = -35    # 2026-08-28: -18 -> -75 (rojo bien) pero -75 mató al
+                            # verde: layout con verde a 40cm de la pared EXTERIOR
+                            # -> traverse gigante -> a y=305 el verde sigue 150mm
+                            # ADELANTE + al lado, RECUPERANDO enderezó el morro
+                            # contra el verde. -35 (behind_y=345) es el punto medio:
+                            # rojo un poco más tarde, verde no dispara prematuro.
                             # px: tirar el obstáculo (y disparar "pasado" ->
                               # RECUPERANDO en el ESP32) cuando bev_y > robot_y + pad.
                               # NEGATIVO a propósito: umbral en 380-18 = 362, o sea
