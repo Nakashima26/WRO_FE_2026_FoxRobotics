@@ -489,17 +489,21 @@ LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
 # línea puede verse inclinada/diagonal en el BEV, no necesariamente horizontal;
 # comparar solo Y contra un obstáculo puede clasificarlo mal si está a una X
 # distinta de por donde se ancló la lectura.
-LINE_FIT_BAND_PX     = 35   # (antes 60) +-px alrededor de near_y de donde se toman
-                             # pixeles para el ajuste. Más angosto = menos riesgo de
-                             # colar pixeles de OTRO segmento más lejano y torcer la pendiente.
-LINE_FIT_MIN_POINTS  = 70   # (antes 30) pixeles mínimos en la banda para confiar en la
-                             # pendiente ajustada; si no alcanza, se usa el fallback
-                             # horizontal (solo Y). Subido para exigir un segmento bien
-                             # visible antes de comprometerse a una pendiente.
-LINE_FIT_MAX_SLOPE_DEG = 30  # si la recta ajustada queda más inclinada que esto respecto
-                             # a la horizontal se descarta (la línea de esquina en BEV es
-                             # ~perpendicular al avance; un ajuste muy diagonal casi
-                             # siempre es ruido) -> fallback plano en near_y.
+LINE_FIT_BAND_PX     = 45   # (2026-08-29: 35 -> 45) +-px alrededor de near_y de donde
+                             # se toman pixeles para el ajuste. Se amplió para juntar
+                             # los MIN_POINTS antes (línea recién vista, delgada).
+LINE_FIT_MIN_POINTS  = 35   # 2026-08-29: 70 -> 35. Con 70, la línea naranja recién
+                             # vista (lejos, delgada) no juntaba 70px -> _fit_line_near
+                             # devolvía None -> classify() caía al FALLBACK HORIZONTAL
+                             # -> un rojo que está PASANDO la esquina caía en "mi recta"
+                             # y el carro lo esquivaba (orillas420, reporte del usuario).
+                             # 35 permite estimar la pendiente desde los primeros frames;
+                             # el EMA de _smooth_line (line_ema=0.35) amortigua el ruido.
+LINE_FIT_MAX_SLOPE_DEG = 45  # 2026-08-29: 30 -> 45. Al acercarse a la esquina en ángulo,
+                             # o esquivando (chasis ladeado ~20°), la línea SÍ se ve
+                             # diagonal en el BEV -> descartar >30° forzaba el horizontal
+                             # equivocado. 45° deja pasar la inclinación real sin colar
+                             # una vertical de ruido.
 
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
 LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
@@ -543,6 +547,12 @@ TURN_RECOVERY_FRAMES = 20
 # 2026-08-28: duplicados (3->6, 6->12) al pasar el pipeline de ~7fps a ~14fps.
 LINE_CLASSIFY_FRAMES_TO_MINE   = 6
 LINE_CLASSIFY_FRAMES_TO_BEYOND = 12
+# 2026-08-29: veredicto por PRIMERA vez de un obstáculo sin clasificar
+# (o.beyond is None). Antes, un obstáculo nuevo era "mío" AL INSTANTE pero
+# "siguiente recta" tardaba TO_BEYOND(12) -> un rojo que estaba pasando la
+# esquina se esquivaba ~1s antes de corregirse (orillas420). Este umbral chico
+# aplica SOLO al primer veredicto; cambiar uno ya fijado sigue usando 6/12.
+LINE_CLASSIFY_FRAMES_FIRST     = 4
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60

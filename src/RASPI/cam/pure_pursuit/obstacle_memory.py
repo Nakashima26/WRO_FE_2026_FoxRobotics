@@ -592,8 +592,15 @@ class ObstacleMemory:
                     else:
                         o._cls_vote = want_beyond
                         o._cls_votes = 1
-                    need = (C.LINE_CLASSIFY_FRAMES_TO_BEYOND if want_beyond
-                            else C.LINE_CLASSIFY_FRAMES_TO_MINE)
+                    if o.beyond is None:
+                        # PRIMER veredicto: rápido en ambos sentidos. Antes "mío"
+                        # era instantáneo y "siguiente recta" tardaba 12 frames
+                        # -> se esquivaba un obstáculo de la recta que sigue.
+                        need = getattr(C, "LINE_CLASSIFY_FRAMES_FIRST", 4)
+                    elif want_beyond:
+                        need = C.LINE_CLASSIFY_FRAMES_TO_BEYOND
+                    else:
+                        need = C.LINE_CLASSIFY_FRAMES_TO_MINE
                     if o._cls_votes >= need:
                         o.beyond = want_beyond
                         o._cls_vote = None
