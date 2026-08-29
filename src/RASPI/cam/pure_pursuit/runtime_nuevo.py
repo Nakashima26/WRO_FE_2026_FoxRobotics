@@ -326,7 +326,12 @@ class PPRuntime:
             self._recup_can_arm = True
             self._recup_clear_count = 0
             self._heading_ref = None
-            self.memory.forget_color_obstacles()
+            # Solo olvidar si NINGÚN cono sigue de verdad adelante (>40px del
+            # eje): así no se borra un obstáculo que el carro tiene justo
+            # enfrente y todavía debe rodear.
+            if not any(c in ("Red", "Green") and (ry - oy) > 40.0
+                       for (ox, oy, c) in bev_obstacles):
+                self.memory.forget_color_obstacles()
         else:
             self._last_recup_reason = (
                 f"despejado herr={heading_err:+.0f} clr={self._recup_clear_count}")
