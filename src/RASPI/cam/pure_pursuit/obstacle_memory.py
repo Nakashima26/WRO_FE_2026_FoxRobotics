@@ -28,8 +28,8 @@ from . import config as C
 
 
 class _Obs:
-    __slots__ = ("x", "y", "color", "conf", "x0", "y_min", "heading0",
-                 "beyond", "_cls_vote", "_cls_votes")
+    __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
+                 "xr", "yr", "beyond", "_cls_vote", "_cls_votes")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -42,6 +42,16 @@ class _Obs:
         # robot (empezó del lado de esquiva y terminó del otro), no si ya
         # estaba del otro lado desde el principio.
         self.x0 = x
+        # y cuando se detectó por primera vez. Junto con x0 y heading0 es el
+        # ANCLA del trigger "geom" (ver _prune / OBS_MEM_LAT_TURN_MODE="geom").
+        self.y0 = y
+        # Posición dead-reckoning pura de la lata: nace en (x,y) y SOLO la mueve
+        # _advance() (ego-movimiento: giro real del IMU + avance asumido). NUNCA
+        # se re-ancla con detecciones frescas (a diferencia de x,y). Es la base
+        # geométrica de "¿ya la rodeé de lado?" sin depender de que la x medida
+        # cruce un umbral frágil.
+        self.xr = x
+        self.yr = y
         # Heading del carro (IMU) cuando se detectó por primera vez. El rebase
         # LATERAL primario compara el heading actual contra éste: si el carro
         # rotó >= OBS_MEM_LAT_TURN_DEG hacia el lado correcto desde que vio la
@@ -85,6 +95,7 @@ class ObstacleMemory:
         self._obs: list[_Obs] = []
         self._prev_heading: float | None = None
         self._last_dheading: float = 0.0   # Δheading del último update (predicción _prune)
+        self._last_ds_anchor: float = 0.0  # avance px del último frame para el ancla "geom" (lead)
         # Tiempo acumulado de vida de la memoria (suma de dt_s). NO se reinicia
         # en reset() -- es para la rampa de arranque (ver update()), que es un
         # evento de una sola vez al empezar la carrera, no algo por-giro.
@@ -104,13 +115,18 @@ class ObstacleMemory:
 
     # ── Transformación por movimiento del robot ─────────────────────────────────
 
-    def _advance(self, ds_px: float, dheading_deg: float):
+    def _advance(self, ds_px: float, ds_anchor: float, dheading_deg: float):
         """
         Lleva cada obstáculo recordado del frame anterior al frame actual.
 
         El robot avanzó ds_px (hacia arriba/−Y) y giró dheading_deg.  En el marco
         relativo al robot eso equivale a: la lata baja ds_px y el mundo rota −dθ
         alrededor del robot.
+
+        ds_anchor: avance px aplicado al ANCLA dead-reckoning (o.xr,o.yr) del
+        trigger "geom" -- normalmente == ds_px, pero se escala aparte con
+        OBS_MEM_GEOM_SPEED_SCALE para calibrar sin tocar el mapa que ve la
+        centerline.
         """
         # Rotación −dθ.  NOTA: si al doblar el mapa se desalinea hacia el lado
         # equivocado, invierte el signo aquí (depende de la orientación del gyro).
@@ -126,6 +142,13 @@ class ObstacleMemory:
             ry_new = ux * sin_p + uy * cos_p
             o.x = self.rx + rx_new
             o.y = self.ry + ry_new
+
+            # Ancla "geom": MISMA transformada, con su propio avance, sin
+            # re-anclado por detecciones -> ego-movimiento puro desde (x0,y0).
+            ay = (o.yr - self.ry) + ds_anchor
+            ax = (o.xr - self.rx)
+            o.xr = self.rx + (ax * cos_p - ay * sin_p)
+            o.yr = self.ry + (ax * sin_p + ay * cos_p)
 
     # ── Fusión con detecciones nuevas ───────────────────────────────────────────
 
@@ -191,6 +214,94 @@ class ObstacleMemory:
 
         self._obs = kept
 
+    # ── Rebase lateral: ¿ya rodeé esta lata de lado? ────────────────────────────
+
+    def _lat_pass(self, o: "_Obs") -> tuple[bool, str]:
+        """
+        Veredicto de rebase LATERAL de una lata (distinto del rebase por "y
+        detrás", que se maneja aparte en _prune con behind_y).
+
+        En una esquiva de ángulo el carro rodea la lata de COSTADO: la lata
+        nunca cruza `behind_y` porque el carro gira más que avanza. Tres vías,
+        se elige con OBS_MEM_LAT_TURN_MODE:
+
+          "angle" : el carro giró (IMU) >= OBS_MEM_LAT_TURN_DEG hacia el lado
+                    correcto desde que vio la lata. Simple pero IGNORA dónde
+                    estaba la lata -> mismo ángulo despeja distinto según x0.
+
+          "geom"  : reproyecta la posición inicial de la lata (ancla o.xr/o.yr,
+                    movida SOLO por ego-movimiento: giro real IMU + avance
+                    asumido·SPEED_SCALE) y pregunta si ya quedó longitudinalmente
+                    al costado/detrás (fyr <= AHEAD_MARGIN) Y separada del eje
+                    del robot por CLEAR_PX a CUALQUIER lado (dirección-agnóstico:
+                    si el latiguazo la rodeó, |exr| crece; si el carro le pasó
+                    por encima sin rodearla, |exr| se queda chico y NO dispara).
+                    LEAD_FRAMES adelanta el disparo para tapar la latencia
+                    serial. MIN_DTHETA_DEG evita disparos por ruido en recta.
+
+          (x)     : respaldo en TODOS los modos -- la x medida (frágil, oscila)
+                    cruzó el eje del robot al lado opuesto de x0.
+
+        Exige, en todos los casos: la lata estuvo DE VERDAD adelante en algún
+        frame (y_min de detección) y sigue a la altura del robot (banda y).
+        """
+        ahead_gate = self.ry - getattr(C, "OBS_MEM_PASSED_MIN_AHEAD_PX", 40.0)
+        lat_y_band = getattr(C, "OBS_MEM_LATERAL_Y_BAND_PX", 140.0)
+        lat_margin = getattr(C, "OBS_MEM_LATERAL_MARGIN_PX", 8.0)
+        if not (o.y_min < ahead_gate and o.y > self.ry - lat_y_band):
+            return False, ""
+
+        mode = getattr(C, "OBS_MEM_LAT_TURN_MODE", None)
+        if mode is None:   # compat con el flag viejo
+            mode = "angle" if getattr(C, "OBS_MEM_LAT_TURN_ENABLED", True) else "off"
+
+        have_head = o.heading0 is not None and self._prev_heading is not None
+        dtheta = ((self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0) if have_head else 0.0
+
+        if mode == "angle" and have_head:
+            turn_deg = getattr(C, "OBS_MEM_LAT_TURN_DEG", 35.0)
+            # +|dheading| de lead: contrarresta el undershoot de 1 frame.
+            d_pred = dtheta + math.copysign(abs(self._last_dheading), dtheta) if dtheta != 0 else dtheta
+            if ((o.color == "Red"   and d_pred <= -turn_deg) or
+                    (o.color == "Green" and d_pred >=  turn_deg)):
+                return True, (
+                    f"PASADO(lat-giro) x={o.x:.0f} y={o.y:.0f} "
+                    f"h0={round(o.heading0)} h={round(self._prev_heading)} conf={o.conf:.2f}"
+                )
+        elif mode == "geom" and have_head:
+            if abs(dtheta) >= getattr(C, "OBS_MEM_GEOM_MIN_DTHETA_DEG", 8.0):
+                clear_px = getattr(C, "OBS_MEM_GEOM_CLEAR_PX", C.OBS_INFLATE_R)
+                ahead_m  = getattr(C, "OBS_MEM_GEOM_AHEAD_MARGIN_PX", 55.0)
+                lead     = getattr(C, "OBS_MEM_GEOM_LEAD_FRAMES", 2.0)
+                # Ancla reproyectada al marco ACTUAL del robot (robot mira +y-arriba):
+                #   exr = separación lateral, fyr = distancia longitudinal (+ adelante).
+                # "Rodeada" = separada del eje por CLEAR_PX a cualquier lado Y ya no
+                # más de AHEAD_M px adelante (con LEAD_FRAMES de adelanto). NO se
+                # exige que quede DETRÁS: basta con que la línea recta de
+                # recuperación no la toque. |exr| en vez de signo por color ->
+                # robusto a la convención de giro del IMU; si el carro le pasó por
+                # encima sin rodearla, |exr| se queda chico y no dispara.
+                exr = o.xr - self.rx
+                fyr = (self.ry - o.yr) - lead * self._last_ds_anchor
+                if abs(exr) >= clear_px and fyr <= ahead_m:
+                    return True, (
+                        f"PASADO(lat-geom) exr={exr:.0f} fyr={fyr:.0f} "
+                        f"dth={dtheta:.0f} clr={clear_px:.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
+                    )
+
+        # (x) respaldo -- activo en todos los modos
+        if ((o.color == "Red"
+             and o.x0 >= self.rx - lat_margin and o.x < self.rx - lat_margin) or
+            (o.color == "Green"
+             and o.x0 <= self.rx + lat_margin and o.x > self.rx + lat_margin)):
+            return True, (
+                f"PASADO(lat-x) x={o.x:.0f} y={o.y:.0f} "
+                f"h0={o.heading0 if o.heading0 is None else round(o.heading0)} "
+                f"h={self._prev_heading if self._prev_heading is None else round(self._prev_heading)} "
+                f"conf={o.conf:.2f}"
+            )
+        return False, ""
+
     # ── Poda ────────────────────────────────────────────────────────────────────
 
     def _prune(self) -> bool:
@@ -204,8 +315,6 @@ class ObstacleMemory:
         específicamente por quedar detrás del robot ("evento pasado").
         """
         behind_y = self.ry + C.OBS_MEM_BEHIND_PAD
-        lat_margin = getattr(C, "OBS_MEM_LATERAL_MARGIN_PX", 8.0)
-        lat_y_band = getattr(C, "OBS_MEM_LATERAL_Y_BAND_PX", 140.0)
         # Para disparar "PASADO" (RECUPERANDO) exigimos que la lata haya estado
         # DE VERDAD adelante en algún frame (detección de cámara, y_min chico).
         # Si nació ya proyectada con y grande -- p.ej. una detección espuria en
@@ -215,10 +324,20 @@ class ObstacleMemory:
         kept: list[_Obs] = []
         passed = False
         for o in self._obs:
-            if o.conf < C.OBS_MEM_MIN_CONF:
-                self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
-                continue                             # perdido de vista, no rebasado
             was_ahead = o.y_min < ahead_gate
+            if o.conf < C.OBS_MEM_MIN_CONF:
+                # Perdido de vista. Antes de tirarlo en silencio: si el
+                # ego-movimiento dice que YA lo rodeé de lado, sí dispara
+                # RECUPERANDO -- si no, el trigger geom pierde la carrera contra
+                # el decay (OBS_MEM_DECAY) cuando la lata sale de cámara en plena
+                # esquiva y no se re-detecta.
+                lp, why = self._lat_pass(o)
+                if lp:
+                    self.last_prune_reason = why
+                    passed = True
+                else:
+                    self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
+                continue
             if o.y > behind_y:                       # ya quedó detrás del robot
                 if was_ahead:
                     self.last_prune_reason = (
@@ -229,60 +348,11 @@ class ObstacleMemory:
                 else:
                     self.last_prune_reason = f"DESCARTE_NO_ADELANTE y={o.y:.0f} ymin={o.y_min:.0f}"
                 continue
-            # ── Rebase LATERAL: en una esquiva de ángulo el carro pasa la lata
-            # de LADO, no de frente. Dos señales (OR):
-            #
-            #  (a) POR GIRO (primaria): cuánto rotó el carro (IMU) desde que vio
-            #      la lata. Si giró >= OBS_MEM_LAT_TURN_DEG hacia el lado
-            #      correcto (Red -> derecha -> heading baja; Green -> izquierda
-            #      -> heading sube), ya la rodeó. Mide el GIRO REAL, no una x
-            #      inferida -> no le gana la condición por distancia en un
-            #      latiguazo (era el bug de run8: la x rozó el umbral y rebotó,
-            #      ganó "PASADO por y" a ang=-74 = tardísimo).
-            #
-            #  (b) POR CRUCE DE X (respaldo): la lata cruzó el eje del robot al
-            #      lado opuesto. Frágil (la x oscila) pero cubre casos raros.
-            #
-            # Ambas exigen: la lata estuvo adelante (was_ahead) y sigue a la
-            # altura del robot (banda y, no muy adelante).
-            lat_ok_y = o.y > self.ry - lat_y_band
-            turn_deg = getattr(C, "OBS_MEM_LAT_TURN_DEG", 35.0)
-            turned_ok = False
-            # 2026-08-28 TEMPORAL: flag para desactivar el trigger por giro de
-            # heading y dejar RECUPERANDO SOLO por rebase físico (cruce de x /
-            # y detrás / borde) -- "como estaba antes". Poner True para volver.
-            if (getattr(C, "OBS_MEM_LAT_TURN_ENABLED", True)
-                    and o.heading0 is not None and self._prev_heading is not None):
-                d = self._prev_heading - o.heading0
-                d = (d + 180.0) % 360.0 - 180.0            # normaliza a [-180,180]
-                # Predicción: a 8fps el heading salta ~12°/frame en un latiguazo;
-                # sumar el Δheading del último frame en la dirección del giro hace
-                # que dispare ~1 frame antes en vez de pasarse del umbral.
-                # 2026-08-28: probé x2 al doblar fps y RECUPERANDO entraba ~7°
-                # ANTES (dodge se cortaba a ~22° real vs 29 objetivo) -> revertido
-                # a x1. A ~14fps hay menos undershoot por frame, el lead x1 basta.
-                d_pred = d + math.copysign(abs(self._last_dheading), d) if d != 0 else d
-                turned_ok = (
-                    (o.color == "Red"   and d_pred <= -turn_deg) or
-                    (o.color == "Green" and d_pred >=  turn_deg)
-                )
-            crossed = (
-                (o.color == "Red"
-                 and o.x0 >= self.rx - lat_margin
-                 and o.x < self.rx - lat_margin)
-                or
-                (o.color == "Green"
-                 and o.x0 <= self.rx + lat_margin
-                 and o.x > self.rx + lat_margin)
-            )
-            if was_ahead and lat_ok_y and (turned_ok or crossed):
-                how = "giro" if turned_ok else "x"
-                self.last_prune_reason = (
-                    f"PASADO(lat-{how}) x={o.x:.0f} y={o.y:.0f} "
-                    f"h0={o.heading0 if o.heading0 is None else round(o.heading0)} "
-                    f"h={self._prev_heading if self._prev_heading is None else round(self._prev_heading)} "
-                    f"conf={o.conf:.2f}"
-                )
+            # Rebase LATERAL (el carro pasó la lata de LADO en una esquiva de
+            # ángulo, no de frente): ver _lat_pass() -- modo angle / geom / x.
+            lp, why = self._lat_pass(o)
+            if lp:
+                self.last_prune_reason = why
                 passed = True
                 continue
             if not (0.0 <= o.x < C.BEV_W and 0.0 <= o.y < C.BEV_H):
@@ -402,7 +472,13 @@ class ObstacleMemory:
             frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
             ds_px *= 1.0 - (1.0 - mn) * frac
 
-        self._advance(ds_px, dheading)
+        # Avance del ancla "geom": mismo ds que el mapa (ya con rampa + freno por
+        # giro) escalado por OBS_MEM_GEOM_SPEED_SCALE -- perilla para calibrar si
+        # RECUPERANDO entra tarde (subir) o pronto (bajar) sin mover la memoria.
+        ds_anchor = ds_px * getattr(C, "OBS_MEM_GEOM_SPEED_SCALE", 1.0)
+        self._last_ds_anchor = ds_anchor
+
+        self._advance(ds_px, ds_anchor, dheading)
         self._merge(new_obs)
         self._dedupe()
         self.last_passed = self._prune()

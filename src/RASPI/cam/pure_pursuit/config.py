@@ -270,11 +270,48 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # todavía grande -> RECUPERANDO tiene trabajo que hacer y dura.
 OBS_MEM_LAT_TURN_DEG       = 35
 
-# 2026-08-28 TEMPORAL: False desactiva el trigger de RECUPERANDO por giro de
-# heading (lat-giro). Con False, RECUPERANDO solo se lanza por rebase FÍSICO:
-# cruce de x (lat-x), lata detrás (PASADO y), o salida por el borde inferior.
-# Volver a True para reactivar el trigger por rotación del IMU.
-OBS_MEM_LAT_TURN_ENABLED   = False
+# ─── Trigger de "ya rodeé la lata de lado" -> PASADO/RECUPERANDO ──────────────
+# Cuál de los 3 métodos decide el rebase lateral (obstacle_memory._prune):
+#   "angle" : el carro giró >= OBS_MEM_LAT_TURN_DEG (arriba). Simple pero
+#             IGNORA dónde estaba la lata: 22° de giro despejan una lata muy
+#             lateral pero NO una casi al frente -> dispara pronto o tarde.
+#   "geom"  : reproyecta la posición inicial de la lata (x0,y0) por el
+#             ego-movimiento acumulado (giro real IMU + avance asumido) y
+#             pregunta si YA quedó al costado y despejada por _CLEAR_PX.
+#             Toma en cuenta posición inicial + giro -> ni antes ni después.
+#   "off"   : sin trigger por rotación; solo rebase físico (lat-x / PASADO y /
+#             borde). RECUPERANDO entra tarde en esquivas de ángulo.
+# (OBS_MEM_LAT_TURN_ENABLED se ignora si esta línea está presente; se deja por
+#  compatibilidad: sin MODE, True->"angle", False->"off".)
+OBS_MEM_LAT_TURN_MODE      = "geom"
+OBS_MEM_LAT_TURN_ENABLED   = True
+
+# ── Perillas del modo "geom" — calibrar en pista, en este orden ──────────────
+# 1) _CLEAR_PX: cuántos px BEV al costado del eje del robot debe quedar la lata
+#    para contar como librada. Default = radio de inflado (~35).
+#    SUBIR  -> rebasa más limpio, RECUPERANDO más TARDE.
+#    BAJAR  -> RECUPERANDO más PRONTO (riesgo: rozar la lata).
+OBS_MEM_GEOM_CLEAR_PX        = OBS_INFLATE_R
+# 2) _AHEAD_MARGIN_PX: gate longitudinal. La lata reproyectada al marco actual
+#    del robot debe estar a <= esta "y" adelante para contar como rodeada
+#    (NO se exige que quede detrás: basta que la recta de recuperación no la
+#    toque). Default ~= lookahead mínimo.
+#    BAJAR (o negativo) -> exige la lata más al costado/detrás -> más TARDE.
+#    SUBIR -> dispara con la lata aún más adelante -> más PRONTO.
+OBS_MEM_GEOM_AHEAD_MARGIN_PX = 55.0
+# 3) _MIN_DTHETA_DEG: giro total mínimo del IMU antes de que "geom" pueda
+#    disparar. Anti-ruido: en recta el heading tiembla y (x0,y0) puede venir
+#    sucio de una detección lejana. Subir si dispara en falso en rectas.
+OBS_MEM_GEOM_MIN_DTHETA_DEG  = 8.0
+# 4) _SPEED_SCALE: escala SOLO el avance asumido del ancla geom (no toca el
+#    mapa que ve la centerline). Si RECUPERANDO entra TARDE -> subir (>1.0);
+#    si entra PRONTO -> bajar (<1.0). Corrige que ROBOT_SPEED_MMS=350 no sea
+#    la velocidad real durante el latiguazo.
+OBS_MEM_GEOM_SPEED_SCALE     = 1.0
+# 5) _LEAD_FRAMES: dispara N frames antes para tapar el round-trip serial
+#    Pi->ESP32 (~0.3 s). A ~14 fps, 2 frames ≈ 0.14 s. Subir si RECUPERANDO
+#    llega tarde por latencia; 0 lo desactiva.
+OBS_MEM_GEOM_LEAD_FRAMES     = 2.0
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
