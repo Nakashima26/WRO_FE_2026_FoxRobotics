@@ -378,10 +378,13 @@ def detect_centerline(
                      calcula aquí como antes.
       stats_out    : si se pasa un dict, se rellena con señales internas del
                      frame para el caller. Hoy: stats_out["weights"] = lista de
-                     pesos de esquiva (0..1) alineada 1:1 con la lista de puntos
+                     pesos por fila (0..1) alineada 1:1 con la lista de puntos
                      devuelta (índice 0 = fila más cercana al eje del robot).
-                     runtime_nuevo lo usa para el trigger de RECUPERANDO por
-                     estado medido (peso ~0 junto al eje = ya no se rodea nada).
+                     OJO: el peso es de esquiva de LATA solo cuando hay una
+                     Red/Green en bev_obstacles; sin latas, las filas sin piso
+                     (pared de frente) también meten 1.0 aquí. El caller debe
+                     ignorar weights si no hay lata de color en la lista
+                     (ver runtime_nuevo._measured_recup_trigger).
       obstacle_conf: confianza (0..1) de cada obstáculo, MISMO orden/largo que
                      bev_obstacles (ver ObstacleMemory.last_confidences) --
                      atenúa qué tan fuerte se compromete el path al lado de

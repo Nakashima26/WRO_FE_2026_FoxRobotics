@@ -200,10 +200,16 @@ class PPRuntime:
         if not getattr(C, "RECUP_MEAS_ENABLED", True):
             return False
 
+        # OJO: cl_stats["weights"] mezcla el peso de esquiva de LATA con el peso
+        # 1.0 que detect_centerline pone en filas SIN PISO (pared de frente,
+        # proyección de tendencia). Esas ramas solo corren si NO hay lata de
+        # color en la lista -> si no hay Red/Green, el peso junto al eje NO es de
+        # esquiva y no debe armar nada.
+        has_color_obs = any(c in ("Red", "Green") for _, _, c in bev_obstacles)
         weights = cl_stats.get("weights") or []
         # points[0] es la fila más cercana al eje; ROW_STEP px entre filas.
         n_near = max(1, int(C.RECUP_MEAS_NEAR_PX / C.CENTERLINE_ROW_STEP))
-        max_w_near = max(weights[:n_near], default=0.0)
+        max_w_near = max(weights[:n_near], default=0.0) if has_color_obs else 0.0
 
         # heading_ref: se siembra al armarse la esquiva.
         if (self._heading_ref is None and self._last_heading is not None
