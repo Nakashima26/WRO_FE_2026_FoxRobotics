@@ -120,7 +120,7 @@ CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-mues
 CENTERLINE_DEBUG      = True   # 2026-08-28 TEMPORAL: log [CLDBG] fila-a-fila del
                               # path cerca de la lata (free/pass/w/ox y cx en
                               # cada etapa de post-proceso) para ubicar el brinco.
-CENTERLINE_COMMIT_W   = 0.2    # peso de esquiva a partir del cual el punto del
+CENTERLINE_COMMIT_W   = 0.12   # peso de esquiva a partir del cual el punto del
                               # path se FUERZA a la banda [ox+INFLATE_R,
                               # ox+off_max] del lado WRO correcto, pase lo que
                               # pase con la máscara de piso (siempre hay paso
