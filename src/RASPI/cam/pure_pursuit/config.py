@@ -261,7 +261,14 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # Bajado 35 -> 22: en pista disparaba a ~50° (a 8fps el heading salta ~12°/
 # frame y se pasaba del umbral). 22 + la predicción (+|dheading|, ver
 # _prune) lo lanzan ~20° antes.
-OBS_MEM_LAT_TURN_DEG       = 33.0   # 2026-08-28: 29->33, a ~14fps disparaba a ~22° real y cortaba la esquiva corta
+# 2026-08-28: 29->33 fue un error — a ~14fps el lead d_pred (=|dheading/frame|,
+# ~5° a 14fps vs ~12° a 8fps) es más chico, así que 33 quedaba por ARRIBA de lo
+# que d_pred alcanza y lat-giro casi no disparaba: RECUPERANDO entraba por el
+# respaldo lat-x a ~21° real y como el carro ya estaba regresando, salía por
+# headingOk en 2-3 frames ("casi no dura"). Bajado a 22 -> lat-giro dispara
+# PRIMERO a ~17° real (22 - 5 de lead), a mitad de esquiva, con error de heading
+# todavía grande -> RECUPERANDO tiene trabajo que hacer y dura.
+OBS_MEM_LAT_TURN_DEG       = 22.0
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
@@ -384,9 +391,9 @@ LINE_CLASSIFY_FRAMES_TO_MINE   = 6
 LINE_CLASSIFY_FRAMES_TO_BEYOND = 12
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
-# Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
+# Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
-PP_STEER_GAIN     = MAX_STEER_DEG   # 35.0
+PP_STEER_GAIN     = MAX_STEER_DEG   # 60.0
 
 # ─── PID de fallback (igual que wro_runtime.py) ───────────────────────────────
 RED_TARGET_PX    = 140
