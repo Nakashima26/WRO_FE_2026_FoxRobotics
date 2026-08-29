@@ -344,7 +344,13 @@ OBS_MEM_GEOM_MIN_DTHETA_DEG   = 12.0
 # SPEED_SCALE: multiplicador final del avance del ancla (escape hatch). Si en
 # pista RECUPERANDO entra sistemáticamente TARDE -> subir (1.1-1.3); si entra
 # PRONTO -> bajar. Dejar en 1.0 salvo evidencia.
-OBS_MEM_GEOM_SPEED_SCALE      = 1.0
+OBS_MEM_GEOM_SPEED_SCALE      = 0.35  # 2026-08-28: 1.0 -> 0.35. En el pivote del
+                                      # verde (steer suave, yaw ~2°/frame, casi
+                                      # sin traslación) el modelo de bicicleta
+                                      # sobre-marcha el ancla ~3x -> geom disparaba
+                                      # PASADO con el verde aún 130mm al frente.
+                                      # 0.35 alinea el avance del ancla con el
+                                      # avance real medido (detección y).
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una

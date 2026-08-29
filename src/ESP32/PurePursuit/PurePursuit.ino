@@ -146,7 +146,7 @@ bool primerGiro         = false;
 int  AngGiro            =88;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
-const int cooldownGiro     = 1500;   // ms entre giros
+const int cooldownGiro     = 2000;   // ms entre giros
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
