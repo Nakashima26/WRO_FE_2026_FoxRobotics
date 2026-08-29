@@ -240,40 +240,35 @@ def _clamp_to_pass_side(
     w_img: int,
 ) -> list[tuple[float, int]]:
     """
-    Garantía FINAL de lado: para cada fila donde una lata pesa >= COMMIT_W, el
-    punto del path se fuerza a la banda [ox+INFLATE_R, ox+off_max] del lado WRO
-    correcto (Rojo -> derecha, Verde -> izquierda). Corre DESPUÉS de todo el
-    post-proceso, así que sobrescribe cualquier jalón de _smooth_x /
-    _enforce_free_mask hacia el lado contrario.
+    Garantía FINAL de lado, SOLO en las filas que el círculo de inflado de una
+    lata bloquea de verdad (|y - oy| <= INFLATE_R): el punto del path se empuja
+    justo afuera del borde del círculo, del lado WRO correcto (Rojo -> derecha,
+    Verde -> izquierda). Corre DESPUÉS de todo el post-proceso -> sobrescribe
+    cualquier jalón de _smooth_x / _enforce_free_mask al lado contrario.
 
-    Motivo: físicamente SIEMPRE hay paso por el lado obligado (la lata está
-    dentro del corredor). Si la cámara no vio piso ahí (untado de color de la
-    lata cerca), NO es razón para trazar la ruta del otro lado.
+    NO toca las filas de aproximación (lata lejos, fuera del círculo): ahí el
+    blend por rampa mueve el path de lado GRADUALMENTE. Antes se clampaba toda
+    fila con peso>0 a la banda estrecha de paso -> el path se jalaba a la
+    izquierda ~200px antes de la lata -> volantazo temprano del verde.
     """
     if not bev_obstacles:
         return points
-    commit_w = float(getattr(C, "CENTERLINE_COMMIT_W", 0.5))
-    off_max = C.OBS_INFLATE_R + getattr(C, "PASS_LANE_MARGIN_PX", 30)
+    R = float(C.OBS_INFLATE_R)
+    margin = 2.0
     out: list[tuple[float, int]] = []
     for x, y in points:
-        best_w = 0.0
-        lo = hi = None
         for idx, (ox, oy, color) in enumerate(bev_obstacles):
             if color not in ("Red", "Green"):
                 continue
-            conf = 1.0
-            if obstacle_conf is not None and idx < len(obstacle_conf):
-                conf = obstacle_conf[idx]
-            wgt = _ramp_weight(y, oy) * conf
-            if wgt > best_w:
-                best_w = wgt
-                if color == "Red":
-                    lo, hi = ox + C.OBS_INFLATE_R, ox + off_max      # banda a la derecha
-                else:
-                    lo, hi = ox - off_max, ox - C.OBS_INFLATE_R      # banda a la izquierda
-        if lo is not None and best_w >= commit_w:
-            x = float(np.clip(x, max(0.0, lo), min(w_img - 1.0, hi)))
-        out.append((x, y))
+            dy = abs(float(y) - float(oy))
+            if dy > R:
+                continue
+            half = math.sqrt(max(0.0, R * R - dy * dy))   # medio-ancho del círculo a esta fila
+            if color == "Red":
+                x = max(x, ox + half + margin)            # a la derecha del borde
+            else:
+                x = min(x, ox - half - margin)            # a la izquierda del borde
+        out.append((float(np.clip(x, 0.0, w_img - 1.0)), y))
     return out
 
 

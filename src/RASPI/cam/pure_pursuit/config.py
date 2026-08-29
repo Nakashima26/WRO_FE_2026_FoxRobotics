@@ -100,15 +100,15 @@ FLOOR_COLOR_RANGES = [
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
-CENTERLINE_RAMP_PX   = 200   # horizonte de anticipo: empieza a abrir el path
-                             # hacia el lado de paso a esta distancia Y de la lata
-                             # (200 px ≈ 400 mm; debe ser > LOOKAHEAD_PX).
-                             # Subido de 140 -> 200: en pista la esquiva no
-                             # arrancaba hasta que la lata estaba a ~1 radio de
-                             # inflado, forzando un volantazo tardío. 200 da
-                             # ~120 mm más de anticipo para mover el path de lado
-                             # gradualmente. NO capa el steer máximo (volantazo
-                             # sigue disponible cuando la lata está cerca).
+CENTERLINE_RAMP_PX   = 130   # horizonte de anticipo: empieza a abrir el path
+                             # hacia el lado de paso a esta distancia Y de la lata.
+                             # 2026-08-28: 200 -> 130. Con 200 (~400mm) las filas
+                             # cerca del robot ya tenían peso ~0.5 con el verde a
+                             # ~210mm -> el path se abría fuerte de lejos ->
+                             # volantazo temprano del verde (giraba tanto que
+                             # perdía de vista la lata a media pista). 130
+                             # (~260mm) lo hace progresivo. La seguridad ya la
+                             # garantiza _clamp_to_pass_side en el círculo.
 CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # lata) el peso de esquiva decae 1->0. Antes era
                               # OBS_INFLATE_R (~39px, ~2 filas) -> el path se
