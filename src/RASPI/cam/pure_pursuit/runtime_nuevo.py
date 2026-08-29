@@ -405,12 +405,13 @@ class PPRuntime:
                             # Evento de un solo frame: un obstáculo quedó detrás
                             # del robot recién en este update -> "ya lo pasé de
                             # verdad", no "dejé de verlo". Dispara RECUPERANDO.
-                            # Se REPITE 3 frames: a 8fps un mensaje serial que se
+                            # Se REPITE 6 frames: a ~14fps un mensaje serial que se
                             # pierde retrasaría RECUPERANDO ~0.4s (o lo perdería).
+                            # (2026-08-28: 3->6 al doblar fps ~7->~14, mismo hold en seg.)
                             # El ESP32 consume el pulso e ignora las repeticiones
                             # (ya está en RECUPERANDO).
                             if self.memory.last_passed:
-                                self._pasado_hold = 3
+                                self._pasado_hold = 6
                             pasado = self._pasado_hold > 0
                             if self._pasado_hold > 0:
                                 self._pasado_hold -= 1

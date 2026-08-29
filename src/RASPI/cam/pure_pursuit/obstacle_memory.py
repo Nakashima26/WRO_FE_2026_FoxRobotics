@@ -254,7 +254,9 @@ class ObstacleMemory:
                 # Predicción: a 8fps el heading salta ~12°/frame en un latiguazo;
                 # sumar el Δheading del último frame en la dirección del giro hace
                 # que dispare ~1 frame antes en vez de pasarse del umbral.
-                d_pred = d + math.copysign(abs(self._last_dheading), d) if d != 0 else d
+                # 2026-08-28: x2 al doblar fps (~7->~14) — Δheading/frame cayó a la
+                # mitad, así que el adelanto se restaura a ~12° equivalentes.
+                d_pred = d + math.copysign(abs(self._last_dheading) * 2.0, d) if d != 0 else d
                 turned_ok = (
                     (o.color == "Red"   and d_pred <= -turn_deg) or
                     (o.color == "Green" and d_pred >=  turn_deg)

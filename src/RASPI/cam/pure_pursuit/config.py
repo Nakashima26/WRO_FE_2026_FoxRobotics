@@ -144,7 +144,8 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 # En pista el steer saltaba +0.56 -> +0.20 -> +0.79 -> -0.28 (norm.) frame a
 # frame = latigazo. Esto lo capa. 0 desactiva. 12°/frame @ ~15fps ≈ 180°/s,
 # suficiente para esquivar sin dar el volantazo. En grados de steer (pre-norm).
-PP_STEER_SLEW_DEG = 12.0
+# 2026-08-28: bajado 12->6 al pasar el pipeline de ~7fps a ~14fps (mismo °/s).
+PP_STEER_SLEW_DEG = 6.0
 
 # Lookahead variable — derivado de la escala de urgencia
 # NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
@@ -206,7 +207,8 @@ ROBOT_SPEED_MMS    = 350.0   # velocidad de marcha asumida (mm/s). Ajustar al ca
 # a este valor, el fix correcto ya no es este radio -- es hacer que
 # _merge() respete la clasificación mine/beyond de OrangeLineTracker.
 OBS_MEM_MATCH_PX   = 75.0    # radio para fusionar una detección nueva con una recordada (px BEV)
-OBS_MEM_DECAY      = 0.12    # confianza perdida por frame sin re-ver el obstáculo (0..1)
+OBS_MEM_DECAY      = 0.06    # confianza perdida por frame sin re-ver el obstáculo (0..1)
+                            # 2026-08-28: 0.12->0.06 al doblar fps (~7->~14), mismo decay/seg
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 OBS_MEM_BEHIND_PAD = -18    # px: tirar el obstáculo (y disparar "pasado" ->
@@ -343,12 +345,12 @@ LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la
                                     # naranja antes del run-length: puentea huecos de
                                     # 1-3 px por oclusión parcial / sombra para que un
                                     # segmento real no se parta en dos.
-LINE_TRACK_PERSIST_FRAMES = 3    # frames seguidos que una lectura nueva debe repetirse
+LINE_TRACK_PERSIST_FRAMES = 6    # (2026-08-28: 3->6 al doblar fps ~7->~14) frames seguidos que una lectura nueva debe repetirse
                                  # (mismo 'seen', near_y dentro de tolerancia) antes de
                                  # aceptarla como estado estable.
 LINE_TRACK_TOLERANCE_PX   = 20   # (antes 15) margen en near_y para seguir contando la
                                  # misma lectura como "la misma" entre frames.
-LINE_TRACK_HOLD_FRAMES    = 2    # si 'seen' se pierde, cuántos frames se mantiene la
+LINE_TRACK_HOLD_FRAMES    = 4    # (2026-08-28: 2->4 al doblar fps ~7->~14) si 'seen' se pierde, cuántos frames se mantiene la
                                  # última línea estable antes de darla por perdida
                                  # (absorbe dropouts cortos). 0 = soltar de inmediato.
 LINE_TRACK_NEAR_Y_EMA     = 0.4  # peso de la lectura nueva al mezclar near_y (EMA).
@@ -364,7 +366,8 @@ LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendie
 # sobre la recta nueva; un obstáculo real recién detectado ahí no debe
 # arriesgarse a que se clasifique "más allá" por una lectura de línea que
 # todavía no se estabilizó sobre datos reales de esta recta.
-TURN_RECOVERY_FRAMES = 10
+# 2026-08-28: 10->20 al pasar el pipeline de ~7fps a ~14fps (misma ventana en seg).
+TURN_RECOVERY_FRAMES = 20
 
 # Clasificación "mía" / "más allá" de la línea naranja
 # (obstacle_memory.classify_and_split): NO es un latch permanente. Cada frame se
@@ -376,8 +379,9 @@ TURN_RECOVERY_FRAMES = 10
 #   - pasar a "más allá" (dejar de esquivar): más frames. Un tramo corto de
 #     lectura de línea ruidosa no debe abandonar una esquiva a medias -- ese era
 #     el motivo original de la clasificación pegajosa.
-LINE_CLASSIFY_FRAMES_TO_MINE   = 3
-LINE_CLASSIFY_FRAMES_TO_BEYOND = 6
+# 2026-08-28: duplicados (3->6, 6->12) al pasar el pipeline de ~7fps a ~14fps.
+LINE_CLASSIFY_FRAMES_TO_MINE   = 6
+LINE_CLASSIFY_FRAMES_TO_BEYOND = 12
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=35  →  obs=steer_deg/35
