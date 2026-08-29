@@ -268,7 +268,7 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # headingOk en 2-3 frames ("casi no dura"). Bajado a 22 -> lat-giro dispara
 # PRIMERO a ~17° real (22 - 5 de lead), a mitad de esquiva, con error de heading
 # todavía grande -> RECUPERANDO tiene trabajo que hacer y dura.
-OBS_MEM_LAT_TURN_DEG       = 22.0
+OBS_MEM_LAT_TURN_DEG       = 35
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
