@@ -147,9 +147,13 @@ PASS_LANE_MARGIN_PX = 30
 
 # ─── Escala única de urgencia por distancia (mm reales) ──────────────────────
 # A esta distancia (o menos) del obstáculo: máxima agresividad de esquiva.
-OBSTACLE_URGENT_MM = 180.0   # 
+OBSTACLE_URGENT_MM = 180.0   # <= esto: reacción full (gain 1.0, lookahead corto)
 # A esta distancia (o más): comportamiento normal/suave, sin urgencia.
-OBSTACLE_CASUAL_MM = 350.0   # 
+# 2026-08-28: 350 -> 260. El verde de la pista se detecta a ~200-280mm, o sea
+# YA dentro de la zona urgente con 350 -> arrancaba con fuerza. 260 (FAR_PX~130)
+# mete el primer avistón del verde en la zona suave -> steer progresivo que
+# sube al acercarse. NO afecta al rojo (se ve encima, siempre urgente).
+OBSTACLE_CASUAL_MM = 260.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MIN)
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
@@ -197,7 +201,7 @@ FRONT_CHECK_HALFWIDTH_PX = 30    # medio-ancho del "carril" frontal revisado,
 # Atenuación de steer por distancia — misma escala
 STEER_DIST_GAIN_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
 STEER_DIST_GAIN_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
-STEER_DIST_GAIN_MIN     = 0.45  # 2026-08-28: 0.8 -> 0.45. Con 0.8 el steer de
+STEER_DIST_GAIN_MIN     = 0.30  # 2026-08-28: 0.8 -> 0.45 -> 0.30. Con 0.8 el steer de
                                   # esquiva saltaba a ~0.63 en cuanto se veía la
                                   # lata a ~240mm -> el carro sobre-giraba ~40°
                                   # con la lata aún lejos, la barría fuera del
