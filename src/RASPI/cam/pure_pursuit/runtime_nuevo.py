@@ -132,6 +132,7 @@ class PPRuntime:
         # ── Trigger de RECUPERANDO por ESTADO MEDIDO (ver _measured_recup_trigger) ──
         self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
         self._dodge_armed: bool = False          # hubo una esquiva de verdad en curso
+        self._recup_can_arm: bool = True         # gate: solo re-arma tras un peso bajo (esquiva nueva)
         self._recup_clear_count: int = 0         # frames seguidos con el path ya despejado
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
@@ -211,65 +212,83 @@ class PPRuntime:
         n_near = max(1, int(C.RECUP_MEAS_NEAR_PX / C.CENTERLINE_ROW_STEP))
         max_w_near = max(weights[:n_near], default=0.0) if has_color_obs else 0.0
 
-        # heading_ref: se siembra al armarse la esquiva.
-        if (self._heading_ref is None and self._last_heading is not None
-                and max_w_near >= C.RECUP_MEAS_ARM_W):
-            self._heading_ref = self._last_heading
+        # (1) ARMAR — LATCH. Una vez que el planner rodeó una lata de verdad
+        # (max_w_near >= ARM_W), _dodge_armed queda en True y el chequeo de
+        # disparo corre CADA frame -- NO se re-arma-y-retorna mientras el peso
+        # siga alto (ese era el bug de orillas412: conf ~1.0 mantenía el peso
+        # arriba toda la esquiva, así que el disparo solo se evaluaba tras el
+        # prune de la lata -> igual de tarde que BEHIND_PAD). heading_ref se
+        # siembra UNA vez, al armar.
+        # Tras disparar, no re-armar hasta que el peso baje de ARM_W al menos un
+        # frame -> exige una esquiva NUEVA (transición bajo->alto), no la misma
+        # lata que sigue en memoria mientras el ESP32 endereza (evita re-disparo
+        # de RECUPERANDO en cadena sobre el mismo obstáculo).
+        if max_w_near < C.RECUP_MEAS_ARM_W:
+            self._recup_can_arm = True
+        if (max_w_near >= C.RECUP_MEAS_ARM_W and not self._dodge_armed
+                and getattr(self, "_recup_can_arm", True)):
+            self._dodge_armed = True
+            self._recup_can_arm = False
+            self._recup_clear_count = 0
+            if self._last_heading is not None:
+                self._heading_ref = self._last_heading
 
         heading_err = 0.0
         if self._last_heading is not None and self._heading_ref is not None:
             heading_err = (self._last_heading - self._heading_ref + 180.0) % 360.0 - 180.0
 
-        # (1) armar — "hubo una lata que el planner rodeó"
-        if max_w_near >= C.RECUP_MEAS_ARM_W:
-            self._dodge_armed = True
-            self._recup_clear_count = 0
-            self._last_recup_reason = (
-                f"armado w={max_w_near:.2f} herr={heading_err:+.0f}")
-            return False
-
         if not self._dodge_armed:
             return False
 
-        # (2) ¿alguna lata todavía estorbando derecho adelante? (posición MEDIDA)
-        rx, ry = C.ROBOT_BEV_X, C.ROBOT_BEV_Y
-        clear_px  = float(getattr(C, "OBS_MEM_GEOM_CLEAR_PX",
-                                  C.OBS_INFLATE_R + 35))
-        ahead_tol = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_PX", 30.0))
-        blocking = False
-        for (ox, oy, color) in bev_obstacles:
-            if color not in ("Red", "Green"):
-                continue
-            if (ry - oy) > ahead_tol and abs(ox - rx) < clear_px:
-                blocking = True
-                break
+        # (2) ¿alguna lata todavía estorbando adelante? SOLO por distancia
+        # LONGITUDINAL (ry - oy). NO se usa la x de la lata: cuando la lata está
+        # cerca de la cámara su proyección BEV se "unta" y o.x se queda pegada al
+        # centro toda la esquiva (visto en pista: red x=232->179->193 mientras el
+        # carro giraba 60°) -> con el término lateral "blocking" no se limpiaba
+        # nunca y el disparo caía igual de tarde que el respaldo BEHIND_PAD.
+        ry = C.ROBOT_BEV_Y
+        ahead_tol = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_PX", 90.0))
+        blocking = any(
+            c in ("Red", "Green") and (ry - oy) > ahead_tol
+            for (ox, oy, c) in bev_obstacles
+        )
         # Respaldo: si el planner tampoco rodea nada junto al eje, está despejado
         # aunque la memoria aún cargue la lata en algún lado raro.
         path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W)
 
         if not path_clear:
             self._recup_clear_count = 0
+            self._last_recup_reason = (
+                f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f}")
             return False
         self._recup_clear_count += 1
-        if self._recup_clear_count < C.RECUP_MEAS_CLEAR_FRAMES:
-            return False
 
-        # (3) ¿vale la pena enderezar?
-        if abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG:
+        # (3) DISPARAR en cuanto la lata quedó atrás Y el chasis está chueco de
+        # verdad. El chequeo corre cada frame mientras se sigue "despejado" -->
+        # aunque el heading TODAVÍA esté creciendo (mitad del latiguazo), dispara
+        # en el frame en que cruza HEADING_DEG. Antes se desarmaba a la primera
+        # de |herr|<HEADING_DEG con el path despejado y perdía el latiguazo que
+        # aún no llegaba a 25° (visto en sim con la traza de la red de orillas412).
+        if (self._recup_clear_count >= C.RECUP_MEAS_CLEAR_FRAMES
+                and abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG):
             self._last_recup_reason = (
                 f"PASADO(medido) herr={heading_err:+.0f} "
-                f"clr={self._recup_clear_count} block=0")
+                f"clr={self._recup_clear_count}")
             self._dodge_armed = False
             self._recup_clear_count = 0
             self._heading_ref = None
             return True
 
-        # Path despejado pero el chasis casi recto -> esquiva suave que se
-        # resolvió sola. Desarmar en silencio, SIN RECUPERANDO.
-        self._last_recup_reason = f"esquiva-suave-ok herr={heading_err:+.0f}"
-        self._dodge_armed = False
-        self._recup_clear_count = 0
-        self._heading_ref = None
+        # Despejado MUCHOS frames y el heading nunca llegó a HEADING_DEG ->
+        # esquiva suave que se resolvió sola. Desarmar sin RECUPERANDO.
+        if self._recup_clear_count >= getattr(C, "RECUP_MEAS_GENTLE_FRAMES", 10):
+            self._last_recup_reason = f"esquiva-suave-ok herr={heading_err:+.0f}"
+            self._dodge_armed = False
+            self._recup_clear_count = 0
+            self._heading_ref = None
+        else:
+            self._last_recup_reason = (
+                f"despejado herr={heading_err:+.0f} clr={self._recup_clear_count}")
         return False
 
     # ── Captura ───────────────────────────────────────────────────────────────
@@ -720,6 +739,7 @@ class PPRuntime:
                         self._turn_start_t = now
                         # La esquiva (si había) muere con el giro.
                         self._dodge_armed = False
+                        self._recup_can_arm = True
                         self._recup_clear_count = 0
                         self._heading_ref = None
                         print(f"[MEM] Giro detectado (est=G x{self._g_streak}) — "

@@ -335,12 +335,20 @@ RECUP_MEAS_ENABLED        = True
 RECUP_MEAS_NEAR_PX        = 120.0  # px BEV por delante del eje: banda de filas cuyo peso
                                    # de esquiva se mira para ARMAR (hubo lata rodeada)
 RECUP_MEAS_ARM_W          = 0.35   # peso de esquiva que ARMA el trigger
-RECUP_MEAS_AHEAD_TOL_PX   = 30.0   # una lata a <= esto adelante del eje ya cuenta como
-                                   # "al costado" (no estorba yendo recto)
+RECUP_MEAS_AHEAD_TOL_PX   = 90.0   # 2026-08-29 (30->90 tras orillas412): la lata deja de
+                                   # "estorbar" cuando queda a <= esto LONGITUDINALMENTE del
+                                   # eje (ry-oy). Sin término lateral (o.x se unta cuando la
+                                   # lata está cerca de la cámara -> nunca limpiaba y RECUP
+                                   # caía igual de tarde que BEHIND_PAD). BEHIND_PAD prunea a
+                                   # ry-oy ~ -35, así que 90 dispara ~4-5 filas antes.
 RECUP_MEAS_CLEAR_W        = 0.05   # respaldo: peso junto al eje por debajo de esto = despejado
-RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de disparar (~0.2s @14fps)
-RECUP_MEAS_HEADING_DEG    = 15.0   # giro mín. vs la recta para que valga la pena enderezar
-                                   # (por debajo: esquiva suave, PP + wall PID solos)
+RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
+RECUP_MEAS_GENTLE_FRAMES  = 10     # despejado tantos frames CON heading siempre < HEADING_DEG
+                                   # => fue esquiva suave, se desarma sin RECUPERANDO (~0.7s)
+RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro mín. vs la
+                                   # recta para disparar. En pista una esquiva de verdad
+                                   # llega a 35-64°; por debajo de 25 es deriva/esquiva
+                                   # suave -> PP + wall PID solos.
 
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
