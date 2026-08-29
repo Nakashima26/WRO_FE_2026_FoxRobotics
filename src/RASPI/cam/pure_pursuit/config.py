@@ -309,10 +309,10 @@ ROBOT_HALF_WIDTH_PX      = round(140.0 / 2.0 / MM_PER_PX)        # chasis 140mm 
 OBS_MEM_GEOM_CLEAR_PX    = ROBOT_HALF_WIDTH_PX + OBS_INFLATE_R   # 35 + 36 = 71 px
 # ── Perillas de AJUSTE FINO (mover solo estas en pista) ─────────────────────
 # AHEAD_MARGIN_PX: cuánto puede seguir ADELANTE la lata (marco actual) y aún
-# contar como rebasada. 0 = exactamente al través. +N = adelanto de N px para
-# tapar la latencia serial Pi->ESP32 (~0.15 s ~= 10-15 px de recorrido).
-# Subir -> RECUPERANDO más PRONTO.  Bajar/negativo -> más TARDE (más margen).
-OBS_MEM_GEOM_AHEAD_MARGIN_PX = 10.0
+# contar como rebasada. 0 = exactamente al través. +N = adelanto (latencia
+# serial). NEGATIVO = exige que quede N px DETRÁS del eje trasero -> más margen.
+# Subir -> RECUPERANDO más PRONTO.  Bajar/negativo -> más TARDE.
+OBS_MEM_GEOM_AHEAD_MARGIN_PX = 0.0
 # MIN_DTHETA_DEG: giro real mínimo del IMU antes de que "geom" pueda disparar.
 # Garantiza que hubo una esquiva de verdad (una esquiva rota >=20-30°; el ruido
 # en recta <8°). Subir si dispara en falso en tramos rectos.

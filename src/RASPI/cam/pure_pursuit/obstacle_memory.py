@@ -486,20 +486,24 @@ class ObstacleMemory:
             frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
             ds_px *= 1.0 - (1.0 - mn) * frac
 
-        # ── Avance del ancla "geom" por MODELO DE BICICLETA ────────────────────
-        # En una esquiva el carro gira mucho y avanza poco: usar ROBOT_SPEED_MMS
-        # fijo sobre-marcha la lata (por eso "off" falla). El avance real y el
-        # giro están ligados: s = R·Δθ, con R = WHEELBASE/tan(steer). Δθ lo mide
-        # el IMU (exacto) y steer es el que se comandó -> s sin adivinar nada.
-        # En recta (steer~0, Δθ~0) R->inf: se usa el avance libre ds_ramped.
+        # ── Avance del ancla "geom" ───────────────────────────────────────────
+        # Dos estimaciones del avance de frente, se toma la MENOR:
+        #  (a) arco de bicicleta s = R·Δθ, R = WHEELBASE/tan(steer). Es el
+        #      avance SIN deslizamiento -> cota SUPERIOR.
+        #  (b) ds_px ya frenado por giro (OBS_MEM_TURN_SCALE_MIN): modela que en
+        #      un latiguazo el carro DERRAPA y casi no avanza -> más realista
+        #      cuando |dheading| es grande.
+        # Con solo (a) el ancla sobre-marchaba (verde: Yr decía "al costado" a
+        # 36° de giro cuando físicamente seguía 120px adelante -> RECUPERANDO
+        # prematuro -> choque). El min() la mantiene honesta en el pivote.
         steer_rad = abs(math.radians(steer_deg))
         if abs(dheading) > 0.3 and steer_rad > math.radians(3.0):
             steer_rad = min(steer_rad, math.radians(C.MAX_STEER_DEG))
             R_px = C.WHEELBASE_PX / math.tan(steer_rad)
             ds_arc = R_px * abs(math.radians(dheading))
-            ds_anchor = min(ds_arc, ds_ramped)      # el arco no puede exceder el avance libre
+            ds_anchor = min(ds_arc, ds_px)          # ds_px ya viene frenado por giro
         else:
-            ds_anchor = ds_ramped
+            ds_anchor = ds_px
         ds_anchor *= getattr(C, "OBS_MEM_GEOM_SPEED_SCALE", 1.0)
         self._last_ds_anchor = ds_anchor
 
