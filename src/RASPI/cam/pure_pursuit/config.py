@@ -338,12 +338,17 @@ RECUP_MEAS_ENABLED        = True
 RECUP_MEAS_NEAR_PX        = 120.0  # px BEV por delante del eje: banda de filas cuyo peso
                                    # de esquiva se mira para ARMAR (hubo lata rodeada)
 RECUP_MEAS_ARM_W          = 0.35   # peso de esquiva que ARMA el trigger
-RECUP_MEAS_AHEAD_TOL_PX   = 90.0   # 2026-08-29 (30->90 tras orillas412): la lata deja de
-                                   # "estorbar" cuando queda a <= esto LONGITUDINALMENTE del
-                                   # eje (ry-oy). Sin término lateral (o.x se unta cuando la
-                                   # lata está cerca de la cámara -> nunca limpiaba y RECUP
-                                   # caía igual de tarde que BEHIND_PAD). BEHIND_PAD prunea a
-                                   # ry-oy ~ -35, así que 90 dispara ~4-5 filas antes.
+RECUP_MEAS_AHEAD_TOL_PX   = 60.0   # 2026-08-29: 30->90 (orillas412) -> 50 (orillas416).
+                                   # La lata deja de "estorbar" cuando queda a <= esto
+                                   # LONGITUDINALMENTE del eje (ry-oy). Con 90 el VERDE
+                                   # disparaba measured a herr+45 con la lata aún 84px
+                                   # adelante (su proyección BEV de cono alto la lee ~70px
+                                   # más lejos de lo que está) -> RECUPERANDO metió el morro.
+                                   # 50: la lata que se lee mal (verde) cae al respaldo
+                                   # BEHIND_PAD, que solo dispara con y>345 (ya detrás de
+                                   # verdad, y como la proyección la lee CORTA, la real está
+                                   # aún más atrás -> seguro). El rojo, cuya y sí avanza,
+                                   # sigue disparando measured ~10° antes que BEHIND_PAD.
 # 2026-08-29 (orillas415): ahead_tol ENCOGE cuando el giro es grande. Un
 # latiguazo grande barre un arco grande al enderezar; si la lata sigue adelante,
 # RECUPERANDO le mete el morro (verde disparó a herr+59 con la lata 72px
@@ -351,8 +356,8 @@ RECUP_MEAS_AHEAD_TOL_PX   = 90.0   # 2026-08-29 (30->90 tras orillas412): la lat
 # HARD_HI. El rojo de orillas415 (herr-47, funcionó bien) queda casi intacto
 # (tol ~82); el verde (herr+59) sube su umbral a ~35 -> espera a que quede al
 # lado antes de disparar.
-RECUP_MEAS_AHEAD_TOL_HARD_LO = 45.0
-RECUP_MEAS_AHEAD_TOL_HARD_HI = 68.0
+RECUP_MEAS_AHEAD_TOL_HARD_LO = 32.0
+RECUP_MEAS_AHEAD_TOL_HARD_HI = 58.0
 RECUP_MEAS_CLEAR_W        = 0.05   # respaldo: peso junto al eje por debajo de esto = despejado
 RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
 RECUP_MEAS_GENTLE_FRAMES  = 10     # despejado tantos frames CON heading siempre < HEADING_DEG
