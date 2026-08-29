@@ -447,6 +447,16 @@ LINE_CLASSIFY_FRAMES_TO_BEYOND = 12
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
 PP_STEER_GAIN     = MAX_STEER_DEG   # 60.0
 
+# 2026-08-28: Excepción "interior pass". Cuando el obstáculo se esquiva hacia
+# el mismo lado que la pista va a girar, la Pi mandaba intr=1 y el ESP32 dejaba
+# de bloquear detectarEsquina() por ese obstáculo. Rompió la garantía dura
+# "veo obstáculo -> no giro": el TurnDirectionTracker fijó "L" MAL (el rojo del
+# arranque se clasificó "beyond"), eso puso intr=1 para todo verde, y el ESP32
+# giró en pleno latiguazo ladeado a +37deg -> falsa esquina -> choque.
+# False = intr SIEMPRE 0 = garantía dura restaurada. Volver a True solo cuando
+# el turn-dir esté confiable Y el ESP32 tenga el gate de alineación.
+INTERIOR_PASS_ENABLED = False
+
 # ─── PID de fallback (igual que wro_runtime.py) ───────────────────────────────
 RED_TARGET_PX    = 140
 GREEN_TARGET_PX  = 500

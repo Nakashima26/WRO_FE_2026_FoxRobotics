@@ -620,10 +620,18 @@ void loop() {
       // así que sin eso el comportamiento es idéntico al de siempre.
       bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
 
+      // 2026-08-28: gate de alineación. En un latiguazo de esquiva el chasis
+      // queda ladeado (visto en pista a +37deg) y un ultrasónico lateral lee
+      // "sin pared" -> detectarEsquina() disparaba una falsa esquina. En una
+      // esquina REAL el carro llega ~recto, así que exigir |anguloGyro| chico
+      // no la afecta.
+      bool chasisAlineado = fabs(anguloGyro) < 15.0f;
+
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
+          && chasisAlineado
           && detectarEsquina(distL, distR)
-          && millis() - timeStart > 3000) 
+          && millis() - timeStart > 3000)
       {
         estado     = GIRANDO;
         anguloGyro = 0;

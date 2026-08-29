@@ -481,9 +481,19 @@ class PPRuntime:
                         # por él. Sin dirección confirmada, default seguro:
                         # False (bloquea igual que siempre).
                         interior = False
-                        if bev_obstacles and turn_dir is not None:
+                        if (getattr(C, "INTERIOR_PASS_ENABLED", True)
+                                and bev_obstacles and turn_dir is not None):
                             closest = max(bev_obstacles, key=lambda o: o[1])
                             interior = is_interior_pass(turn_dir, closest[2])
+
+                        # ── DEBUG clasificación mine/beyond + turn-dir ──
+                        # (solo cuando hay algo "beyond" -> el caso que fijó mal
+                        # la dirección; ver TurnDirectionTracker).
+                        if bev_obstacles_beyond:
+                            print(f"[CLASS] mia={[(round(x),round(y),c) for x,y,c in bev_obstacles]} "
+                                  f"beyond={[(round(x),round(y),c) for x,y,c in bev_obstacles_beyond]} "
+                                  f"turn_dir={turn_dir} interior={interior} "
+                                  f"orange_near_y={orange_info.get('near_y')}", flush=True)
                         _t4 = time.perf_counter()
                         bev_timing["line"] = (_t4 - _t3) * 1000.0
 

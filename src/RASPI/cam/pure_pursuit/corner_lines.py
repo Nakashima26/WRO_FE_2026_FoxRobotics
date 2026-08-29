@@ -357,8 +357,20 @@ class TurnDirectionTracker:
             self._candidate = guess
             self._candidate_count = 1
 
-        if self._candidate_count >= self.persist_frames:
+        just_fixed = False
+        if self._candidate_count >= self.persist_frames and self.direction is None:
             self.direction = self._candidate
+            just_fixed = True
+
+        # DEBUG: por qué se elige/fija la dirección de giro (se fijó "L" mal en
+        # pista por el rojo del arranque clasificado "beyond"). Log en el
+        # cambio de candidato, los primeros conteos, y al fijar.
+        if just_fixed or self._candidate_count <= 2:
+            ox, oy, oc = bev_obstacles_beyond[0]
+            print(f"[TURNDIR] {'>>> FIJADA ' if just_fixed else ''}"
+                  f"cand={self._candidate} x{self._candidate_count}/{self.persist_frames} "
+                  f"obs0=({ox:.0f},{oy:.0f},{oc}) rx={robot_x:.0f} "
+                  f"beyond_n={len(bev_obstacles_beyond)}", flush=True)
 
         return self.direction
 
