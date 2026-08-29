@@ -102,20 +102,28 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
 def _ramp_weight(row_y: int, obs_y: float) -> float:
     """
     0 = ignorar la lata (usar centro del pasillo), 1 = lado de paso completo.
-    La rampa entra al acercarse a la lata y se mantiene en 1 en el inflado;
-    al rebasarla decae en un radio de inflación para volver al centro.
+    Entra sobre CENTERLINE_RAMP_PX, se mantiene en 1 dentro del inflado, y SALE
+    sobre CENTERLINE_EXIT_RAMP_PX (más corto que la entrada, pero varias filas).
+
+    2026-08-28: antes salía sobre `full_r` (~36 px = ~2 filas) -> apenas librado
+    el círculo, el path se enganchaba de golpe al centro (302->200 en 3 filas)
+    = "brinco hacia adentro" que cruzaba el borde del inflado. Una salida sobre
+    ~90 px la vuelve un arco limpio; NO se usa la rampa de entrada completa
+    (~200 px) para no dejar el path sesgado al lado de la lata tanto tramo por
+    delante que estorbe a la SIGUIENTE lata (rojo->verde, lados opuestos).
     """
     full_r = float(C.OBS_INFLATE_R)
     ramp = max(full_r + 1.0, float(C.CENTERLINE_RAMP_PX))
+    exit_ramp = max(full_r + 1.0, float(getattr(C, "CENTERLINE_EXIT_RAMP_PX", 90.0)))
     d = float(row_y) - float(obs_y)  # >0: la fila aún no llega a la lata
 
-    if d >= ramp:
+    if d >= ramp or d <= -exit_ramp:
         return 0.0
     if d > full_r:
-        return 1.0 - (d - full_r) / (ramp - full_r)
+        return 1.0 - (d - full_r) / (ramp - full_r)          # acercándose
     if d >= -full_r:
-        return 1.0
-    return max(0.0, 1.0 + (d + full_r) / full_r)
+        return 1.0                                            # en el inflado
+    return 1.0 - (-d - full_r) / (exit_ramp - full_r)         # ya rebasada
 
 
 def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, color: str) -> int | None:

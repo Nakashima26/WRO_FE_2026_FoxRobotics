@@ -632,7 +632,6 @@ void loop() {
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
-          && chasisAlineado
           && detectarEsquina(distL, distR)
           && millis() - timeStart > 3000)
       {

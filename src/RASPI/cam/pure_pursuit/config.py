@@ -109,6 +109,13 @@ CENTERLINE_RAMP_PX   = 200   # horizonte de anticipo: empieza a abrir el path
                              # ~120 mm más de anticipo para mover el path de lado
                              # gradualmente. NO capa el steer máximo (volantazo
                              # sigue disponible cuando la lata está cerca).
+CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
+                              # lata) el peso de esquiva decae 1->0. Antes era
+                              # OBS_INFLATE_R (~39px, ~2 filas) -> el path se
+                              # enganchaba de golpe al centro apenas librado el
+                              # círculo ("brinco hacia adentro"). 90px = arco de
+                              # salida limpio, sin sesgar tanto tramo por delante
+                              # que estorbe a la siguiente lata.
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
