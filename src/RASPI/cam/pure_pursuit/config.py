@@ -270,6 +270,12 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # todavía grande -> RECUPERANDO tiene trabajo que hacer y dura.
 OBS_MEM_LAT_TURN_DEG       = 35
 
+# 2026-08-28 TEMPORAL: False desactiva el trigger de RECUPERANDO por giro de
+# heading (lat-giro). Con False, RECUPERANDO solo se lanza por rebase FÍSICO:
+# cruce de x (lat-x), lata detrás (PASADO y), o salida por el borde inferior.
+# Volver a True para reactivar el trigger por rotación del IMU.
+OBS_MEM_LAT_TURN_ENABLED   = False
+
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
 # detección que nace proyectada con y grande (borde inferior del BEV, lata muy

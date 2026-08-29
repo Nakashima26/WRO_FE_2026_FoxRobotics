@@ -248,7 +248,11 @@ class ObstacleMemory:
             lat_ok_y = o.y > self.ry - lat_y_band
             turn_deg = getattr(C, "OBS_MEM_LAT_TURN_DEG", 35.0)
             turned_ok = False
-            if o.heading0 is not None and self._prev_heading is not None:
+            # 2026-08-28 TEMPORAL: flag para desactivar el trigger por giro de
+            # heading y dejar RECUPERANDO SOLO por rebase físico (cruce de x /
+            # y detrás / borde) -- "como estaba antes". Poner True para volver.
+            if (getattr(C, "OBS_MEM_LAT_TURN_ENABLED", True)
+                    and o.heading0 is not None and self._prev_heading is not None):
                 d = self._prev_heading - o.heading0
                 d = (d + 180.0) % 360.0 - 180.0            # normaliza a [-180,180]
                 # Predicción: a 8fps el heading salta ~12°/frame en un latiguazo;
