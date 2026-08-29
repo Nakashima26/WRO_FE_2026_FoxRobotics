@@ -437,9 +437,12 @@ OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
                                       # del BEV, se cuenta como "pasada" solo si
                                       # |x - robot_x| < esto (rebase real, no
                                       # ruido de rotación que la saca de lado)
-OBS_MEM_DEDUPE_PX  = 55.0    # red de seguridad secundaria si igual se duplica -- ver OBS_MEM_MATCH_PX
-                              # (mismo riesgo de confundir obstáculos de esquina: se
-                              # queda deliberadamente por debajo de OBS_MEM_MATCH_PX)
+OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
+                              # re-proyecta saltando >55px frame a frame -> _merge
+                              # creaba 2 registros que _dedupe no fusionaba -> nobs=2
+                              # fantasma, steer oscilando (lap 3 orillas420). Los
+                              # obstáculos WRO reales están a >=200mm (>=100px BEV) así
+                              # que 85 no confunde dos latas de verdad.
 
 # Red de seguridad para runtime_nuevo.py: si el ESP32 se queda atorado
 # reportando est=G (ack perdido, giro real que nunca termina, etc.), no

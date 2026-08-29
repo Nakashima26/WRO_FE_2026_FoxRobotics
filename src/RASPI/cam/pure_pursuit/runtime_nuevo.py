@@ -315,12 +315,18 @@ class PPRuntime:
         # Despejado MUCHOS frames y el heading nunca llegó a HEADING_DEG ->
         # esquiva suave que se resolvió sola. Desarmar sin RECUPERANDO, y
         # permitir re-armar (la siguiente lata sí puede necesitar RECUPERANDO).
+        # OLVIDAR la lata: si el path está despejado tanto tiempo y no hubo
+        # latiguazo, la lata ya quedó al costado -> que la centerline deje de
+        # rodearla (si no, un cono que se queda pegado al eje trasero, giro~0,
+        # re-detectado, mantiene prio=1 y el steer oscilando -- visto lap 3
+        # orillas420: R en y~321 falta+24 por decenas de frames).
         if self._recup_clear_count >= getattr(C, "RECUP_MEAS_GENTLE_FRAMES", 10):
             self._last_recup_reason = f"esquiva-suave-ok herr={heading_err:+.0f}"
             self._dodge_armed = False
             self._recup_can_arm = True
             self._recup_clear_count = 0
             self._heading_ref = None
+            self.memory.forget_color_obstacles()
         else:
             self._last_recup_reason = (
                 f"despejado herr={heading_err:+.0f} clr={self._recup_clear_count}")
