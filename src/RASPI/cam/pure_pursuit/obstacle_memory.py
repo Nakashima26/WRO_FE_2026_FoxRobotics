@@ -120,6 +120,19 @@ class ObstacleMemory:
         self.last_prune_reason = "-"
         self.last_confidences = []
 
+    def forget_color_obstacles(self):
+        """
+        Olvida TODAS las latas Red/Green de la memoria (deja líneas u otros si
+        los hubiera). Lo llama runtime_nuevo cuando el trigger de RECUPERANDO
+        decide que la lata ya se rebasó: así la centerline deja de rodearla en
+        el MISMO frame y el carro sale del arco de esquiva en vez de seguir
+        clavando el volante alrededor de un cono que ya pasó (el modo "angle"
+        viejo hacía justo esto al podar la lata en _prune -> era lo que mantenía
+        la esquiva fluida; "off" lo quitó y el carro se quedaba pivoteando).
+        """
+        self._obs = [o for o in self._obs if o.color not in ("Red", "Green")]
+        self.last_confidences = [o.conf for o in self._obs]
+
     # ── Transformación por movimiento del robot ─────────────────────────────────
 
     def _advance(self, ds_px: float, ds_anchor: float, dheading_deg: float):

@@ -513,6 +513,7 @@ class PPRuntime:
                 pasado        = False
                 measured_pass = False
                 cl_stats: dict = {}
+                lookahead_eff = float(C.LOOKAHEAD_MAX_PX)   # diag: lookahead PP usado este frame
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
@@ -674,6 +675,12 @@ class PPRuntime:
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
+                                # Olvida el cono YA: la centerline del PRÓXIMO
+                                # frame deja de rodearlo -> el carro sale del
+                                # arco en vez de seguir clavando el volante
+                                # (comportamiento del modo "angle" viejo, que
+                                # era lo que mantenía la esquiva fluida).
+                                self.memory.forget_color_obstacles()
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
@@ -808,6 +815,11 @@ class PPRuntime:
                       f"armed={int(self._dodge_armed)} clr={self._recup_clear_count} "
                       f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "
                       f"pasado={int(pasado)} measured={int(measured_pass)}", flush=True)
+                # Diag esquiva: steer final (deg) que se manda, lookahead usado,
+                # y n_obstáculos. Para ver si el carro ARQUEA (steer moderado, la
+                # y del cono avanza en [MEMDBG]) o PIVOTEA (steer al tope, y clavada).
+                print(f"[PPDIAG] steer={steer_deg:+.1f}deg obs={obs_norm:+.3f} "
+                      f"lka={lookahead_eff:.0f} nobs={len(bev_obstacles)}", flush=True)
 
                 t_ser = time.perf_counter()
                 timing_ms["ser"] = (t_ser - t_bev) * 1000.0
