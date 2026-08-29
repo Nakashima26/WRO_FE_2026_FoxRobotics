@@ -344,6 +344,15 @@ RECUP_MEAS_AHEAD_TOL_PX   = 90.0   # 2026-08-29 (30->90 tras orillas412): la lat
                                    # lata está cerca de la cámara -> nunca limpiaba y RECUP
                                    # caía igual de tarde que BEHIND_PAD). BEHIND_PAD prunea a
                                    # ry-oy ~ -35, así que 90 dispara ~4-5 filas antes.
+# 2026-08-29 (orillas415): ahead_tol ENCOGE cuando el giro es grande. Un
+# latiguazo grande barre un arco grande al enderezar; si la lata sigue adelante,
+# RECUPERANDO le mete el morro (verde disparó a herr+59 con la lata 72px
+# adelante -> choque). Rampa: tol pleno hasta HARD_LO grados, baja lineal a 0 en
+# HARD_HI. El rojo de orillas415 (herr-47, funcionó bien) queda casi intacto
+# (tol ~82); el verde (herr+59) sube su umbral a ~35 -> espera a que quede al
+# lado antes de disparar.
+RECUP_MEAS_AHEAD_TOL_HARD_LO = 45.0
+RECUP_MEAS_AHEAD_TOL_HARD_HI = 68.0
 RECUP_MEAS_CLEAR_W        = 0.05   # respaldo: peso junto al eje por debajo de esto = despejado
 RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
 RECUP_MEAS_GENTLE_FRAMES  = 10     # despejado tantos frames CON heading siempre < HEADING_DEG

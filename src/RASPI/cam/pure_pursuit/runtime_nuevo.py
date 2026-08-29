@@ -254,8 +254,23 @@ class PPRuntime:
         # centro toda la esquiva (visto en pista: red x=232->179->193 mientras el
         # carro giraba 60°) -> con el término lateral "blocking" no se limpiaba
         # nunca y el disparo caía igual de tarde que el respaldo BEHIND_PAD.
+        #
+        # ahead_tol ESCALA con el giro: al enderezar desde herr grande el morro
+        # barre un arco grande y lo puede meter en la lata si ésta sigue adelante
+        # (orillas415: verde disparó a herr+59 con la lata 72px adelante -> morro
+        # dentro del verde). Cuanto mayor el giro, más cerca del eje (o detrás)
+        # debe estar la lata para disparar.
         ry = C.ROBOT_BEV_Y
-        ahead_tol = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_PX", 90.0))
+        _tol0 = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_PX", 90.0))
+        _hlo  = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_HARD_LO", 45.0))
+        _hhi  = float(getattr(C, "RECUP_MEAS_AHEAD_TOL_HARD_HI", 68.0))
+        _a = abs(heading_err)
+        if _a <= _hlo:
+            ahead_tol = _tol0                       # esquiva "normal": tol pleno
+        elif _a >= _hhi:
+            ahead_tol = 0.0                         # latiguazo extremo: lata al eje o detrás
+        else:
+            ahead_tol = _tol0 * (_hhi - _a) / (_hhi - _hlo)
         blocking = any(
             c in ("Red", "Green") and (ry - oy) > ahead_tol
             for (ox, oy, c) in bev_obstacles
@@ -267,7 +282,8 @@ class PPRuntime:
         if not path_clear:
             self._recup_clear_count = 0
             self._last_recup_reason = (
-                f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f}")
+                f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f} "
+                f"atol={ahead_tol:.0f}")
             return False
         self._recup_clear_count += 1
 
