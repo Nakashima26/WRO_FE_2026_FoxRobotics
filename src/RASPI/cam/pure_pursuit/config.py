@@ -152,7 +152,7 @@ PP_STEER_SLEW_DEG = 6.0
 # con lata cerca -> el carro clavaba el volante, sobrepasaba y raspaba la lata
 # al pasar (confirmado en pista, choque en rojo de inicio y en cada verde).
 # 70 px conserva el "acortar para esquivar" sin pegar el límite.
-LOOKAHEAD_MIN_PX      = 70.0
+LOOKAHEAD_MIN_PX      = 60.0   # 2026-08-28: 70->60, esquiva se sentía floja a ~14fps (más steer con lata cerca)
 LOOKAHEAD_MAX_PX      = 100.0
 LOOKAHEAD_OBS_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
 LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
@@ -261,7 +261,7 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 # Bajado 35 -> 22: en pista disparaba a ~50° (a 8fps el heading salta ~12°/
 # frame y se pasaba del umbral). 22 + la predicción (+|dheading|, ver
 # _prune) lo lanzan ~20° antes.
-OBS_MEM_LAT_TURN_DEG       = 29.0
+OBS_MEM_LAT_TURN_DEG       = 33.0   # 2026-08-28: 29->33, a ~14fps disparaba a ~22° real y cortaba la esquiva corta
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
