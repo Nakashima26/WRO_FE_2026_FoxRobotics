@@ -133,6 +133,7 @@ class PPRuntime:
         self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
         self._dodge_armed: bool = False          # hubo una esquiva de verdad en curso
         self._recup_can_arm: bool = True         # gate: solo re-arma tras un peso bajo (esquiva nueva)
+        self._recup_arm_streak: int = 0          # frames seguidos con peso alto (debounce de armado)
         self._recup_clear_count: int = 0         # frames seguidos con el path ya despejado
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
@@ -223,9 +224,17 @@ class PPRuntime:
         # frame -> exige una esquiva NUEVA (transición bajo->alto), no la misma
         # lata que sigue en memoria mientras el ESP32 endereza (evita re-disparo
         # de RECUPERANDO en cadena sobre el mismo obstáculo).
-        if max_w_near < C.RECUP_MEAS_ARM_W:
+        # Debounce de armado: la esquiva tiene que estar en curso ARM_FRAMES
+        # frames seguidos (peso alto) antes de armar. Un verde que se ve 1 solo
+        # frame y se pierde (tras un giro, FOV rasante) ya NO arma -> no entra
+        # a RECUPERANDO "super rápido" con la lata todavía enfrente (orillas417/8).
+        if max_w_near >= C.RECUP_MEAS_ARM_W:
+            self._recup_arm_streak = getattr(self, "_recup_arm_streak", 0) + 1
+        else:
+            self._recup_arm_streak = 0
             self._recup_can_arm = True
-        if (max_w_near >= C.RECUP_MEAS_ARM_W and not self._dodge_armed
+        if (self._recup_arm_streak >= getattr(C, "RECUP_MEAS_ARM_FRAMES", 3)
+                and not self._dodge_armed
                 and getattr(self, "_recup_can_arm", True)):
             self._dodge_armed = True
             self._recup_can_arm = False
@@ -547,6 +556,18 @@ class PPRuntime:
                                     far_objects.append((x + w / 2.0, w, h, color_name))
                         _t2 = time.perf_counter()
                         bev_timing["proj"] = (_t2 - _t1) * 1000.0
+
+                        # Diag detección: lo que la CÁMARA ve (crudo) y si proyectó
+                        # al BEV. Para el verde que "no se ve tras el giro":
+                        # distinguir "no detectado" (cam=0) de "detectado pero no
+                        # proyecta" (cam>0, bev=0 -> far_objects).
+                        _camR = len(positions.get("Red", []))
+                        _camG = len(positions.get("Green", []))
+                        if _camR or _camG or new_obstacles or far_objects:
+                            print(f"[DET] camR={_camR} camG={_camG} "
+                                  f"bev={[(round(a),round(b),c[0]) for a,b,c in new_obstacles]} "
+                                  f"far={[(round(fx),c[0]) for fx,_w,_h,c in far_objects]}",
+                                  flush=True)
 
                         # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)

@@ -116,9 +116,10 @@ CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # salida limpio, sin sesgar tanto tramo por delante
                               # que estorbe a la siguiente lata.
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
-CENTERLINE_DEBUG      = True   # 2026-08-28 TEMPORAL: log [CLDBG] fila-a-fila del
-                              # path cerca de la lata (free/pass/w/ox y cx en
-                              # cada etapa de post-proceso) para ubicar el brinco.
+CENTERLINE_DEBUG      = False  # 2026-08-29: APAGADO. El log [CLDBG] fila-a-fila
+                              # llenaba el journal de la Pi (74MB) y rotaba los
+                              # datos útiles en minutos. Encender solo para
+                              # depurar un brinco de path puntual.
 CENTERLINE_COMMIT_W   = 0.12   # peso de esquiva a partir del cual el punto del
                               # path se FUERZA a la banda [ox+INFLATE_R,
                               # ox+off_max] del lado WRO correcto, pase lo que
@@ -356,6 +357,11 @@ RECUP_MEAS_AHEAD_TOL_PX   = 60.0   # 2026-08-29: 30->90 (orillas412) -> 50 (oril
 RECUP_MEAS_AHEAD_TOL_HARD_LO = 32.0
 RECUP_MEAS_AHEAD_TOL_HARD_HI = 58.0
 RECUP_MEAS_CLEAR_W        = 0.05   # respaldo: peso junto al eje por debajo de esto = despejado
+RECUP_MEAS_ARM_FRAMES     = 3      # 2026-08-29: la esquiva debe estar en curso tantos frames
+                                   # seguidos (peso alto) antes de ARMAR. Un verde que se ve
+                                   # 1 frame y se pierde (tras giro, FOV rasante) ya no arma
+                                   # -> no entra a RECUPERANDO "super rápido" con la lata aún
+                                   # enfrente (orillas417/418, reporte del usuario).
 RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
 RECUP_MEAS_GENTLE_FRAMES  = 10     # despejado tantos frames CON heading siempre < HEADING_DEG
                                    # => fue esquiva suave, se desarma sin RECUPERANDO (~0.7s)
