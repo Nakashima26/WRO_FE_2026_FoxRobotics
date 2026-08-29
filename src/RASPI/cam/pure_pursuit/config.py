@@ -100,15 +100,16 @@ FLOOR_COLOR_RANGES = [
 CENTERLINE_ROW_STEP  = 15    # muestrear cada N filas
 CENTERLINE_MIN_WIDTH = 20    # píxeles mínimos de espacio libre para aceptar fila
 CENTERLINE_TOP_Y     = BEV_H // 3   # no subir más allá de 1/3 de la imagen
-CENTERLINE_RAMP_PX   = 130   # horizonte de anticipo: empieza a abrir el path
+CENTERLINE_RAMP_PX   = 180   # horizonte de anticipo: empieza a abrir el path
                              # hacia el lado de paso a esta distancia Y de la lata.
-                             # 2026-08-28: 200 -> 130. Con 200 (~400mm) las filas
-                             # cerca del robot ya tenían peso ~0.5 con el verde a
-                             # ~210mm -> el path se abría fuerte de lejos ->
-                             # volantazo temprano del verde (giraba tanto que
-                             # perdía de vista la lata a media pista). 130
-                             # (~260mm) lo hace progresivo. La seguridad ya la
-                             # garantiza _clamp_to_pass_side en el círculo.
+                             # 2026-08-28: 200 -> 130 (con 200 + gain alto había
+                             # volantazo temprano del verde). 2026-08-29: 130 ->
+                             # 180 (~360mm): en orillas412 la esquiva llegaba a
+                             # obs=-0.97 con el cono ya encima -> pegada a la
+                             # pared. Ahora el path se abre antes PERO suave
+                             # (STEER_DIST_GAIN_MIN bajado a 0.15 el mismo día),
+                             # no de golpe. Si vuelve el volantazo temprano ->
+                             # bajar a 150.
 CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # lata) el peso de esquiva decae 1->0. Antes era
                               # OBS_INFLATE_R (~39px, ~2 filas) -> el path se
@@ -149,11 +150,14 @@ PASS_LANE_MARGIN_PX = 30
 # A esta distancia (o menos) del obstáculo: máxima agresividad de esquiva.
 OBSTACLE_URGENT_MM = 180.0   # <= esto: reacción full (gain 1.0, lookahead corto)
 # A esta distancia (o más): comportamiento normal/suave, sin urgencia.
-# 2026-08-28: 350 -> 260. El verde de la pista se detecta a ~200-280mm, o sea
-# YA dentro de la zona urgente con 350 -> arrancaba con fuerza. 260 (FAR_PX~130)
-# mete el primer avistón del verde en la zona suave -> steer progresivo que
-# sube al acercarse. NO afecta al rojo (se ve encima, siempre urgente).
-OBSTACLE_CASUAL_MM = 260.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MIN)
+# 2026-08-28: 350 -> 260. 2026-08-29: 260 -> 450. En orillas412 la banda
+# 260->180 (solo 80mm / ~40px) hacía que la reacción pasara de "nada" a "full"
+# casi de golpe: la esquiva del verde llegaba a obs=-0.97 con el cono encima
+# -> pegada a la pared. 450 abre la rampa de urgencia a ~135px (270mm): el
+# steer se inclina temprano y GRADUAL (con STEER_DIST_GAIN_MIN=0.15 la reacción
+# lejana es apenas un sesgo, no un volantazo) y llega al ángulo necesario ANTES
+# de estar encima. NO afecta al rojo (se ve encima, siempre en zona urgente).
+OBSTACLE_CASUAL_MM = 450.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MIN)
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
@@ -175,8 +179,8 @@ PP_STEER_SLEW_DEG = 6.0
 # 70 px conserva el "acortar para esquivar" sin pegar el límite.
 LOOKAHEAD_MIN_PX      = 60.0   # 2026-08-28: 70->60, esquiva se sentía floja a ~14fps (más steer con lata cerca)
 LOOKAHEAD_MAX_PX      = 100.0
-LOOKAHEAD_OBS_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
-LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
+LOOKAHEAD_OBS_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # =90px  (180/2)
+LOOKAHEAD_OBS_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # =225px (450/2)
 
 CENTERLINE_URGENCY_RELAX = 1.6
 
@@ -199,18 +203,17 @@ FRONT_CHECK_HALFWIDTH_PX = 30    # medio-ancho del "carril" frontal revisado,
 
 # Suaviza el steer de esquiva cuando el obstáculo aún no está crítico.
 # Atenuación de steer por distancia — misma escala
-STEER_DIST_GAIN_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
-STEER_DIST_GAIN_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
-STEER_DIST_GAIN_MIN     = 0.30  # 2026-08-28: 0.8 -> 0.45 -> 0.30. Con 0.8 el steer de
-                                  # esquiva saltaba a ~0.63 en cuanto se veía la
-                                  # lata a ~240mm -> el carro sobre-giraba ~40°
-                                  # con la lata aún lejos, la barría fuera del
-                                  # cuadro y se enderezaba -> re-esquiva. 0.45
-                                  # deja la reacción lejana suave; dentro de
-                                  # ~110px sube a 1.0 (volantazo cuando de
-                                  # verdad hace falta). Objetivo del usuario:
-                                  # "no girar tanto al estar lejos, girar solo
-                                  # cuando sea necesario".
+STEER_DIST_GAIN_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # =90px  (180/2)
+STEER_DIST_GAIN_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # =225px (450/2)
+STEER_DIST_GAIN_MIN     = 0.15  # 2026-08-28: 0.8 -> 0.45 -> 0.30. 2026-08-29: 0.30 -> 0.15.
+                                  # Ahora la zona "suave" llega hasta 450mm
+                                  # (OBSTACLE_CASUAL_MM), así que el sesgo lejano
+                                  # tiene que ser MÁS chico para no sobre-girar
+                                  # con la lata todavía a 40cm. 0.15 = apenas
+                                  # empieza a apuntar al lado de paso; dentro de
+                                  # ~90px sube a 1.0 (esquiva de verdad). Objetivo
+                                  # del usuario: "esquivar suave y continuo si hay
+                                  # espacio; girar fuerte solo cuando hace falta".
 
 
 # ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
