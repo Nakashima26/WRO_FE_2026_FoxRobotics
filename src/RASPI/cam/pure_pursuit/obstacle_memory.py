@@ -133,6 +133,14 @@ class ObstacleMemory:
         phi = math.radians(-dheading_deg)
         cos_p, sin_p = math.cos(phi), math.sin(phi)
 
+        # El ANCLA geom usa el signo de rotación OPUESTO: verificado contra la
+        # forma cerrada (rotar el punto -Δθ para expresarlo en el marco nuevo)
+        # da el signo +dheading. El mapa (o.x/o.y) se corrige con detecciones
+        # frescas así que su signo "ajustado a ojo" pasó desapercibido; el
+        # ancla es dead-reckoning puro y necesita el físicamente correcto.
+        phi_a = math.radians(dheading_deg)
+        cos_a, sin_a = math.cos(phi_a), math.sin(phi_a)
+
         for o in self._obs:
             # 1) avance: la lata se acerca → baja en la imagen
             uy = (o.y - self.ry) + ds_px
@@ -143,12 +151,12 @@ class ObstacleMemory:
             o.x = self.rx + rx_new
             o.y = self.ry + ry_new
 
-            # Ancla "geom": MISMA transformada, con su propio avance, sin
+            # Ancla "geom": misma forma, rotación con signo físico (phi_a), sin
             # re-anclado por detecciones -> ego-movimiento puro desde (x0,y0).
             ay = (o.yr - self.ry) + ds_anchor
             ax = (o.xr - self.rx)
-            o.xr = self.rx + (ax * cos_p - ay * sin_p)
-            o.yr = self.ry + (ax * sin_p + ay * cos_p)
+            o.xr = self.rx + (ax * cos_a - ay * sin_a)
+            o.yr = self.ry + (ax * sin_a + ay * cos_a)
 
     # ── Fusión con detecciones nuevas ───────────────────────────────────────────
 
@@ -277,32 +285,31 @@ class ObstacleMemory:
                     f"h0={round(o.heading0)} h={round(self._prev_heading)} conf={o.conf:.2f}"
                 )
         elif mode == "geom" and have_head:
-            if abs(dtheta) >= getattr(C, "OBS_MEM_GEOM_MIN_DTHETA_DEG", 8.0):
+            # Gate: hubo una esquiva de verdad (no ruido de recta).
+            if abs(dtheta) >= getattr(C, "OBS_MEM_GEOM_MIN_DTHETA_DEG", 12.0):
                 clear_px = getattr(C, "OBS_MEM_GEOM_CLEAR_PX", C.OBS_INFLATE_R)
-                ahead_m  = getattr(C, "OBS_MEM_GEOM_AHEAD_MARGIN_PX", 55.0)
-                lead     = getattr(C, "OBS_MEM_GEOM_LEAD_FRAMES", 2.0)
-                # Ancla reproyectada al marco ACTUAL del robot (robot mira +y-arriba):
-                #   exr = separación lateral, fyr = distancia longitudinal (+ adelante).
-                # "Rodeada" = separada del eje por CLEAR_PX a cualquier lado Y ya no
-                # más de AHEAD_M px adelante (con LEAD_FRAMES de adelanto). NO se
-                # exige que quede DETRÁS: basta con que la línea recta de
-                # recuperación no la toque. |exr| en vez de signo por color ->
-                # robusto a la convención de giro del IMU; si el carro le pasó por
-                # encima sin rodearla, |exr| se queda chico y no dispara.
-                exr = o.xr - self.rx
-                ex0 = o.x0 - self.rx
-                fyr = (self.ry - o.yr) - lead * self._last_ds_anchor
-                # separación lateral GANADA desde la detección -- no el offset
-                # absoluto (una lata detectada ya descentrada disparaba en falso).
-                gained = abs(exr) - abs(ex0)
-                if gained >= clear_px and fyr <= ahead_m:
+                ahead_m  = getattr(C, "OBS_MEM_GEOM_AHEAD_MARGIN_PX", 10.0)
+                # Ancla (o.xr, o.yr): la posición inicial de la lata propagada
+                # por el ego-movimiento (rotación IMU exacta + arco s=R·Δθ del
+                # modelo de bicicleta, ver update()). En el marco ACTUAL del
+                # robot (mira hacia -y en imagen => +y-arriba):
+                X_r = o.xr - self.rx            # + = lata a la derecha del eje de avance
+                Y_r = self.ry - o.yr           # + = lata adelante del eje trasero
+                # Rodeada si sale del pasillo recto (a cualquier lado) o ya
+                # quedó al través/detrás. NO se exige "detrás": basta que la
+                # recta de recuperación no la toque.
+                if abs(X_r) >= clear_px or Y_r <= ahead_m:
+                    how = "lado" if abs(X_r) >= clear_px else "trav"
                     return True, (
-                        f"PASADO(lat-geom) exr={exr:.0f} ex0={ex0:.0f} gain={gained:.0f} "
-                        f"fyr={fyr:.0f} dth={dtheta:.0f} clr={clear_px:.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
+                        f"PASADO(lat-geom/{how}) Xr={X_r:+.0f} Yr={Y_r:+.0f} "
+                        f"dth={dtheta:+.0f} clr={clear_px:.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
                     )
 
-        # (x) respaldo -- activo en todos los modos
-        if ((o.color == "Red"
+        # (x) respaldo -- SOLO en modo "angle". En "geom" la x medida cruza el
+        # eje por el YAW del carro (no porque lo rebasó) y disparaba en falso;
+        # geom decide solo con el ancla.
+        if mode == "angle" and (
+            (o.color == "Red"
              and o.x0 >= self.rx - lat_margin and o.x < self.rx - lat_margin) or
             (o.color == "Green"
              and o.x0 <= self.rx + lat_margin and o.x > self.rx + lat_margin)):
@@ -417,7 +424,8 @@ class ObstacleMemory:
                new_obs: list[tuple[float, float, str]],
                dt_s: float,
                heading_deg: float | None,
-               estado: str | None = None
+               estado: str | None = None,
+               steer_deg: float = 0.0
                ) -> list[tuple[float, float, str]]:
         """
         Avanza el mapa, fusiona detecciones nuevas y devuelve la lista combinada
@@ -461,6 +469,7 @@ class ObstacleMemory:
         ramp_s = getattr(C, "OBS_MEM_LAUNCH_RAMP_S", 0.0)
         if ramp_s > 0.0 and self._elapsed_s < ramp_s:
             ds_px *= self._elapsed_s / ramp_s
+        ds_ramped = ds_px   # avance libre (con rampa, SIN freno por giro) -- tope del ancla geom
 
         # Freno por giro: en un latiguazo de esquiva el carro ROTA pero casi no
         # avanza de frente. El avance forward asumido (ROBOT_SPEED_MMS fijo)
@@ -477,10 +486,21 @@ class ObstacleMemory:
             frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
             ds_px *= 1.0 - (1.0 - mn) * frac
 
-        # Avance del ancla "geom": mismo ds que el mapa (ya con rampa + freno por
-        # giro) escalado por OBS_MEM_GEOM_SPEED_SCALE -- perilla para calibrar si
-        # RECUPERANDO entra tarde (subir) o pronto (bajar) sin mover la memoria.
-        ds_anchor = ds_px * getattr(C, "OBS_MEM_GEOM_SPEED_SCALE", 1.0)
+        # ── Avance del ancla "geom" por MODELO DE BICICLETA ────────────────────
+        # En una esquiva el carro gira mucho y avanza poco: usar ROBOT_SPEED_MMS
+        # fijo sobre-marcha la lata (por eso "off" falla). El avance real y el
+        # giro están ligados: s = R·Δθ, con R = WHEELBASE/tan(steer). Δθ lo mide
+        # el IMU (exacto) y steer es el que se comandó -> s sin adivinar nada.
+        # En recta (steer~0, Δθ~0) R->inf: se usa el avance libre ds_ramped.
+        steer_rad = abs(math.radians(steer_deg))
+        if abs(dheading) > 0.3 and steer_rad > math.radians(3.0):
+            steer_rad = min(steer_rad, math.radians(C.MAX_STEER_DEG))
+            R_px = C.WHEELBASE_PX / math.tan(steer_rad)
+            ds_arc = R_px * abs(math.radians(dheading))
+            ds_anchor = min(ds_arc, ds_ramped)      # el arco no puede exceder el avance libre
+        else:
+            ds_anchor = ds_ramped
+        ds_anchor *= getattr(C, "OBS_MEM_GEOM_SPEED_SCALE", 1.0)
         self._last_ds_anchor = ds_anchor
 
         self._advance(ds_px, ds_anchor, dheading)

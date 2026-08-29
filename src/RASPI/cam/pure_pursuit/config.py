@@ -277,56 +277,50 @@ OBS_MEM_LATERAL_Y_BAND_PX  = 140.0  # solo cuenta si o.y > robot_y - esto
 OBS_MEM_LAT_TURN_DEG       = 35
 
 # ─── Trigger de "ya rodeé la lata de lado" -> PASADO/RECUPERANDO ──────────────
-# Cuál de los 3 métodos decide el rebase lateral (obstacle_memory._prune):
-#   "angle" : el carro giró >= OBS_MEM_LAT_TURN_DEG (arriba). Simple pero
-#             IGNORA dónde estaba la lata: 22° de giro despejan una lata muy
-#             lateral pero NO una casi al frente -> dispara pronto o tarde.
-#   "geom"  : reproyecta la posición inicial de la lata (x0,y0) por el
-#             ego-movimiento acumulado (giro real IMU + avance asumido) y
-#             pregunta si YA quedó al costado y despejada por _CLEAR_PX.
-#             Toma en cuenta posición inicial + giro -> ni antes ni después.
-#   "off"   : SIN rebase lateral de ningún tipo (ni giro, ni geom, ni cruce de
-#             x). RECUPERANDO SOLO cuando la lata quedó DETRÁS del eje del robot
-#             ("PASADO y", ver OBS_MEM_BEHIND_PAD) o salió por el borde inferior.
-#             Es el comportamiento base que funcionaba. Para que RECUPERANDO
-#             entre MÁS RÁPIDO en este modo -> baja OBS_MEM_BEHIND_PAD (más
-#             negativo = la lata cuenta como "detrás" con un "y" menor).
-# (OBS_MEM_LAT_TURN_ENABLED se ignora si esta línea está presente; se deja por
-#  compatibilidad: sin MODE, True->"angle", False->"off".)
+# obstacle_memory._lat_pass(), elegido por OBS_MEM_LAT_TURN_MODE:
 #
-# 2026-08-28: "angle" y "geom" metieron disparos en falso en pista (lata lejana
-# emborronada por el giro post-RECUPERANDO -> esquiva al lado equivocado ->
-# sobregiro/no_path). Vuelto a "off" = solo PASADO-y, base limpia. Desde aquí
-# se calibra SOLO OBS_MEM_BEHIND_PAD.
-OBS_MEM_LAT_TURN_MODE      = "off"
-OBS_MEM_LAT_TURN_ENABLED   = False
+#   "geom"  : GEOMÉTRICO, derivado de física (no de prueba-y-error). Ver abajo.
+#   "angle" : el carro giró >= OBS_MEM_LAT_TURN_DEG. Ignora dónde estaba la lata.
+#   "off"   : sin rebase lateral; RECUPERANDO solo por "PASADO y" (la lata cae
+#             por detrás del eje, OBS_MEM_BEHIND_PAD). En una esquiva de mucho
+#             ángulo el carro pivotea sin avanzar -> entra muy tarde o, si se
+#             baja BEHIND_PAD para compensar, dispara con la lata todavía
+#             al lado (choque). Un solo BEHIND_PAD no sirve a rojo+verde.
+OBS_MEM_LAT_TURN_MODE      = "geom"
+OBS_MEM_LAT_TURN_ENABLED   = True   # compat (sin MODE: True->"angle")
 
-# ── Perillas del modo "geom" — calibrar en pista, en este orden ──────────────
-# 1) _CLEAR_PX: cuántos px BEV al costado del eje del robot debe quedar la lata
-#    para contar como librada. Default = radio de inflado (~35).
-#    SUBIR  -> rebasa más limpio, RECUPERANDO más TARDE.
-#    BAJAR  -> RECUPERANDO más PRONTO (riesgo: rozar la lata).
-OBS_MEM_GEOM_CLEAR_PX        = OBS_INFLATE_R
-# 2) _AHEAD_MARGIN_PX: gate longitudinal. La lata reproyectada al marco actual
-#    del robot debe estar a <= esta "y" adelante para contar como rodeada
-#    (NO se exige que quede detrás: basta que la recta de recuperación no la
-#    toque). Default ~= lookahead mínimo.
-#    BAJAR (o negativo) -> exige la lata más al costado/detrás -> más TARDE.
-#    SUBIR -> dispara con la lata aún más adelante -> más PRONTO.
-OBS_MEM_GEOM_AHEAD_MARGIN_PX = 55.0
-# 3) _MIN_DTHETA_DEG: giro total mínimo del IMU antes de que "geom" pueda
-#    disparar. Anti-ruido: en recta el heading tiembla y (x0,y0) puede venir
-#    sucio de una detección lejana. Subir si dispara en falso en rectas.
-OBS_MEM_GEOM_MIN_DTHETA_DEG  = 8.0
-# 4) _SPEED_SCALE: escala SOLO el avance asumido del ancla geom (no toca el
-#    mapa que ve la centerline). Si RECUPERANDO entra TARDE -> subir (>1.0);
-#    si entra PRONTO -> bajar (<1.0). Corrige que ROBOT_SPEED_MMS=350 no sea
-#    la velocidad real durante el latiguazo.
-OBS_MEM_GEOM_SPEED_SCALE     = 1.0
-# 5) _LEAD_FRAMES: dispara N frames antes para tapar el round-trip serial
-#    Pi->ESP32 (~0.3 s). A ~14 fps, 2 frames ≈ 0.14 s. Subir si RECUPERANDO
-#    llega tarde por latencia; 0 lo desactiva.
-OBS_MEM_GEOM_LEAD_FRAMES     = 2.0
+# ── MODO "geom" — cómo funciona ─────────────────────────────────────────────
+# Al detectar la lata se guarda su posición (x0,y0) y el heading del IMU.
+# Cada frame se reproyecta esa posición al marco ACTUAL del robot aplicando el
+# ego-movimiento: rotación = Δheading REAL del IMU (exacto), avance = longitud
+# de arco s = R·Δθ con R = WHEELBASE/tan(steer) del modelo de bicicleta (usa el
+# steer que de verdad se comandó, NO una velocidad adivinada). El ancla o.xr/
+# o.yr en obstacle_memory hace justo esa integración.
+#
+# La lata está "rodeada" cuando, en el marco actual, queda:
+#     |X_r| >= CLEAR_PX      (fuera del pasillo recto del robot, a cualquier lado)
+#   Ó  Y_r  <= AHEAD_MARGIN  (ya al costado / detrás del eje)
+#
+# ── Constantes DERIVADAS (no ajustar salvo que cambie el hardware) ──────────
+# CLEAR_PX = medio ancho del chasis + inflado de la lata. Si el centro de la
+# lata está a >= esto del eje de avance, el borde del carro libra el borde
+# inflado de la lata yendo recto.
+ROBOT_HALF_WIDTH_PX      = round(140.0 / 2.0 / MM_PER_PX)        # chasis 140mm -> 35 px
+OBS_MEM_GEOM_CLEAR_PX    = ROBOT_HALF_WIDTH_PX + OBS_INFLATE_R   # 35 + 36 = 71 px
+# ── Perillas de AJUSTE FINO (mover solo estas en pista) ─────────────────────
+# AHEAD_MARGIN_PX: cuánto puede seguir ADELANTE la lata (marco actual) y aún
+# contar como rebasada. 0 = exactamente al través. +N = adelanto de N px para
+# tapar la latencia serial Pi->ESP32 (~0.15 s ~= 10-15 px de recorrido).
+# Subir -> RECUPERANDO más PRONTO.  Bajar/negativo -> más TARDE (más margen).
+OBS_MEM_GEOM_AHEAD_MARGIN_PX = 10.0
+# MIN_DTHETA_DEG: giro real mínimo del IMU antes de que "geom" pueda disparar.
+# Garantiza que hubo una esquiva de verdad (una esquiva rota >=20-30°; el ruido
+# en recta <8°). Subir si dispara en falso en tramos rectos.
+OBS_MEM_GEOM_MIN_DTHETA_DEG   = 12.0
+# SPEED_SCALE: multiplicador final del avance del ancla (escape hatch). Si en
+# pista RECUPERANDO entra sistemáticamente TARDE -> subir (1.1-1.3); si entra
+# PRONTO -> bajar. Dejar en 1.0 salvo evidencia.
+OBS_MEM_GEOM_SPEED_SCALE      = 1.0
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
