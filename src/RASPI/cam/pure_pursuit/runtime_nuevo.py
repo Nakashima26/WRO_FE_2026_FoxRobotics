@@ -668,7 +668,14 @@ class PPRuntime:
                         # movimiento, y si se armaba ahí quedaba sin heading_ref
                         # para siempre (bug orillas414). Apagado también en el
                         # giro y su cooldown.
-                        if armed and not self._is_turning and not en_recuperacion_giro:
+                        # `_prev_estado != "G"`: en cuanto el ESP32 entra a
+                        # GIRANDO resetea su anguloGyro a 0 -> el heading que
+                        # llega en el ACK SALTA ~90° de golpe -> heading_err se
+                        # dispara y measured firaba a herr=+89 en pleno giro
+                        # (orillas417). Con esto el trigger se apaga al PRIMER
+                        # est=G, sin esperar la confirmación de 2 frames.
+                        if (armed and not self._is_turning and self._prev_estado != "G"
+                                and not en_recuperacion_giro):
                             measured_pass = self._measured_recup_trigger(
                                 cl_stats, bev_obstacles
                             )
@@ -762,6 +769,14 @@ class PPRuntime:
                     # se exigen TURN_EST_G_CONFIRM_FRAMES consecutivos.
                     if estado_now == "G":
                         self._g_streak += 1
+                        # Desarmar la esquiva medida al PRIMER est=G (sin esperar
+                        # confirmación): el ESP32 ya reseteó anguloGyro -> el
+                        # heading del ACK saltó ~90° -> heading_err es basura y
+                        # measured firaría espurio (orillas417 herr=+89).
+                        self._dodge_armed = False
+                        self._recup_can_arm = True
+                        self._recup_clear_count = 0
+                        self._heading_ref = None
                     else:
                         self._g_streak = 0
                     g_confirmed = self._g_streak >= C.TURN_EST_G_CONFIRM_FRAMES
