@@ -139,16 +139,15 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
     # offset lateral respecto al cono a "radio bloqueado + medio carril".
     off_max = C.OBS_INFLATE_R + getattr(C, "PASS_LANE_MARGIN_PX", 30)
 
+    # Si NO se encuentra hueco libre del lado de paso (la lata cerca "unta" su
+    # color sobre el BEV / oclusión), se COMPROMETE igual al borde del inflado
+    # del lado correcto: físicamente SIEMPRE hay paso por el lado obligado WRO
+    # (la lata está dentro del corredor). NUNCA devolver un punto del lado
+    # contrario solo porque ahí sí se vio piso.
     if color == "Red":
         cx_rel = _widest_free_segment(safe_row_mask[iox:], pref_min)
         if cx_rel is None:
-            cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # fallback sin margen
-        # Último recurso si ni siquiera row_mask (sin margen) tiene un hueco
-        # ancho: usar OBS_INFLATE_R (radio YA bloqueado alrededor del
-        # obstáculo, físico+seguridad), NUNCA OBS_PHYSICAL_R_PX -- ese es
-        # solo el radio físico de la lata, más chico que lo que free_mask ya
-        # bloqueó, así que ese punto caía DENTRO de la propia zona bloqueada
-        # (el path terminaba apuntando a la lata en vez de esquivarla).
+            cx_rel = _widest_free_segment(row_mask[iox:], pref_min)  # sin margen
         cx = (iox + cx_rel) if cx_rel is not None else iox + C.OBS_INFLATE_R
         return int(max(iox + C.OBS_INFLATE_R, min(cx, iox + off_max)))
 
@@ -231,6 +230,50 @@ def _limit_lateral_step(points: list[tuple[float, int]], weights: list[float] | 
             x = prev_x - max_dx
         out.append((x, y))
         prev_x = x
+    return out
+
+
+def _clamp_to_pass_side(
+    points: list[tuple[float, int]],
+    bev_obstacles: list[tuple[float, float, str]],
+    obstacle_conf: list[float] | None,
+    w_img: int,
+) -> list[tuple[float, int]]:
+    """
+    Garantía FINAL de lado: para cada fila donde una lata pesa >= COMMIT_W, el
+    punto del path se fuerza a la banda [ox+INFLATE_R, ox+off_max] del lado WRO
+    correcto (Rojo -> derecha, Verde -> izquierda). Corre DESPUÉS de todo el
+    post-proceso, así que sobrescribe cualquier jalón de _smooth_x /
+    _enforce_free_mask hacia el lado contrario.
+
+    Motivo: físicamente SIEMPRE hay paso por el lado obligado (la lata está
+    dentro del corredor). Si la cámara no vio piso ahí (untado de color de la
+    lata cerca), NO es razón para trazar la ruta del otro lado.
+    """
+    if not bev_obstacles:
+        return points
+    commit_w = float(getattr(C, "CENTERLINE_COMMIT_W", 0.5))
+    off_max = C.OBS_INFLATE_R + getattr(C, "PASS_LANE_MARGIN_PX", 30)
+    out: list[tuple[float, int]] = []
+    for x, y in points:
+        best_w = 0.0
+        lo = hi = None
+        for idx, (ox, oy, color) in enumerate(bev_obstacles):
+            if color not in ("Red", "Green"):
+                continue
+            conf = 1.0
+            if obstacle_conf is not None and idx < len(obstacle_conf):
+                conf = obstacle_conf[idx]
+            wgt = _ramp_weight(y, oy) * conf
+            if wgt > best_w:
+                best_w = wgt
+                if color == "Red":
+                    lo, hi = ox + C.OBS_INFLATE_R, ox + off_max      # banda a la derecha
+                else:
+                    lo, hi = ox - off_max, ox - C.OBS_INFLATE_R      # banda a la izquierda
+        if lo is not None and best_w >= commit_w:
+            x = float(np.clip(x, max(0.0, lo), min(w_img - 1.0, hi)))
+        out.append((x, y))
     return out
 
 
@@ -637,6 +680,9 @@ def detect_centerline(
         # real (confirmado con pruebas: sin esto había puntos invadiendo la
         # zona de seguridad incluso con confianza plena).
         points = _enforce_free_mask(points, free_mask, w)
+        # Garantía de LADO (corre al final, sobrescribe jalones de _smooth_x /
+        # _enforce_free_mask al lado contrario del obstáculo).
+        points = _clamp_to_pass_side(points, bev_obstacles, obstacle_conf, w)
         if getattr(C, "CENTERLINE_DEBUG", False) and _dbg_rows:
             _dbg_enf = {int(yy): xx for xx, yy in points}
             for r in _dbg_rows:
