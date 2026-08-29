@@ -230,8 +230,16 @@ class PPRuntime:
             self._dodge_armed = True
             self._recup_can_arm = False
             self._recup_clear_count = 0
-            if self._last_heading is not None:
-                self._heading_ref = self._last_heading
+            self._heading_ref = None   # se siembra abajo con el heading de ESTE frame
+
+        # Siembra PEREZOSA de heading_ref: en cuanto haya heading y la esquiva
+        # esté armada. Antes se sembraba SOLO en el frame de armado -> si se armó
+        # sin heading (p.ej. el trigger llegó a correr desarmado, o el ACK aún no
+        # traía ang=), quedaba en None para siempre y heading_err=0 -> measured
+        # nunca disparaba (bug de orillas414).
+        if (self._dodge_armed and self._heading_ref is None
+                and self._last_heading is not None):
+            self._heading_ref = self._last_heading
 
         heading_err = 0.0
         if self._last_heading is not None and self._heading_ref is not None:
@@ -280,10 +288,12 @@ class PPRuntime:
             return True
 
         # Despejado MUCHOS frames y el heading nunca llegó a HEADING_DEG ->
-        # esquiva suave que se resolvió sola. Desarmar sin RECUPERANDO.
+        # esquiva suave que se resolvió sola. Desarmar sin RECUPERANDO, y
+        # permitir re-armar (la siguiente lata sí puede necesitar RECUPERANDO).
         if self._recup_clear_count >= getattr(C, "RECUP_MEAS_GENTLE_FRAMES", 10):
             self._last_recup_reason = f"esquiva-suave-ok herr={heading_err:+.0f}"
             self._dodge_armed = False
+            self._recup_can_arm = True
             self._recup_clear_count = 0
             self._heading_ref = None
         else:
@@ -637,9 +647,11 @@ class PPRuntime:
                         # Sustituto del ancla "geom". Usa cl_stats["weights"] (lo
                         # que el planner de verdad decidió esquivar este frame) +
                         # el heading real -> sin dead-reckoning que derive.
-                        # Apagado durante el giro y su cooldown (memoria/ línea
-                        # aún inestables, ninguna esquiva puede estar en curso).
-                        if not self._is_turning and not en_recuperacion_giro:
+                        # SOLO armado: desarmado no hay heading (ACK=None) ni
+                        # movimiento, y si se armaba ahí quedaba sin heading_ref
+                        # para siempre (bug orillas414). Apagado también en el
+                        # giro y su cooldown.
+                        if armed and not self._is_turning and not en_recuperacion_giro:
                             measured_pass = self._measured_recup_trigger(
                                 cl_stats, bev_obstacles
                             )
