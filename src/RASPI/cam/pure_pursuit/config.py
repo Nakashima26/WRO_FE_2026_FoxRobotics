@@ -303,15 +303,54 @@ OBS_MEM_LAT_TURN_DEG       = 35
 # ─── Trigger de "ya rodeé la lata de lado" -> PASADO/RECUPERANDO ──────────────
 # obstacle_memory._lat_pass(), elegido por OBS_MEM_LAT_TURN_MODE:
 #
-#   "geom"  : GEOMÉTRICO, derivado de física (no de prueba-y-error). Ver abajo.
+#   "geom"  : GEOMÉTRICO por dead-reckoning del ancla (x0,y0 + giro + arco). Se
+#             re-parchó 4 veces (angle, geom, geom v2, SPEED_SCALE 1.0/0.35/0.60)
+#             y NUNCA funcionó en pista: el ancla integra IMU + modelo de
+#             bicicleta + velocidad no medida y deriva 200-400mm en 1-2s ->
+#             disparo prematuro (morro contra la lata) o tardío (57° de error).
 #   "angle" : el carro giró >= OBS_MEM_LAT_TURN_DEG. Ignora dónde estaba la lata.
-#   "off"   : sin rebase lateral; RECUPERANDO solo por "PASADO y" (la lata cae
-#             por detrás del eje, OBS_MEM_BEHIND_PAD). En una esquiva de mucho
-#             ángulo el carro pivotea sin avanzar -> entra muy tarde o, si se
-#             baja BEHIND_PAD para compensar, dispara con la lata todavía
-#             al lado (choque). Un solo BEHIND_PAD no sirve a rojo+verde.
-OBS_MEM_LAT_TURN_MODE      = "geom"
-OBS_MEM_LAT_TURN_ENABLED   = True   # compat (sin MODE: True->"angle")
+#   "off"   : sin rebase lateral en obstacle_memory; el rebase de ángulo lo
+#             decide runtime_nuevo._measured_recup_trigger() por ESTADO MEDIDO
+#             (el planner dejó de rodear la lata + chasis chueco), que NO integra
+#             error. "PASADO y" de _prune (OBS_MEM_BEHIND_PAD) queda como
+#             respaldo para el rebase DE FRENTE (la lata sale por abajo del BEV).
+# 2026-08-29: "off". geom retirado como disparo (código sigue, dormido). El
+# rebase lateral ahora es el trigger medido de runtime_nuevo (RECUP_MEAS_*).
+OBS_MEM_LAT_TURN_MODE      = "off"
+OBS_MEM_LAT_TURN_ENABLED   = False  # compat (sin MODE: True->"angle")
+
+# ─── Trigger de RECUPERANDO por ESTADO MEDIDO — runtime_nuevo._measured_recup_trigger ─
+# Sustituto del ancla "geom". No hace dead-reckoning de la lata: mira el estado
+# MEDIDO este frame y dispara RECUPERANDO cuando se cumplen las 3 cosas:
+#   1) hubo una esquiva DE VERDAD en curso  (peso de rampa de detect_centerline
+#      >= RECUP_MEAS_ARM_W en alguna fila junto al eje en algún frame),
+#   2) el planner YA no rodea nada en las filas junto al eje (peso <=
+#      RECUP_MEAS_CLEAR_W) por RECUP_MEAS_CLEAR_FRAMES frames seguidos,
+#   3) el chasis quedó chueco respecto a la recta (|heading - heading_ref| >=
+#      RECUP_MEAS_HEADING_DEG)  -> hay algo que enderezar.
+# Separa solo con (3) el caso "esquiva suave con espacio" (heading chico -> PP +
+# wall PID solos, NO dispara) del "latiguazo sin espacio" (heading grande ->
+# dispara justo al terminar de rodearla).
+RECUP_MEAS_ENABLED        = True
+RECUP_MEAS_NEAR_PX        = 120.0  # px BEV por delante del eje: banda de filas cuyo peso
+                                   # de esquiva se mira para ARMAR (hubo lata rodeada)
+RECUP_MEAS_ARM_W          = 0.35   # peso de esquiva que ARMA el trigger
+RECUP_MEAS_AHEAD_TOL_PX   = 30.0   # una lata a <= esto adelante del eje ya cuenta como
+                                   # "al costado" (no estorba yendo recto)
+RECUP_MEAS_CLEAR_W        = 0.05   # respaldo: peso junto al eje por debajo de esto = despejado
+RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de disparar (~0.2s @14fps)
+RECUP_MEAS_HEADING_DEG    = 15.0   # giro mín. vs la recta para que valga la pena enderezar
+                                   # (por debajo: esquiva suave, PP + wall PID solos)
+
+# Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
+# retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
+PASADO_HOLD_FRAMES        = 6
+
+# est=G debounce: frames CONSECUTIVOS de est=G en el ACK del ESP32 antes de dar
+# el giro por real y borrar/apagar la memoria de obstáculos. Un est=G espurio
+# (ACK con ruido, "est=G fantasma tras verde") ya NO dispara el wipe de memoria
+# a media esquiva -> RECUPERANDO deja de perder la lata que venía siguiendo.
+TURN_EST_G_CONFIRM_FRAMES = 2
 
 # ── MODO "geom" — cómo funciona ─────────────────────────────────────────────
 # Al detectar la lata se guarda su posición (x0,y0) y el heading del IMU.

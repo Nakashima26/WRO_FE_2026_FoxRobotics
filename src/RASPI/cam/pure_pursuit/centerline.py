@@ -358,6 +358,7 @@ def detect_centerline(
     bev_obstacles: list[tuple[float, float, str]],
     bev_hsv: np.ndarray | None = None,
     obstacle_conf: list[float] | None = None,
+    stats_out: dict | None = None,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -375,6 +376,12 @@ def detect_centerline(
                      OrangeLineTracker.update() para no convertir la misma
                      imagen BGR->HSV dos veces por frame). Si no se pasa, se
                      calcula aquí como antes.
+      stats_out    : si se pasa un dict, se rellena con señales internas del
+                     frame para el caller. Hoy: stats_out["weights"] = lista de
+                     pesos de esquiva (0..1) alineada 1:1 con la lista de puntos
+                     devuelta (índice 0 = fila más cercana al eje del robot).
+                     runtime_nuevo lo usa para el trigger de RECUPERANDO por
+                     estado medido (peso ~0 junto al eje = ya no se rodea nada).
       obstacle_conf: confianza (0..1) de cada obstáculo, MISMO orden/largo que
                      bev_obstacles (ver ObstacleMemory.last_confidences) --
                      atenúa qué tan fuerte se compromete el path al lado de
@@ -692,6 +699,12 @@ def detect_centerline(
                       + ("  <<< SALTO" if (raw is not None and enf is not None
                                           and abs(raw - enf) > 18) else ""),
                       flush=True)
+
+    if stats_out is not None:
+        # weights se llena 1:1 con points en cada rama del muestreo fila-a-fila y
+        # el post-proceso (_limit_lateral_step/_smooth_x/_enforce_free_mask/
+        # _clamp_to_pass_side) preserva largo y orden -> alineado con el return.
+        stats_out["weights"] = list(weights)
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 
