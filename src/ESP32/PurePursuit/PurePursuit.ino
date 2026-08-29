@@ -620,24 +620,18 @@ void loop() {
       // así que sin eso el comportamiento es idéntico al de siempre.
       bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
 
-      // Gate de alineación. En un latiguazo de esquiva el chasis queda ladeado
-      // (visto en pista a ~37° de ERROR de heading) y un ultrasónico lateral lee
-      // "sin pared" -> detectarEsquina() disparaba una falsa esquina y el carro
-      // giraba CON la inclinación de la esquiva -> +88° extra -> choque
-      // (orillas419). 25° bloquea el latiguazo pero permite esquinas reales con
-      // algo de error de heading.
-      // 2026-08-29: (a) AHORA SÍ está en el if de abajo -- estaba calculado y
-      // sin usar. (b) Es |anguloObjetivo - anguloGyro| (error vs la recta
-      // ACTUAL), NO |anguloGyro|: tras cada giro anguloObjetivo queda en ~±88
-      // (no en 0), y en RECTA el PID mantiene anguloGyro ~= anguloObjetivo ->
-      // |anguloGyro| vale ~88 en recta y |anguloGyro|<25 habría bloqueado
-      // TODAS las esquinas menos la primera. El error vs anguloObjetivo sí es
-      // "qué tan ladeado voy respecto a mi recta".
-      bool chasisAlineado = fabs(anguloObjetivo - anguloGyro) < 25.0f;
+      // 2026-08-28: gate de alineación. En un latiguazo de esquiva el chasis
+      // queda ladeado (visto en pista a +37deg) y un ultrasónico lateral lee
+      // "sin pared" -> detectarEsquina() disparaba una falsa esquina.
+      // 25° (no 15): con 15 el carro no lograba mantenerse recto y NO detectaba
+      // la esquina real -> se iba de frente. 25 bloquea el latiguazo (37°) pero
+      // permite esquinas reales con algo de error de heading. (Con
+      // INTERIOR_PASS_ENABLED=False el bloqueo por obstáculo ya tapa el caso
+      // original; esto es red de seguridad.)
+      bool chasisAlineado = fabs(anguloGyro) < 25.0f;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo
-          && chasisAlineado
           && detectarEsquina(distL, distR)
           && millis() - timeStart > 3000)
       {
