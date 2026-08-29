@@ -622,10 +622,13 @@ void loop() {
 
       // 2026-08-28: gate de alineación. En un latiguazo de esquiva el chasis
       // queda ladeado (visto en pista a +37deg) y un ultrasónico lateral lee
-      // "sin pared" -> detectarEsquina() disparaba una falsa esquina. En una
-      // esquina REAL el carro llega ~recto, así que exigir |anguloGyro| chico
-      // no la afecta.
-      bool chasisAlineado = fabs(anguloGyro) < 15.0f;
+      // "sin pared" -> detectarEsquina() disparaba una falsa esquina.
+      // 25° (no 15): con 15 el carro no lograba mantenerse recto y NO detectaba
+      // la esquina real -> se iba de frente. 25 bloquea el latiguazo (37°) pero
+      // permite esquinas reales con algo de error de heading. (Con
+      // INTERIOR_PASS_ENABLED=False el bloqueo por obstáculo ya tapa el caso
+      // original; esto es red de seguridad.)
+      bool chasisAlineado = fabs(anguloGyro) < 25.0f;
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && !bloqueadoPorObstaculo

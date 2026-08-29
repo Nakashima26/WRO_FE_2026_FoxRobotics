@@ -180,13 +180,16 @@ FRONT_CHECK_HALFWIDTH_PX = 30    # medio-ancho del "carril" frontal revisado,
 # Atenuación de steer por distancia — misma escala
 STEER_DIST_GAIN_NEAR_PX = OBSTACLE_URGENT_MM / MM_PER_PX   # ≈110px
 STEER_DIST_GAIN_FAR_PX  = OBSTACLE_CASUAL_MM / MM_PER_PX   # ≈250px
-STEER_DIST_GAIN_MIN     = 0.8   # subido de 0.5: la atenuación de steer en la
-                                  # zona lejana (110-250px) hacía que el carro
-                                  # casi no se moviera de lado hasta tener la
-                                  # lata encima, y luego esquivara de volantazo.
-                                  # 0.8 deja la reacción lejana casi a fuerza
-                                  # completa. Dentro de 110px sigue siendo 1.0
-                                  # (volantazo intacto).
+STEER_DIST_GAIN_MIN     = 0.45  # 2026-08-28: 0.8 -> 0.45. Con 0.8 el steer de
+                                  # esquiva saltaba a ~0.63 en cuanto se veía la
+                                  # lata a ~240mm -> el carro sobre-giraba ~40°
+                                  # con la lata aún lejos, la barría fuera del
+                                  # cuadro y se enderezaba -> re-esquiva. 0.45
+                                  # deja la reacción lejana suave; dentro de
+                                  # ~110px sube a 1.0 (volantazo cuando de
+                                  # verdad hace falta). Objetivo del usuario:
+                                  # "no girar tanto al estar lejos, girar solo
+                                  # cuando sea necesario".
 
 
 # ─── Memoria de obstáculos (mapa rodante disperso) — obstacle_memory.py ───────
