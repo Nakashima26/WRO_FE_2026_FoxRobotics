@@ -279,17 +279,21 @@ OBS_MEM_LAT_TURN_DEG       = 35
 #             ego-movimiento acumulado (giro real IMU + avance asumido) y
 #             pregunta si YA quedó al costado y despejada por _CLEAR_PX.
 #             Toma en cuenta posición inicial + giro -> ni antes ni después.
-#   "off"   : sin trigger por rotación; solo rebase físico (lat-x / PASADO y /
-#             borde). RECUPERANDO entra tarde en esquivas de ángulo.
+#   "off"   : SIN rebase lateral de ningún tipo (ni giro, ni geom, ni cruce de
+#             x). RECUPERANDO SOLO cuando la lata quedó DETRÁS del eje del robot
+#             ("PASADO y", ver OBS_MEM_BEHIND_PAD) o salió por el borde inferior.
+#             Es el comportamiento base que funcionaba. Para que RECUPERANDO
+#             entre MÁS RÁPIDO en este modo -> baja OBS_MEM_BEHIND_PAD (más
+#             negativo = la lata cuenta como "detrás" con un "y" menor).
 # (OBS_MEM_LAT_TURN_ENABLED se ignora si esta línea está presente; se deja por
 #  compatibilidad: sin MODE, True->"angle", False->"off".)
-OBS_MEM_LAT_TURN_MODE      = "angle"   # 2026-08-28: "geom" mató el rendimiento en
-                                       # pista (disparaba con la lata detectada ya
-                                       # descentrada + ruido de heading). Vuelto a
-                                       # "angle" @ 35 (estado que el usuario dejó a
-                                       # mano). "geom" sigue disponible pero NO
-                                       # calibrado -- ver perillas abajo.
-OBS_MEM_LAT_TURN_ENABLED   = True
+#
+# 2026-08-28: "angle" y "geom" metieron disparos en falso en pista (lata lejana
+# emborronada por el giro post-RECUPERANDO -> esquiva al lado equivocado ->
+# sobregiro/no_path). Vuelto a "off" = solo PASADO-y, base limpia. Desde aquí
+# se calibra SOLO OBS_MEM_BEHIND_PAD.
+OBS_MEM_LAT_TURN_MODE      = "off"
+OBS_MEM_LAT_TURN_ENABLED   = False
 
 # ── Perillas del modo "geom" — calibrar en pista, en este orden ──────────────
 # 1) _CLEAR_PX: cuántos px BEV al costado del eje del robot debe quedar la lata

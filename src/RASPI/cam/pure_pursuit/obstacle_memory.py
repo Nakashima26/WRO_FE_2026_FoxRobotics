@@ -255,6 +255,14 @@ class ObstacleMemory:
         if mode is None:   # compat con el flag viejo
             mode = "angle" if getattr(C, "OBS_MEM_LAT_TURN_ENABLED", True) else "off"
 
+        # "off" = SIN rebase lateral de ningún tipo (ni giro, ni geom, ni cruce
+        # de x). RECUPERANDO SOLO por "PASADO y" (la lata quedó detrás del eje
+        # del robot, ver _prune / OBS_MEM_BEHIND_PAD) o "PASADO(borde)". Es el
+        # comportamiento base que funcionaba -- para acelerar RECUPERANDO en
+        # este modo, baja OBS_MEM_BEHIND_PAD (más negativo = dispara antes).
+        if mode == "off":
+            return False, ""
+
         have_head = o.heading0 is not None and self._prev_heading is not None
         dtheta = ((self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0) if have_head else 0.0
 
