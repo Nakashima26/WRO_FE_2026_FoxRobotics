@@ -117,6 +117,9 @@ CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # salida limpio, sin sesgar tanto tramo por delante
                               # que estorbe a la siguiente lata.
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
+CENTERLINE_DEBUG      = True   # 2026-08-28 TEMPORAL: log [CLDBG] fila-a-fila del
+                              # path cerca de la lata (free/pass/w/ox y cx en
+                              # cada etapa de post-proceso) para ubicar el brinco.
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)

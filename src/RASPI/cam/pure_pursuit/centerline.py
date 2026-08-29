@@ -441,6 +441,7 @@ def detect_centerline(
     # ── 3. Muestreo fila a fila ────────────────────────────────────────────
     points: list[tuple[float, int]] = []
     weights: list[float] = []
+    _dbg_rows: list = []
     # Historial de bordes (y, izq, der) del hueco safe_mask en filas con dato
     # real -- permite, cuando una fila más adelante se queda sin piso, AJUSTAR
     # la tendencia del borde que se está cerrando y proyectarla hacia
@@ -611,10 +612,22 @@ def detect_centerline(
 
         points.append((float(np.clip(cx, 0, w - 1)), y))
         weights.append(best_w)
+        if getattr(C, "CENTERLINE_DEBUG", False) and best_w > 0.05:
+            _branch = ("free" if (pass_cx is None or best_w <= 0.0)
+                       else ("passonly" if free_cx is None else "blend"))
+            _dbg_rows.append([y, _branch,
+                              None if free_cx is None else int(free_cx),
+                              None if pass_cx is None else int(pass_cx),
+                              round(best_w, 2),
+                              None if best_ox is None else int(best_ox),
+                              round(float(np.clip(cx, 0, w - 1)), 1)])
 
     if points:
+        _dbg_raw = {int(yy): xx for xx, yy in points}
         points = _limit_lateral_step(points, weights)
+        _dbg_lim = {int(yy): xx for xx, yy in points}
         points = _smooth_x(points, weights)
+        _dbg_smo = {int(yy): xx for xx, yy in points}
         # Red de seguridad FINAL: cada fila ya se verificó individualmente
         # contra el círculo bloqueado del obstáculo antes de esto, pero
         # _smooth_x() promedia con las filas vecinas sin saber nada de
@@ -624,6 +637,20 @@ def detect_centerline(
         # real (confirmado con pruebas: sin esto había puntos invadiendo la
         # zona de seguridad incluso con confianza plena).
         points = _enforce_free_mask(points, free_mask, w)
+        if getattr(C, "CENTERLINE_DEBUG", False) and _dbg_rows:
+            _dbg_enf = {int(yy): xx for xx, yy in points}
+            for r in _dbg_rows:
+                y = r[0]
+                raw, lim, smo, enf = (_dbg_raw.get(y), _dbg_lim.get(y),
+                                      _dbg_smo.get(y), _dbg_enf.get(y))
+                def _f(v):
+                    return "  -  " if v is None else f"{v:5.0f}"
+                print(f"[CLDBG] y={y:3d} {r[1]:8s} free={_f(r[2])} pass={_f(r[3])} "
+                      f"w={r[4]:.2f} ox={_f(r[5])} | raw={_f(raw)} lim={_f(lim)} "
+                      f"smo={_f(smo)} enf={_f(enf)}"
+                      + ("  <<< SALTO" if (raw is not None and enf is not None
+                                          and abs(raw - enf) > 18) else ""),
+                      flush=True)
 
     return [(int(round(np.clip(x, 0, w - 1))), int(y)) for x, y in points]
 
