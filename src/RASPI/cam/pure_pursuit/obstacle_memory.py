@@ -29,7 +29,7 @@ from . import config as C
 
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
-                 "xr", "yr", "beyond", "_cls_vote", "_cls_votes")
+                 "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -52,6 +52,13 @@ class _Obs:
         # cruce un umbral frágil.
         self.xr = x
         self.yr = y
+        # El ancla (x0,y0,heading0,xr,yr) NO se fija hasta que la lata se detecta
+        # a una `y` confiable (>= OBS_MEM_ANCHOR_MIN_Y). Antes de eso la
+        # proyección cámara->BEV cerca del horizonte es basura (error enorme en
+        # x/y por ángulo rasante) -> el dead-reckoning arrancaría de un punto
+        # inventado (visto en pista: ancla Xr=-124 Yr=+212 con la lata enfrente).
+        # Mientras anchored=False, _merge re-siembra el ancla con cada detección.
+        self.anchored = y >= getattr(C, "OBS_MEM_ANCHOR_MIN_Y", 200.0)
         # Heading del carro (IMU) cuando se detectó por primera vez. El rebase
         # LATERAL primario compara el heading actual contra éste: si el carro
         # rotó >= OBS_MEM_LAT_TURN_DEG hacia el lado correcto desde que vio la
@@ -181,6 +188,14 @@ class ObstacleMemory:
                 best.x, best.y = nx, ny
                 best.conf = C.OBS_MEM_REFRESH
                 best.y_min = min(best.y_min, ny)   # detección, no estima
+                # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
+                # (deja de re-sembrarse) en cuanto la lata se ve a `y` confiable.
+                if not best.anchored:
+                    best.x0, best.y0 = nx, ny
+                    best.xr, best.yr = nx, ny
+                    best.heading0 = self._prev_heading
+                    if ny >= getattr(C, "OBS_MEM_ANCHOR_MIN_Y", 200.0):
+                        best.anchored = True
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
                     self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
@@ -284,25 +299,23 @@ class ObstacleMemory:
                     f"PASADO(lat-giro) x={o.x:.0f} y={o.y:.0f} "
                     f"h0={round(o.heading0)} h={round(self._prev_heading)} conf={o.conf:.2f}"
                 )
-        elif mode == "geom" and have_head:
-            # Gate: hubo una esquiva de verdad (no ruido de recta).
+        elif mode == "geom" and have_head and o.anchored:
+            # Gate: hubo una esquiva de verdad (no ruido de recta) Y el ancla
+            # está fijada de una detección confiable (no del horizonte del BEV).
             if abs(dtheta) >= getattr(C, "OBS_MEM_GEOM_MIN_DTHETA_DEG", 12.0):
-                clear_px = getattr(C, "OBS_MEM_GEOM_CLEAR_PX", C.OBS_INFLATE_R)
                 ahead_m  = getattr(C, "OBS_MEM_GEOM_AHEAD_MARGIN_PX", 10.0)
-                # Ancla (o.xr, o.yr): la posición inicial de la lata propagada
-                # por el ego-movimiento (rotación IMU exacta + arco s=R·Δθ del
-                # modelo de bicicleta, ver update()). En el marco ACTUAL del
-                # robot (mira hacia -y en imagen => +y-arriba):
-                X_r = o.xr - self.rx            # + = lata a la derecha del eje de avance
-                Y_r = self.ry - o.yr           # + = lata adelante del eje trasero
-                # Rodeada si sale del pasillo recto (a cualquier lado) o ya
-                # quedó al través/detrás. NO se exige "detrás": basta que la
-                # recta de recuperación no la toque.
-                if abs(X_r) >= clear_px or Y_r <= ahead_m:
-                    how = "lado" if abs(X_r) >= clear_px else "trav"
+                # Ancla (o.xr, o.yr): posición inicial de la lata propagada por
+                # el ego-movimiento (rotación IMU exacta + arco s=R·Δθ). En el
+                # marco ACTUAL del robot (mira -y en imagen => +y-arriba):
+                X_r = o.xr - self.rx            # + = lata a la derecha
+                Y_r = self.ry - o.yr           # + = lata ADELANTE del eje trasero
+                # Rodeada = la lata ya quedó al través / detrás (Y_r <= am).
+                # (Se quitó la rama |X_r|>=CLEAR: un ancla corrupta que deriva
+                #  de lado disparaba con la lata aún 200px enfrente -> choque.)
+                if Y_r <= ahead_m:
                     return True, (
-                        f"PASADO(lat-geom/{how}) Xr={X_r:+.0f} Yr={Y_r:+.0f} "
-                        f"dth={dtheta:+.0f} clr={clear_px:.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
+                        f"PASADO(lat-geom/trav) Xr={X_r:+.0f} Yr={Y_r:+.0f} "
+                        f"dth={dtheta:+.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
                     )
 
         # (x) respaldo -- SOLO en modo "angle". En "geom" la x medida cruza el

@@ -351,6 +351,11 @@ OBS_MEM_GEOM_SPEED_SCALE      = 0.35  # 2026-08-28: 1.0 -> 0.35. En el pivote de
                                       # PASADO con el verde aún 130mm al frente.
                                       # 0.35 alinea el avance del ancla con el
                                       # avance real medido (detección y).
+# El ancla geom (x0,y0,heading0) NO se fija hasta que la lata se detecta a
+# `y >= esto` en el BEV. Más arriba (horizonte) la proyección cámara->BEV es
+# basura -> el dead-reckoning arrancaba de un punto inventado (visto en pista:
+# ancla Xr=-124 Yr=+212 con la lata enfrente -> RECUPERANDO -> choque).
+OBS_MEM_ANCHOR_MIN_Y          = 200.0
 
 # Anti "pasado" espurio: para disparar RECUPERANDO, la lata debió estar de
 # verdad adelante en algún frame (y_min de DETECCIÓN < robot_y - esto). Una
