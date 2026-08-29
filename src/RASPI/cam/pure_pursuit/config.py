@@ -283,7 +283,12 @@ OBS_MEM_LAT_TURN_DEG       = 35
 #             borde). RECUPERANDO entra tarde en esquivas de ángulo.
 # (OBS_MEM_LAT_TURN_ENABLED se ignora si esta línea está presente; se deja por
 #  compatibilidad: sin MODE, True->"angle", False->"off".)
-OBS_MEM_LAT_TURN_MODE      = "geom"
+OBS_MEM_LAT_TURN_MODE      = "angle"   # 2026-08-28: "geom" mató el rendimiento en
+                                       # pista (disparaba con la lata detectada ya
+                                       # descentrada + ruido de heading). Vuelto a
+                                       # "angle" @ 35 (estado que el usuario dejó a
+                                       # mano). "geom" sigue disponible pero NO
+                                       # calibrado -- ver perillas abajo.
 OBS_MEM_LAT_TURN_ENABLED   = True
 
 # ── Perillas del modo "geom" — calibrar en pista, en este orden ──────────────

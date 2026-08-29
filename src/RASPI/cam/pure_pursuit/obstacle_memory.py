@@ -282,11 +282,15 @@ class ObstacleMemory:
                 # robusto a la convención de giro del IMU; si el carro le pasó por
                 # encima sin rodearla, |exr| se queda chico y no dispara.
                 exr = o.xr - self.rx
+                ex0 = o.x0 - self.rx
                 fyr = (self.ry - o.yr) - lead * self._last_ds_anchor
-                if abs(exr) >= clear_px and fyr <= ahead_m:
+                # separación lateral GANADA desde la detección -- no el offset
+                # absoluto (una lata detectada ya descentrada disparaba en falso).
+                gained = abs(exr) - abs(ex0)
+                if gained >= clear_px and fyr <= ahead_m:
                     return True, (
-                        f"PASADO(lat-geom) exr={exr:.0f} fyr={fyr:.0f} "
-                        f"dth={dtheta:.0f} clr={clear_px:.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
+                        f"PASADO(lat-geom) exr={exr:.0f} ex0={ex0:.0f} gain={gained:.0f} "
+                        f"fyr={fyr:.0f} dth={dtheta:.0f} clr={clear_px:.0f} am={ahead_m:.0f} conf={o.conf:.2f}"
                     )
 
         # (x) respaldo -- activo en todos los modos
@@ -326,17 +330,10 @@ class ObstacleMemory:
         for o in self._obs:
             was_ahead = o.y_min < ahead_gate
             if o.conf < C.OBS_MEM_MIN_CONF:
-                # Perdido de vista. Antes de tirarlo en silencio: si el
-                # ego-movimiento dice que YA lo rodeé de lado, sí dispara
-                # RECUPERANDO -- si no, el trigger geom pierde la carrera contra
-                # el decay (OBS_MEM_DECAY) cuando la lata sale de cámara en plena
-                # esquiva y no se re-detecta.
-                lp, why = self._lat_pass(o)
-                if lp:
-                    self.last_prune_reason = why
-                    passed = True
-                else:
-                    self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
+                # Perdido de vista, no rebasado. (Se probó evaluar _lat_pass aquí
+                # para el modo "geom" pero disparaba RECUPERANDO en falso al
+                # decaer latas que nunca se rodearon -- revertido.)
+                self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue
             if o.y > behind_y:                       # ya quedó detrás del robot
                 if was_ahead:
