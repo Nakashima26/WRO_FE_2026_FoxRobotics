@@ -525,6 +525,26 @@ LINE_FIT_MAX_SLOPE_DEG = 72  # 2026-08-29: 30 -> 45. Al acercarse a la esquina e
                              # fuera. DIST_HUBER + MIN_POINTS + EMA + PERSIST_FRAMES
                              # filtran un ajuste malo de un frame suelto.
 
+# ─── Dirección de giro por PENDIENTE de la línea naranja — TurnDirectionTracker ─
+# La MISMA línea de esquina se ve con pendiente de signo OPUESTO según el
+# sentido de vuelta (confirmado en pista 2026-08-31):
+#   vy < 0  (la recta sube de izquierda->derecha en BEV)  -> giro DERECHA
+#   vy > 0                                                 -> giro IZQUIERDA
+# vy = line[1] de OrangeLineTracker.stable["line"] (= yr - yl; line[0]=vx es
+# siempre +399, así que signo de pendiente == signo de vy). Es señal más
+# TEMPRANA y fiable que la posición lateral de un obstáculo "beyond" (no
+# necesita que haya un obstáculo ni un offset >40px), y no tiene el historial
+# de fijar mal que rompió el intento viejo de interior-pass. El obstáculo
+# queda solo de respaldo cuando no hay pendiente utilizable.
+LINE_DIR_FROM_SLOPE_ENABLED = True
+# Zona muerta: |vy| por debajo de esto (línea casi plana en BEV) NO vota
+# dirección. vy ≈ 399·tan(θ): 60 ≈ 8.5°, una esquina real se ve a >=25° (vy
+# >~185), así que esto solo filtra una lectura al borde de horizontal.
+LINE_DIR_SLOPE_DEADBAND = 60.0
+# (la persistencia antes de fijar la dirección es TurnDirectionTracker
+# .persist_frames = 5, más los ~6 frames que OrangeLineTracker tarda en dar
+# una `line` estable -> ~11 frames desde que se ve la naranja hasta latchear.)
+
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
 LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
                                     # naranja antes del run-length: puentea huecos de

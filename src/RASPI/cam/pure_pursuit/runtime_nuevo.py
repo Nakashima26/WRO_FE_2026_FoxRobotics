@@ -689,11 +689,15 @@ class PPRuntime:
                             )
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
-                        # persistencia, ver TurnDirectionTracker) de la posición
-                        # lateral de un obstáculo visto más allá de la naranja,
-                        # y se queda fija toda la carrera.
+                        # persistencia, ver TurnDirectionTracker) y se queda fija
+                        # toda la carrera. Fuente primaria: signo de la pendiente
+                        # de la línea naranja (vy); respaldo: posición lateral de
+                        # un obstáculo "beyond". En el cooldown post-giro la
+                        # `line` aún se re-acumula -> no pasarla ahí.
                         turn_dir = self.turn_dir_tracker.update(
-                            bev_obstacles_beyond, C.ROBOT_BEV_X
+                            bev_obstacles_beyond, C.ROBOT_BEV_X,
+                            line=(None if en_recuperacion_giro
+                                  else orange_info.get("line")),
                         )
 
                         # ── Interior/exterior del obstáculo actual (el más
@@ -912,9 +916,12 @@ class PPRuntime:
                 print(log_line, flush=True)
 
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
+                _ln = line_info["Orange"].get("line")
+                _vy = None if _ln is None else round(float(_ln[1]))
                 print(f"[DIR] fija={self.turn_dir_tracker.direction} "
                       f"ovr={getattr(C, 'CORNER_TURN_DIR_OVERRIDE', None)} "
-                      f"interior={interior} ext_corner_hold={int(self._ext_corner_hold)}", flush=True)
+                      f"vy={_vy} interior={interior} "
+                      f"ext_corner_hold={int(self._ext_corner_hold)}", flush=True)
                 # Vuelca el estado interno de la memoria rodante a stdout (antes
                 # solo iba al HUD de pantalla vía _annotate). Permite medir en
                 # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx
