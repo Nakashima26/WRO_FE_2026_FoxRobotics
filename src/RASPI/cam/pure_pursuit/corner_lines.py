@@ -351,6 +351,21 @@ class TurnDirectionTracker:
         self._candidate = None
         self._candidate_count = 0
 
+    def set_esp_direction(self, d: str) -> None:
+        """El ESP32 confirmó su dirección de giro (direccionIzquierda, fijada
+        en su 1er GIRANDO con distL>distR y mandada como dir= en el ACK:V2).
+        Es AUTORITATIVA: fija o corrige la dirección. Cubre las esquinas 2-12;
+        la 1 sigue dependiendo de la estimación por visión (el ESP manda '?'
+        hasta que hace su primer giro). El ESP se resetea entre corridas ->
+        no llega un dir= viejo."""
+        if d not in ("L", "R"):
+            return
+        if self.direction != d:
+            print(f"[TURNDIR] >>> ESP dir={d} (antes {self.direction})", flush=True)
+            self.direction = d
+            self._candidate = None
+            self._candidate_count = 0
+
     def update(self, bev_obstacles_beyond: list[tuple[float, float, str]],
                robot_x: float, line: tuple | None = None,
                near_y: float | None = None) -> str | None:

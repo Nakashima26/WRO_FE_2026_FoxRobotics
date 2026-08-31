@@ -101,6 +101,16 @@ def _parse_estado(ack: str) -> str | None:
     val = ack[idx + 4: idx + 5]
     return val if val in ("G", "R", "S") else None
 
+def _parse_direccion(ack: str) -> str | None:
+    """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
+    if not ack:
+        return None
+    idx = ack.find("dir=")
+    if idx < 0:
+        return None
+    val = ack[idx + 4: idx + 5]
+    return val if val in ("L", "R") else None
+
 
 class PPRuntime:
     """
@@ -131,6 +141,10 @@ class PPRuntime:
         self._ext_corner_hold: bool = False   # este frame se rescató un cono
                                               # EXTERIOR de la boca de la esquina
                                               # (ver CORNER_EXTERIOR_PASS_ENABLED)
+        self._ext_corner_block: int = 0       # frames restantes forzando prio=1
+                                              # tras soltar el rescate (el giro no
+                                              # se suelta hasta que el cono está
+                                              # de verdad atrás, no por arrastre)
 
         # ── Trigger de RECUPERANDO por ESTADO MEDIDO (ver _measured_recup_trigger) ──
         self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
@@ -167,10 +181,16 @@ class PPRuntime:
     # ── Serial ────────────────────────────────────────────────────────────────
 
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
-                               pasado: bool, interior: bool) -> str:
-        has_obstacle = n_mem_obs > 0   # basado en memoria real, no en steer
+                               pasado: bool, interior: bool,
+                               turn_block: bool = False) -> str:
+        # turn_block: se acaba de pasar un cono exterior de esquina y todavía
+        # NO se quiere soltar el giro (el cono podría estar al lado por
+        # arrastre de memoria). Fuerza prio/mem para que el ESP32 mantenga
+        # bloqueado detectarEsquina() unos frames más.
+        has_obstacle = (n_mem_obs > 0) or turn_block
+        mem_out = max(n_mem_obs, 1) if turn_block else n_mem_obs
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
-                f"state={state},prio={int(has_obstacle)},mem={n_mem_obs},pp=1,"
+                f"state={state},prio={int(has_obstacle)},mem={mem_out},pp=1,"
                 f"pasado={int(pasado)},intr={int(interior)}")
 
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
@@ -496,6 +516,7 @@ class PPRuntime:
                     # pudo estar apuntando a una naranja que no es la del 1er
                     # giro de la carrera).
                     self.turn_dir_tracker.reset()
+                    self._ext_corner_block = 0
                     if on_ready is not None:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -857,8 +878,22 @@ class PPRuntime:
                 timing_ms["bev"] = (t_bev - t_vis) * 1000.0
 
                 # ── Construir y (si armado) enviar mensaje serial ────────────
+                # ── Bloqueo de giro post-rescate de cono exterior ────────────
+                # Mientras se rescata (exthold) se refresca el contador; al
+                # soltarse, se mantiene prio=1 CORNER_EXT_PASS_TURN_BLOCK_FRAMES
+                # frames más -> el ESP32 no gira hasta que el cono está de
+                # verdad atrás, no por el arrastre de memoria que lo poda como
+                # "PASADO" antes de tiempo.
+                if self._ext_corner_hold:
+                    self._ext_corner_block = getattr(
+                        C, "CORNER_EXT_PASS_TURN_BLOCK_FRAMES", 10)
+                elif self._ext_corner_block > 0:
+                    self._ext_corner_block -= 1
+                _turn_block = self._ext_corner_block > 0
+
                 serial_msg = self._build_serial_message(
-                    obs_norm, state, len(bev_obstacles), pasado, interior
+                    obs_norm, state, len(bev_obstacles), pasado, interior,
+                    turn_block=_turn_block,
                 )
                 if armed:
                     self.serial_link.send_line(serial_msg)
@@ -869,6 +904,13 @@ class PPRuntime:
                 heading = _parse_heading(serial_ack)
                 if heading is not None:
                     self._last_heading = heading
+
+                # Dirección de giro AUTORITATIVA del ESP32 (dir= en el ACK, L/R
+                # desde su 1er GIRANDO). Cubre esquinas 2-12; corrige cualquier
+                # estimación de visión.
+                _esp_dir = _parse_direccion(serial_ack)
+                if _esp_dir is not None:
+                    self.turn_dir_tracker.set_esp_direction(_esp_dir)
 
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
@@ -930,7 +972,8 @@ class PPRuntime:
                 print(f"[DIR] fija={self.turn_dir_tracker.direction} "
                       f"ovr={getattr(C, 'CORNER_TURN_DIR_OVERRIDE', None)} "
                       f"vy={_vy} interior={interior} "
-                      f"ext_corner_hold={int(self._ext_corner_hold)}", flush=True)
+                      f"ext_corner_hold={int(self._ext_corner_hold)} "
+                      f"turn_block={self._ext_corner_block}", flush=True)
                 # Vuelca el estado interno de la memoria rodante a stdout (antes
                 # solo iba al HUD de pantalla vía _annotate). Permite medir en
                 # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx

@@ -634,10 +634,13 @@ CORNER_EXTERIOR_PASS_ENABLED = True
 # el choque. None = usar el tracker de visión (comportamiento de siempre).
 CORNER_TURN_DIR_OVERRIDE = None   # None | "L" | "R"
 
-# El cono cuenta como "en la boca de la esquina" solo si la naranja ya está
-# cerca (near_y >= esto). Mismo umbral de "esquina inminente" que la supresión
-# de pasado -> el handoff rescate->giro queda alineado con esa supresión.
-CORNER_EXT_PASS_NEAR_ORANGE_Y = RECUP_SUPPRESS_NEAR_ORANGE_Y   # 285.0
+# El cono cuenta como "en la boca de la esquina" si la naranja está a near_y
+# >= esto. 2026-08-31: era RECUP_SUPPRESS_NEAR_ORANGE_Y (285) y en los frames
+# del usuario el verde se escapaba a "beyond" a near_y~281 (antes de llegar a
+# 285) -> se dejaba de esquivar a media aproximación -> reaparecía como
+# fantasma. 230 lo agarra apenas la naranja se ve estable, con pista por
+# delante, y no se suelta.
+CORNER_EXT_PASS_NEAR_ORANGE_Y = 230.0
 
 # ...y solo si el cono no está más de esto ADELANTE de la línea naranja (px
 # BEV; y decrece hacia adelante -> "no más allá de BAND" = oy >= near_y - BAND).
@@ -645,13 +648,19 @@ CORNER_EXT_PASS_NEAR_ORANGE_Y = RECUP_SUPPRESS_NEAR_ORANGE_Y   # 285.0
 # después de girar. Subir si el cono de esquina se ve más lejos de la línea.
 CORNER_EXT_PASS_BAND_PX = 70.0
 
-# Mientras se pasa el cono exterior de esquina, capar el |steer_deg| a esto
-# para ir "completamente vertical" y no empezar a arquear hacia el giro antes
-# de tiempo (la centerline, con la esquina abierta adelante, puede curvar hacia
-# ella y PP la seguiría). La esquiva de un cono YA exterior es suave, así que
-# este cap no le pelea. Subir si el cono necesita una esquiva más marcada;
-# 0 = sin cap (deja que la centerline mande).
-CORNER_EXT_PASS_MAX_STEER_DEG = 12.0
+# Cap de |steer_deg| mientras se rescata el cono exterior. 2026-08-31: era 12
+# ("ir vertical"); el usuario pidió que ESQUIVE de verdad (como un cono
+# normal) porque ir recto lo rozaba. 25 deja arquear lo que pida la centerline
+# sin dar un volantazo. 0 = sin cap.
+CORNER_EXT_PASS_MAX_STEER_DEG = 25.0
+
+# Tras rescatar un cono exterior, cuántos frames más se mantiene prio=1 (giro
+# BLOQUEADO) DESPUÉS de que el cono desaparece de memoria. Arregla lo de los
+# frames del usuario: el fantasma del verde se poda como "PASADO" por arrastre
+# (y>345) cuando el carro NO lo pasó de verdad -> GIRANDO entraba y barría
+# hacia el cono. Con esto el giro no se suelta hasta ~10 frames (~0.7s ~=
+# 240mm de avance) después de que el cono se fue = genuinamente atrás.
+CORNER_EXT_PASS_TURN_BLOCK_FRAMES = 10
 
 # ─── PID de fallback (igual que wro_runtime.py) ───────────────────────────────
 RED_TARGET_PX    = 140

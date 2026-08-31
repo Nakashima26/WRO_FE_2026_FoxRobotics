@@ -322,7 +322,14 @@ void parsePiMessage(String line) {
     Serial2.print("ACK:V2,ang=");
     Serial2.print(anguloGyro, 2);
     Serial2.print(",est=");
-    Serial2.println(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
+    Serial2.print(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
+    // Dirección de giro de la pista: '?' hasta el 1er GIRANDO, luego L/R
+    // (direccionIzquierda se fija ahí con distL>distR). La Pi la usa para el
+    // manejo de conos exteriores de esquina — fiable de la esquina 2 en
+    // adelante (la 1 la sigue estimando por visión). primerGiro arranca en
+    // false cada corrida porque el ESP se resetea entre runs.
+    Serial2.print(",dir=");
+    Serial2.println(!primerGiro ? "?" : (direccionIzquierda ? "L" : "R"));
     return;
   }
 
