@@ -312,17 +312,21 @@ class OrangeLineTracker:
 
 class TurnDirectionTracker:
     """
-    Fija la dirección de giro (izquierda/derecha) de la pista. Dos fuentes:
+    Fija la dirección de giro (izquierda/derecha) de la pista.
 
-      1. PRIMARIA — signo de la pendiente de la línea naranja (vy de
-         `line`): la MISMA línea de esquina se ve con pendiente negativa
-         yendo en un sentido y positiva en el otro. vy<0 -> giro derecha,
-         vy>0 -> giro izquierda. Disponible apenas la naranja es estable.
-      2. RESPALDO — posición lateral de un obstáculo "beyond": si cae a la
-         derecha del robot, giro derecha; a la izquierda, giro izquierda.
-         Solo se usa si no hay pendiente utilizable (su historial de fijar
-         mal — rojo de arranque mal clasificado — rompió el intento viejo de
-         interior-pass).
+      PRIMARIA — posición lateral de un obstáculo "beyond" (siguiente recta):
+        cae a la derecha del eje -> giro derecha; a la izquierda -> izquierda.
+        Guard de offset mínimo 40px (un rojo de arranque a 6px fijó "L" mal
+        en pista, 2026-08-28).
+      CONFIRMACIÓN opcional (apagada por defecto) — signo de la pendiente de
+        la naranja. Se probó como primaria y FALLÓ: `vy` sigue a la distancia
+        a la línea, no al sentido de giro (osciló +170->-27->+126 en una sola
+        aproximación). Si se enciende, solo veta/confirma con la línea cerca.
+
+    Solo se infiere DURANTE la corrida (runtime_nuevo llama con beyond=[] y
+    line=None mientras está desarmado, y reset() al armar). El caso crítico es
+    el PRIMER giro; en los siguientes, tras el primer GIRANDO del ESP32, ya
+    hay obstáculos "beyond" limpios de la recta nueva.
 
     Igual que OrangeLineTracker, exige que la misma dirección salga
     PERSIST_FRAMES seguidos antes de fijarla — es una decisión demasiado
@@ -348,45 +352,55 @@ class TurnDirectionTracker:
         self._candidate_count = 0
 
     def update(self, bev_obstacles_beyond: list[tuple[float, float, str]],
-               robot_x: float, line: tuple | None = None) -> str | None:
+               robot_x: float, line: tuple | None = None,
+               near_y: float | None = None) -> str | None:
         if self.direction is not None:
             return self.direction   # ya fija, no se vuelve a evaluar
 
-        # ── Fuente PRIMARIA: signo de la pendiente de la línea naranja ──
-        # La MISMA línea de esquina se ve con pendiente de signo OPUESTO según
-        # el sentido de vuelta (confirmado en pista 2026-08-31):
-        #   vy < 0  (la recta sube de izquierda->derecha en BEV)  -> giro DERECHA
-        #   vy > 0                                                 -> giro IZQUIERDA
-        # `line` = (vx, vy, x0, y0) de OrangeLineTracker.stable["line"] (ya
-        # suavizada por EMA + persistencia). vx es siempre +399, así que el
-        # signo de la pendiente == signo de vy. Está disponible apenas la
-        # naranja se ve estable — antes que un obstáculo "beyond" con offset
-        # lateral suficiente, y sin depender de que haya un obstáculo.
-        guess_slope = None
-        if line is not None and getattr(C, "LINE_DIR_FROM_SLOPE_ENABLED", True):
-            vy = float(line[1])
-            dead = float(getattr(C, "LINE_DIR_SLOPE_DEADBAND", 60.0))
-            if vy <= -dead:
-                guess_slope = "R"
-            elif vy >= dead:
-                guess_slope = "L"
-            # |vy| < dead -> línea casi plana en BEV, no vota (evita latchear
-            # de una lectura al borde de horizontal).
-
-        # ── Fuente de RESPALDO: posición lateral de un obstáculo "beyond" ──
-        # 2026-08-28: guard de offset mínimo. En pista se fijó "L" con un rojo
-        # en x=194 (rx=200, offset 6px = ruido). Un obstáculo en la SIGUIENTE
-        # recta cae CLARAMENTE a un lado; pocos px no son señal.
+        # ── PRIMARIO: posición lateral de un obstáculo "beyond" ──
+        # Un obstáculo de la SIGUIENTE recta cae CLARAMENTE a un lado del eje
+        # según hacia dónde gira la pista: a la derecha -> giro derecha; a la
+        # izquierda -> giro izquierda.
+        # Guard de offset mínimo (2026-08-28): en pista se fijó "L" con un rojo
+        # a x=194 (rx=200, offset 6px = ruido). Pocos px no son señal.
         guess_obs = None
         if bev_obstacles_beyond:
             ox0 = bev_obstacles_beyond[0][0]
             if abs(ox0 - robot_x) >= 40.0:
                 guess_obs = "R" if ox0 > robot_x else "L"
 
-        # La pendiente manda cuando está; el obstáculo es solo respaldo (su
-        # historial de fijar mal es lo que rompió el intento viejo de
-        # interior-pass).
-        guess = guess_slope if guess_slope is not None else guess_obs
+        # ── CONFIRMACIÓN opcional: signo de la pendiente de la naranja ──
+        # 2026-08-31: se PROBÓ como fuente primaria y FALLÓ — `vy` sigue a la
+        # distancia a la línea (distorsión BEV de campo lejano), no al sentido
+        # de giro: en UNA aproximación osciló +170 -> -27 -> +126 y latcheó
+        # "L" con la pista girando a la derecha. Queda apagada por defecto
+        # (LINE_DIR_FROM_SLOPE_ENABLED=False); si se enciende, solo se lee con
+        # la línea CERCA (near_y alto = zona BEV bien calibrada) y solo sirve
+        # para CONFIRMAR / vetar al obstáculo, nunca para decidir sola.
+        guess_slope = None
+        if (line is not None
+                and getattr(C, "LINE_DIR_FROM_SLOPE_ENABLED", False)
+                and near_y is not None
+                and near_y >= getattr(C, "LINE_DIR_MIN_NEAR_Y", 285.0)):
+            vy = float(line[1])
+            dead = float(getattr(C, "LINE_DIR_SLOPE_DEADBAND", 20.0))
+            if vy <= -dead:
+                guess_slope = "R"
+            elif vy >= dead:
+                guess_slope = "L"
+
+        # El obstáculo manda. Si la pendiente está y lo CONTRADICE, no se vota
+        # este frame (que se resuelva o que una fuente se caiga) -- así una
+        # lectura de pendiente mala no arrastra, pero tampoco puede fijar sola.
+        if (guess_obs is not None and guess_slope is not None
+                and guess_obs != guess_slope):
+            if self._candidate is not None:   # solo al romper un candidato en curso
+                print(f"[TURNDIR] conflicto obs={guess_obs} vs slope={guess_slope} "
+                      f"-> no vota", flush=True)
+            self._candidate = None
+            self._candidate_count = 0
+            return None
+        guess = guess_obs if guess_obs is not None else guess_slope
         if guess is None:
             self._candidate = None
             self._candidate_count = 0
@@ -403,15 +417,15 @@ class TurnDirectionTracker:
             self.direction = self._candidate
             just_fixed = True
 
-        # DEBUG: por qué se elige/fija la dirección (se fijó "L" mal en pista
-        # por el rojo del arranque). Log al cambiar candidato, primeros
-        # conteos, y al fijar. slope vs obs deja ver si discrepan.
+        # DEBUG: por qué se elige/fija la dirección (se fijó mal en pista antes).
         if just_fixed or self._candidate_count <= 2:
             _vy = None if line is None else round(float(line[1]))
+            _ny = None if near_y is None else round(float(near_y))
+            _ox = None if not bev_obstacles_beyond else round(bev_obstacles_beyond[0][0])
             print(f"[TURNDIR] {'>>> FIJADA ' if just_fixed else ''}"
                   f"cand={self._candidate} x{self._candidate_count}/{self.persist_frames} "
-                  f"slope={guess_slope}(vy={_vy}) obs={guess_obs} rx={robot_x:.0f}",
-                  flush=True)
+                  f"obs={guess_obs}(ox={_ox}) slope={guess_slope}(vy={_vy},ny={_ny}) "
+                  f"rx={robot_x:.0f}", flush=True)
 
         return self.direction
 

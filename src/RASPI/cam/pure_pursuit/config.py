@@ -525,25 +525,20 @@ LINE_FIT_MAX_SLOPE_DEG = 72  # 2026-08-29: 30 -> 45. Al acercarse a la esquina e
                              # fuera. DIST_HUBER + MIN_POINTS + EMA + PERSIST_FRAMES
                              # filtran un ajuste malo de un frame suelto.
 
-# ─── Dirección de giro por PENDIENTE de la línea naranja — TurnDirectionTracker ─
-# La MISMA línea de esquina se ve con pendiente de signo OPUESTO según el
-# sentido de vuelta (confirmado en pista 2026-08-31):
-#   vy < 0  (la recta sube de izquierda->derecha en BEV)  -> giro DERECHA
-#   vy > 0                                                 -> giro IZQUIERDA
-# vy = line[1] de OrangeLineTracker.stable["line"] (= yr - yl; line[0]=vx es
-# siempre +399, así que signo de pendiente == signo de vy). Es señal más
-# TEMPRANA y fiable que la posición lateral de un obstáculo "beyond" (no
-# necesita que haya un obstáculo ni un offset >40px), y no tiene el historial
-# de fijar mal que rompió el intento viejo de interior-pass. El obstáculo
-# queda solo de respaldo cuando no hay pendiente utilizable.
-LINE_DIR_FROM_SLOPE_ENABLED = True
-# Zona muerta: |vy| por debajo de esto (línea casi plana en BEV) NO vota
-# dirección. vy ≈ 399·tan(θ): 60 ≈ 8.5°, una esquina real se ve a >=25° (vy
-# >~185), así que esto solo filtra una lectura al borde de horizontal.
-LINE_DIR_SLOPE_DEADBAND = 60.0
-# (la persistencia antes de fijar la dirección es TurnDirectionTracker
-# .persist_frames = 5, más los ~6 frames que OrangeLineTracker tarda en dar
-# una `line` estable -> ~11 frames desde que se ve la naranja hasta latchear.)
+# ─── Dirección de giro — TurnDirectionTracker ───────────────────────────────
+# PRIMARIA: posición lateral de un obstáculo "beyond" (ver corner_lines.py).
+#
+# La PENDIENTE de la naranja se probó como primaria (2026-08-31) y FALLÓ: el
+# `vy` (=line[1]) sigue a la DISTANCIA a la línea, no al sentido de giro —
+# distorsión del BEV en campo lejano. En una sola aproximación al 1er giro:
+#   near_y=173 (lejos) vy=+170  |  near_y=291 (cerca) vy=-5  |  near_y=318 vy=+126
+# Latcheó "L" con la pista girando a la DERECHA. Queda como CONFIRMACIÓN
+# opcional, apagada por defecto: si se enciende, solo se lee con la línea
+# cerca (near_y >= LINE_DIR_MIN_NEAR_Y) y solo puede VETAR al obstáculo
+# (conflicto -> no vota), nunca fijar sola.
+LINE_DIR_FROM_SLOPE_ENABLED = False
+LINE_DIR_MIN_NEAR_Y    = 285.0   # solo mirar la pendiente con la línea a <=~190mm
+LINE_DIR_SLOPE_DEADBAND = 20.0   # |vy| por debajo de esto = no opina
 
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
 LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara

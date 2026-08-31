@@ -695,18 +695,18 @@ class PPRuntime:
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
-                        # toda la carrera. Fuente primaria: signo de la pendiente
-                        # de la línea naranja (vy); respaldo: posición lateral de
-                        # un obstáculo "beyond". En el cooldown post-giro la
-                        # `line` aún se re-acumula -> no pasarla ahí.
-                        # Solo infiere dirección DURANTE la corrida (armado):
-                        # desarmado el pipeline corre pero el carro no se mueve
-                        # y puede estar apuntando a cualquier naranja.
+                        # toda la carrera. PRIMARIA: posición lateral de un
+                        # obstáculo "beyond". La pendiente (line/near_y) es solo
+                        # confirmación opcional (apagada por defecto). Solo
+                        # infiere DURANTE la corrida (armado): desarmado el
+                        # pipeline corre pero el carro no se mueve.
                         turn_dir = self.turn_dir_tracker.update(
                             bev_obstacles_beyond if armed else [],
                             C.ROBOT_BEV_X,
                             line=(orange_info.get("line")
                                   if (armed and not en_recuperacion_giro) else None),
+                            near_y=(orange_info.get("near_y")
+                                    if (armed and not en_recuperacion_giro) else None),
                         )
 
                         # ── Interior/exterior del obstáculo actual (el más
