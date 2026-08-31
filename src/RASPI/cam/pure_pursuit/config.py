@@ -393,6 +393,14 @@ RECUP_SUPPRESS_NEAR_ORANGE_Y = 285.0
 # lleva el cono de la recta siguiente).
 RECUP_SUPPRESS_KEEP_MEASURED = True
 
+# Tras un rebase MEDIDO cerca de una esquina (RECUP_SUPPRESS_KEEP_MEASURED):
+# una vez que RECUPERANDO terminó de enderezar, forzar prio=1 (giro bloqueado)
+# estos frames más antes de soltar el giro. Sin esto el ESP32 disparaba
+# detectarEsquina() ~0.5s ANTES del punto real (reporte del usuario,
+# orillas429: "el giro se activó mucho antes, le faltó medio segundo").
+# ~8 frames @ ~15fps ~= 0.5s. Subir si el giro sigue entrando temprano.
+RECUP_CORNER_TURN_DELAY_FRAMES = 8
+
 # est=G debounce: frames CONSECUTIVOS de est=G en el ACK del ESP32 antes de dar
 # el giro por real y borrar/apagar la memoria de obstáculos. Un est=G espurio
 # (ACK con ruido, "est=G fantasma tras verde") ya NO dispara el wipe de memoria

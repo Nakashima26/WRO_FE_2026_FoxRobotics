@@ -142,6 +142,10 @@ class PPRuntime:
                                                   # de _measured_recup_trigger
                                                   # (esquiva de ángulo REAL) — no
                                                   # se suprime cerca de la esquina
+        self._turn_delay_frames: int = 0  # tras un rebase medido cerca de una
+                                          # esquina: fuerza prio=1 estos frames
+                                          # (post-RECUPERANDO) para que el giro
+                                          # no entre ~0.5s antes del punto real
         self._ext_corner_hold: bool = False   # este frame se rescató un cono
                                               # EXTERIOR de la boca de la esquina
                                               # (ver CORNER_EXTERIOR_PASS_ENABLED)
@@ -523,6 +527,7 @@ class PPRuntime:
                     self._ext_corner_block = 0
                     self._pasado_hold = 0
                     self._pasado_from_measured = False
+                    self._turn_delay_frames = 0
                     if on_ready is not None:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -799,6 +804,19 @@ class PPRuntime:
                                 # (comportamiento del modo "angle" viejo, que
                                 # era lo que mantenía la esquiva fluida).
                                 self.memory.forget_color_obstacles()
+                                # Si el rebase medido fue CERCA de una esquina,
+                                # retrasar el giro: tras RECUPERANDO el ESP32
+                                # disparaba detectarEsquina() ~0.5s antes del
+                                # punto real (reporte del usuario, orillas429).
+                                # _turn_delay_frames fuerza prio=1 (giro
+                                # bloqueado) esos frames, DESPUÉS de que
+                                # RECUPERANDO termina, para que el carro avance
+                                # recto hasta el punto correcto.
+                                _ny_m = orange_info.get("near_y")
+                                if (_ny_m is not None and _ny_m >=
+                                        getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 285.0)):
+                                    self._turn_delay_frames = getattr(
+                                        C, "RECUP_CORNER_TURN_DELAY_FRAMES", 8)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
@@ -912,7 +930,19 @@ class PPRuntime:
                         C, "CORNER_EXT_PASS_TURN_BLOCK_FRAMES", 10)
                 elif self._ext_corner_block > 0:
                     self._ext_corner_block -= 1
-                _turn_block = self._ext_corner_block > 0
+
+                # ── Retraso de giro post-RECUPERANDO cerca de esquina ────────
+                # Solo consume el contador cuando RECUPERANDO YA terminó (no
+                # `pasado` ni est=R) — forzar prio=1 durante RECUPERANDO lo
+                # abortaría (el ESP32 sale a SIGUIENDO con piPriority). Una vez
+                # enderezado, prio=1 estos frames bloquea detectarEsquina() ->
+                # el carro avanza recto hasta el punto real del giro.
+                _turn_hold = False
+                if (self._turn_delay_frames > 0
+                        and not pasado and self._prev_estado != "R"):
+                    self._turn_delay_frames -= 1
+                    _turn_hold = True
+                _turn_block = (self._ext_corner_block > 0) or _turn_hold
 
                 serial_msg = self._build_serial_message(
                     obs_norm, state, len(bev_obstacles), pasado, interior,
@@ -996,7 +1026,8 @@ class PPRuntime:
                       f"ovr={getattr(C, 'CORNER_TURN_DIR_OVERRIDE', None)} "
                       f"vy={_vy} interior={interior} "
                       f"ext_corner_hold={int(self._ext_corner_hold)} "
-                      f"turn_block={self._ext_corner_block}", flush=True)
+                      f"turn_block={self._ext_corner_block} "
+                      f"turn_delay={self._turn_delay_frames}", flush=True)
                 # Vuelca el estado interno de la memoria rodante a stdout (antes
                 # solo iba al HUD de pantalla vía _annotate). Permite medir en
                 # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx
