@@ -138,6 +138,10 @@ class PPRuntime:
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
         self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
+        self._pasado_from_measured: bool = False  # el pulso pasado en curso vino
+                                                  # de _measured_recup_trigger
+                                                  # (esquiva de ángulo REAL) — no
+                                                  # se suprime cerca de la esquina
         self._ext_corner_hold: bool = False   # este frame se rescató un cono
                                               # EXTERIOR de la boca de la esquina
                                               # (ver CORNER_EXTERIOR_PASS_ENABLED)
@@ -517,6 +521,8 @@ class PPRuntime:
                     # giro de la carrera).
                     self.turn_dir_tracker.reset()
                     self._ext_corner_block = 0
+                    self._pasado_hold = 0
+                    self._pasado_from_measured = False
                     if on_ready is not None:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -786,6 +792,7 @@ class PPRuntime:
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
+                                self._pasado_from_measured = True
                                 # Olvida el cono YA: la centerline del PRÓXIMO
                                 # frame deja de rodearlo -> el carro sale del
                                 # arco en vez de seguir clavando el volante
@@ -858,18 +865,34 @@ class PPRuntime:
                 # (near_y grande), el ESP32 está por girar. Un pasado=1 aquí lo
                 # mete a RECUPERANDO -> en ese estado NO evalúa detectarEsquina()
                 # -> el giro entra ~0.5s tarde y el carro se lleva el cono de la
-                # recta siguiente (orillas420/421). El giro mismo endereza; no
-                # hace falta RECUPERANDO ciego encima.
+                # recta siguiente (orillas420/421).
+                # EXCEPCIÓN 2026-08-31 (RECUP_SUPPRESS_KEEP_MEASURED): si el
+                # pulso vino del trigger MEDIDO (esquiva de ÁNGULO real, cono
+                # rojo/verde en la misma recta cerca de la esquina), el chasis
+                # quedó chueco y SÍ hace falta RECUPERANDO -> sin él, el carro
+                # ladeado dispara un FALSO detectarEsquina() (ultrasónico lateral
+                # lee "sin pared" por el yaw) y gira ~90° encima del ladeo
+                # (reporte del usuario). Solo se suprime el pasado ESPURIO
+                # (memory.last_passed / BEHIND_PAD head-on, sin esquiva de
+                # ángulo), que era el caso de orillas420/421.
                 _oy = line_info["Orange"].get("near_y")
                 _corner_soon = (line_info["Orange"].get("seen")
                                 and _oy is not None
                                 and _oy >= getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 300.0))
-                if _corner_soon and self._pasado_hold > 0:
+                _keep_measured = (self._pasado_from_measured
+                                  and getattr(C, "RECUP_SUPPRESS_KEEP_MEASURED", True))
+                if _corner_soon and self._pasado_hold > 0 and not _keep_measured:
                     self._pasado_hold = 0
+                    self._pasado_from_measured = False
                     self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
+                elif _corner_soon and _keep_measured and self._pasado_hold > 0:
+                    self._last_recup_reason = (
+                        f"pasado(medido) NO suprimido cerca esquina (oy={_oy:.0f})")
                 pasado = self._pasado_hold > 0
                 if self._pasado_hold > 0:
                     self._pasado_hold -= 1
+                    if self._pasado_hold == 0:
+                        self._pasado_from_measured = False
 
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"

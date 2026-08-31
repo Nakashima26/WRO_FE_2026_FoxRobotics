@@ -381,6 +381,18 @@ PASADO_HOLD_FRAMES        = 6
 # siguiente (orillas420/421). El giro mismo endereza el heading.
 RECUP_SUPPRESS_NEAR_ORANGE_Y = 285.0
 
+# ...PERO NO suprimir si el pasado vino del trigger MEDIDO (esquiva de ÁNGULO
+# real — cono rojo/verde en la MISMA recta, cerca de la esquina). Ahí el chasis
+# quedó chueco y RECUPERANDO SÍ hace falta: sin él, el carro ladeado dispara un
+# FALSO detectarEsquina() (ultrasónico lateral lee "sin pared" por el yaw) y
+# gira ~90° encima del ladeo (reporte del usuario 2026-08-31: "esquiva rojo en
+# la recta, tenía que entrar recuperando, en cambio entró a girando"). La
+# supresión sigue matando el pasado ESPURIO (memory.last_passed / BEHIND_PAD
+# head-on, sin esquiva de ángulo), que era el caso de orillas420/421.
+# False = supresión ciega de siempre (revertir si esto retrasa el giro y se
+# lleva el cono de la recta siguiente).
+RECUP_SUPPRESS_KEEP_MEASURED = True
+
 # est=G debounce: frames CONSECUTIVOS de est=G en el ACK del ESP32 antes de dar
 # el giro por real y borrar/apagar la memoria de obstáculos. Un est=G espurio
 # (ACK con ruido, "est=G fantasma tras verde") ya NO dispara el wipe de memoria
