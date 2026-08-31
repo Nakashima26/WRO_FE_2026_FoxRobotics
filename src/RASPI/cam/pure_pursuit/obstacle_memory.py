@@ -548,7 +548,7 @@ class ObstacleMemory:
         return [(o.x, o.y, o.color) for o in self._obs]
 
     def classify_and_split(
-        self, classify_fn
+        self, classify_fn, rescue_fn=None
     ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
         """
         Separa los obstáculos en memoria entre "mi recta" y "más allá" de la
@@ -565,6 +565,15 @@ class ObstacleMemory:
         no se puede saber, p.ej. línea sin estabilizar) — mismo contrato que
         OrangeLineTracker.classify() pero solo con ox, oy (robot_x/robot_y
         ya deben venir "horneados" en un lambda/partial del caller).
+
+        rescue_fn(ox, oy, color) -> bool (opcional). Si devuelve True para un
+        objeto que la clasificación dejó en "más allá", ese objeto se devuelve
+        igual en `mine` (se esquiva + bloquea el giro) SIN tocar su o.beyond:
+        la histéresis sigue intacta por debajo, así que si el giro llega y el
+        cono sí pasa a la recta siguiente, la clasificación no quedó corrupta.
+        Uso: cono EXTERIOR pegado a la boca de la esquina (ver
+        CORNER_EXTERIOR_PASS_ENABLED en config.py) — geométricamente está al
+        otro lado de la naranja pero hay que rodearlo ANTES de girar.
 
         Llamar SOLO cuando la línea es visible y estable (mismo criterio que
         ya se usaba en runtime_nuevo.py) — si no, no llamar y tratar todo
@@ -607,7 +616,14 @@ class ObstacleMemory:
                         o._cls_votes = 0
             # result is None -> la línea no opina este frame; no se toca el conteo.
             if o.beyond is True:
-                beyond.append((o.x, o.y, o.color))
+                if rescue_fn is not None and rescue_fn(o.x, o.y, o.color):
+                    # Cono exterior de esquina: se trata como "mío" (esquiva +
+                    # bloqueo de giro) aunque geométricamente esté "más allá".
+                    # o.beyond NO se toca -> la histéresis sigue intacta.
+                    mine.append((o.x, o.y, o.color))
+                    mine_conf.append(o.conf)
+                else:
+                    beyond.append((o.x, o.y, o.color))
             else:                       # False o None (sin veredicto) -> "mía" (seguro)
                 mine.append((o.x, o.y, o.color))
                 mine_conf.append(o.conf)

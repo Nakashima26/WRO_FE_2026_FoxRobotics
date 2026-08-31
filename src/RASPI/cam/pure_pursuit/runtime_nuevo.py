@@ -128,6 +128,9 @@ class PPRuntime:
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
         self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
+        self._ext_corner_hold: bool = False   # este frame se rescató un cono
+                                              # EXTERIOR de la boca de la esquina
+                                              # (ver CORNER_EXTERIOR_PASS_ENABLED)
 
         # ── Trigger de RECUPERANDO por ESTADO MEDIDO (ver _measured_recup_trigger) ──
         self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
@@ -537,6 +540,7 @@ class PPRuntime:
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
+                self._ext_corner_hold = False
                 bev_timing    = {"warp": 0.0, "proj": 0.0, "mem": 0.0, "line": 0.0, "dc": 0.0, "ctrl": 0.0}
 
                 if self.bev.is_calibrated:
@@ -632,6 +636,38 @@ class PPRuntime:
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
                         if orange_info["seen"] and not en_recuperacion_giro:
+                            # ── Rescate de cono EXTERIOR pegado a la boca de la
+                            # esquina: si la pista va a girar y el cono de la
+                            # boca se pasa por el lado CONTRARIO al giro, hay
+                            # que rodearlo ANTES de girar -> se trata como "mío"
+                            # aunque caiga "más allá" de la naranja. Ver
+                            # CORNER_EXTERIOR_PASS_ENABLED en config.py.
+                            # turn_dir: override de config si está fijo (el
+                            # equipo sabe la dirección al montar la pista), si
+                            # no, la latcheada del tracker de visión (ya fija
+                            # para cuando se llega a una esquina).
+                            _turn_dir_eff = (getattr(C, "CORNER_TURN_DIR_OVERRIDE", None)
+                                             or self.turn_dir_tracker.direction)
+                            _oy_line = orange_info.get("near_y")
+                            _corner_imminent = (
+                                _oy_line is not None
+                                and _oy_line >= getattr(C, "CORNER_EXT_PASS_NEAR_ORANGE_Y", 285.0))
+                            _rescue_fn = None
+                            if (getattr(C, "CORNER_EXTERIOR_PASS_ENABLED", False)
+                                    and _corner_imminent and _turn_dir_eff is not None):
+                                _band = float(getattr(C, "CORNER_EXT_PASS_BAND_PX", 70.0))
+                                def _rescue_fn(ox, oy, color, _td=_turn_dir_eff,
+                                               _nyl=_oy_line, _b=_band):
+                                    # Exterior = el lado de paso WRO NO coincide
+                                    # con el giro. Y solo en la boca de la
+                                    # esquina (no metido en la recta siguiente).
+                                    if is_interior_pass(_td, color):
+                                        return False
+                                    if oy < _nyl - _b:
+                                        return False
+                                    self._ext_corner_hold = True
+                                    return True
+
                             # Clasificación PEGAJOSA por objeto (ver
                             # ObstacleMemory.classify_and_split()) -- una vez
                             # que un objeto se clasifica "mío" o "más allá",
@@ -647,7 +683,8 @@ class PPRuntime:
                                 self.memory.classify_and_split(
                                     lambda ox, oy: self.line_tracker.classify(
                                         ox, oy, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
-                                    )
+                                    ),
+                                    rescue_fn=_rescue_fn,
                                 )
                             )
 
@@ -675,10 +712,11 @@ class PPRuntime:
                         # ── DEBUG clasificación mine/beyond + turn-dir ──
                         # (solo cuando hay algo "beyond" -> el caso que fijó mal
                         # la dirección; ver TurnDirectionTracker).
-                        if bev_obstacles_beyond:
+                        if bev_obstacles_beyond or self._ext_corner_hold:
                             print(f"[CLASS] mia={[(round(x),round(y),c) for x,y,c in bev_obstacles]} "
                                   f"beyond={[(round(x),round(y),c) for x,y,c in bev_obstacles_beyond]} "
                                   f"turn_dir={turn_dir} interior={interior} "
+                                  f"exthold={int(self._ext_corner_hold)} "
                                   f"orange_near_y={orange_info.get('near_y')}", flush=True)
                         _t4 = time.perf_counter()
                         bev_timing["line"] = (_t4 - _t3) * 1000.0
@@ -752,6 +790,19 @@ class PPRuntime:
                                 # Hay un obstáculo BEV real activo → el hint no
                                 # debe competir con la esquiva geométrica precisa.
                                 self.far_hint.reset_all()
+
+                        # ── Cono EXTERIOR de esquina: ir "completamente
+                        # vertical". La centerline, con la esquina abierta
+                        # adelante, puede curvar hacia ella y PP la seguiría ->
+                        # el carro arquearía hacia el giro antes de rebasar el
+                        # cono. Capar el steer mantiene el rumbo recto; la
+                        # esquiva de un cono YA exterior es suave y cabe dentro
+                        # del cap. 0 = sin cap.
+                        if self._ext_corner_hold and pp_active:
+                            _cap = float(getattr(C, "CORNER_EXT_PASS_MAX_STEER_DEG", 0.0))
+                            if _cap > 0.0:
+                                steer_deg = max(-_cap, min(_cap, steer_deg))
+
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
                         bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
@@ -861,7 +912,9 @@ class PPRuntime:
                 print(log_line, flush=True)
 
                 print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
-                print(f"[DIR] fija={self.turn_dir_tracker.direction} interior={interior}", flush=True)
+                print(f"[DIR] fija={self.turn_dir_tracker.direction} "
+                      f"ovr={getattr(C, 'CORNER_TURN_DIR_OVERRIDE', None)} "
+                      f"interior={interior} ext_corner_hold={int(self._ext_corner_hold)}", flush=True)
                 # Vuelca el estado interno de la memoria rodante a stdout (antes
                 # solo iba al HUD de pantalla vía _annotate). Permite medir en
                 # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx

@@ -579,6 +579,55 @@ PP_STEER_GAIN     = MAX_STEER_DEG   # 60.0
 # el turn-dir esté confiable Y el ESP32 tenga el gate de alineación.
 INTERIOR_PASS_ENABLED = False
 
+# ─── Obstáculo EXTERIOR pegado a la boca de la esquina ───────────────────────
+# Caso (reporte del usuario, HUD orillas424): la pista va a girar (naranja
+# cerca) y justo en la boca de la esquina hay un cono cuyo lado de paso WRO es
+# el CONTRARIO al giro -> verde con giro a la DERECHA, o rojo con giro a la
+# IZQUIERDA (o sea, NOT is_interior_pass). Ahí no se puede girar todavía: hay
+# que pasar el cono COMPLETO por el lado correcto (el exterior del giro), yendo
+# recto, y solo cuando ya quedó atrás soltar el giro.
+#
+# Sin esto, classify_and_split() lo manda a "beyond" (está al otro lado de la
+# naranja) -> desaparece del plan -> prio=0/mem=0 -> el ESP32 ve vía libre y
+# gira CONTRA el cono.
+#
+# Fix (solo Pi, NO toca PurePursuit.ino): mientras se cumpla el caso, ese cono
+# se RESCATA de "beyond" y se trata como "mío":
+#   (a) sigue en bev_obstacles -> la centerline lo esquiva por el lado WRO
+#       correcto (_clamp_to_pass_side: verde->izquierda, rojo->derecha),
+#   (b) prio=1/mem>0 -> el ESP32 mantiene bloqueado detectarEsquina().
+# Cuando el cono cruza el eje, _prune lo tira; como la naranja está cerca,
+# RECUP_SUPPRESS_NEAR_ORANGE_Y ya anula el pulso `pasado` -> el ESP32 pasa
+# directo a GIRANDO. NO es el intento viejo de "interior pass" (ese soltaba el
+# giro ANTES via intr=1; esto lo RETIENE). No se toca intr ni el .ino.
+CORNER_EXTERIOR_PASS_ENABLED = True
+
+# Dirección de giro de la pista para ESTE campeonato. El equipo la sabe al
+# montar la pista. Si se fija ("L" o "R"), se usa para decidir interior/exterior
+# en vez de la que infiere TurnDirectionTracker por visión — que en el intento
+# viejo de interior-pass se fijó MAL (rojo de arranque mal clasificado) y causó
+# el choque. None = usar el tracker de visión (comportamiento de siempre).
+CORNER_TURN_DIR_OVERRIDE = None   # None | "L" | "R"
+
+# El cono cuenta como "en la boca de la esquina" solo si la naranja ya está
+# cerca (near_y >= esto). Mismo umbral de "esquina inminente" que la supresión
+# de pasado -> el handoff rescate->giro queda alineado con esa supresión.
+CORNER_EXT_PASS_NEAR_ORANGE_Y = RECUP_SUPPRESS_NEAR_ORANGE_Y   # 285.0
+
+# ...y solo si el cono no está más de esto ADELANTE de la línea naranja (px
+# BEV; y decrece hacia adelante -> "no más allá de BAND" = oy >= near_y - BAND).
+# Un cono ya metido en la recta siguiente NO se rescata: lo resuelve esa recta
+# después de girar. Subir si el cono de esquina se ve más lejos de la línea.
+CORNER_EXT_PASS_BAND_PX = 70.0
+
+# Mientras se pasa el cono exterior de esquina, capar el |steer_deg| a esto
+# para ir "completamente vertical" y no empezar a arquear hacia el giro antes
+# de tiempo (la centerline, con la esquina abierta adelante, puede curvar hacia
+# ella y PP la seguiría). La esquiva de un cono YA exterior es suave, así que
+# este cap no le pelea. Subir si el cono necesita una esquiva más marcada;
+# 0 = sin cap (deja que la centerline mande).
+CORNER_EXT_PASS_MAX_STEER_DEG = 12.0
+
 # ─── PID de fallback (igual que wro_runtime.py) ───────────────────────────────
 RED_TARGET_PX    = 140
 GREEN_TARGET_PX  = 500
