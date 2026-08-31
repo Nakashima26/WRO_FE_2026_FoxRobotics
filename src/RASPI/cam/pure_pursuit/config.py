@@ -509,11 +509,21 @@ LINE_FIT_MIN_POINTS  = 35   # 2026-08-29: 70 -> 35. Con 70, la línea naranja re
                              # y el carro lo esquivaba (orillas420, reporte del usuario).
                              # 35 permite estimar la pendiente desde los primeros frames;
                              # el EMA de _smooth_line (line_ema=0.35) amortigua el ruido.
-LINE_FIT_MAX_SLOPE_DEG = 45  # 2026-08-29: 30 -> 45. Al acercarse a la esquina en ángulo,
+LINE_FIT_MAX_SLOPE_DEG = 72  # 2026-08-29: 30 -> 45. Al acercarse a la esquina en ángulo,
                              # o esquivando (chasis ladeado ~20°), la línea SÍ se ve
                              # diagonal en el BEV -> descartar >30° forzaba el horizontal
                              # equivocado. 45° deja pasar la inclinación real sin colar
                              # una vertical de ruido.
+                             # 2026-08-31: 45 -> 72. La MISMA línea de esquina se ve a
+                             # ~30° en un sentido de vuelta y a ~60° en el otro (el
+                             # ángulo con que la cruza el chasis cambia con la
+                             # dirección) -> con 45 en medio, un sentido ajustaba bien
+                             # y el otro caía SIEMPRE al fallback horizontal
+                             # (clasificación mala, el giro no se armaba -- reporte del
+                             # usuario). 72 acepta los ~60° reales; una vertical de
+                             # ruido (>72°, columna de píxeles / borde de cono) sigue
+                             # fuera. DIST_HUBER + MIN_POINTS + EMA + PERSIST_FRAMES
+                             # filtran un ajuste malo de un frame suelto.
 
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
 LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
