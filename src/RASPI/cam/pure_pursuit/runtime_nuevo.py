@@ -491,6 +491,11 @@ class PPRuntime:
                     ready_ack = "ACK:READY" in (self.serial_link.try_readline() or "")
                     armed = True
                     self._last_update_t = None   # dt limpio para el 1er frame armado
+                    # La dirección de giro se infiere SOLO durante la corrida:
+                    # descartar cualquier latch del rato desarmado (el carro
+                    # pudo estar apuntando a una naranja que no es la del 1er
+                    # giro de la carrera).
+                    self.turn_dir_tracker.reset()
                     if on_ready is not None:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -694,10 +699,14 @@ class PPRuntime:
                         # de la línea naranja (vy); respaldo: posición lateral de
                         # un obstáculo "beyond". En el cooldown post-giro la
                         # `line` aún se re-acumula -> no pasarla ahí.
+                        # Solo infiere dirección DURANTE la corrida (armado):
+                        # desarmado el pipeline corre pero el carro no se mueve
+                        # y puede estar apuntando a cualquier naranja.
                         turn_dir = self.turn_dir_tracker.update(
-                            bev_obstacles_beyond, C.ROBOT_BEV_X,
-                            line=(None if en_recuperacion_giro
-                                  else orange_info.get("line")),
+                            bev_obstacles_beyond if armed else [],
+                            C.ROBOT_BEV_X,
+                            line=(orange_info.get("line")
+                                  if (armed and not en_recuperacion_giro) else None),
                         )
 
                         # ── Interior/exterior del obstáculo actual (el más
