@@ -585,7 +585,21 @@ class ObstacleMemory:
         mine: list[tuple[float, float, str]] = []
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
+        force_mine_y = getattr(C, "CLASSIFY_FORCE_MINE_Y", 290.0)
         for o in self._obs:
+            # PISO DE CERCANÍA (ver OrangeLineTracker.classify / config): un
+            # obstáculo casi encima NO puede ser de la siguiente recta. Se fuerza
+            # a "mía" y se ROMPE el latch `beyond` de una -- sin esto la
+            # histéresis TO_MINE(6) no alcanza a rescatarlo antes de _prune y el
+            # carro lo embiste (orillas471).
+            if o.y >= force_mine_y:
+                if o.beyond is not False:
+                    o.beyond = False
+                    o._cls_vote = None
+                    o._cls_votes = 0
+                mine.append((o.x, o.y, o.color))
+                mine_conf.append(o.conf)
+                continue
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             if result is not None:
                 want_beyond = (result is False)

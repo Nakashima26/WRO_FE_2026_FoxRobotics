@@ -579,6 +579,14 @@ LINE_FIT_MAX_SLOPE_DEG = 72  # 2026-08-29: 30 -> 45. Al acercarse a la esquina e
                              # ruido (>72°, columna de píxeles / borde de cono) sigue
                              # fuera. DIST_HUBER + MIN_POINTS + EMA + PERSIST_FRAMES
                              # filtran un ajuste malo de un frame suelto.
+LINE_FIT_MIN_X_SPAN_PX = 150 # 2026-09-01: los pixeles del ajuste deben abarcar al
+                             # menos esto en X. Una línea de esquina real cruza el
+                             # BEV (~400px de ancho); el borde de un cono / una
+                             # columna de ruido abarca ~30-50px pero puede colar un
+                             # fit de ~60° (< MAX_SLOPE_DEG) que luego manda TODO lo
+                             # de adelante a "beyond" (orillas471: line[1]~+728 con
+                             # un rojo de la recta actual justo ahí). Si no abarca,
+                             # se usa el fallback horizontal plano en near_y.
 
 # ─── Dirección de giro — TurnDirectionTracker ───────────────────────────────
 # PRIMARIA: posición lateral de un obstáculo "beyond" (ver corner_lines.py).
@@ -643,6 +651,18 @@ LINE_CLASSIFY_FRAMES_TO_BEYOND = 12
 # esquina se esquivaba ~1s antes de corregirse (orillas420). Este umbral chico
 # aplica SOLO al primer veredicto; cambiar uno ya fijado sigue usando 6/12.
 LINE_CLASSIFY_FRAMES_FIRST     = 4
+
+# 2026-09-01: PISO DE CERCANÍA. Un obstáculo con y-BEV >= esto está casi bajo la
+# nariz (behind_y de _prune = ry+BEHIND_PAD = 345): físicamente NO puede ser de
+# la siguiente recta -- para tenerlo tan cerca ya habrías cruzado la esquina, y
+# ahí manda CRUCERO/MANIOBRA, no la esquiva. OrangeLineTracker.classify() y
+# classify_and_split() lo fuerzan a "mía" ignorando la línea, y rompen el latch
+# `beyond` de una (sin esperar LINE_CLASSIFY_FRAMES_TO_MINE). Motivo: orillas471
+# -- la naranja se fijó mal (near_y saltando 157->318, fits de pendiente basura
+# line[1]~+728) -> un rojo de la recta actual quedó `beyond` desde el 1er frame,
+# el latch nunca se soltó y el carro lo embistió. Ventana 290->345 = ~4 frames
+# para mandarlo al ESP antes de que _prune lo tire como PASADO.
+CLASSIFY_FORCE_MINE_Y          = 290.0
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60

@@ -90,6 +90,12 @@ def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
     ys, xs = np.where(band > 0)
     if len(xs) < min_points:
         return None
+    # Los pixeles deben abarcar un rango ancho en X: una línea de esquina real
+    # cruza el BEV; el borde de un cono / columna de ruido no. Sin esto, ese
+    # ruido colaba un fit de ~60° (bajo MAX_SLOPE_DEG) que en line_side_is_near
+    # manda todo lo de adelante a "beyond" (orillas471).
+    if float(xs.max() - xs.min()) < getattr(C, "LINE_FIT_MIN_X_SPAN_PX", 150):
+        return None
     pts = np.column_stack([xs.astype(np.float32), (ys + y0b).astype(np.float32)])
     # DIST_HUBER (no DIST_L2): mínimos cuadrados le da todo el peso a los
     # outliers -- unos pocos pixeles de ruido lejos del eje de la línea bastaban
@@ -288,6 +294,15 @@ class OrangeLineTracker:
             yl = self.line_ema * yl + (1.0 - self.line_ema) * pyl
             yr = self.line_ema * yr + (1.0 - self.line_ema) * pyr
 
+        # El fit crudo ya pasó LINE_FIT_MAX_SLOPE_DEG, pero la mezcla EMA con una
+        # recta previa (posible tramo malo / vieja) puede dejar la recta final
+        # más inclinada. Re-chequea el resultado mezclado con el mismo tope; si
+        # se pasa, cae al fallback horizontal (classify usa oy > near_y).
+        ang = abs(float(np.degrees(np.arctan2(yr - yl, w - 1.0))))
+        ang = min(ang, 180.0 - ang)
+        if ang > C.LINE_FIT_MAX_SLOPE_DEG:
+            return None
+
         return (float(w - 1.0), float(yr - yl), 0.0, float(yl))
 
     def classify(self, ox: float, oy: float, robot_x: float, robot_y: float) -> bool | None:
@@ -302,6 +317,13 @@ class OrangeLineTracker:
         funciona igual de bien que antes cuando la línea SÍ es horizontal,
         y es mejor que no clasificar nada.
         """
+        # PISO DE CERCANÍA: un obstáculo casi bajo la nariz NO puede ser de la
+        # siguiente recta (ver C.CLASSIFY_FORCE_MINE_Y). Se ignora la línea —
+        # buena o basura — porque justo aquí es donde una mala fijación de la
+        # naranja mete un cono de la recta actual en "beyond" y el carro lo
+        # embiste (orillas471).
+        if oy >= getattr(C, "CLASSIFY_FORCE_MINE_Y", 290.0):
+            return True
         if not self.stable["seen"]:
             return None
         line = self.stable["line"]
