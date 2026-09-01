@@ -317,8 +317,12 @@ OBS_MEM_LAT_TURN_DEG       = 35
 #             respaldo para el rebase DE FRENTE (la lata sale por abajo del BEV).
 # 2026-08-29: "off". geom retirado como disparo (código sigue, dormido). El
 # rebase lateral ahora es el trigger medido de runtime_nuevo (RECUP_MEAS_*).
-OBS_MEM_LAT_TURN_MODE      = "off"
-OBS_MEM_LAT_TURN_ENABLED   = False  # compat (sin MODE: True->"angle")
+# 2026-09-01 (rama SectionTurning): de vuelta a "angle" -- el trigger MEDIDO
+# daba fakes y el bug de la línea naranja. "angle" (lat-giro IMM >= DEG) es el
+# RECUPERANDO confiable de siempre. RECUP_MEAS_ENABLED=False y la supresión por
+# naranja neutralizada (ver abajo).
+OBS_MEM_LAT_TURN_MODE      = "angle"
+OBS_MEM_LAT_TURN_ENABLED   = True   # compat (sin MODE: True->"angle")
 
 # ─── Trigger de RECUPERANDO por ESTADO MEDIDO — runtime_nuevo._measured_recup_trigger ─
 # Sustituto del ancla "geom". No hace dead-reckoning de la lata: mira el estado
@@ -332,7 +336,9 @@ OBS_MEM_LAT_TURN_ENABLED   = False  # compat (sin MODE: True->"angle")
 # Separa solo con (3) el caso "esquiva suave con espacio" (heading chico -> PP +
 # wall PID solos, NO dispara) del "latiguazo sin espacio" (heading grande ->
 # dispara justo al terminar de rodearla).
-RECUP_MEAS_ENABLED        = True
+RECUP_MEAS_ENABLED        = False  # rama SectionTurning: apagado (daba fakes). RECUPERANDO
+                                   # vía OBS_MEM_LAT_TURN_MODE="angle". Poner True para volver
+                                   # al trigger medido.
 RECUP_MEAS_NEAR_PX        = 120.0  # px BEV por delante del eje: banda de filas cuyo peso
                                    # de esquiva se mira para ARMAR (hubo lata rodeada)
 RECUP_MEAS_ARM_W          = 0.35   # peso de esquiva que ARMA el trigger
@@ -387,7 +393,11 @@ PASADO_HOLD_FRAMES        = 6
 # En RECUPERANDO el ESP32 no evalúa detectarEsquina() -> un pasado justo antes de
 # la esquina metía el giro ~0.5s tarde y el carro se llevaba el cono de la recta
 # siguiente (orillas420/421). El giro mismo endereza el heading.
-RECUP_SUPPRESS_NEAR_ORANGE_Y = 285.0
+# 2026-09-01 (rama SectionTurning): NEUTRALIZADO (9999) — esta supresión era la
+# causa del "GIRANDO en vez de RECUPERANDO cerca de la naranja". Con la maniobra
+# por-tramos la esquina la maneja APROXIMANDO (no pasado->RECUPERANDO), así que
+# ya no hace falta suprimir. Volver a 285 si se retoma el giro continuo.
+RECUP_SUPPRESS_NEAR_ORANGE_Y = 9999.0
 
 # ...PERO NO suprimir si el pasado vino del trigger MEDIDO (esquiva de ÁNGULO
 # real — cono rojo/verde en la MISMA recta, cerca de la esquina). Ahí el chasis
