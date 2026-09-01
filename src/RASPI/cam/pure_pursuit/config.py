@@ -317,12 +317,14 @@ OBS_MEM_LAT_TURN_DEG       = 35
 #             respaldo para el rebase DE FRENTE (la lata sale por abajo del BEV).
 # 2026-08-29: "off". geom retirado como disparo (código sigue, dormido). El
 # rebase lateral ahora es el trigger medido de runtime_nuevo (RECUP_MEAS_*).
-# 2026-09-01 (rama SectionTurning): de vuelta a "angle" -- el trigger MEDIDO
-# daba fakes y el bug de la línea naranja. "angle" (lat-giro IMM >= DEG) es el
-# RECUPERANDO confiable de siempre. RECUP_MEAS_ENABLED=False y la supresión por
-# naranja neutralizada (ver abajo).
-OBS_MEM_LAT_TURN_MODE      = "angle"
-OBS_MEM_LAT_TURN_ENABLED   = True   # compat (sin MODE: True->"angle")
+# 2026-09-01 (rama SectionTurning): se probó "angle" y disparaba RECUPERANDO
+# TEMPRANO (orillas445: con la lata aún 40-58px adelante) — lat-giro y lat-x
+# disparan por el YAW de la esquiva, no porque la lata quedó atrás. De vuelta a
+# "off" + trigger MEDIDO. Lo que sí se mantiene: supresión por naranja apagada
+# (RECUP_SUPPRESS_NEAR_ORANGE_Y=9999). El giro falso cerca de la esquina se
+# arregla en el ESP32 (trigger de giro nuevo), no matando el pasado en la Pi.
+OBS_MEM_LAT_TURN_MODE      = "off"
+OBS_MEM_LAT_TURN_ENABLED   = False  # compat (sin MODE: True->"angle")
 
 # ─── Trigger de RECUPERANDO por ESTADO MEDIDO — runtime_nuevo._measured_recup_trigger ─
 # Sustituto del ancla "geom". No hace dead-reckoning de la lata: mira el estado
@@ -336,9 +338,9 @@ OBS_MEM_LAT_TURN_ENABLED   = True   # compat (sin MODE: True->"angle")
 # Separa solo con (3) el caso "esquiva suave con espacio" (heading chico -> PP +
 # wall PID solos, NO dispara) del "latiguazo sin espacio" (heading grande ->
 # dispara justo al terminar de rodearla).
-RECUP_MEAS_ENABLED        = False  # rama SectionTurning: apagado (daba fakes). RECUPERANDO
-                                   # vía OBS_MEM_LAT_TURN_MODE="angle". Poner True para volver
-                                   # al trigger medido.
+RECUP_MEAS_ENABLED        = True   # rama SectionTurning: de vuelta a True. "angle" disparaba
+                                   # RECUPERANDO temprano (orillas445). El medido espera a que
+                                   # la lata quede atrás de verdad.
 RECUP_MEAS_NEAR_PX        = 120.0  # px BEV por delante del eje: banda de filas cuyo peso
                                    # de esquiva se mira para ARMAR (hubo lata rodeada)
 RECUP_MEAS_ARM_W          = 0.35   # peso de esquiva que ARMA el trigger
