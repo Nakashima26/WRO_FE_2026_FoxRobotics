@@ -407,6 +407,21 @@ RECUP_CORNER_TURN_DELAY_FRAMES = 3
 # a media esquiva -> RECUPERANDO deja de perder la lata que venía siguiendo.
 TURN_EST_G_CONFIRM_FRAMES = 2
 
+# ─── Detector de obstáculos DURANTE el giro (mid_turn.py) ────────────────────
+# FASE 1: solo observa y registra (línea [MTURN] en journalctl). NO cambia el
+# steering ni manda nada al ESP32. Sirve para medir en pista si la detección
+# mid-turn confirma latas reales sin fantasmas, antes de cablearla al firmware.
+# La memoria rodante sigue apagada durante el giro; esto es aparte.
+MIDTURN_WINDOW            = 4      # frames de historia (ring buffer)
+MIDTURN_CONFIRM_FRAMES    = 3      # de esos, cuántos deben coincidir en color+posición
+MIDTURN_ROI_MAX_MM        = 280.0  # distancia real máx. robot->lata para contarla
+MIDTURN_ROI_HALF_ANGLE_DEG = 45.0 # semiapertura del cono "hacia adelante" del ROI
+MIDTURN_POS_TOL_PX        = 50.0   # tolerancia de posición BEV entre frames (100 mm)
+MIDTURN_MIN_GYRO_DEG      = 25.0   # no mirar antes de este avance de giro (los
+                                   # primeros grados ven la esquina / la recta que
+                                   # se deja atrás, no la recta nueva)
+MIDTURN_SIDE_DEADBAND_PX  = 24.0   # |bev_x - eje| bajo esto -> lado '?' (indeciso)
+
 # ── MODO "geom" — cómo funciona ─────────────────────────────────────────────
 # Al detectar la lata se guarda su posición (x0,y0) y el heading del IMU.
 # Cada frame se reproyecta esa posición al marco ACTUAL del robot aplicando el

@@ -47,6 +47,7 @@ from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_p
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
+from .mid_turn import MidTurnObstacleDetector
 from . import config as C
 
 
@@ -129,6 +130,8 @@ class PPRuntime:
         self.far_hint   = FarHintManager()
         self.line_tracker = OrangeLineTracker()
         self.turn_dir_tracker = TurnDirectionTracker()
+        # FASE 1 mid-turn: solo observa/registra (ver mid_turn.py). No actúa.
+        self.mid_turn   = MidTurnObstacleDetector()
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -524,6 +527,7 @@ class PPRuntime:
                     # pudo estar apuntando a una naranja que no es la del 1er
                     # giro de la carrera).
                     self.turn_dir_tracker.reset()
+                    self.mid_turn.reset()
                     self._ext_corner_block = 0
                     self._pasado_hold = 0
                     self._pasado_from_measured = False
@@ -626,6 +630,17 @@ class PPRuntime:
                         if self._is_turning:
                             bev_obstacles = []
                             obstacle_conf = []
+                            # FASE 1 mid-turn: detección INSTANTÁNEA solo para
+                            # observar/registrar. new_obstacles = proyección BEV
+                            # cruda de ESTE frame (sin memoria rodante). NO toca
+                            # bev_obstacles, steering, memoria ni el mensaje serial.
+                            _mt_ev = self.mid_turn.update(new_obstacles, self._last_heading)
+                            if _mt_ev is not None:
+                                print(f"[MTURN] CONFIRMADO {_mt_ev.color} lado={_mt_ev.side} "
+                                      f"d={_mt_ev.dist_mm:.0f}mm bev=({_mt_ev.bev_x:.0f},{_mt_ev.bev_y:.0f}) "
+                                      f"frames={_mt_ev.frames}/{_mt_ev.window} "
+                                      f"gyro={_mt_ev.heading_deg:+.0f} wro_bias={_mt_ev.wro_bias:+d} "
+                                      f"(FASE1: no se actúa)", flush=True)
                         else:
                             bev_obstacles = self.memory.update(
                                 new_obstacles, dt_s, self._last_heading,
@@ -989,6 +1004,7 @@ class PPRuntime:
                         # Empieza el giro físico -> vaciar YA y apagar la memoria.
                         self.memory.reset()
                         self.line_tracker.reset()   # la línea ya quedó atrás, no aplica a la recta nueva
+                        self.mid_turn.reset()       # FASE 1: historia limpia para este giro
                         self._is_turning   = True
                         self._turn_start_t = now
                         # La esquiva (si había) muere con el giro.
@@ -1005,6 +1021,9 @@ class PPRuntime:
                         self._turn_recovery_frames = C.TURN_RECOVERY_FRAMES
                         self._heading_ref = None   # ref fresca para la esquiva de la recta nueva
                         print("[MEM] Giro terminado — memoria de obstáculos reactivada.", flush=True)
+                        _mt_last = self.mid_turn.last_sighting
+                        print(f"[MTURN] fin de giro — {'nada confirmado' if _mt_last is None else _mt_last}",
+                              flush=True)
                     self._prev_estado = estado_now
 
                 # Red de seguridad: si por un ACK perdido/atorado el ESP32 nunca
@@ -1046,6 +1065,9 @@ class PPRuntime:
                 # y del cono avanza en [MEMDBG]) o PIVOTEA (steer al tope, y clavada).
                 print(f"[PPDIAG] steer={steer_deg:+.1f}deg obs={obs_norm:+.3f} "
                       f"lka={lookahead_eff:.0f} nobs={len(bev_obstacles)}", flush=True)
+                # FASE 1 mid-turn: estado por frame SOLO mientras dura el giro.
+                if self._is_turning:
+                    print(f"[MTURN] {self.mid_turn.status_str()}", flush=True)
 
                 t_ser = time.perf_counter()
                 timing_ms["ser"] = (t_ser - t_bev) * 1000.0
