@@ -912,38 +912,14 @@ class PPRuntime:
                     self.far_hint.reset_all()
 
                 # ── Finalizar el pulso pasado=1 ──────────────────────────────
-                # OR de las dos vías: memory.last_passed (rebase de FRENTE, "PASADO
-                # y" / borde) ya subió _pasado_hold arriba; el trigger MEDIDO
-                # (rebase de ÁNGULO) lo subió tras detect_centerline. Aquí solo se
-                # emite el hold y se decrementa -- una sola vez por frame, corra o
-                # no el pipeline BEV.
-                # SUPRIMIR si la esquina es inminente: con la línea naranja cerca
-                # (near_y grande), el ESP32 está por girar. Un pasado=1 aquí lo
-                # mete a RECUPERANDO -> en ese estado NO evalúa detectarEsquina()
-                # -> el giro entra ~0.5s tarde y el carro se lleva el cono de la
-                # recta siguiente (orillas420/421).
-                # EXCEPCIÓN 2026-08-31 (RECUP_SUPPRESS_KEEP_MEASURED): si el
-                # pulso vino del trigger MEDIDO (esquiva de ÁNGULO real, cono
-                # rojo/verde en la misma recta cerca de la esquina), el chasis
-                # quedó chueco y SÍ hace falta RECUPERANDO -> sin él, el carro
-                # ladeado dispara un FALSO detectarEsquina() (ultrasónico lateral
-                # lee "sin pared" por el yaw) y gira ~90° encima del ladeo
-                # (reporte del usuario). Solo se suprime el pasado ESPURIO
-                # (memory.last_passed / BEHIND_PAD head-on, sin esquiva de
-                # ángulo), que era el caso de orillas420/421.
-                _oy = line_info["Orange"].get("near_y")
-                _corner_soon = (line_info["Orange"].get("seen")
-                                and _oy is not None
-                                and _oy >= getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 300.0))
-                _keep_measured = (self._pasado_from_measured
-                                  and getattr(C, "RECUP_SUPPRESS_KEEP_MEASURED", True))
-                if _corner_soon and self._pasado_hold > 0 and not _keep_measured:
-                    self._pasado_hold = 0
-                    self._pasado_from_measured = False
-                    self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
-                elif _corner_soon and _keep_measured and self._pasado_hold > 0:
-                    self._last_recup_reason = (
-                        f"pasado(medido) NO suprimido cerca esquina (oy={_oy:.0f})")
+                # memory.last_passed (rebase por "PASADO y" / lat-giro / borde)
+                # ya subió _pasado_hold arriba. Aquí solo se emite el hold y se
+                # decrementa -- una vez por frame.
+                # 2026-09-01 (rama SectionTurning): se QUITÓ la supresión por
+                # línea naranja (RECUP_SUPPRESS_NEAR_ORANGE_Y). Era la causa del
+                # "GIRANDO en vez de RECUPERANDO". RECUPERANDO SIEMPRE entra si
+                # hay pulso; el trigger de giro nuevo (ESP32) ya no depende de
+                # que la Pi mate el pasado cerca de la esquina.
                 pasado = self._pasado_hold > 0
                 if self._pasado_hold > 0:
                     self._pasado_hold -= 1
