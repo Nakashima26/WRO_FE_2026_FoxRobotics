@@ -37,6 +37,8 @@ MPU6050 mpu(Wire);
 #define A1          18
 #define A2          19
 #define SERVO_PIN   13
+#define TRIG_F      14   // HC-SR04 frontal (ronda de obstáculos: CRUCERO/MANIOBRA)
+#define ECHO_F      33
 
 // ── PWM ───────────────────────────────────────────────────────────────────────
 const int freqServo  = 50;
@@ -105,8 +107,14 @@ const float ppSteerGain = 60.0;
 // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
 // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
 float ppServoGain = 1.0;
-float PP_GYRO_BLEND = 0.4;   // 0 = solo vision, 1 = solo gyro. Empieza bajo y sube si sigue derivando.
-float PP_WALL_BLEND = .15;
+float PP_GYRO_BLEND = 0.12;  // 0 = solo vision, 1 = solo gyro. BAJO a propósito: en el modo
+                            // por tramos el heading de referencia queda viciado tras cada
+                            // MANIOBRA (no gira exacto 90°), y un blend alto "defiende" ese
+                            // heading chueco -> el carro deriva lap a lap. Visión + wall PID
+                            // re-referencian al carril/paredes reales y no tienen ese problema.
+float PP_WALL_BLEND = 0.30;  // SUBIDO: el wall PID (distL-distR) centra en el carril y
+                            // ayuda a des-enchuecar. Solo aplica en recta limpia
+                            // (!piPriority && mem<=0), así que no choca con la esquina.
 
 // ── Boot sincronización con Pi ────────────────────────────────────────────────
 bool piReadyReceived = false;
@@ -127,8 +135,53 @@ const unsigned long BOOT_WAIT_PI_MS = 1000;
 // enderezar solo con lo que ve en ese instante incierto, aquí el wall PID +
 // gyro PID (que YA se calculan siempre, ver controlPID()) toman el volante
 // hasta que el robot vuelve a estar centrado/alineado.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO };
+// CRUCERO / MANIOBRA: solo ronda de obstáculos (rondaObstaculos=true). En lugar
+// del giro continuo (GIRANDO), al llegar a una esquina el carro va DERECHO por
+// ángulo (CRUCERO) hasta ~50cm de la pared y luego hace una maniobra por tramos
+// (MANIOBRA): pivote hacia adelante o EN REVERSA según qué tan pegado va a la
+// pared exterior del giro. Con rondaObstaculos=false nada de esto se usa.
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA };
 Estado estado = SIGUIENDO;
+
+// ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
+const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
+const int  FRONT_TURN_FWD_CM = 60;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
+                                       // (el arco necesita espacio adelante)
+const int  FRONT_TURN_REV_CM = 30;     // ... si será REVERSE (hay que estar cerca de la pared
+                                       // para que el pivote en reversa no sobrepase)
+const int  FRONT_CRUCERO_CM = 80;      // SIGUIENDO -> CRUCERO (recta ya limpia, esquina cerca)
+const int  MANIOBRA_OVERSHOOT_DEG = 12; // sale del pivote a (AngGiro - esto): el carro sigue
+                                        // rotando por inercia y sin esto la recta nueva
+                                        // arrancaba ~10-15° chueca (orillas460)
+// Dirección de giro de la pista: 0 = auto (se latchea en la 1ª esquina por
+// apertura de pared), 1 = SIEMPRE derecha, 2 = SIEMPRE izquierda. El equipo
+// sabe el sentido al montar -> poner 1 o 2 para que NUNCA dependa del ultrasónico.
+const int  GIRO_DIR_OVERRIDE = 0;
+const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
+const int  MANIOBRA_VEL_REV  = 100;     // PWM objetivo del motor en la reversa-pivote
+const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el golpe de corriente)
+const float CRUCERO_WALL_BLEND = 0.8f; // en CRUCERO: cuánto del wall PID se mezcla para CENTRAR
+                                       // en el carril (0 = solo heading, 1 = wall PID completo).
+                                       // Solo aplica mientras ambas paredes existen.
+const unsigned long MANIOBRA_FRENO_MS      = 300;   // coast (A1=A2=LOW) antes/después de invertir dirección
+                                                    // — SIN esto el puente H se fríe por "plugging" (invertir
+                                                    // con el motor girando). Reventó un TB6612 así (2026-09-01).
+const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa de a poco. Corto a
+                                                    // propósito: el motor viene PARADO (coast de
+                                                    // fase 0), así que arrancar a MANIOBRA_VEL_REV
+                                                    // es un inrush normal, no "plugging". Puedes
+                                                    // bajarlo más o dejarlo en 0.
+const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // reversa no llegó a 88° -> frena y termina de frente
+const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin llegar a la pared -> MANIOBRA igual (red de seguridad anti-atasco)
+unsigned long cruceroEntryMs = 0;
+int  contadorFront     = 0;            // debounce del sensor frontal
+bool maniobraDecidida  = false;
+bool maniobraGirarDer  = false;
+bool maniobraReversa   = false;
+long maniobraDistExt   = 0;
+int  maniobraFase      = -1;           // -1=sin init  0=frenar-antes 1=pivote 2=frenar-después 3=frenar-y-reintentar-fwd
+unsigned long maniobraFaseMs   = 0;    // inicio de la fase actual (para las pausas de freno)
+unsigned long maniobraPivoteMs = 0;    // inicio del pivote (para la rampa y el timeout de reversa)
 
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
 const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alineado"
@@ -164,6 +217,7 @@ const int TURNS_PER_RACE = 12;
 float alpha         = 0.85;
 float distL_filtrada = 0;
 float distR_filtrada = 0;
+float distF_filtrada = 0;   // sensor frontal (solo ronda de obstáculos)
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -180,6 +234,76 @@ void escribirServo(int angulo) {
 void setMotor(int velocidad) {
   velocidad = constrain(velocidad, 0, 100);
   ledcWrite(PWMA, velocidad);
+}
+
+// Motor en coast (terminales flotando) — para frenar suave y dejar caer la
+// back-EMF antes de invertir la dirección del puente H.
+void motorCoast() {
+  setMotor(0);
+  digitalWrite(A1, LOW);
+  digitalWrite(A2, LOW);
+}
+
+void motorAdelante() { digitalWrite(A1, HIGH); digitalWrite(A2, LOW); }
+void motorReversa()  { digitalWrite(A1, LOW);  digitalWrite(A2, HIGH); }
+
+// Decide dirección de giro (lado con hueco > umbralPared) y FORWARD vs REVERSE
+// (según la distancia a la pared EXTERIOR, la que SÍ existe — el "sin pared"
+// nunca se usa como número). La llama CRUCERO en el frame del trigger (para
+// elegir el umbral frontal) y latchea con maniobraDecidida=true.
+void decidirManiobra(long distL, long distR) {
+  bool derAbierta = (distR > umbralPared);
+  bool izqAbierta = (distL > umbralPared);
+
+  // ── DIRECCIÓN de giro ── override manual > latch de la 1ª esquina > apertura
+  //    de pared > comparación. Una vez decidida (primerGiro) NO se re-evalúa:
+  //    todas las esquinas de la pista son del mismo sentido.
+  if (GIRO_DIR_OVERRIDE == 1)      { maniobraGirarDer = true;  primerGiro = true; }
+  else if (GIRO_DIR_OVERRIDE == 2) { maniobraGirarDer = false; primerGiro = true; }
+  else if (primerGiro) {
+    maniobraGirarDer = !direccionIzquierda;                 // ya latcheada
+  } else {
+    if      (derAbierta && !izqAbierta) maniobraGirarDer = true;
+    else if (izqAbierta && !derAbierta) maniobraGirarDer = false;
+    else                               maniobraGirarDer = (distR > distL);  // fallback
+    direccionIzquierda = !maniobraGirarDer;
+    primerGiro         = true;                              // latcheado para el resto
+  }
+  direccionIzquierda = !maniobraGirarDer;   // para el dir= del ACK
+
+  // ── FWD vs REVERSE ── SIEMPRE fresco, según la pared EXTERIOR del giro
+  //    (giro der -> exterior = izq/distL; giro izq -> exterior = der/distR).
+  //    Si esa pared saliera "abierta" (raro en la exterior), usa la otra.
+  long distExt;
+  if (maniobraGirarDer)  distExt = (distL <= umbralPared) ? distL : distR;
+  else                   distExt = (distR <= umbralPared) ? distR : distL;
+  maniobraDistExt  = distExt;
+  maniobraReversa  = (maniobraDistExt >= HUG_CM);
+
+  maniobraDecidida = true;
+}
+
+// Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
+// (recta nueva desde 0) y vuelve a SIGUIENDO. Cuenta el giro.
+void finalizarManiobra() {
+  motorAdelante();
+  escribirServo(centroServo);
+  setMotor(0);
+  velocidadMotor = 180;
+  integralWall = 0; prevErrorWall = 0;
+  integralGyro = 0; prevErrorGyro = 0;
+  anguloGyro       = 0;
+  anguloObjetivo   = 0;          // recta nueva: referencia desde cero
+  lastTurnTime     = millis();
+  maniobraDecidida = false;
+  maniobraFase     = -1;
+  estado           = SIGUIENDO;
+  turnsCompleted++;
+  if (turnsCompleted >= TURNS_PER_RACE) raceFinished = true;
+  Serial.print("MANIOBRA completada ");
+  Serial.print(turnsCompleted);
+  Serial.print("/");
+  Serial.println(TURNS_PER_RACE);
 }
 
 
@@ -322,14 +446,33 @@ void parsePiMessage(String line) {
     Serial2.print("ACK:V2,ang=");
     Serial2.print(anguloGyro, 2);
     Serial2.print(",est=");
-    Serial2.print(estado == GIRANDO ? "G" : (estado == RECUPERANDO ? "R" : "S"));
+    // MANIOBRA -> "G" (la Pi hace su manejo de giro: borra memoria, resetea
+    // line_tracker). CRUCERO -> "C" (la Pi lo trata igual que "S"; solo sirve
+    // para verlo en el journalctl). RECUPERANDO -> "R". SIGUIENDO -> "S".
+    Serial2.print((estado == GIRANDO || estado == MANIOBRA) ? "G"
+                  : (estado == RECUPERANDO ? "R"
+                     : (estado == CRUCERO ? "C" : "S")));
     // Dirección de giro de la pista: '?' hasta el 1er GIRANDO, luego L/R
     // (direccionIzquierda se fija ahí con distL>distR). La Pi la usa para el
     // manejo de conos exteriores de esquina — fiable de la esquina 2 en
     // adelante (la 1 la sigue estimando por visión). primerGiro arranca en
     // false cada corrida porque el ESP se resetea entre runs.
     Serial2.print(",dir=");
-    Serial2.println(!primerGiro ? "?" : (direccionIzquierda ? "L" : "R"));
+    Serial2.print(!primerGiro ? "?" : (direccionIzquierda ? "L" : "R"));
+    // ── DEBUG: estado interno del ESP para verlo en el journalctl de la Pi ──
+    // (la Pi loguea el ACK crudo; sus parsers ignoran campos que no conocen).
+    //   fase  : maniobraFase  (-1 sin init, 0 frenar-antes, 1 pivote, 2 frenar-desp, 3 frenar-y-fwd)
+    //   rev   : maniobraReversa (1 = pivote en reversa)
+    //   gd    : maniobraGirarDer (1 = giro a la derecha)
+    //   dL/dR : ultrasónicos laterales filtrados (cm)
+    //   dF    : ultrasónico frontal filtrado (cm)  — 0 si rondaObstaculos=false
+    Serial2.print(",fase="); Serial2.print(maniobraFase);
+    Serial2.print(",rev=");  Serial2.print(maniobraReversa ? 1 : 0);
+    Serial2.print(",gd=");   Serial2.print(maniobraGirarDer ? 1 : 0);
+    Serial2.print(",dL=");   Serial2.print((long)distL_filtrada);
+    Serial2.print(",dR=");   Serial2.print((long)distR_filtrada);
+    Serial2.print(",dF=");   Serial2.print((long)distF_filtrada);
+    Serial2.println();
     return;
   }
 
@@ -400,23 +543,39 @@ void controlPID(long distL, long distR) {
     obsBiasNorm   = 0.0;
     outputFinal   = outputWall + outputGyro;
 
-  } else if (estado == RECUPERANDO) {
-    // Recalcular error SIN el cap de ±20 usado en controlPID general
+  } else if (estado == RECUPERANDO || estado == CRUCERO) {
+    // Control por gyro hacia anguloObjetivo (sin visión). Recalcular error SIN
+    // el cap de ±20 usado en controlPID general.
     float errorGyroRecup = anguloObjetivo - anguloGyro;
     errorGyroRecup = constrain(errorGyroRecup, -60, 60);   // más margen real
 
     float outputRecup = KpGyro * errorGyroRecup + KdGyro * ((errorGyroRecup - prevErrorGyro) / dt);
     prevErrorGyro = errorGyroRecup;
-
     outputRecup = constrain(outputRecup, -60, 60);   // más rango de servo
-    int servoRecup = constrain(centroServo + (int)outputRecup, 20, 150);   // usar límites físicos reales
+
+    // CRUCERO: además CENTRA en el carril con el wall PID (KiWall=0, así que
+    // outputWall es solo P+D, sin integral rancio). PERO solo mientras AMBAS
+    // paredes existen; en cuanto una se abre (esquina) errorWall = distL - distR
+    // se dispararía y clavaría el servo -> ahí, pura gyro.
+    float wallCorr = 0.0;
+    if (estado == CRUCERO && distL <= umbralPared && distR <= umbralPared) {
+      wallCorr = constrain(outputWall * CRUCERO_WALL_BLEND, -25.0f, 25.0f);
+      // El heading de referencia post-MANIOBRA está viciado (no gira exacto 90°).
+      // Mientras las paredes centran, re-referencia anguloObjetivo hacia el heading
+      // ACTUAL poco a poco -> el gyro deja de "defender" el heading chueco y solo
+      // amortigua; las paredes son la referencia real. Sin esto el carro derivaba
+      // lap a lap.
+      anguloObjetivo += (anguloGyro - anguloObjetivo) * 0.05f;
+    }
+
+    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr), 20, 150);
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
-    Serial.print(" | Mode:RECUPERANDO");
+    Serial.print(estado == CRUCERO ? " | Mode:CRUCERO" : " | Mode:RECUPERANDO");
     Serial.print(" | ErrGyro:"); Serial.print(errorGyroRecup);
-    Serial.print(" | OutRecup:"); Serial.print(outputRecup);
-    Serial.print(" | Servo:"); Serial.print(servoRecup);
+    Serial.print(" | Wall:");    Serial.print(wallCorr);
+    Serial.print(" | Servo:");   Serial.print(servoRecup);
     return;
 
   } else if (piPurePursuit) {
@@ -492,6 +651,7 @@ void setup() {
 
   pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
   pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
+  pinMode(TRIG_F, OUTPUT); pinMode(ECHO_F, INPUT);
 
   pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
   digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
@@ -503,6 +663,7 @@ void setup() {
 
   distL_filtrada = leerDistancia(TRIG_L, ECHO_L);
   distR_filtrada = leerDistancia(TRIG_R, ECHO_R);
+  distF_filtrada = leerDistancia(TRIG_F, ECHO_F);
 
   lastPIDTime  = millis();
   lastGyroTime = millis();
@@ -586,6 +747,14 @@ void loop() {
   long distL = (long)distL_filtrada;
   long distR = (long)distR_filtrada;
 
+  // Sensor frontal: solo se usa en la ronda de obstáculos (CRUCERO/MANIOBRA).
+  long distF = 0;
+  if (rondaObstaculos) {
+    long distF_raw = leerDistancia(TRIG_F, ECHO_F);
+    distF_filtrada = filtroEMA(distF_raw, distF_filtrada);
+    distF = (long)distF_filtrada;
+  }
+
   switch (estado) {
 
     case SIGUIENDO: {
@@ -638,22 +807,36 @@ void loop() {
       bool chasisAlineado = fabs(anguloGyro) < 25.0f;
 
       if ((millis() - lastTurnTime > cooldownGiro)
-          && !bloqueadoPorObstaculo
-          && detectarEsquina(distL, distR)
           && millis() - timeStart > 3000)
       {
-        estado     = GIRANDO;
-        anguloGyro = 0;
-
-        if (!primerGiro) {
-          direccionIzquierda = (distL > distR);
-          primerGiro         = true;
+        if (rondaObstaculos) {
+          // Ronda de obstáculos: NO giro continuo. Si la recta ya está limpia
+          // (sin obstáculo mío) y nos acercamos a la esquina -> CRUCERO (control
+          // por ángulo hasta la pared). El obstáculo "beyond" de la recta
+          // siguiente no cuenta: la Pi ya lo excluye de prio/mem.
+          if (!piPriority && piMemoryFrames <= 0
+              && distF > 0 && distF < FRONT_CRUCERO_CM) {
+            contadorFront++;
+            if (contadorFront >= esquinaDebounce) {
+              contadorFront   = 0;
+              cruceroEntryMs  = millis();
+              estado          = CRUCERO;
+              Serial.println("-> CRUCERO");
+            }
+          } else {
+            contadorFront = 0;
+          }
+        } else if (!bloqueadoPorObstaculo && detectarEsquina(distL, distR)) {
+          // Ronda abierta: giro continuo de siempre.
+          estado     = GIRANDO;
+          anguloGyro = 0;
+          if (!primerGiro) {
+            direccionIzquierda = (distL > distR);
+            primerGiro         = true;
+          }
+          piPurePursuit = false;   // suspender PP durante el giro
+          Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
         }
-
-        // Suspender PP durante el giro — el servo lo controla GIRANDO
-        piPurePursuit = false;
-
-        Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
       }
       break;
     }
@@ -673,7 +856,16 @@ void loop() {
         // Ya centrado y alineado → visión retoma el control normal.
         // timedOut: red de seguridad si wallOk nunca se cumple (p.ej. cerca
         // de una esquina real, donde un lado lee "sin pared" legítimamente).
-        estado = SIGUIENDO;
+        // Ronda de obstáculos: si además NO queda obstáculo mío, pasa a CRUCERO
+        // (va derecho por ángulo hacia la esquina). Con objeto presente -> a
+        // SIGUIENDO para esquivarlo, luego RECUPERANDO, luego CRUCERO.
+        if (rondaObstaculos && !piPriority && piMemoryFrames <= 0) {
+          cruceroEntryMs = millis();
+          estado         = CRUCERO;
+          Serial.println("-> CRUCERO (post-recup)");
+        } else {
+          estado = SIGUIENDO;
+        }
       }
       break;
     }
@@ -712,16 +904,184 @@ void loop() {
       }
       break;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRUCERO — solo ronda de obstáculos. Recta ya limpia + esquina cerca:
+    // va DERECHO por ángulo (mismo control que RECUPERANDO en controlPID) hasta
+    // ~FRONT_TURN_CM de la pared, luego MANIOBRA. Si aparece un obstáculo mío,
+    // vuelve a SIGUIENDO para esquivarlo.
+    // ═══════════════════════════════════════════════════════════════════════════
+    case CRUCERO: {
+      velocidadMotor = 180;
+      if (piPasado) piPasado = false;   // pulso viejo/rezagado: CRUCERO ya mantiene heading
+      controlPID(distL, distR);          // branch RECUPERANDO/CRUCERO -> pura gyro
+
+      if (piPriority || piMemoryFrames > 0) {
+        estado = SIGUIENDO;             // apareció obstáculo mío -> a esquivarlo
+        contadorFront = 0;
+        break;
+      }
+
+      // Preview de la decisión para elegir el UMBRAL frontal: REVERSE necesita
+      // estar cerca de la pared (30), FORWARD necesita espacio para el arco (60).
+      bool _revPrev;
+      {
+        bool _da = (distR > umbralPared), _ia = (distL > umbralPared);
+        long _de;
+        if      (_da && !_ia) _de = distL;
+        else if (_ia && !_da) _de = distR;
+        else                  _de = ((distR > distL) ? distL : distR);
+        _revPrev = (_de >= HUG_CM);
+      }
+      int _umbralFront = _revPrev ? FRONT_TURN_REV_CM : FRONT_TURN_FWD_CM;
+
+      bool enLaPared    = (distF > 0 && distF <= _umbralFront);
+      bool cruceroLargo = (millis() - cruceroEntryMs) > CRUCERO_TIMEOUT_MS;  // red de seguridad
+
+      if (enLaPared) contadorFront++;
+      else           contadorFront = 0;
+
+      if (contadorFront >= esquinaDebounce || cruceroLargo) {
+        contadorFront = 0;
+        decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada
+        maniobraFase  = -1;              // MANIOBRA hará el phase-init
+        piPurePursuit = false;
+        estado        = MANIOBRA;
+        Serial.print("-> MANIOBRA dir="); Serial.print(maniobraGirarDer ? "DER" : "IZQ");
+        Serial.print(maniobraReversa ? " REVERSA" : " FORWARD");
+        Serial.print(" distExt="); Serial.print(maniobraDistExt);
+        Serial.print(" distF=");   Serial.print(distF);
+        Serial.println(cruceroLargo ? " TIMEOUT" : "");
+      }
+      break;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MANIOBRA — solo ronda de obstáculos. Reemplaza al giro continuo.
+    //   decide (1 vez): dirección = lado con hueco (>umbralPared). FORWARD vs
+    //   REVERSE según la distancia a la pared EXTERIOR (la que SÍ existe; el
+    //   "sin pared" nunca se usa como número).
+    //   FORWARD: viene de CRUCERO (adelante) -> mismo sentido, sin freno.
+    //            servo hacia el giro + motor adelante (como GIRANDO).
+    //   REVERSE: hay que INVERTIR el puente H. Máquina de fases:
+    //     0 FRENAR-ANTES  : coast MANIOBRA_FRENO_MS (cae la back-EMF) -> invierte
+    //     1 PIVOTE        : servo contrario + reversa con RAMPA de PWM, hasta 88°
+    //                       (o timeout -> fase 3: frena y termina de frente)
+    //     2 FRENAR-DESPUÉS: coast MANIOBRA_FRENO_MS antes de volver a adelante
+    //     3 FRENAR-Y-FWD  : coast, luego re-arranca el pivote de frente
+    //   SIN los coast, invertir con el motor girando frió un TB6612 (2026-09-01).
+    //   Fin: endereza, resetea (recta nueva desde 0), turnsCompleted++, SIGUIENDO.
+    // ═══════════════════════════════════════════════════════════════════════════
+    case MANIOBRA: {
+      if (!maniobraDecidida) decidirManiobra(distL, distR);   // safety (normalmente CRUCERO ya decidió)
+
+      if (maniobraFase < 0) {   // phase-init (una vez por maniobra)
+        if (maniobraReversa) {
+          maniobraFase   = 0;             // frenar antes de invertir
+          maniobraFaseMs = millis();
+          motorCoast();
+        } else {
+          maniobraFase     = 1;           // forward: mismo sentido, sin freno
+          anguloGyro       = 0;
+          maniobraPivoteMs = millis();
+        }
+      }
+
+      float delta = abs(anguloGyro);
+      const int EXIT_DEG = AngGiro - MANIOBRA_OVERSHOOT_DEG;   // sale antes: la inercia completa
+
+      // ── Fase 0: FRENAR antes de invertir ──────────────────────────────────
+      if (maniobraFase == 0) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) {
+          motorReversa();                 // ya detenido -> ahora sí invierte
+          anguloGyro       = 0;
+          maniobraPivoteMs = millis();
+          maniobraFase     = 1;
+        }
+        break;
+      }
+
+      // ── Fase 1: PIVOTE ───────────────────────────────────────────────────
+      if (maniobraFase == 1) {
+        // reversa atascada -> frenar y terminar de frente
+        if (maniobraReversa && delta < EXIT_DEG
+            && (millis() - maniobraPivoteMs) > MANIOBRA_REV_TIMEOUT_MS) {
+          maniobraReversa = false;
+          maniobraFase    = 3;
+          maniobraFaseMs  = millis();
+          motorCoast();
+          Serial.println("MANIOBRA: reversa timeout -> freno -> forward");
+          break;
+        }
+
+        if (maniobraReversa) {
+          unsigned long tR = millis() - maniobraPivoteMs;
+          int vel = (tR < MANIOBRA_RAMP_MS)
+                    ? (int)map((long)tR, 0, (long)MANIOBRA_RAMP_MS,
+                               MANIOBRA_VEL_MIN, MANIOBRA_VEL_REV)
+                    : MANIOBRA_VEL_REV;
+          if (delta > EXIT_DEG - 20) vel = min(vel, MANIOBRA_VEL_MIN);   // frena el último tramo
+          motorReversa();
+          escribirServo(maniobraGirarDer ? 150 : 20);   // servo CONTRARIO al giro
+          setMotor(vel);
+        } else {
+          if      (delta < 45)            velocidadMotor = 165;
+          else if (delta < EXIT_DEG - 20) velocidadMotor = 145;
+          else                            velocidadMotor = 100;   // último tramo: crawl
+          motorAdelante();
+          escribirServo(maniobraGirarDer ? 20 : 150);    // servo hacia el giro
+          setMotor(velocidadMotor);
+        }
+
+        if (delta >= EXIT_DEG) {
+          if (maniobraReversa) {          // veníamos en reversa -> frenar antes de adelante
+            maniobraFase   = 2;
+            maniobraFaseMs = millis();
+            motorCoast();
+            escribirServo(centroServo);
+          } else {
+            finalizarManiobra();
+          }
+        }
+        break;
+      }
+
+      // ── Fase 2: FRENAR después de la reversa, luego cerrar ───────────────
+      if (maniobraFase == 2) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) finalizarManiobra();
+        break;
+      }
+
+      // ── Fase 3: FRENAR tras timeout de reversa, luego pivote de frente ───
+      if (maniobraFase == 3) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) {
+          motorAdelante();
+          maniobraPivoteMs = millis();
+          maniobraFase     = 1;          // vuelve al pivote, ahora de frente
+        }
+        break;
+      }
+      break;
+    }
   }
 
   // ── Log periódico ─────────────────────────────────────────────────────────
   Serial.print(" | Estado:");
   if      (estado == GIRANDO)     Serial.print("GIRANDO");
   else if (estado == RECUPERANDO) Serial.print("RECUPERANDO");
+  else if (estado == CRUCERO)     Serial.print("CRUCERO");
+  else if (estado == MANIOBRA)    Serial.print("MANIOBRA");
   else                             Serial.print("SIGUIENDO");
   Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
   Serial.print(" | L:");        Serial.print(distL);
   Serial.print(" | R:");        Serial.print(distR);
+  if (rondaObstaculos) { Serial.print(" | F:"); Serial.print(distF); }
   Serial.print(" | Ang:");      Serial.print(anguloGyro);
   Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
   Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
