@@ -100,6 +100,8 @@ def _parse_estado(ack: str) -> str | None:
     if idx < 0:
         return None
     val = ack[idx + 4: idx + 5]
+    if val == "C":          # CRUCERO (ESP): la Pi lo trata igual que SIGUIENDO
+        return "S"
     return val if val in ("G", "R", "S") else None
 
 def _parse_direccion(ack: str) -> str | None:
