@@ -42,8 +42,14 @@ class PurePursuitController:
         if not bev_obstacles:
             return C.LOOKAHEAD_MAX_PX
 
+        # Distancia LONGITUDINAL (px por delante del eje), NO euclidiana. Con la
+        # euclidiana, un obstáculo aún de lado (offset lateral grande) mantenía
+        # nearest_d alto -> lookahead largo -> PP apuntaba lejos -> steer suave ->
+        # el carro seguía DERECHO hasta tener el cono encima y ahí giraba tarde
+        # (rozaba, orillas456). Con la longitudinal el lookahead se acorta cuando
+        # el obstáculo se acerca DE FRENTE, sin importar cuánto lo tenga de lado.
         nearest_d = min(
-            math.hypot(ox - robot_x, oy - robot_y) for ox, oy, _ in bev_obstacles
+            max(0.0, robot_y - oy) for ox, oy, _ in bev_obstacles
         )
 
         if nearest_d <= C.LOOKAHEAD_OBS_NEAR_PX:
@@ -60,7 +66,11 @@ class PurePursuitController:
     def _distance_steer_gain(bev_obstacles, robot_x, robot_y) -> float:
         if not bev_obstacles:
             return 1.0
-        nearest_d = min(math.hypot(ox - robot_x, oy - robot_y) for ox, oy, _ in bev_obstacles)
+        # LONGITUDINAL (px por delante del eje), no euclidiana — mismo motivo que
+        # adaptive_lookahead: con la euclidiana un obstáculo aún de lado mantenía
+        # nearest_d alto y el steer se atenuaba al 30% -> el carro iba derecho y
+        # esquivaba tarde (rozaba, orillas456).
+        nearest_d = min(max(0.0, robot_y - oy) for ox, oy, _ in bev_obstacles)
         if nearest_d <= C.STEER_DIST_GAIN_NEAR_PX:
             return 1.0
         if nearest_d >= C.STEER_DIST_GAIN_FAR_PX:
