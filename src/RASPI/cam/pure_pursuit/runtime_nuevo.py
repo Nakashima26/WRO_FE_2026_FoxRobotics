@@ -206,7 +206,8 @@ class PPRuntime:
 
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
 
-    def _measured_recup_trigger(self, cl_stats: dict, bev_obstacles: list) -> bool:
+    def _measured_recup_trigger(self, cl_stats: dict, bev_obstacles: list,
+                                corner_soon: bool = False) -> bool:
         """
         Decide si el robot ACABA de rebasar un obstáculo de LADO (esquiva de
         ángulo) — el disparo de RECUPERANDO que el ancla "geom" nunca acertó.
@@ -222,7 +223,10 @@ class PPRuntime:
           2. Ya NO hay lata "estorbando" derecho adelante: ninguna Red/Green de
              la memoria está a la vez > AHEAD_TOL px adelante del eje Y a menos
              de CLEAR_PX px de lado (yendo recto el borde del carro la libra).
-             Debe cumplirse RECUP_MEAS_CLEAR_FRAMES frames seguidos.
+             Debe cumplirse RECUP_MEAS_CLEAR_FRAMES frames seguidos -- o solo
+             RECUP_MEAS_CLEAR_FRAMES_CORNER (1) si corner_soon (naranja encima):
+             el debounce de 3 llegaba tarde y el ESP32 metía un giro falso antes
+             (orillas440). corner_soon lo pasa el llamador desde line_info Orange.
           3. El chasis quedó chueco vs la recta: |heading - heading_ref| >=
              RECUP_MEAS_HEADING_DEG. heading_ref se fija al ARMARSE (heading de
              la recta antes de empezar a rodear).
@@ -296,7 +300,8 @@ class PPRuntime:
               f"herr={heading_err:+.1f} "
               f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "
               f"h={'-' if self._last_heading is None else round(self._last_heading)} "
-              f"hascolor={int(has_color_obs)} clr={self._recup_clear_count}", flush=True)
+              f"hascolor={int(has_color_obs)} clr={self._recup_clear_count} "
+              f"csoon={int(bool(corner_soon))}", flush=True)
 
         if not self._dodge_armed:
             return False
@@ -346,7 +351,9 @@ class PPRuntime:
         # en el frame en que cruza HEADING_DEG. Antes se desarmaba a la primera
         # de |herr|<HEADING_DEG con el path despejado y perdía el latiguazo que
         # aún no llegaba a 25° (visto en sim con la traza de la red de orillas412).
-        if (self._recup_clear_count >= C.RECUP_MEAS_CLEAR_FRAMES
+        _clear_req = (getattr(C, "RECUP_MEAS_CLEAR_FRAMES_CORNER", 1)
+                      if corner_soon else C.RECUP_MEAS_CLEAR_FRAMES)
+        if (self._recup_clear_count >= _clear_req
                 and abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG):
             self._last_recup_reason = (
                 f"PASADO(medido) herr={heading_err:+.0f} "
@@ -816,8 +823,14 @@ class PPRuntime:
                         # est=G, sin esperar la confirmación de 2 frames.
                         if (armed and not self._is_turning and self._prev_estado != "G"
                                 and not en_recuperacion_giro):
+                            _oy_cs = orange_info.get("near_y")
+                            _corner_soon_meas = (
+                                orange_info.get("seen") and _oy_cs is not None
+                                and _oy_cs >= getattr(
+                                    C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 285.0))
                             measured_pass = self._measured_recup_trigger(
-                                cl_stats, bev_obstacles
+                                cl_stats, bev_obstacles,
+                                corner_soon=bool(_corner_soon_meas),
                             )
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,

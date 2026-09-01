@@ -363,6 +363,14 @@ RECUP_MEAS_ARM_FRAMES     = 3      # 2026-08-29: la esquiva debe estar en curso 
                                    # -> no entra a RECUPERANDO "super rápido" con la lata aún
                                    # enfrente (orillas417/418, reporte del usuario).
 RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
+RECUP_MEAS_CLEAR_FRAMES_CORNER = 1  # ...PERO si la línea naranja ya está encima
+                                   # (near_y >= RECUP_SUPPRESS_NEAR_ORANGE_Y): disparar en
+                                   # cuanto el path despeja 1 frame. El debounce de 3 dejaba
+                                   # 2 frames con prio=0/mem=0/pasado=0 y el chasis chueco ->
+                                   # el ESP32 metía un detectarEsquina() falso -> GIRANDO en
+                                   # vez de RECUPERANDO (Verde6/Rojo2/CW, orillas440, ~2/3).
+                                   # El pasado espurio (memory.last_passed) sigue suprimido
+                                   # cerca de la esquina; esto solo adelanta el MEDIDO.
 RECUP_MEAS_GENTLE_FRAMES  = 10     # despejado tantos frames CON heading siempre < HEADING_DEG
                                    # => fue esquiva suave, se desarma sin RECUPERANDO (~0.7s)
 RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro mín. vs la
