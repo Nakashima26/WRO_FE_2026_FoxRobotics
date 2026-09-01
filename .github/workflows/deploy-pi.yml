@@ -25,9 +25,11 @@ jobs:
             "cd /home/user/FoxRobotics && git pull origin main"
 
       - name: Restart services
+        # wro-runtime: NUNCA 'restart' -> traba la camara CSI (LED apagado, atascada).
+        # Usar stop + sleep 4 + start. wro-vnc si tolera restart.
         run: |
           ssh -i ~/.ssh/github_actions ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} \
-            "sudo systemctl restart wro-vnc.service && sudo systemctl restart wro-runtime.service"
+            "sudo systemctl restart wro-vnc.service && sudo systemctl stop wro-runtime.service && sleep 4 && sudo systemctl start wro-runtime.service"
 
       - name: Verify services
         run: |
