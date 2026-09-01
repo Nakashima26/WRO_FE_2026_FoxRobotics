@@ -288,6 +288,16 @@ class PPRuntime:
         if self._last_heading is not None and self._heading_ref is not None:
             heading_err = (self._last_heading - self._heading_ref + 180.0) % 360.0 - 180.0
 
+        # DIAG (solo log, sin efecto): estado de armado del trigger cada frame que
+        # corre — cubre el hueco de que el early-return de abajo no registra
+        # arm_streak / max_w_near cuando _dodge_armed aún es False.
+        print(f"[RECUParm] w={max_w_near:.2f} streak={self._recup_arm_streak} "
+              f"can_arm={int(self._recup_can_arm)} armed={int(self._dodge_armed)} "
+              f"herr={heading_err:+.1f} "
+              f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "
+              f"h={'-' if self._last_heading is None else round(self._last_heading)} "
+              f"hascolor={int(has_color_obs)} clr={self._recup_clear_count}", flush=True)
+
         if not self._dodge_armed:
             return False
 
