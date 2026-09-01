@@ -398,8 +398,8 @@ RECUP_SUPPRESS_KEEP_MEASURED = True
 # estos frames más antes de soltar el giro. Sin esto el ESP32 disparaba
 # detectarEsquina() ~0.5s ANTES del punto real (reporte del usuario,
 # orillas429: "el giro se activó mucho antes, le faltó medio segundo").
-# ~8 frames @ ~15fps ~= 0.5s. Subir si el giro sigue entrando temprano.
-RECUP_CORNER_TURN_DELAY_FRAMES = 8
+# ~3 frames @ ~15fps ~= 0.2s. Subir si el giro sigue entrando temprano.
+RECUP_CORNER_TURN_DELAY_FRAMES = 3
 
 # est=G debounce: frames CONSECUTIVOS de est=G en el ACK del ESP32 antes de dar
 # el giro por real y borrar/apagar la memoria de obstáculos. Un est=G espurio
