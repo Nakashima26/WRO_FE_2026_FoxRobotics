@@ -680,7 +680,12 @@ INTERIOR_PASS_ENABLED = False
 # RECUP_SUPPRESS_NEAR_ORANGE_Y ya anula el pulso `pasado` -> el ESP32 pasa
 # directo a GIRANDO. NO es el intento viejo de "interior pass" (ese soltaba el
 # giro ANTES via intr=1; esto lo RETIENE). No se toca intr ni el .ino.
-CORNER_EXTERIOR_PASS_ENABLED = True
+# 2026-09-01 (rama SectionTurning): OFF. En el modelo por-tramos todo lo que
+# está pasando la naranja es "beyond" y se maneja cuando ya estás en esa recta
+# (tras la maniobra). No se rescata ningún cono exterior -> rescue_fn=None,
+# _ext_corner_hold nunca se activa, y toda la lógica CORNER_EXT_PASS_* queda
+# inerte.
+CORNER_EXTERIOR_PASS_ENABLED = False
 
 # Dirección de giro de la pista para ESTE campeonato. El equipo la sabe al
 # montar la pista. Si se fija ("L" o "R"), se usa para decidir interior/exterior
