@@ -390,6 +390,14 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6
 
+# 2026-09-01: tras TERMINAR un pulso pasado=1, no arrancar otro por estos frames.
+# El chasis todavía se está asentando tras RECUPERANDO; un 2º pasado encima
+# (típicamente un fantasma de memoria cruzando behind_y, o un smear del mismo
+# cono) mete al ESP a RECUPERANDO de nuevo y el carro sobre-corrige. orillas473:
+# el fantasma del rojo re-disparó pasado ~2s después, justo sobre el verde ->
+# doble RECUPERANDO -> heading a +42° -> se comió el verde. ~15 frames (~1.2s).
+PASADO_COOLDOWN_FRAMES    = 15
+
 # Suprimir pasado=1 (=> no RECUPERANDO) si la línea naranja está a near_y >= esto
 # en el BEV (robot en y=380, así que 285 = línea a <=~190mm = esquina inminente).
 # En RECUPERANDO el ESP32 no evalúa detectarEsquina() -> un pasado justo antes de
@@ -655,14 +663,20 @@ LINE_CLASSIFY_FRAMES_FIRST     = 4
 # 2026-09-01: PISO DE CERCANÍA. Un obstáculo con y-BEV >= esto está casi bajo la
 # nariz (behind_y de _prune = ry+BEHIND_PAD = 345): físicamente NO puede ser de
 # la siguiente recta -- para tenerlo tan cerca ya habrías cruzado la esquina, y
-# ahí manda CRUCERO/MANIOBRA, no la esquiva. OrangeLineTracker.classify() y
-# classify_and_split() lo fuerzan a "mía" ignorando la línea, y rompen el latch
-# `beyond` de una (sin esperar LINE_CLASSIFY_FRAMES_TO_MINE). Motivo: orillas471
-# -- la naranja se fijó mal (near_y saltando 157->318, fits de pendiente basura
-# line[1]~+728) -> un rojo de la recta actual quedó `beyond` desde el 1er frame,
-# el latch nunca se soltó y el carro lo embistió. Ventana 290->345 = ~4 frames
-# para mandarlo al ESP antes de que _prune lo tire como PASADO.
+# ahí manda CRUCERO/MANIOBRA, no la esquiva. classify_and_split() lo fuerza a
+# "mía" ignorando la línea y rompe el latch `beyond` de una (sin esperar
+# LINE_CLASSIFY_FRAMES_TO_MINE). Motivo: orillas471 -- la naranja se fijó mal
+# (near_y saltando 157->318, fits de pendiente basura line[1]~+728) -> un rojo de
+# la recta actual quedó `beyond` desde el 1er frame, el latch nunca se soltó y el
+# carro lo embistió. Ventana 290->345 = ~4 frames para mandarlo al ESP antes de
+# que _prune lo tire como PASADO.
 CLASSIFY_FORCE_MINE_Y          = 290.0
+# 2026-09-01: el piso SOLO aplica con confianza >= esto. Un fantasma de memoria
+# (camX=0, conf decayendo ~0.06/frame) extrapolado hasta y>=290 no debe forzar
+# esquiva ni romper el latch -- orillas473: un rojo ghost conf 0.52 metió steer
+# izquierdo espurio durante la esquiva del verde. 0.65 ~= visto en los últimos
+# ~5 frames.
+CLASSIFY_FORCE_MINE_MIN_CONF   = 0.65
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60

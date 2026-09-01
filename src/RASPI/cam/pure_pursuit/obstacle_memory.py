@@ -586,13 +586,16 @@ class ObstacleMemory:
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
         force_mine_y = getattr(C, "CLASSIFY_FORCE_MINE_Y", 290.0)
+        force_mine_min_conf = getattr(C, "CLASSIFY_FORCE_MINE_MIN_CONF", 0.65)
         for o in self._obs:
-            # PISO DE CERCANÍA (ver OrangeLineTracker.classify / config): un
-            # obstáculo casi encima NO puede ser de la siguiente recta. Se fuerza
-            # a "mía" y se ROMPE el latch `beyond` de una -- sin esto la
-            # histéresis TO_MINE(6) no alcanza a rescatarlo antes de _prune y el
-            # carro lo embiste (orillas471).
-            if o.y >= force_mine_y:
+            # PISO DE CERCANÍA (ver config): un obstáculo casi encima NO puede
+            # ser de la siguiente recta. Se fuerza a "mía" y se ROMPE el latch
+            # `beyond` de una -- sin esto la histéresis TO_MINE(6) no alcanza a
+            # rescatarlo antes de _prune y el carro lo embiste (orillas471).
+            # PERO exige confianza: un fantasma de memoria (camX=0, conf
+            # decayendo) extrapolado hasta y>=290 NO debe forzar esquiva ni
+            # romper el latch (orillas473: un rojo conf 0.52 metió steer espurio).
+            if o.y >= force_mine_y and o.conf >= force_mine_min_conf:
                 if o.beyond is not False:
                     o.beyond = False
                     o._cls_vote = None

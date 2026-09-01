@@ -143,6 +143,9 @@ class PPRuntime:
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
         self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
+        self._pasado_cooldown: int = 0  # tras terminar un pulso pasado, frames en
+                                        # los que NO se arranca otro (anti doble
+                                        # RECUPERANDO, ver PASADO_COOLDOWN_FRAMES)
         self._pasado_from_measured: bool = False  # el pulso pasado en curso vino
                                                   # de _measured_recup_trigger
                                                   # (esquiva de ángulo REAL) — no
@@ -549,6 +552,7 @@ class PPRuntime:
                     self.mid_turn.reset()
                     self._ext_corner_block = 0
                     self._pasado_hold = 0
+                    self._pasado_cooldown = 0
                     self._pasado_from_measured = False
                     self._turn_delay_frames = 0
                     if on_ready is not None:
@@ -676,7 +680,9 @@ class PPRuntime:
                             # BEV. Respaldo del trigger medido, que cubre el rebase
                             # de ÁNGULO. El pulso pasado=1 se finaliza más abajo
                             # (tras detect_centerline), ya OR-eado con el medido.
-                            if self.memory.last_passed:
+                            # cooldown: no re-disparar sobre el rastro del pulso
+                            # anterior (un fantasma cruzando behind_y, orillas473).
+                            if self.memory.last_passed and self._pasado_cooldown <= 0:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
                         _t3 = time.perf_counter()
@@ -834,6 +840,11 @@ class PPRuntime:
                                 cl_stats, bev_obstacles,
                                 corner_soon=bool(_corner_soon_meas),
                             )
+                            # cooldown: si acabamos de hacer RECUPERANDO, no
+                            # encadenar otro -- el chasis aún se asienta
+                            # (orillas473: doble RECUPERANDO -> heading a +42°).
+                            if measured_pass and self._pasado_cooldown > 0:
+                                measured_pass = False
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
@@ -942,6 +953,7 @@ class PPRuntime:
                 if _corner_soon and self._pasado_hold > 0 and not _keep_measured:
                     self._pasado_hold = 0
                     self._pasado_from_measured = False
+                    self._pasado_cooldown = C.PASADO_COOLDOWN_FRAMES
                     self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
                 elif _corner_soon and _keep_measured and self._pasado_hold > 0:
                     self._last_recup_reason = (
@@ -951,6 +963,10 @@ class PPRuntime:
                     self._pasado_hold -= 1
                     if self._pasado_hold == 0:
                         self._pasado_from_measured = False
+                        # pulso terminado -> arranca el cooldown anti doble RECUP
+                        self._pasado_cooldown = C.PASADO_COOLDOWN_FRAMES
+                elif self._pasado_cooldown > 0:
+                    self._pasado_cooldown -= 1
 
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"

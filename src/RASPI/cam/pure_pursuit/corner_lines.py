@@ -317,13 +317,11 @@ class OrangeLineTracker:
         funciona igual de bien que antes cuando la línea SÍ es horizontal,
         y es mejor que no clasificar nada.
         """
-        # PISO DE CERCANÍA: un obstáculo casi bajo la nariz NO puede ser de la
-        # siguiente recta (ver C.CLASSIFY_FORCE_MINE_Y). Se ignora la línea —
-        # buena o basura — porque justo aquí es donde una mala fijación de la
-        # naranja mete un cono de la recta actual en "beyond" y el carro lo
-        # embiste (orillas471).
-        if oy >= getattr(C, "CLASSIFY_FORCE_MINE_Y", 290.0):
-            return True
+        # NOTA: el "piso de cercanía" (un obstáculo casi bajo la nariz NO puede
+        # ser de la siguiente recta) vive en obstacle_memory.classify_and_split()
+        # y NO aquí, porque allí se puede exigir además confianza mínima (un
+        # fantasma de memoria desvaneciéndose no debe forzar esquiva). Ver
+        # C.CLASSIFY_FORCE_MINE_Y / C.CLASSIFY_FORCE_MINE_MIN_CONF.
         if not self.stable["seen"]:
             return None
         line = self.stable["line"]
