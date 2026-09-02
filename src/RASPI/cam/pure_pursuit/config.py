@@ -160,6 +160,13 @@ OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MI
 # Absorbe el offset sensor-frontal ↔ origen BEV y el diámetro del cono.
 DODGE_WALL_MARGIN_MM = 100.0
 
+# 2026-09-01: filtro por lado del giro (runtime_nuevo). Con turn_dir conocido y
+# >=2 conos `mia`, uno del lado del giro con x más allá de ROBOT_BEV_X ± esto
+# (habiendo un primario del otro lado) se manda a `beyond`: es del siguiente
+# segmento (visible pasando la esquina, mal proyectado). orillas482: verde(2)
+# izq + rojo(5) del sig. segmento derecha, giro=R.
+DODGE_TURN_SIDE_MARGIN_PX = 60
+
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
 WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)

@@ -807,6 +807,41 @@ class PPRuntime:
                                       f"(mant={len(_keep)})", flush=True)
                             bev_obstacles, obstacle_conf = _keep, _keep_conf
 
+                        # ── Filtro por LADO DEL GIRO ── el segmento siguiente está
+                        # del lado hacia donde gira la pista. Estando aún en la
+                        # recta actual (esquina sin abrir), un cono MUY del lado
+                        # del giro que aparece A LA PAR de un obstáculo primario
+                        # del OTRO lado es del siguiente segmento: la cámara lo ve
+                        # pasando la esquina y el BEV lo proyecta mal (cerca, "a la
+                        # par del verde"). El dF no lo agarra porque esa mala
+                        # proyección lo pone antes de la pared. Los conos de MI
+                        # columna del lado del giro ya los pasé para cuando esto
+                        # aplica (orillas482: verde(2) izq + rojo(5) del sig.
+                        # segmento a la derecha, giro=R).
+                        _td = (getattr(C, "CORNER_TURN_DIR_OVERRIDE", None)
+                               or self.turn_dir_tracker.direction)
+                        if _td in ("L", "R") and len(bev_obstacles) >= 2:
+                            _k = getattr(C, "DODGE_TURN_SIDE_MARGIN_PX", 60)
+                            _bound = C.ROBOT_BEV_X + (_k if _td == "R" else -_k)
+                            _has_primary_other = any(
+                                (ox < C.ROBOT_BEV_X) if _td == "R" else (ox > C.ROBOT_BEV_X)
+                                for ox, _, _ in bev_obstacles)
+                            if _has_primary_other:
+                                _keep2, _keep2_conf = [], []
+                                for _i, (_ox, _oy, _oc) in enumerate(bev_obstacles):
+                                    _outside = (_ox > _bound) if _td == "R" else (_ox < _bound)
+                                    if _outside:
+                                        bev_obstacles_beyond.append((_ox, _oy, _oc))
+                                    else:
+                                        _keep2.append((_ox, _oy, _oc))
+                                        _keep2_conf.append(
+                                            obstacle_conf[_i] if _i < len(obstacle_conf) else 1.0)
+                                if len(_keep2) != len(bev_obstacles):
+                                    print(f"[TURNSIDE] td={_td} bound={_bound:.0f} -> "
+                                          f"{len(bev_obstacles) - len(_keep2)} cono(s) a beyond",
+                                          flush=True)
+                                bev_obstacles, obstacle_conf = _keep2, _keep2_conf
+
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
                         # toda la carrera. PRIMARIA: posición lateral de un
