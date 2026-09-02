@@ -30,7 +30,7 @@ from . import config as C
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
                  "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "next_seg", "_next_seg_streak", "cam_h")
+                 "next_seg", "_next_seg_streak")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -94,12 +94,6 @@ class _Obs:
         # carro ladeado, que es cuando la naranja falla (orillas496/498).
         self.next_seg: bool = False
         self._next_seg_streak: int = 0
-        # Alto del bbox de CÁMARA de la última detección FRESCA (proximidad real,
-        # NO miente con el yaw como la naranja ni con la proyección BEV como `y`).
-        # classify_and_split() fuerza `mia` a un cono con cam_h grande + conf
-        # fresca: un cono físicamente CERCA es de mi recta, la naranja no vota.
-        # 0.0 = nunca visto fresco / solo dead-reckoning.
-        self.cam_h: float = 0.0
 
 
 class ObstacleMemory:
@@ -197,16 +191,13 @@ class ObstacleMemory:
 
     # ── Fusión con detecciones nuevas ───────────────────────────────────────────
 
-    def _merge(self, new_obs: list[tuple[float, float, str]],
-               new_obs_h: list[float] | None = None):
+    def _merge(self, new_obs: list[tuple[float, float, str]]):
         match_r2 = C.OBS_MEM_MATCH_PX ** 2
         # Decaer todos primero; los que se re-vean recuperan confianza al fusionar.
         for o in self._obs:
             o.conf -= C.OBS_MEM_DECAY
-        _touched: set[int] = set()   # _Obs refrescados en ESTA llamada (para cam_h)
 
-        for i, (nx, ny, color) in enumerate(new_obs):
-            nh = float(new_obs_h[i]) if (new_obs_h and i < len(new_obs_h)) else 0.0
+        for nx, ny, color in new_obs:
             best = None
             best_d2 = match_r2
             for o in self._obs:
@@ -221,15 +212,6 @@ class ObstacleMemory:
                 best.x, best.y = nx, ny
                 best.conf = C.OBS_MEM_REFRESH
                 best.y_min = min(best.y_min, ny)   # detección, no estima
-                # cam_h: si dos detecciones caen en el MISMO _Obs este frame
-                # (near+far fusionados por _merge/_dedupe), quedarse con la MÁS
-                # GRANDE -> el _Obs representa al cono CERCANO (el que hay que
-                # rodear), no al de la recta siguiente.
-                if id(best) in _touched:
-                    best.cam_h = max(best.cam_h, nh)
-                else:
-                    best.cam_h = nh
-                    _touched.add(id(best))
                 # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
                 # (deja de re-sembrarse) en cuanto la lata se ve a `y` confiable.
                 if not best.anchored:
@@ -240,10 +222,8 @@ class ObstacleMemory:
                         best.anchored = True
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
-                    _no = _Obs(nx, ny, color, C.OBS_MEM_REFRESH,
-                               heading0=self._prev_heading)
-                    _no.cam_h = nh
-                    self._obs.append(_no)
+                    self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
+                                          heading0=self._prev_heading))
 
     # ── Reduce duplicados fantasma ─────────────────────────────────────────────────────────────────
     def _dedupe(self):
@@ -273,12 +253,7 @@ class ObstacleMemory:
                     continue
                 d2 = (k.x - o.x) ** 2 + (k.y - o.y) ** 2
                 if d2 <= dedupe_r2:
-                    # o es un duplicado de k (k ya tiene >= confianza) → descartar o.
-                    # cam_h del que queda = el MÁS GRANDE de los dos: si _dedupe
-                    # se comió un cono near + uno far (misma color, ~50px en BEV),
-                    # el registro que sobrevive debe representar al CERCANO.
-                    k.cam_h = max(k.cam_h, o.cam_h)
-                    k.next_seg = k.next_seg and o.next_seg
+                    # o es un duplicado de k (k ya tiene >= confianza) → descartar o
                     merged_into_existing = True
                     break
             if not merged_into_existing:
@@ -494,8 +469,7 @@ class ObstacleMemory:
             turned = None
         return (f"y={o.y:.0f} x={o.x:.0f} conf={o.conf:.2f} "
                 f"falta={behind_y - o.y:+.0f}px "
-                f"ymin={o.y_min:.0f} giro={'?' if turned is None else round(turned)} "
-                f"camh={o.cam_h:.0f} nseg={int(o.next_seg)}")
+                f"ymin={o.y_min:.0f} giro={'?' if turned is None else round(turned)}")
 
     def debug_all(self) -> str:
         """
@@ -517,8 +491,7 @@ class ObstacleMemory:
                dt_s: float,
                heading_deg: float | None,
                estado: str | None = None,
-               steer_deg: float = 0.0,
-               new_obs_h: list[float] | None = None
+               steer_deg: float = 0.0
                ) -> list[tuple[float, float, str]]:
         """
         Avanza el mapa, fusiona detecciones nuevas y devuelve la lista combinada
@@ -601,7 +574,7 @@ class ObstacleMemory:
         self._last_ds_anchor = ds_anchor
 
         self._advance(ds_px, ds_anchor, dheading)
-        self._merge(new_obs, new_obs_h)
+        self._merge(new_obs)
         self._dedupe()
         self.last_passed = self._prune()
 
@@ -653,16 +626,6 @@ class ObstacleMemory:
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
         for o in self._obs:
-            # Cono físicamente CERCA (bbox de cámara grande + conf fresca) = de
-            # MI recta, SIEMPRE. La naranja no vota: es justo cuando el carro
-            # está ladeado (esquivando) que la naranja miente y mandaba este
-            # cono a `beyond` -> no se esquivaba -> sin RECUPERANDO -> GIRANDO
-            # (orillas496/498/500). El bbox NO miente con el yaw.
-            if (o.cam_h >= getattr(C, "CLASSIFY_FORCE_MINE_BBOX_PX", 70.0)
-                    and o.conf >= getattr(C, "CLASSIFY_FORCE_MINE_MIN_CONF", 0.65)):
-                mine.append((o.x, o.y, o.color))
-                mine_conf.append(o.conf)
-                continue
             # Latch por bbox (ver flag_next_seg): cono de la recta SIGUIENTE
             # fijado por tamaño cuando había 2 conos y el carro estaba ladeado
             # (la naranja no era confiable). Va directo a `beyond`, sin naranja

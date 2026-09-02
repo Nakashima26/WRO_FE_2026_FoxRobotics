@@ -692,7 +692,6 @@ class PPRuntime:
                                 # steer del frame ANTERIOR (compute() aún no corre
                                 # este frame) -> modelo de bicicleta del ancla geom.
                                 steer_deg=self.controller._prev_steer_deg,
-                                new_obs_h=new_obs_h,
                             )
                             # Alineado 1:1 con bev_obstacles (mismo orden) --
                             # ver detect_centerline(obstacle_conf=).
