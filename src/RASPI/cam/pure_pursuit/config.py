@@ -173,6 +173,14 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 # 2026-08-28: bajado 12->6 al pasar el pipeline de ~7fps a ~14fps (mismo °/s).
 PP_STEER_SLEW_DEG = 6.0
 
+# 2026-09-01: tope de |steer_deg| cuando hay un obstáculo activo (esquiva). Sin
+# esto PP mandaba ~49° (obs 0.82) para un cono a 18cm -> radio de giro
+# ≈ batalla/tan(49°) ≈ 9cm -> el carro PIVOTEA (rota sin trasladar), se clava a
+# -50° y arruina la secuencia (verde sin esquivar, cono de la recta siguiente
+# haciendo de ancla). 32° -> radio ≈ 16cm = arco. 0 = sin tope. Las esquivas
+# que funcionaban (orillas417) iban a ~24-42° -> caben.
+PP_DODGE_MAX_STEER_DEG = 32.0
+
 # Lookahead variable — derivado de la escala de urgencia
 # NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
 # con lata cerca -> el carro clavaba el volante, sobrepasaba y raspaba la lata

@@ -967,6 +967,17 @@ class PPRuntime:
                             if _cap > 0.0:
                                 steer_deg = max(-_cap, min(_cap, steer_deg))
 
+                        # ── Tope de steer en esquiva ── con un obstáculo activo,
+                        # cap `steer_deg`. Radio de giro ≈ batalla/tan(steer): a
+                        # ~49° (obs 0.82, visto en pista) el radio es ~9cm -> el
+                        # carro PIVOTEA en vez de arquear, se clava a -50° y todo
+                        # lo que sigue (verde, cono de la recta siguiente) se
+                        # arruina. A ~32° el radio es ~16cm = un arco real.
+                        if pp_active and bev_obstacles:
+                            _dcap = float(getattr(C, "PP_DODGE_MAX_STEER_DEG", 0.0))
+                            if _dcap > 0.0:
+                                steer_deg = max(-_dcap, min(_dcap, steer_deg))
+
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
                         bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
