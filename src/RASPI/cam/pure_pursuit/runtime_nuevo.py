@@ -823,8 +823,12 @@ class PPRuntime:
                         if _td in ("L", "R") and len(bev_obstacles) >= 2:
                             _k = getattr(C, "DODGE_TURN_SIDE_MARGIN_PX", 60)
                             _bound = C.ROBOT_BEV_X + (_k if _td == "R" else -_k)
+                            # "primario del otro lado": deadband ±30 para que un
+                            # verde que ya derivó al centro (chasis ladeado) siga
+                            # contando y el filtro no parpadee.
                             _has_primary_other = any(
-                                (ox < C.ROBOT_BEV_X) if _td == "R" else (ox > C.ROBOT_BEV_X)
+                                (ox < C.ROBOT_BEV_X + 30) if _td == "R"
+                                else (ox > C.ROBOT_BEV_X - 30)
                                 for ox, _, _ in bev_obstacles)
                             if _has_primary_other:
                                 _keep2, _keep2_conf = [], []
