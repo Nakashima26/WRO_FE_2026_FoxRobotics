@@ -385,6 +385,14 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
                                    # recta para disparar. En pista una esquiva de verdad
                                    # llega a 35-64°; por debajo de 25 es deriva/esquiva
                                    # suave -> PP + wall PID solos.
+# 2026-09-01: si la lata que "estorba" no se ve FRESCA (cámara: camR/camG=0)
+# tantos frames seguidos -- con la esquiva armada y |herr| >= HEADING_DEG --
+# se da el path por despejado aunque su ghost de memoria diga que sigue
+# adelante. La lata salió del FOV durante el yaw grande -> el carro ya la
+# rodeó; su dead-reckoning (~3px/frame) nunca vencía el ahead_tol que se
+# achica con el yaw -> RECUPERANDO nunca disparaba y el ESP llegaba a la
+# esquina ladeado 50° (orillas490).
+RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
 
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.

@@ -166,6 +166,7 @@ class PPRuntime:
         self._recup_can_arm: bool = True         # gate: solo re-arma tras un peso bajo (esquiva nueva)
         self._recup_arm_streak: int = 0          # frames seguidos con peso alto (debounce de armado)
         self._recup_clear_count: int = 0         # frames seguidos con el path ya despejado
+        self._recup_noghost_streak: int = 0      # frames sin ver color fresco (con esquiva armada + herr grande)
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
 
@@ -210,7 +211,8 @@ class PPRuntime:
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
 
     def _measured_recup_trigger(self, cl_stats: dict, bev_obstacles: list,
-                                corner_soon: bool = False) -> bool:
+                                corner_soon: bool = False,
+                                fresh_color: bool = True) -> bool:
         """
         Decide si el robot ACABA de rebasar un obstáculo de LADO (esquiva de
         ángulo) — el disparo de RECUPERANDO que el ancla "geom" nunca acertó.
@@ -280,6 +282,7 @@ class PPRuntime:
             self._dodge_armed = True
             self._recup_can_arm = False
             self._recup_clear_count = 0
+            self._recup_noghost_streak = 0
             self._heading_ref = None   # se siembra abajo con el heading de ESTE frame
 
         # Siembra PEREZOSA de heading_ref: en cuanto haya heading y la esquiva
@@ -304,7 +307,8 @@ class PPRuntime:
               f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "
               f"h={'-' if self._last_heading is None else round(self._last_heading)} "
               f"hascolor={int(has_color_obs)} clr={self._recup_clear_count} "
-              f"csoon={int(bool(corner_soon))}", flush=True)
+              f"csoon={int(bool(corner_soon))} fresh={int(fresh_color)} "
+              f"noghost={getattr(self, '_recup_noghost_streak', 0)}", flush=True)
 
         if not self._dodge_armed:
             return False
@@ -336,9 +340,22 @@ class PPRuntime:
             c in ("Red", "Green") and (ry - oy) > ahead_tol
             for (ox, oy, c) in bev_obstacles
         )
+        # Bypass del ghost: si la lata que "estorba" no se ve FRESCA (la cámara
+        # no la detectó) hace RECUP_MEAS_GHOST_CLEAR_FRAMES frames y el chasis ya
+        # está chueco, el carro ya la rodeó -> su ghost de memoria dead-reckoned
+        # no debe retener RECUPERANDO. orillas490: el verde salió del FOV a
+        # y=291, su ghost avanzaba ~3px/frame y el ahead_tol se achica con el
+        # yaw -> "blocking" eterno -> el ESP llegó a la esquina a 51° sin
+        # enderezar.
+        if not fresh_color and abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG:
+            self._recup_noghost_streak = getattr(self, "_recup_noghost_streak", 0) + 1
+        else:
+            self._recup_noghost_streak = 0
+        ghost_stale = (self._recup_noghost_streak
+                       >= getattr(C, "RECUP_MEAS_GHOST_CLEAR_FRAMES", 3))
         # Respaldo: si el planner tampoco rodea nada junto al eje, está despejado
         # aunque la memoria aún cargue la lata en algún lado raro.
-        path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W)
+        path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W) or ghost_stale
 
         if not path_clear:
             self._recup_clear_count = 0
@@ -884,6 +901,7 @@ class PPRuntime:
                             measured_pass = self._measured_recup_trigger(
                                 cl_stats, bev_obstacles,
                                 corner_soon=bool(_corner_soon_meas),
+                                fresh_color=bool(_camR or _camG),
                             )
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
