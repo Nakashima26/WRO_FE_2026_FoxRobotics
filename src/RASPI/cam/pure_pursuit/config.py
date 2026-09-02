@@ -499,6 +499,12 @@ OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
                                       # del BEV, se cuenta como "pasada" solo si
                                       # |x - robot_x| < esto (rebase real, no
                                       # ruido de rotación que la saca de lado)
+# 2026-09-01: la poda por "y > behind_y" solo dispara PASADO (=> RECUPERANDO) si
+# la lata está a |x - robot_x| <= esto al cruzar. Un rebase DE FRENTE deja la
+# lata bajo la nariz; una lata muy de lado que cruza por dead-reckoning es un
+# cono del SIGUIENTE segmento mal proyectado, y su falso PASADO le roba el
+# trigger de RECUPERANDO a la esquiva en curso (orillas487: 2do rojo a ~66px).
+OBS_MEM_PASSED_X_HALFWIDTH = 50.0
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2

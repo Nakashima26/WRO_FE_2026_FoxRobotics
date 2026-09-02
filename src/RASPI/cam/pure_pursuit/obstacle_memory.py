@@ -366,6 +366,17 @@ class ObstacleMemory:
         # el borde inferior del BEV con la lata muy cerca al arrancar -- NO es
         # un rebase: se descarta en silencio, sin mandar recuperando.
         ahead_gate = self.ry - getattr(C, "OBS_MEM_PASSED_MIN_AHEAD_PX", 40.0)
+        # Para que la poda por "quedó detrás" dispare PASADO (=> RECUPERANDO en el
+        # ESP), la lata debe haberse DETECTADO cerca de la columna del robot
+        # (x0). El PASADO por poda es el respaldo para un rebase DE FRENTE sin
+        # esquiva (el trigger MEDIDO de runtime necesita |heading|>=25° -> no
+        # dispara sin yaw), y esa lata está centrada. Una lata cuyo x0 está muy
+        # de lado NO se rebasa de frente: o es una esquiva (ya la cubre el
+        # trigger medido) o es un cono del SIGUIENTE segmento mal proyectado
+        # cuyo falso PASADO le roba el trigger a la esquiva en curso (orillas487:
+        # 2do rojo x0=256). Se usa x0 (fijo) y no o.x, que _advance rota con el
+        # yaw y puede arrastrar la lata al centro.
+        pass_halfw = getattr(C, "OBS_MEM_PASSED_X_HALFWIDTH", 50.0)
         kept: list[_Obs] = []
         passed = False
         for o in self._obs:
@@ -377,12 +388,17 @@ class ObstacleMemory:
                 self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue
             if o.y > behind_y:                       # ya quedó detrás del robot
-                if was_ahead:
+                if was_ahead and abs(o.x0 - self.rx) <= pass_halfw:
                     self.last_prune_reason = (
                         f"PASADO y={o.y:.0f}>{behind_y} ymin={o.y_min:.0f} "
-                        f"x0={o.x0:.0f} conf={o.conf:.2f}"
+                        f"x0={o.x0:.0f} x={o.x:.0f} conf={o.conf:.2f}"
                     )
                     passed = True
+                elif was_ahead:
+                    self.last_prune_reason = (
+                        f"DESCARTE_DE_LADO x0={o.x0:.0f} "
+                        f"|dx0|={abs(o.x0 - self.rx):.0f}>{pass_halfw:.0f}"
+                    )
                 else:
                     self.last_prune_reason = f"DESCARTE_NO_ADELANTE y={o.y:.0f} ymin={o.y_min:.0f}"
                 continue
