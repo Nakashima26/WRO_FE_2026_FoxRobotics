@@ -394,18 +394,24 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
 # esquina ladeado 50° (orillas490).
 RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
 
-# 2026-09-02: en el chequeo (2) "path despejado", IGNORAR toda lata que caiga
-# CLARAMENTE del otro lado de la línea naranja (oy < near_y - este margen, o sea
-# más lejos del robot que la boca de la esquina). Un rojo/verde de la RECTA
-# SIGUIENTE (p.ej. Verde6/Rojo1 en mi recta + Rojo5 en la de enfrente) se
-# proyecta al BEV y entra a memoria como "mía" mientras classify_and_split aún
-# no tiene veredicto (naranja sin estabilizar 6 frames, o LINE_CLASSIFY_FRAMES_
-# FIRST sin cumplirse) -> `blocking` lo cuenta como estorbo eterno y RECUPERANDO
-# NUNCA dispara para la lata que SÍ es de mi recta (reporte del usuario). El
-# ghost bypass no salva este caso porque el cono de enfrente se sigue viendo
-# fresco. Geométricamente una lata más allá de la naranja no puede ser la que
-# estoy esquivando en esta recta. 0/None = desactivado (comportamiento viejo).
-RECUP_MEAS_BEYOND_LINE_MARGIN_PX = 25.0
+# _merge/_dedupe de la memoria rodante: cuando la CÁMARA ve 2+ conos del mismo
+# color en el mismo frame, son conos FÍSICOS distintos -- no dejar que la
+# detección de uno "secuestre" el _Obs del otro. Con esto:
+#   • _merge asigna 1:1 (una detección reclama a lo más un _Obs, y un _Obs es
+#     reclamado por a lo más una detección por frame) -> la 2a detección crea
+#     su propio _Obs en vez de re-anclar el del 1o.
+#   • cada _Obs recuerda con qué otros _Obs fue CO-DETECTADO (codet_peers) y
+#     _dedupe nunca fusiona ese par, aunque uno dead-reckone hacia el otro al
+#     salir del FOV -- eso, no drift de velocidad, es lo que los acerca.
+# Motivo (orillas ~2026-09-02): Verde6/Rojo1 en mi recta + Rojo5 en la recta
+# siguiente, a ~20-40px en BEV (< OBS_MEM_MATCH_PX=75 y < OBS_MEM_DEDUPE_PX=85).
+# La detección de Rojo5 caía dentro del radio del _Obs de Rojo1 y lo re-anclaba
+# FRESCO cada frame -> el _Obs de Rojo1 nunca hacía dead-reckoning hacia atrás
+# -> `blocking` del trigger medido de RECUPERANDO nunca se limpiaba -> el carro
+# no entraba a RECUPERANDO hasta que Rojo5 salía del FOV (ya en la esquina).
+# SIN Rojo5 el _Obs de Rojo1 sí dead-reckona y RECUPERANDO entra normal.
+# False = comportamiento viejo (un solo _Obs para los dos conos).
+OBS_MEM_SPLIT_CODETECTED = True
 
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.

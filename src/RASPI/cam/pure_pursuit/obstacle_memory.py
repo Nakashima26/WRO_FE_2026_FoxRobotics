@@ -29,7 +29,8 @@ from . import config as C
 
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
-                 "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes")
+                 "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
+                 "codet_peers")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -83,6 +84,11 @@ class _Obs:
         self.beyond: bool | None = None
         self._cls_vote: bool | None = None    # cambio pendiente (True = a "más allá")
         self._cls_votes: int = 0              # frames seguidos apoyando ese cambio
+        # ids de otros _Obs que fueron CO-DETECTADOS por la cámara junto a éste
+        # (2+ bboxes del mismo color el mismo frame -> conos físicos distintos).
+        # _dedupe nunca fusiona un par que aparece aquí, aunque queden cerca al
+        # dead-reckonear uno tras salir del FOV (ver OBS_MEM_SPLIT_CODETECTED).
+        self.codet_peers: set[int] = set()
 
 
 class ObstacleMemory:
@@ -180,11 +186,79 @@ class ObstacleMemory:
 
     # ── Fusión con detecciones nuevas ───────────────────────────────────────────
 
+    def _refresh_obs(self, o: "_Obs", nx: float, ny: float):
+        """Re-visto: confiar en la posición fresca de la cámara."""
+        o.x, o.y = nx, ny
+        o.conf = C.OBS_MEM_REFRESH
+        o.y_min = min(o.y_min, ny)   # detección, no estima
+        # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
+        # (deja de re-sembrarse) en cuanto la lata se ve a `y` confiable.
+        if not o.anchored:
+            o.x0, o.y0 = nx, ny
+            o.xr, o.yr = nx, ny
+            o.heading0 = self._prev_heading
+            if ny >= getattr(C, "OBS_MEM_ANCHOR_MIN_Y", 200.0):
+                o.anchored = True
+
     def _merge(self, new_obs: list[tuple[float, float, str]]):
         match_r2 = C.OBS_MEM_MATCH_PX ** 2
         # Decaer todos primero; los que se re-vean recuperan confianza al fusionar.
         for o in self._obs:
             o.conf -= C.OBS_MEM_DECAY
+
+        fresh_ids: set[int] = set()   # _Obs tocados por una detección este frame
+
+        # ¿la cámara ve 2+ conos del MISMO color este frame? -> son conos
+        # físicos distintos: forzar asignación 1:1 (greedy global por distancia)
+        # para que la detección de uno no "secuestre" el _Obs del otro y lo
+        # re-ancle fresco cada frame (ver OBS_MEM_SPLIT_CODETECTED).
+        _by_color: dict[str, int] = {}
+        for _x, _y, _c in new_obs:
+            _by_color[_c] = _by_color.get(_c, 0) + 1
+        _split = (getattr(C, "OBS_MEM_SPLIT_CODETECTED", True)
+                  and any(n >= 2 for n in _by_color.values()))
+
+        if _split:
+            # Candidatos (dist², idx_detección, idx_obs) dentro del radio,
+            # emparejados por distancia ascendente, cada lado a lo más una vez.
+            # Así el _Obs existente se queda con la detección MÁS cercana (la que
+            # venía siguiendo) y el otro cono estrena su propio _Obs.
+            cand: list[tuple[float, int, int]] = []
+            for di, (nx, ny, color) in enumerate(new_obs):
+                for oi, o in enumerate(self._obs):
+                    if o.color != color:
+                        continue
+                    d2 = (o.x - nx) ** 2 + (o.y - ny) ** 2
+                    if d2 <= match_r2:
+                        cand.append((d2, di, oi))
+            cand.sort()
+            det_pair: dict[int, int] = {}
+            used_obs: set[int] = set()
+            for d2, di, oi in cand:
+                if di in det_pair or oi in used_obs:
+                    continue
+                det_pair[di] = oi
+                used_obs.add(oi)
+            for di, (nx, ny, color) in enumerate(new_obs):
+                oi = det_pair.get(di)
+                if oi is not None:
+                    self._refresh_obs(self._obs[oi], nx, ny)
+                    fresh_ids.add(id(self._obs[oi]))
+                elif len(self._obs) < C.OBS_MEM_MAX:
+                    self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
+                                          heading0=self._prev_heading))
+                    fresh_ids.add(id(self._obs[-1]))
+            # Registrar CO-DETECCIÓN entre los _Obs frescos del mismo color de
+            # este frame -> _dedupe no los volverá a fusionar aunque uno haga
+            # dead-reckoning hacia el otro al salir del FOV.
+            _fresh = [o for o in self._obs if id(o) in fresh_ids]
+            for _a in range(len(_fresh)):
+                for _b in range(_a + 1, len(_fresh)):
+                    if _fresh[_a].color != _fresh[_b].color:
+                        continue
+                    _fresh[_a].codet_peers.add(id(_fresh[_b]))
+                    _fresh[_b].codet_peers.add(id(_fresh[_a]))
+            return
 
         for nx, ny, color in new_obs:
             best = None
@@ -197,18 +271,7 @@ class ObstacleMemory:
                     best_d2 = d2
                     best = o
             if best is not None:
-                # Re-visto: confiar en la posición fresca de la cámara.
-                best.x, best.y = nx, ny
-                best.conf = C.OBS_MEM_REFRESH
-                best.y_min = min(best.y_min, ny)   # detección, no estima
-                # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
-                # (deja de re-sembrarse) en cuanto la lata se ve a `y` confiable.
-                if not best.anchored:
-                    best.x0, best.y0 = nx, ny
-                    best.xr, best.yr = nx, ny
-                    best.heading0 = self._prev_heading
-                    if ny >= getattr(C, "OBS_MEM_ANCHOR_MIN_Y", 200.0):
-                        best.anchored = True
+                self._refresh_obs(best, nx, ny)
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
                     self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
@@ -230,6 +293,12 @@ class ObstacleMemory:
             return
 
         dedupe_r2 = C.OBS_MEM_DEDUPE_PX ** 2
+        # Nunca fusionar un par de _Obs que la cámara CO-DETECTÓ (2+ bboxes del
+        # mismo color el mismo frame -> conos físicos distintos, ver
+        # OBS_MEM_SPLIT_CODETECTED). Se registra en _merge. Sin esto _dedupe
+        # (85px) absorbe el _Obs del cono cercano en el del lejano cuando el
+        # cercano dead-reckona hacia él tras salir del FOV -> vuelve el bug.
+        guard_codet = getattr(C, "OBS_MEM_SPLIT_CODETECTED", True)
         # Procesar de mayor a menor confianza: el más confiable "absorbe"
         # a los cercanos de menor confianza.
         ordered = sorted(self._obs, key=lambda o: o.conf, reverse=True)
@@ -242,6 +311,9 @@ class ObstacleMemory:
                     continue
                 d2 = (k.x - o.x) ** 2 + (k.y - o.y) ** 2
                 if d2 <= dedupe_r2:
+                    if guard_codet and (id(k) in o.codet_peers
+                                        or id(o) in k.codet_peers):
+                        continue   # conos co-detectados: mantener separados
                     # o es un duplicado de k (k ya tiene >= confianza) → descartar o
                     merged_into_existing = True
                     break
