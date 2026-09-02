@@ -160,12 +160,12 @@ OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MI
 # Absorbe el offset sensor-frontal ↔ origen BEV y el diámetro del cono.
 DODGE_WALL_MARGIN_MM = 100.0
 
-# 2026-09-01: filtro por lado del giro (runtime_nuevo). Con turn_dir conocido y
-# >=2 conos `mia`, uno del lado del giro con x más allá de ROBOT_BEV_X ± esto
-# (habiendo un primario del otro lado) se manda a `beyond`: es del siguiente
-# segmento (visible pasando la esquina, mal proyectado). orillas482: verde(2)
-# izq + rojo(5) del sig. segmento derecha, giro=R.
-DODGE_TURN_SIDE_MARGIN_PX = 60
+# 2026-09-01: LOCK al obstáculo primario (runtime_nuevo). Con >=2 conos `mia` se
+# fija el más cercano y los demás se difieren a `beyond` hasta pasarlo. Se sigue
+# por posición: un cono cuya (x,y) esté a <= esto del lock cuenta como el mismo.
+# Evita que el carro pelee dos conos a la vez (orillas482: verde en la cara vs
+# rojo del siguiente segmento mal proyectado).
+LOCK_MATCH_RADIUS_PX = 60.0
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)

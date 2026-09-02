@@ -18,6 +18,7 @@ Para correrlo:
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -151,6 +152,7 @@ class PPRuntime:
         # Estado de la memoria rodante
         self._last_heading: float | None = None
         self._front_cm: int | None = None   # dF del ACK (ultrasónico frontal, cm)
+        self._lock_xy: tuple[float, float] | None = None  # cono primario fijado (>=2 conos)
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._is_turning: bool = False
@@ -807,44 +809,43 @@ class PPRuntime:
                                       f"(mant={len(_keep)})", flush=True)
                             bev_obstacles, obstacle_conf = _keep, _keep_conf
 
-                        # ── Filtro por LADO DEL GIRO ── el segmento siguiente está
-                        # del lado hacia donde gira la pista. Estando aún en la
-                        # recta actual (esquina sin abrir), un cono MUY del lado
-                        # del giro que aparece A LA PAR de un obstáculo primario
-                        # del OTRO lado es del siguiente segmento: la cámara lo ve
-                        # pasando la esquina y el BEV lo proyecta mal (cerca, "a la
-                        # par del verde"). El dF no lo agarra porque esa mala
-                        # proyección lo pone antes de la pared. Los conos de MI
-                        # columna del lado del giro ya los pasé para cuando esto
-                        # aplica (orillas482: verde(2) izq + rojo(5) del sig.
-                        # segmento a la derecha, giro=R).
-                        _td = (getattr(C, "CORNER_TURN_DIR_OVERRIDE", None)
-                               or self.turn_dir_tracker.direction)
-                        if _td in ("L", "R") and len(bev_obstacles) >= 2:
-                            _k = getattr(C, "DODGE_TURN_SIDE_MARGIN_PX", 60)
-                            _bound = C.ROBOT_BEV_X + (_k if _td == "R" else -_k)
-                            # "primario del otro lado": deadband ±30 para que un
-                            # verde que ya derivó al centro (chasis ladeado) siga
-                            # contando y el filtro no parpadee.
-                            _has_primary_other = any(
-                                (ox < C.ROBOT_BEV_X + 30) if _td == "R"
-                                else (ox > C.ROBOT_BEV_X - 30)
-                                for ox, _, _ in bev_obstacles)
-                            if _has_primary_other:
-                                _keep2, _keep2_conf = [], []
+                        # ── LOCK al obstáculo primario ── con >=2 conos `mia`, se
+                        # fija el MÁS CERCANO (mayor y-BEV) y los demás se difieren
+                        # a `beyond` hasta que ése se pase. Se sigue por posición
+                        # (self._lock_xy, radio LOCK_MATCH_RADIUS_PX) para no
+                        # brincar cuando la y de otro cono lo "adelanta" en el BEV
+                        # (proyección mala de un cono del siguiente segmento
+                        # pasando la esquina -- orillas482: verde en la cara +
+                        # rojo del sig. segmento peleándole el volante). Sin
+                        # depender de turn_dir / naranja / calibración.
+                        if len(bev_obstacles) >= 2:
+                            _lr = getattr(C, "LOCK_MATCH_RADIUS_PX", 60.0)
+                            _locked_i = None
+                            if self._lock_xy is not None:
+                                _best_d = _lr
                                 for _i, (_ox, _oy, _oc) in enumerate(bev_obstacles):
-                                    _outside = (_ox > _bound) if _td == "R" else (_ox < _bound)
-                                    if _outside:
-                                        bev_obstacles_beyond.append((_ox, _oy, _oc))
-                                    else:
-                                        _keep2.append((_ox, _oy, _oc))
-                                        _keep2_conf.append(
-                                            obstacle_conf[_i] if _i < len(obstacle_conf) else 1.0)
-                                if len(_keep2) != len(bev_obstacles):
-                                    print(f"[TURNSIDE] td={_td} bound={_bound:.0f} -> "
-                                          f"{len(bev_obstacles) - len(_keep2)} cono(s) a beyond",
-                                          flush=True)
-                                bev_obstacles, obstacle_conf = _keep2, _keep2_conf
+                                    _d = math.hypot(_ox - self._lock_xy[0],
+                                                    _oy - self._lock_xy[1])
+                                    if _d < _best_d:
+                                        _best_d, _locked_i = _d, _i
+                            if _locked_i is None:                 # sin lock o se perdió -> re-fija al más cercano
+                                _locked_i = max(range(len(bev_obstacles)),
+                                                key=lambda k: bev_obstacles[k][1])
+                            _lx, _ly, _lc = bev_obstacles[_locked_i]
+                            self._lock_xy = (_lx, _ly)
+                            for _i, _obs in enumerate(bev_obstacles):
+                                if _i != _locked_i:
+                                    bev_obstacles_beyond.append(_obs)
+                            print(f"[LOCK] {_lc}@({_lx:.0f},{_ly:.0f}) "
+                                  f"difiere {len(bev_obstacles) - 1}", flush=True)
+                            _kc = obstacle_conf[_locked_i] if _locked_i < len(obstacle_conf) else 1.0
+                            bev_obstacles, obstacle_conf = [(_lx, _ly, _lc)], [_kc]
+                        elif len(bev_obstacles) == 1:
+                            # seguí al único: cuando aparezca un 2do, el lock ya
+                            # apunta a ÉSTE (el que estaba primero) y no al nuevo.
+                            self._lock_xy = (bev_obstacles[0][0], bev_obstacles[0][1])
+                        else:
+                            self._lock_xy = None
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
