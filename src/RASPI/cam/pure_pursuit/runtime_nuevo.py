@@ -661,9 +661,12 @@ class PPRuntime:
                         _camR = len(positions.get("Red", []))
                         _camG = len(positions.get("Green", []))
                         if _camR or _camG or new_obstacles or far_objects:
+                            # h = alto del bbox de CÁMARA (proximidad real). CALIBRACIÓN
+                            # 2026-09-02: comparar h de un cono de MI recta vs uno de la
+                            # SIGUIENTE para el filtro bbox (solo cuando hay >=2 conos).
                             print(f"[DET] camR={_camR} camG={_camG} "
-                                  f"bev={[(round(a),round(b),c[0]) for a,b,c in new_obstacles]} "
-                                  f"far={[(round(fx),c[0]) for fx,_w,_h,c in far_objects]}",
+                                  f"bev={[(round(a),round(b),c[0],round(hh)) for (a,b,c),hh in zip(new_obstacles, new_obs_h)]} "
+                                  f"far={[(round(fx),c[0],round(_h)) for fx,_w,_h,c in far_objects]}",
                                   flush=True)
 
                         # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
