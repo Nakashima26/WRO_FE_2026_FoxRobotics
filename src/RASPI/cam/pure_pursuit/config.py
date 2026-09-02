@@ -154,6 +154,12 @@ OBSTACLE_URGENT_MM = 180.0   # <= esto: reacción full (gain 1.0, lookahead cort
 # metía ruido -> revertido a 300 (compromiso, era 260).
 OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MIN)
 
+# 2026-09-01: margen antes de la pared frontal (dF del ESP) para el filtro
+# geométrico de runtime_nuevo: un cono a >= (dF*10 - esto) mm de frente se
+# considera de la SIGUIENTE recta (está en/pasando la pared) y no se esquiva.
+# Absorbe el offset sensor-frontal ↔ origen BEV y el diámetro del cono.
+DODGE_WALL_MARGIN_MM = 100.0
+
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
 WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)

@@ -114,6 +114,19 @@ def _parse_direccion(ack: str) -> str | None:
     val = ack[idx + 4: idx + 5]
     return val if val in ("L", "R") else None
 
+def _parse_front_dist(ack: str) -> int | None:
+    """dF=<int> del ACK:V2: distancia (cm) del ultrasónico frontal del ESP32.
+    ~199/200 = sin lectura (nada cerca). None si no está en el ACK."""
+    if not ack:
+        return None
+    idx = ack.find("dF=")
+    if idx < 0:
+        return None
+    try:
+        return int(ack[idx + 3:].split(",")[0])
+    except (ValueError, IndexError):
+        return None
+
 
 class PPRuntime:
     """
@@ -137,6 +150,7 @@ class PPRuntime:
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
+        self._front_cm: int | None = None   # dF del ACK (ultrasónico frontal, cm)
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._is_turning: bool = False
@@ -765,6 +779,34 @@ class PPRuntime:
                                 )
                             )
 
+                        # ── Filtro geométrico por pared frontal (dF del ESP) ──
+                        # Un cono cuya distancia longitudinal en el BEV supera la
+                        # pared de enfrente está EN o PASANDO esa pared -> es de
+                        # la SIGUIENTE recta, no de la mía. Sin depender de la
+                        # naranja (que cerca de la esquina es basura). Se
+                        # autolimita: el BEV solo cubre ~760mm, así que con dF
+                        # grande (sin pared) wall_mm es enorme y no filtra nada.
+                        # Motivo: orillas477/478 -- el carro esquivaba el rojo de
+                        # la recta siguiente y ese cono le hacía de ancla/pivote,
+                        # arruinando la esquiva del verde de la recta actual.
+                        if self._front_cm is not None and self._front_cm > 0 and bev_obstacles:
+                            _wall_mm = self._front_cm * 10.0 - getattr(
+                                C, "DODGE_WALL_MARGIN_MM", 100.0)
+                            _keep, _keep_conf = [], []
+                            for _i, (_ox, _oy, _oc) in enumerate(bev_obstacles):
+                                _fwd_mm = (C.ROBOT_BEV_Y - _oy) * C.MM_PER_PX
+                                _cf = obstacle_conf[_i] if _i < len(obstacle_conf) else 1.0
+                                if _fwd_mm >= _wall_mm:
+                                    bev_obstacles_beyond.append((_ox, _oy, _oc))
+                                else:
+                                    _keep.append((_ox, _oy, _oc))
+                                    _keep_conf.append(_cf)
+                            if len(_keep) != len(bev_obstacles):
+                                print(f"[WALLFILT] dF={self._front_cm}cm -> "
+                                      f"{len(bev_obstacles) - len(_keep)} cono(s) a beyond "
+                                      f"(mant={len(_keep)})", flush=True)
+                            bev_obstacles, obstacle_conf = _keep, _keep_conf
+
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
                         # toda la carrera. PRIMARIA: posición lateral de un
@@ -1025,6 +1067,10 @@ class PPRuntime:
                 heading = _parse_heading(serial_ack)
                 if heading is not None:
                     self._last_heading = heading
+
+                _fd = _parse_front_dist(serial_ack)
+                if _fd is not None:
+                    self._front_cm = _fd
 
                 # Dirección de giro AUTORITATIVA del ESP32 (dir= en el ACK, L/R
                 # desde su 1er GIRANDO). Cubre esquinas 2-12; corrige cualquier
