@@ -546,6 +546,17 @@ LOCK_MATCH_RADIUS_PX = 70.0
 NEXT_SEG_BBOX_MAX_PX  = 62.0
 NEXT_SEG_BBOX_RATIO   = 0.6
 NEXT_SEG_BBOX_FRAMES  = 3
+
+# 2026-09-02: un cono con bbox de cámara >= esto Y conf >= MIN_CONF se fuerza a
+# `mia` en classify_and_split(), IGNORANDO la naranja. Un cono físicamente
+# CERCA es de mi recta -- y es justo cuando el carro está ladeado esquivándolo
+# que la naranja lo mandaba a `beyond` -> no se esquivaba -> sin RECUPERANDO ->
+# GIRANDO (orillas496/498/500: 2 rojos, el cercano caía a beyond). El bbox no
+# miente con el yaw (a diferencia de la naranja) ni con la proyección BEV (a
+# diferencia de `y`, que un cono pasando la esquina infla). Calibración
+# [DET] h= (orillas499/500): cono de mi recta h~74-240; recta siguiente h~40-55.
+CLASSIFY_FORCE_MINE_BBOX_PX = 70.0
+CLASSIFY_FORCE_MINE_MIN_CONF = 0.65
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2
