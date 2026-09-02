@@ -163,6 +163,11 @@ class PPRuntime:
         # ── Trigger de RECUPERANDO por ESTADO MEDIDO (ver _measured_recup_trigger) ──
         self._heading_ref: float | None = None   # heading de la recta al ARMARSE la esquiva
         self._dodge_armed: bool = False          # hubo una esquiva de verdad en curso
+        self._recup_lock_xy: tuple[float, float] | None = None  # cono que ARMÓ la
+        #   esquiva en curso. El chequeo "¿ya lo rodeé?" se hace SOLO contra este
+        #   cono, buscándolo en mia+beyond -> si su clasificación cambia a beyond
+        #   a media esquiva (2º cono corrompe la naranja, orillas496) NO se pierde
+        #   ni el trigger lo da por rodeado. "Me quedo con el cono que esquivo."
         self._recup_can_arm: bool = True         # gate: solo re-arma tras un peso bajo (esquiva nueva)
         self._recup_arm_streak: int = 0          # frames seguidos con peso alto (debounce de armado)
         self._recup_clear_count: int = 0         # frames seguidos con el path ya despejado
@@ -212,7 +217,8 @@ class PPRuntime:
 
     def _measured_recup_trigger(self, cl_stats: dict, bev_obstacles: list,
                                 corner_soon: bool = False,
-                                fresh_color: bool = True) -> bool:
+                                fresh_color: bool = True,
+                                obs_beyond: list | None = None) -> bool:
         """
         Decide si el robot ACABA de rebasar un obstáculo de LADO (esquiva de
         ángulo) — el disparo de RECUPERANDO que el ancla "geom" nunca acertó.
@@ -284,6 +290,14 @@ class PPRuntime:
             self._recup_clear_count = 0
             self._recup_noghost_streak = 0
             self._heading_ref = None   # se siembra abajo con el heading de ESTE frame
+            # Latch el cono que armó esta esquiva (el color más cercano al eje en
+            # bev_obstacles -- post-LOCK es el primario). A partir de aquí el
+            # chequeo de "rodeado" lo sigue por posición en mia+beyond.
+            _armc = [(ox, oy) for (ox, oy, c) in bev_obstacles
+                     if c in ("Red", "Green")]
+            self._recup_lock_xy = (
+                min(_armc, key=lambda p: abs(p[0] - C.ROBOT_BEV_X))
+                if _armc else None)
 
         # Siembra PEREZOSA de heading_ref: en cuanto haya heading y la esquiva
         # esté armada. Antes se sembraba SOLO en el frame de armado -> si se armó
@@ -308,7 +322,9 @@ class PPRuntime:
               f"h={'-' if self._last_heading is None else round(self._last_heading)} "
               f"hascolor={int(has_color_obs)} clr={self._recup_clear_count} "
               f"csoon={int(bool(corner_soon))} fresh={int(fresh_color)} "
-              f"noghost={getattr(self, '_recup_noghost_streak', 0)}", flush=True)
+              f"noghost={getattr(self, '_recup_noghost_streak', 0)} "
+              f"lock={'-' if self._recup_lock_xy is None else f'{self._recup_lock_xy[0]:.0f},{self._recup_lock_xy[1]:.0f}'}",
+              flush=True)
 
         if not self._dodge_armed:
             return False
@@ -336,10 +352,32 @@ class PPRuntime:
             ahead_tol = 0.0                         # latiguazo extremo: lata al eje o detrás
         else:
             ahead_tol = _tol0 * (_hhi - _a) / (_hhi - _hlo)
-        blocking = any(
-            c in ("Red", "Green") and (ry - oy) > ahead_tol
-            for (ox, oy, c) in bev_obstacles
-        )
+        # "Me quedo con el cono que esquivo": si hay un cono latcheado (lo hubo al
+        # armar), el bloqueo se evalúa SOLO contra él, buscándolo en mia+beyond
+        # -> aunque su clasificación cambie a beyond a media esquiva sigue
+        # bloqueando hasta que de verdad quede atrás. Un cono NUEVO que solo
+        # aparece (recta siguiente) ya no retiene RECUPERANDO (orillas496).
+        _all_color = [t for t in (list(bev_obstacles) + list(obs_beyond or []))
+                      if t[2] in ("Red", "Green")]
+        _locked_ahead = None
+        if self._recup_lock_xy is not None:
+            _lr2 = getattr(C, "LOCK_MATCH_RADIUS_PX", 70.0) ** 2
+            _bd = _lr2
+            for (ox, oy, c) in _all_color:
+                _d = (ox - self._recup_lock_xy[0]) ** 2 + (oy - self._recup_lock_xy[1]) ** 2
+                if _d < _bd:
+                    _bd, _locked_ahead = _d, (ox, oy)
+        if self._recup_lock_xy is not None:
+            if _locked_ahead is not None:
+                self._recup_lock_xy = _locked_ahead      # seguir al cono
+                blocking = (ry - _locked_ahead[1]) > ahead_tol
+            else:
+                blocking = False                         # el cono latcheado ya no está -> rodeado
+        else:
+            blocking = any(
+                c in ("Red", "Green") and (ry - oy) > ahead_tol
+                for (ox, oy, c) in bev_obstacles
+            )
         # Bypass del ghost: si la lata que "estorba" no se ve FRESCA (la cámara
         # no la detectó) hace RECUP_MEAS_GHOST_CLEAR_FRAMES frames y el chasis ya
         # está chueco, el carro ya la rodeó -> su ghost de memoria dead-reckoned
@@ -355,7 +393,13 @@ class PPRuntime:
                        >= getattr(C, "RECUP_MEAS_GHOST_CLEAR_FRAMES", 3))
         # Respaldo: si el planner tampoco rodea nada junto al eje, está despejado
         # aunque la memoria aún cargue la lata en algún lado raro.
-        path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W) or ghost_stale
+        # PERO: si el cono LATCHEADO sigue adelante, eso MANDA -- el respaldo por
+        # peso bajo no aplica (el peso cayó porque el cono se fue a beyond, no
+        # porque el carro lo haya rodeado -- orillas496).
+        if self._recup_lock_xy is not None and blocking:
+            path_clear = False
+        else:
+            path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W) or ghost_stale
 
         if not path_clear:
             self._recup_clear_count = 0
@@ -381,6 +425,7 @@ class PPRuntime:
             self._dodge_armed = False
             self._recup_clear_count = 0
             self._heading_ref = None
+            self._recup_lock_xy = None
             return True
 
         # Despejado MUCHOS frames y el heading nunca llegó a HEADING_DEG ->
@@ -397,11 +442,13 @@ class PPRuntime:
             self._recup_can_arm = True
             self._recup_clear_count = 0
             self._heading_ref = None
+            self._recup_lock_xy = None
             # Solo olvidar si NINGÚN cono sigue de verdad adelante (>40px del
             # eje): así no se borra un obstáculo que el carro tiene justo
-            # enfrente y todavía debe rodear.
+            # enfrente y todavía debe rodear. Se mira mia+beyond -- un cono que
+            # se fue a beyond a media esquiva NO debe borrarse (orillas496).
             if not any(c in ("Red", "Green") and (ry - oy) > 40.0
-                       for (ox, oy, c) in bev_obstacles):
+                       for (ox, oy, c) in _all_color):
                 self.memory.forget_color_obstacles()
         else:
             self._last_recup_reason = (
@@ -902,6 +949,7 @@ class PPRuntime:
                                 cl_stats, bev_obstacles,
                                 corner_soon=bool(_corner_soon_meas),
                                 fresh_color=bool(_camR or _camG),
+                                obs_beyond=bev_obstacles_beyond,
                             )
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
@@ -1090,6 +1138,7 @@ class PPRuntime:
                         self._recup_can_arm = True
                         self._recup_clear_count = 0
                         self._heading_ref = None
+                        self._recup_lock_xy = None
                     else:
                         self._g_streak = 0
                     g_confirmed = self._g_streak >= C.TURN_EST_G_CONFIRM_FRAMES
@@ -1106,6 +1155,7 @@ class PPRuntime:
                         self._recup_can_arm = True
                         self._recup_clear_count = 0
                         self._heading_ref = None
+                        self._recup_lock_xy = None
                         print(f"[MEM] Giro detectado (est=G x{self._g_streak}) — "
                               f"memoria de obstáculos desactivada.", flush=True)
                     elif estado_now != "G" and self._is_turning:
