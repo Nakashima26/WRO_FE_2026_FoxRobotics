@@ -394,6 +394,19 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
 # esquina ladeado 50° (orillas490).
 RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
 
+# 2026-09-02: en el chequeo (2) "path despejado", IGNORAR toda lata que caiga
+# CLARAMENTE del otro lado de la línea naranja (oy < near_y - este margen, o sea
+# más lejos del robot que la boca de la esquina). Un rojo/verde de la RECTA
+# SIGUIENTE (p.ej. Verde6/Rojo1 en mi recta + Rojo5 en la de enfrente) se
+# proyecta al BEV y entra a memoria como "mía" mientras classify_and_split aún
+# no tiene veredicto (naranja sin estabilizar 6 frames, o LINE_CLASSIFY_FRAMES_
+# FIRST sin cumplirse) -> `blocking` lo cuenta como estorbo eterno y RECUPERANDO
+# NUNCA dispara para la lata que SÍ es de mi recta (reporte del usuario). El
+# ghost bypass no salva este caso porque el cono de enfrente se sigue viendo
+# fresco. Geométricamente una lata más allá de la naranja no puede ser la que
+# estoy esquivando en esta recta. 0/None = desactivado (comportamiento viejo).
+RECUP_MEAS_BEYOND_LINE_MARGIN_PX = 25.0
+
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6

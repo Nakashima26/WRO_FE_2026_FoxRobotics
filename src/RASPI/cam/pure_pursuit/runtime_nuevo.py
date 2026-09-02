@@ -212,7 +212,8 @@ class PPRuntime:
 
     def _measured_recup_trigger(self, cl_stats: dict, bev_obstacles: list,
                                 corner_soon: bool = False,
-                                fresh_color: bool = True) -> bool:
+                                fresh_color: bool = True,
+                                orange_near_y: float | None = None) -> bool:
         """
         Decide si el robot ACABA de rebasar un obstáculo de LADO (esquiva de
         ángulo) — el disparo de RECUPERANDO que el ancla "geom" nunca acertó.
@@ -336,8 +337,19 @@ class PPRuntime:
             ahead_tol = 0.0                         # latiguazo extremo: lata al eje o detrás
         else:
             ahead_tol = _tol0 * (_hhi - _a) / (_hhi - _hlo)
+        # IGNORAR latas CLARAMENTE más allá de la línea naranja (oy menor que
+        # near_y - margen => más lejos del robot que la boca de la esquina).
+        # Un rojo/verde de la recta SIGUIENTE entra a memoria como "mía"
+        # mientras classify_and_split aún no tiene veredicto -> sin esto
+        # "estorba" para siempre y RECUPERANDO nunca dispara para la lata que
+        # SÍ es de mi recta (ver RECUP_MEAS_BEYOND_LINE_MARGIN_PX).
+        _beyond_m = float(getattr(C, "RECUP_MEAS_BEYOND_LINE_MARGIN_PX", 0.0) or 0.0)
+        _line_cut = (orange_near_y - _beyond_m
+                     if (orange_near_y is not None and _beyond_m > 0.0)
+                     else None)
         blocking = any(
             c in ("Red", "Green") and (ry - oy) > ahead_tol
+            and (_line_cut is None or oy >= _line_cut)
             for (ox, oy, c) in bev_obstacles
         )
         # Bypass del ghost: si la lata que "estorba" no se ve FRESCA (la cámara
@@ -361,7 +373,8 @@ class PPRuntime:
             self._recup_clear_count = 0
             self._last_recup_reason = (
                 f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f} "
-                f"atol={ahead_tol:.0f}")
+                f"atol={ahead_tol:.0f} "
+                f"lcut={'-' if _line_cut is None else round(_line_cut)}")
             return False
         self._recup_clear_count += 1
 
@@ -902,6 +915,8 @@ class PPRuntime:
                                 cl_stats, bev_obstacles,
                                 corner_soon=bool(_corner_soon_meas),
                                 fresh_color=bool(_camR or _camG),
+                                orange_near_y=(_oy_cs if orange_info.get("seen")
+                                               else None),
                             )
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
