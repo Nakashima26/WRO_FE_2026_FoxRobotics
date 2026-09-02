@@ -1,0 +1,25 @@
+# FoxRobotics — WRO 2026 Future Engineers
+# Raspberry Pi runtime dependencies (Python >= 3.10).
+#
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# Versions below are the minimums we run against. To lock the exact set that
+# is on the competition Pi, run `pip freeze > requirements.lock.txt` there.
+
+numpy>=1.24
+opencv-python>=4.6          # cv2 — BEV warp, HSV masks, contours.
+                            #   On the Pi you may prefer the system build:
+                            #   sudo apt install python3-opencv   (then skip this line)
+pyserial>=3.5               # `serial` — UART link to the ESP32 (V2 protocol)
+RPi.GPIO>=0.7.1             # start button (GPIO17) + status LED (GPIO27)
+
+# ── System packages (apt, NOT pip) ──────────────────────────────────────────
+#   python3-smbus                     # `import smbus` (I2C helper, legacy path)
+#   libcamera + gstreamer1.0-libcamera, gstreamer1.0-plugins-{base,good}
+#                                     # camera capture pipeline in vision.open_camera()
+#
+# ── ESP32 firmware (Arduino, not Python) ────────────────────────────────────
+#   arduino-cli core install esp32:esp32
+#   arduino-cli lib  install "MPU6050_tockn"
