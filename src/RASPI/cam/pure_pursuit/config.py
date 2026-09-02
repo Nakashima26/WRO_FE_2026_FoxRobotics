@@ -505,6 +505,12 @@ OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
 # cono del SIGUIENTE segmento mal proyectado, y su falso PASADO le roba el
 # trigger de RECUPERANDO a la esquiva en curso (orillas487: 2do rojo a ~66px).
 OBS_MEM_PASSED_X_HALFWIDTH = 50.0
+
+# 2026-09-01: LOCK al obstáculo primario (runtime_nuevo). Con >=2 conos se fija
+# uno (bbox de cámara más grande = más cerca; después por posición) y el resto
+# NO entra a la centerline hasta pasarlo. Un cono a <= esto px del lock cuenta
+# como el mismo. Evita el zigzag de dos lados de paso opuestos (orillas488).
+LOCK_MATCH_RADIUS_PX = 70.0
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2

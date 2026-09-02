@@ -137,6 +137,7 @@ class PPRuntime:
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
+        self._lock_xy: tuple[float, float] | None = None  # cono primario fijado (>=2 conos)
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._is_turning: bool = False
@@ -618,6 +619,9 @@ class PPRuntime:
                         # Proyectar obstáculos detectados al plano BEV, y
                         # separar los que NO proyectaron (candidatos a hint lejano)
                         new_obstacles = []
+                        new_obs_h     = []   # alto del bbox de CÁMARA, 1:1 con new_obstacles
+                                             # (proximidad REAL; el BEV y miente con un
+                                             # cono pasando la esquina -- ver el lock abajo)
                         far_objects   = []   # (center_x, w, h, color) — fuera de BEV
                         for color_name in ("Red", "Green"):
                             for obj in positions.get(color_name, []):
@@ -625,6 +629,7 @@ class PPRuntime:
                                 result = map_obstacle_to_bev(self.bev, x, y, w, h)
                                 if result is not None:
                                     new_obstacles.append((result[0], result[1], color_name))
+                                    new_obs_h.append(float(h))
                                 else:
                                     # No proyectó (fuera de bev_in_bounds o
                                     # cam_to_bev falló) → tratar como lejano
@@ -758,6 +763,52 @@ class PPRuntime:
                                     rescue_fn=_rescue_fn,
                                 )
                             )
+
+                        # ── LOCK al obstáculo primario ── con >=2 conos la
+                        # centerline no puede satisfacer dos lados de paso
+                        # opuestos y `obs` oscila (orillas488: +0.47 <-> -0.60).
+                        # Se fija UNO: el resto sale de bev_obstacles (a beyond,
+                        # NO entra a la centerline) hasta que ése se pase.
+                        #  - criterio para FIJAR: bbox de cámara más grande = más
+                        #    cerca de verdad. El BEV y NO sirve: un cono pasando
+                        #    la esquina proyecta con y MAYOR (falso "más cerca")
+                        #    que el verde que tengo en la cara (orillas488:
+                        #    R y=258 > G y=246, y el verde es el cercano).
+                        #  - despues se sigue por POSICION (self._lock_xy) para no
+                        #    brincar si el otro cono gana y/bbox un frame por ruido.
+                        if len(bev_obstacles) >= 2:
+                            def _cam_h(ox, oy):
+                                bd, bh = (getattr(C, "LOCK_MATCH_RADIUS_PX", 70.0)) ** 2, 0.0
+                                for (nx, ny, _c), nh in zip(new_obstacles, new_obs_h):
+                                    d = (nx - ox) ** 2 + (ny - oy) ** 2
+                                    if d < bd:
+                                        bd, bh = d, nh
+                                return bh
+                            _lr2 = (getattr(C, "LOCK_MATCH_RADIUS_PX", 70.0)) ** 2
+                            _li = None
+                            if self._lock_xy is not None:
+                                _bd = _lr2
+                                for _i, (_ox, _oy, _c) in enumerate(bev_obstacles):
+                                    _d = (_ox - self._lock_xy[0]) ** 2 + (_oy - self._lock_xy[1]) ** 2
+                                    if _d < _bd:
+                                        _bd, _li = _d, _i
+                            if _li is None:                       # re-fijar: bbox más grande, empate -> mayor y
+                                _li = max(range(len(bev_obstacles)),
+                                          key=lambda k: (_cam_h(*bev_obstacles[k][:2]),
+                                                         bev_obstacles[k][1]))
+                            _lock = bev_obstacles[_li]
+                            self._lock_xy = (_lock[0], _lock[1])
+                            _dropped = [o for j, o in enumerate(bev_obstacles) if j != _li]
+                            bev_obstacles_beyond.extend(_dropped)
+                            _lkc = obstacle_conf[_li] if _li < len(obstacle_conf) else 1.0
+                            bev_obstacles, obstacle_conf = [_lock], [_lkc]
+                            print(f"[LOCK] {_lock[2]}@({_lock[0]:.0f},{_lock[1]:.0f}) "
+                                  f"h={_cam_h(_lock[0], _lock[1]):.0f} difiere {len(_dropped)}",
+                                  flush=True)
+                        elif len(bev_obstacles) == 1:
+                            self._lock_xy = (bev_obstacles[0][0], bev_obstacles[0][1])
+                        else:
+                            self._lock_xy = None
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
