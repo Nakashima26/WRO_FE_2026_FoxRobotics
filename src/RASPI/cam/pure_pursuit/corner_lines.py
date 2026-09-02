@@ -311,11 +311,15 @@ class OrangeLineTracker:
         línea, mi recta); False si está del otro lado (siguiente recta).
         None si no hay línea estable todavía (no se puede clasificar).
 
-        Usa la recta con pendiente cuando se pudo ajustar (self.stable["line"]);
-        si no hubo suficientes pixeles para ajustarla (línea muy ocluida/corta
-        en este momento), cae de vuelta a comparar solo Y contra near_y —
-        funciona igual de bien que antes cuando la línea SÍ es horizontal,
-        y es mejor que no clasificar nada.
+        Con LINE_CLASSIFY_REQUIRE_FIT (default) SOLO clasifica cuando hay un
+        ajuste de recta con pendiente real (self.stable["line"]). Sin él caía a
+        comparar `oy > near_y` — y ese fallback es justo el que rompía: tras un
+        RECUPERANDO el tracker re-adquiere sobre ruido, `near_y` se CONGELA en un
+        valor espurio y CERCA (base de un cono en hue naranja, reflejo) con
+        `line=None`, y un cono de MI recta que está "por encima" de ese near_y
+        queda `beyond` -> ignorado -> choque (orillas471/473/475/476). Con
+        LINE_FIT_MIN_X_SPAN_PX filtrando el ruido, `line is None` ya significa
+        casi siempre "no hay línea real" -> no opinar (None -> se trata como mío).
         """
         # NOTA: el "piso de cercanía" (un obstáculo casi bajo la nariz NO puede
         # ser de la siguiente recta) vive en obstacle_memory.classify_and_split()
@@ -327,7 +331,9 @@ class OrangeLineTracker:
         line = self.stable["line"]
         if line is not None:
             return line_side_is_near(ox, oy, line, robot_x, robot_y)
-        return oy > self.stable["near_y"]
+        if getattr(C, "LINE_CLASSIFY_REQUIRE_FIT", True):
+            return None                       # sin ajuste real -> no clasificar
+        return oy > self.stable["near_y"]     # fallback histórico (frágil)
 
 
 class TurnDirectionTracker:

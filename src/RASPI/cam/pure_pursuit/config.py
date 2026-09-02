@@ -593,8 +593,16 @@ LINE_FIT_MIN_X_SPAN_PX = 150 # 2026-09-01: los pixeles del ajuste deben abarcar 
                              # columna de ruido abarca ~30-50px pero puede colar un
                              # fit de ~60° (< MAX_SLOPE_DEG) que luego manda TODO lo
                              # de adelante a "beyond" (orillas471: line[1]~+728 con
-                             # un rojo de la recta actual justo ahí). Si no abarca,
-                             # se usa el fallback horizontal plano en near_y.
+                             # un rojo de la recta actual justo ahí).
+
+# 2026-09-01: OrangeLineTracker.classify() SOLO opina cuando hay un ajuste de
+# recta con pendiente real (stable["line"] != None). El fallback `oy > near_y`
+# (línea "vista" pero sin ajuste) rompía una y otra vez: tras un RECUPERANDO el
+# tracker re-adquiere sobre ruido, near_y se congela CERCA y espurio con
+# line=None, y un cono de MI recta queda `beyond` -> ignorado (orillas471/473/
+# 475/476). Con LINE_FIT_MIN_X_SPAN_PX filtrando el ruido, line=None ~= "no hay
+# línea real". False = volver al fallback frágil.
+LINE_CLASSIFY_REQUIRE_FIT = True
 
 # ─── Dirección de giro — TurnDirectionTracker ───────────────────────────────
 # PRIMARIA: posición lateral de un obstáculo "beyond" (ver corner_lines.py).
