@@ -205,7 +205,6 @@ class ObstacleMemory:
             o.conf -= C.OBS_MEM_DECAY
         _touched: set[int] = set()   # _Obs refrescados en ESTA llamada (para cam_h)
 
-        _sz_ratio = getattr(C, "OBS_MEM_SIZE_MATCH_RATIO", 0.5)
         for i, (nx, ny, color) in enumerate(new_obs):
             nh = float(new_obs_h[i]) if (new_obs_h and i < len(new_obs_h)) else 0.0
             best = None
@@ -214,23 +213,9 @@ class ObstacleMemory:
                 if o.color != color:
                     continue
                 d2 = (o.x - nx) ** 2 + (o.y - ny) ** 2
-                if d2 > best_d2:
-                    continue
-                # Guard de TAMAÑO: una detección CHICA no hace match con un _Obs
-                # de cam_h MUCHO mayor (ni al revés) -> son conos FÍSICOS
-                # distintos a distinta profundidad. Sin esto, el cono de la recta
-                # SIGUIENTE (bbox chico, y~245) SECUESTRA el _Obs del cercano
-                # cuando éste sale del FOV: el _Obs se re-ancla FRESCO en y~245
-                # cada frame -> nunca hace dead-reckoning hacia atrás -> `blocking`
-                # del trigger medido no se limpia NUNCA -> RECUPERANDO solo entra
-                # al podarse la lata en la esquina (orillas502). SIN el 2º cono
-                # el cercano SÍ dead-reckona y libera `blocking` -> por eso
-                # "funciona sin el rojo de la recta siguiente".
-                if nh > 0.0 and o.cam_h > 0.0:
-                    if min(nh, o.cam_h) / max(nh, o.cam_h) < _sz_ratio:
-                        continue
-                best_d2 = d2
-                best = o
+                if d2 <= best_d2:
+                    best_d2 = d2
+                    best = o
             if best is not None:
                 # Re-visto: confiar en la posición fresca de la cámara.
                 best.x, best.y = nx, ny
@@ -290,27 +275,21 @@ class ObstacleMemory:
         ordered = sorted(self._obs, key=lambda o: o.conf, reverse=True)
         kept: list[_Obs] = []
 
-        _sz_ratio = getattr(C, "OBS_MEM_SIZE_MATCH_RATIO", 0.5)
         for o in ordered:
             merged_into_existing = False
             for k in kept:
                 if k.color != o.color:
                     continue
                 d2 = (k.x - o.x) ** 2 + (k.y - o.y) ** 2
-                if d2 > dedupe_r2:
-                    continue
-                # Mismo guard de TAMAÑO que _merge: si los bbox difieren mucho son
-                # conos distintos a distinta profundidad, NO son un fantasma
-                # duplicado -> no fusionar (mantener el cercano y el de la recta
-                # siguiente SEPARADOS -> orillas502).
-                if (k.cam_h > 0.0 and o.cam_h > 0.0
-                        and min(k.cam_h, o.cam_h) / max(k.cam_h, o.cam_h) < _sz_ratio):
-                    continue
-                # o es un duplicado de k (k ya tiene >= confianza) → descartar o.
-                k.cam_h = max(k.cam_h, o.cam_h)
-                k.next_seg = k.next_seg and o.next_seg
-                merged_into_existing = True
-                break
+                if d2 <= dedupe_r2:
+                    # o es un duplicado de k (k ya tiene >= confianza) → descartar o.
+                    # cam_h del que queda = el MÁS GRANDE de los dos: si _dedupe
+                    # se comió un cono near + uno far (misma color, ~50px en BEV),
+                    # el registro que sobrevive debe representar al CERCANO.
+                    k.cam_h = max(k.cam_h, o.cam_h)
+                    k.next_seg = k.next_seg and o.next_seg
+                    merged_into_existing = True
+                    break
             if not merged_into_existing:
                 kept.append(o)
 

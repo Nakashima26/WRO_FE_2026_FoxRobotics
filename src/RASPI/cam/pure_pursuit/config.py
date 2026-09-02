@@ -562,13 +562,6 @@ CLASSIFY_FORCE_MINE_MIN_CONF = 0.65
 # ~8 frames. Evita que un cam_h grande quede fijo eterno sin colapsar por una
 # detección chica que hizo match (orillas501).
 OBS_MEM_CAM_H_DECAY = 0.92
-# _merge/_dedupe: una detección solo hace match/fusión con un _Obs si sus bbox
-# de cámara están dentro de este ratio (min/max). Un cono de la recta SIGUIENTE
-# (bbox chico) con un _Obs de un cono CERCANO (bbox grande) NO son el mismo:
-# sin esto el chico secuestra el _Obs del grande al salir éste del FOV y
-# `blocking` del trigger medido no se limpia nunca (orillas502: "no entra
-# recuperando CON el 2º cono; SÍ entra sin él").
-OBS_MEM_SIZE_MATCH_RATIO = 0.5
 
 # 2026-09-02: escape de la TRAMPA DE PIVOTE del trigger medido de RECUPERANDO
 # (orillas502). Cuando el dodge es un PIVOTE (mucho yaw, poca traslación) la
