@@ -221,16 +221,15 @@ class ObstacleMemory:
                 best.x, best.y = nx, ny
                 best.conf = C.OBS_MEM_REFRESH
                 best.y_min = min(best.y_min, ny)   # detección, no estima
-                # cam_h = MÁXIMO histórico mientras se vea (NUNCA baja de golpe).
-                # Si el cono CERCANO (bbox grande) sale del FOV y una detección
-                # CHICA (cono lejano, o el mismo cono ya rasante) cae dentro del
-                # radio de match, NO debe "secuestrar" el _Obs y colapsar cam_h
-                # 139->61 -> eso lo tiraba a `beyond` -> disparo prematuro del
-                # trigger medido -> re-arme con heading_ref al yaw actual ->
-                # ciego para siempre (orillas501). Decae SOLO en dead-reckoning
-                # (abajo) y el gate conf>=0.65 de classify corta lo rancio.
-                best.cam_h = max(best.cam_h, nh)
-                _touched.add(id(best))
+                # cam_h: si dos detecciones caen en el MISMO _Obs este frame
+                # (near+far fusionados por _merge/_dedupe), quedarse con la MÁS
+                # GRANDE -> el _Obs representa al cono CERCANO (el que hay que
+                # rodear), no al de la recta siguiente.
+                if id(best) in _touched:
+                    best.cam_h = max(best.cam_h, nh)
+                else:
+                    best.cam_h = nh
+                    _touched.add(id(best))
                 # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
                 # (deja de re-sembrarse) en cuanto la lata se ve a `y` confiable.
                 if not best.anchored:
@@ -245,14 +244,6 @@ class ObstacleMemory:
                                heading0=self._prev_heading)
                     _no.cam_h = nh
                     self._obs.append(_no)
-
-        # cam_h decae SOLO en los _Obs que NO se vieron fresh este frame (puro
-        # dead-reckoning): así un cam_h grande no persiste eterno si el cono ya
-        # no está, pero tampoco colapsa por una detección chica que sí hizo match.
-        _dk = getattr(C, "OBS_MEM_CAM_H_DECAY", 0.92)
-        for o in self._obs:
-            if id(o) not in _touched:
-                o.cam_h *= _dk
 
     # ── Reduce duplicados fantasma ─────────────────────────────────────────────────────────────────
     def _dedupe(self):

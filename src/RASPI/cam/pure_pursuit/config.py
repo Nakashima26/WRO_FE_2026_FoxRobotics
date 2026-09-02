@@ -557,11 +557,6 @@ NEXT_SEG_BBOX_FRAMES  = 3
 # [DET] h= (orillas499/500): cono de mi recta h~74-240; recta siguiente h~40-55.
 CLASSIFY_FORCE_MINE_BBOX_PX = 70.0
 CLASSIFY_FORCE_MINE_MIN_CONF = 0.65
-# cam_h = máx histórico mientras se vea; decae este factor por frame SOLO cuando
-# el _Obs no tuvo detección fresca (dead-reckoning). ~0.92 => cae a la mitad en
-# ~8 frames. Evita que un cam_h grande quede fijo eterno sin colapsar por una
-# detección chica que hizo match (orillas501).
-OBS_MEM_CAM_H_DECAY = 0.92
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2
