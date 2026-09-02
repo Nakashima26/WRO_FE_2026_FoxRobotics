@@ -562,18 +562,6 @@ CLASSIFY_FORCE_MINE_MIN_CONF = 0.65
 # ~8 frames. Evita que un cam_h grande quede fijo eterno sin colapsar por una
 # detección chica que hizo match (orillas501).
 OBS_MEM_CAM_H_DECAY = 0.92
-
-# 2026-09-02: escape de la TRAMPA DE PIVOTE del trigger medido de RECUPERANDO
-# (orillas502). Cuando el dodge es un PIVOTE (mucho yaw, poca traslación) la
-# lata se queda ~250px "adelante" en la proyección BEV -- que además está
-# smeareada por el yaw -- y `blocking` (que usa ry-oy) NO se limpia nunca ->
-# el trigger se queda en `rodeando` eterno y RECUPERANDO solo entra cuando la
-# lata sale del FOV y se poda (ya en la esquina). Si |heading_err| >= esto
-# durante RECUP_MEAS_HARD_YAW_FRAMES frames -> path_clear=True (a ese yaw,
-# enderezar hacia 0 aleja el morro de la lata). >> HEADING_DEG(25) y >> el yaw
-# de un dodge normal, que sí espera a que `blocking` se limpie de verdad.
-RECUP_MEAS_HARD_YAW_DEG    = 45.0
-RECUP_MEAS_HARD_YAW_FRAMES = 2
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2

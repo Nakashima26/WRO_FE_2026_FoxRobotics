@@ -167,7 +167,6 @@ class PPRuntime:
         self._recup_arm_streak: int = 0          # frames seguidos con peso alto (debounce de armado)
         self._recup_clear_count: int = 0         # frames seguidos con el path ya despejado
         self._recup_noghost_streak: int = 0      # frames sin ver color fresco (con esquiva armada + herr grande)
-        self._recup_hardyaw_streak: int = 0      # frames con |herr| >= HARD_YAW (escape trampa de pivote)
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
 
@@ -354,33 +353,15 @@ class PPRuntime:
             self._recup_noghost_streak = 0
         ghost_stale = (self._recup_noghost_streak
                        >= getattr(C, "RECUP_MEAS_GHOST_CLEAR_FRAMES", 3))
-        # ESCAPE DE LA TRAMPA DE PIVOTE (orillas502): si el carro giró MUCHÍSIMO
-        # (|herr| >= HARD_YAW) el dodge fue un PIVOTE, no un arco -> la lata se
-        # queda "clavada" ~250px adelante en la proyección BEV (que además está
-        # SMEAR-eada por el yaw y ya NO es de fiar para `blocking`, que usa
-        # ry-oy) -> `blocking` no se limpia NUNCA -> el trigger medido se queda
-        # en `rodeando` para siempre y RECUPERANDO solo entra cuando la lata al
-        # fin sale del FOV y se poda por behind_y (tardísimo, ya en la esquina).
-        # A ese yaw, enderezar hacia 0 aleja el MORRO de la lata (está del lado
-        # del giro) -> es seguro disparar. HARD_YAW (~48°) >> HEADING_DEG(25) y
-        # >> el yaw de un dodge normal (que sí espera a que `blocking` se limpie).
-        _hard_yaw = getattr(C, "RECUP_MEAS_HARD_YAW_DEG", 48.0)
-        if abs(heading_err) >= _hard_yaw:
-            self._recup_hardyaw_streak = getattr(self, "_recup_hardyaw_streak", 0) + 1
-        else:
-            self._recup_hardyaw_streak = 0
-        hardyaw_clear = (self._recup_hardyaw_streak
-                         >= getattr(C, "RECUP_MEAS_HARD_YAW_FRAMES", 3))
         # Respaldo: si el planner tampoco rodea nada junto al eje, está despejado
         # aunque la memoria aún cargue la lata en algún lado raro.
-        path_clear = ((not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W)
-                      or ghost_stale or hardyaw_clear)
+        path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W) or ghost_stale
 
         if not path_clear:
             self._recup_clear_count = 0
             self._last_recup_reason = (
                 f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f} "
-                f"atol={ahead_tol:.0f} hyaw={self._recup_hardyaw_streak}")
+                f"atol={ahead_tol:.0f}")
             return False
         self._recup_clear_count += 1
 
@@ -396,11 +377,9 @@ class PPRuntime:
                 and abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG):
             self._last_recup_reason = (
                 f"PASADO(medido) herr={heading_err:+.0f} "
-                f"clr={self._recup_clear_count} "
-                f"{'HARDYAW' if hardyaw_clear and blocking else ''}")
+                f"clr={self._recup_clear_count}")
             self._dodge_armed = False
             self._recup_clear_count = 0
-            self._recup_hardyaw_streak = 0
             self._heading_ref = None
             return True
 
