@@ -530,6 +530,22 @@ OBS_MEM_PASSED_YAW_DEG = 30.0
 # NO entra a la centerline hasta pasarlo. Un cono a <= esto px del lock cuenta
 # como el mismo. Evita el zigzag de dos lados de paso opuestos (orillas488).
 LOCK_MATCH_RADIUS_PX = 70.0
+
+# 2026-09-02: latch "recta SIGUIENTE" por TAMAÑO de bbox de cámara
+# (ObstacleMemory.flag_next_seg, llamado desde el LOCK -> SOLO con >=2 conos
+# `mia` a la vez). El clasificador por naranja SIGUE siendo el primario; esto
+# es el respaldo para el caso de 2 conos con el carro ladeado, que es cuando
+# la naranja falla feo (orillas496/498: el rojo de MI recta caía a `beyond` o
+# el de la siguiente bloqueaba RECUPERANDO). Calibración [DET] h= (orillas499):
+# cono de mi recta h~74-240 (y creciendo), cono recta siguiente h~40-54 (estable).
+# Un cono descartado por el LOCK se latchea a `next_seg` si, NEXT_SEG_BBOX_FRAMES
+# frames seguidos: h <= NEXT_SEG_BBOX_MAX_PX (absoluto) Y h <= NEXT_SEG_BBOX_RATIO
+# * h_primario (relativo -> no latchea un cono de mi recta solo un poco más lejos).
+# Latcheado = forzado `beyond` cada frame (ignora naranja y que su bbox crezca)
+# hasta memory.reset()/forget_color_obstacles() (el giro).
+NEXT_SEG_BBOX_MAX_PX  = 62.0
+NEXT_SEG_BBOX_RATIO   = 0.6
+NEXT_SEG_BBOX_FRAMES  = 3
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2
