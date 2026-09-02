@@ -585,24 +585,7 @@ class ObstacleMemory:
         mine: list[tuple[float, float, str]] = []
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
-        force_mine_y = getattr(C, "CLASSIFY_FORCE_MINE_Y", 290.0)
-        force_mine_min_conf = getattr(C, "CLASSIFY_FORCE_MINE_MIN_CONF", 0.65)
         for o in self._obs:
-            # PISO DE CERCANÍA (ver config): un obstáculo casi encima NO puede
-            # ser de la siguiente recta. Se fuerza a "mía" y se ROMPE el latch
-            # `beyond` de una -- sin esto la histéresis TO_MINE(6) no alcanza a
-            # rescatarlo antes de _prune y el carro lo embiste (orillas471).
-            # PERO exige confianza: un fantasma de memoria (camX=0, conf
-            # decayendo) extrapolado hasta y>=290 NO debe forzar esquiva ni
-            # romper el latch (orillas473: un rojo conf 0.52 metió steer espurio).
-            if o.y >= force_mine_y and o.conf >= force_mine_min_conf:
-                if o.beyond is not False:
-                    o.beyond = False
-                    o._cls_vote = None
-                    o._cls_votes = 0
-                mine.append((o.x, o.y, o.color))
-                mine_conf.append(o.conf)
-                continue
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             if result is not None:
                 want_beyond = (result is False)

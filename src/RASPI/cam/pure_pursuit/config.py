@@ -154,19 +154,6 @@ OBSTACLE_URGENT_MM = 180.0   # <= esto: reacción full (gain 1.0, lookahead cort
 # metía ruido -> revertido a 300 (compromiso, era 260).
 OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MIN)
 
-# 2026-09-01: margen antes de la pared frontal (dF del ESP) para el filtro
-# geométrico de runtime_nuevo: un cono a >= (dF*10 - esto) mm de frente se
-# considera de la SIGUIENTE recta (está en/pasando la pared) y no se esquiva.
-# Absorbe el offset sensor-frontal ↔ origen BEV y el diámetro del cono.
-DODGE_WALL_MARGIN_MM = 100.0
-
-# 2026-09-01: filtro por lado del giro (runtime_nuevo). Con turn_dir conocido y
-# >=2 conos `mia`, uno del lado del giro con x más allá de ROBOT_BEV_X ± esto
-# (habiendo un primario del otro lado) se manda a `beyond`: es del siguiente
-# segmento (visible pasando la esquina, mal proyectado). orillas482: verde(2)
-# izq + rojo(5) del sig. segmento derecha, giro=R.
-DODGE_TURN_SIDE_MARGIN_PX = 60
-
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
 WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
@@ -179,14 +166,6 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 # suficiente para esquivar sin dar el volantazo. En grados de steer (pre-norm).
 # 2026-08-28: bajado 12->6 al pasar el pipeline de ~7fps a ~14fps (mismo °/s).
 PP_STEER_SLEW_DEG = 6.0
-
-# 2026-09-01: tope de |steer_deg| cuando hay un obstáculo activo (esquiva). Sin
-# esto PP mandaba ~49° (obs 0.82) para un cono a 18cm -> radio de giro
-# ≈ batalla/tan(49°) ≈ 9cm -> el carro PIVOTEA (rota sin trasladar), se clava a
-# -50° y arruina la secuencia (verde sin esquivar, cono de la recta siguiente
-# haciendo de ancla). 32° -> radio ≈ 16cm = arco. 0 = sin tope. Las esquivas
-# que funcionaban (orillas417) iban a ~24-42° -> caben.
-PP_DODGE_MAX_STEER_DEG = 32.0
 
 # Lookahead variable — derivado de la escala de urgencia
 # NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
@@ -411,14 +390,6 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6
 
-# 2026-09-01: tras TERMINAR un pulso pasado=1, no arrancar otro por estos frames.
-# El chasis todavía se está asentando tras RECUPERANDO; un 2º pasado encima
-# (típicamente un fantasma de memoria cruzando behind_y, o un smear del mismo
-# cono) mete al ESP a RECUPERANDO de nuevo y el carro sobre-corrige. orillas473:
-# el fantasma del rojo re-disparó pasado ~2s después, justo sobre el verde ->
-# doble RECUPERANDO -> heading a +42° -> se comió el verde. ~15 frames (~1.2s).
-PASADO_COOLDOWN_FRAMES    = 15
-
 # Suprimir pasado=1 (=> no RECUPERANDO) si la línea naranja está a near_y >= esto
 # en el BEV (robot en y=380, así que 285 = línea a <=~190mm = esquina inminente).
 # En RECUPERANDO el ESP32 no evalúa detectarEsquina() -> un pasado justo antes de
@@ -608,22 +579,6 @@ LINE_FIT_MAX_SLOPE_DEG = 72  # 2026-08-29: 30 -> 45. Al acercarse a la esquina e
                              # ruido (>72°, columna de píxeles / borde de cono) sigue
                              # fuera. DIST_HUBER + MIN_POINTS + EMA + PERSIST_FRAMES
                              # filtran un ajuste malo de un frame suelto.
-LINE_FIT_MIN_X_SPAN_PX = 150 # 2026-09-01: los pixeles del ajuste deben abarcar al
-                             # menos esto en X. Una línea de esquina real cruza el
-                             # BEV (~400px de ancho); el borde de un cono / una
-                             # columna de ruido abarca ~30-50px pero puede colar un
-                             # fit de ~60° (< MAX_SLOPE_DEG) que luego manda TODO lo
-                             # de adelante a "beyond" (orillas471: line[1]~+728 con
-                             # un rojo de la recta actual justo ahí).
-
-# 2026-09-01: OrangeLineTracker.classify() SOLO opina cuando hay un ajuste de
-# recta con pendiente real (stable["line"] != None). El fallback `oy > near_y`
-# (línea "vista" pero sin ajuste) rompía una y otra vez: tras un RECUPERANDO el
-# tracker re-adquiere sobre ruido, near_y se congela CERCA y espurio con
-# line=None, y un cono de MI recta queda `beyond` -> ignorado (orillas471/473/
-# 475/476). Con LINE_FIT_MIN_X_SPAN_PX filtrando el ruido, line=None ~= "no hay
-# línea real". False = volver al fallback frágil.
-LINE_CLASSIFY_REQUIRE_FIT = True
 
 # ─── Dirección de giro — TurnDirectionTracker ───────────────────────────────
 # PRIMARIA: posición lateral de un obstáculo "beyond" (ver corner_lines.py).
@@ -669,13 +624,6 @@ LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendie
 # 2026-08-28: 10->20 al pasar el pipeline de ~7fps a ~14fps (misma ventana en seg).
 TURN_RECOVERY_FRAMES = 20
 
-# 2026-09-01: misma idea pero tras un RECUPERANDO medido (esquiva de ángulo). El
-# chasis se asienta y OrangeLineTracker re-adquiere sobre ruido -> un near_y
-# espurio y CERCA se congela y clasifica "beyond" un cono de MI recta
-# (orillas473/475: rojo esquivado -> RECUPERANDO -> verde ignorado). Durante
-# estos frames no se filtra por la naranja (todo = mío) ni vota turn_dir.
-RECUP_RECOVERY_FRAMES = 20
-
 # Clasificación "mía" / "más allá" de la línea naranja
 # (obstacle_memory.classify_and_split): NO es un latch permanente. Cada frame se
 # re-evalúa contra la línea, pero para CAMBIAR el veredicto de un objeto hace
@@ -695,24 +643,6 @@ LINE_CLASSIFY_FRAMES_TO_BEYOND = 12
 # esquina se esquivaba ~1s antes de corregirse (orillas420). Este umbral chico
 # aplica SOLO al primer veredicto; cambiar uno ya fijado sigue usando 6/12.
 LINE_CLASSIFY_FRAMES_FIRST     = 4
-
-# 2026-09-01: PISO DE CERCANÍA. Un obstáculo con y-BEV >= esto está casi bajo la
-# nariz (behind_y de _prune = ry+BEHIND_PAD = 345): físicamente NO puede ser de
-# la siguiente recta -- para tenerlo tan cerca ya habrías cruzado la esquina, y
-# ahí manda CRUCERO/MANIOBRA, no la esquiva. classify_and_split() lo fuerza a
-# "mía" ignorando la línea y rompe el latch `beyond` de una (sin esperar
-# LINE_CLASSIFY_FRAMES_TO_MINE). Motivo: orillas471 -- la naranja se fijó mal
-# (near_y saltando 157->318, fits de pendiente basura line[1]~+728) -> un rojo de
-# la recta actual quedó `beyond` desde el 1er frame, el latch nunca se soltó y el
-# carro lo embistió. Ventana 290->345 = ~4 frames para mandarlo al ESP antes de
-# que _prune lo tire como PASADO.
-CLASSIFY_FORCE_MINE_Y          = 290.0
-# 2026-09-01: el piso SOLO aplica con confianza >= esto. Un fantasma de memoria
-# (camX=0, conf decayendo ~0.06/frame) extrapolado hasta y>=290 no debe forzar
-# esquiva ni romper el latch -- orillas473: un rojo ghost conf 0.52 metió steer
-# izquierdo espurio durante la esquiva del verde. 0.65 ~= visto en los últimos
-# ~5 frames.
-CLASSIFY_FORCE_MINE_MIN_CONF   = 0.65
 
 # ─── Protocolo serial ESP32 ───────────────────────────────────────────────────
 # Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60

@@ -114,19 +114,6 @@ def _parse_direccion(ack: str) -> str | None:
     val = ack[idx + 4: idx + 5]
     return val if val in ("L", "R") else None
 
-def _parse_front_dist(ack: str) -> int | None:
-    """dF=<int> del ACK:V2: distancia (cm) del ultrasónico frontal del ESP32.
-    ~199/200 = sin lectura (nada cerca). None si no está en el ACK."""
-    if not ack:
-        return None
-    idx = ack.find("dF=")
-    if idx < 0:
-        return None
-    try:
-        return int(ack[idx + 3:].split(",")[0])
-    except (ValueError, IndexError):
-        return None
-
 
 class PPRuntime:
     """
@@ -150,16 +137,12 @@ class PPRuntime:
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
-        self._front_cm: int | None = None   # dF del ACK (ultrasónico frontal, cm)
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
         self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
-        self._pasado_cooldown: int = 0  # tras terminar un pulso pasado, frames en
-                                        # los que NO se arranca otro (anti doble
-                                        # RECUPERANDO, ver PASADO_COOLDOWN_FRAMES)
         self._pasado_from_measured: bool = False  # el pulso pasado en curso vino
                                                   # de _measured_recup_trigger
                                                   # (esquiva de ángulo REAL) — no
@@ -566,7 +549,6 @@ class PPRuntime:
                     self.mid_turn.reset()
                     self._ext_corner_block = 0
                     self._pasado_hold = 0
-                    self._pasado_cooldown = 0
                     self._pasado_from_measured = False
                     self._turn_delay_frames = 0
                     if on_ready is not None:
@@ -694,9 +676,7 @@ class PPRuntime:
                             # BEV. Respaldo del trigger medido, que cubre el rebase
                             # de ÁNGULO. El pulso pasado=1 se finaliza más abajo
                             # (tras detect_centerline), ya OR-eado con el medido.
-                            # cooldown: no re-disparar sobre el rastro del pulso
-                            # anterior (un fantasma cruzando behind_y, orillas473).
-                            if self.memory.last_passed and self._pasado_cooldown <= 0:
+                            if self.memory.last_passed:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
                         _t3 = time.perf_counter()
@@ -779,73 +759,6 @@ class PPRuntime:
                                 )
                             )
 
-                        # ── Filtro geométrico por pared frontal (dF del ESP) ──
-                        # Un cono cuya distancia longitudinal en el BEV supera la
-                        # pared de enfrente está EN o PASANDO esa pared -> es de
-                        # la SIGUIENTE recta, no de la mía. Sin depender de la
-                        # naranja (que cerca de la esquina es basura). Se
-                        # autolimita: el BEV solo cubre ~760mm, así que con dF
-                        # grande (sin pared) wall_mm es enorme y no filtra nada.
-                        # Motivo: orillas477/478 -- el carro esquivaba el rojo de
-                        # la recta siguiente y ese cono le hacía de ancla/pivote,
-                        # arruinando la esquiva del verde de la recta actual.
-                        if self._front_cm is not None and self._front_cm > 0 and bev_obstacles:
-                            _wall_mm = self._front_cm * 10.0 - getattr(
-                                C, "DODGE_WALL_MARGIN_MM", 100.0)
-                            _keep, _keep_conf = [], []
-                            for _i, (_ox, _oy, _oc) in enumerate(bev_obstacles):
-                                _fwd_mm = (C.ROBOT_BEV_Y - _oy) * C.MM_PER_PX
-                                _cf = obstacle_conf[_i] if _i < len(obstacle_conf) else 1.0
-                                if _fwd_mm >= _wall_mm:
-                                    bev_obstacles_beyond.append((_ox, _oy, _oc))
-                                else:
-                                    _keep.append((_ox, _oy, _oc))
-                                    _keep_conf.append(_cf)
-                            if len(_keep) != len(bev_obstacles):
-                                print(f"[WALLFILT] dF={self._front_cm}cm -> "
-                                      f"{len(bev_obstacles) - len(_keep)} cono(s) a beyond "
-                                      f"(mant={len(_keep)})", flush=True)
-                            bev_obstacles, obstacle_conf = _keep, _keep_conf
-
-                        # ── Filtro por LADO DEL GIRO ── el segmento siguiente está
-                        # del lado hacia donde gira la pista. Estando aún en la
-                        # recta actual (esquina sin abrir), un cono MUY del lado
-                        # del giro que aparece A LA PAR de un obstáculo primario
-                        # del OTRO lado es del siguiente segmento: la cámara lo ve
-                        # pasando la esquina y el BEV lo proyecta mal (cerca, "a la
-                        # par del verde"). El dF no lo agarra porque esa mala
-                        # proyección lo pone antes de la pared. Los conos de MI
-                        # columna del lado del giro ya los pasé para cuando esto
-                        # aplica (orillas482: verde(2) izq + rojo(5) del sig.
-                        # segmento a la derecha, giro=R).
-                        _td = (getattr(C, "CORNER_TURN_DIR_OVERRIDE", None)
-                               or self.turn_dir_tracker.direction)
-                        if _td in ("L", "R") and len(bev_obstacles) >= 2:
-                            _k = getattr(C, "DODGE_TURN_SIDE_MARGIN_PX", 60)
-                            _bound = C.ROBOT_BEV_X + (_k if _td == "R" else -_k)
-                            # "primario del otro lado": deadband ±30 para que un
-                            # verde que ya derivó al centro (chasis ladeado) siga
-                            # contando y el filtro no parpadee.
-                            _has_primary_other = any(
-                                (ox < C.ROBOT_BEV_X + 30) if _td == "R"
-                                else (ox > C.ROBOT_BEV_X - 30)
-                                for ox, _, _ in bev_obstacles)
-                            if _has_primary_other:
-                                _keep2, _keep2_conf = [], []
-                                for _i, (_ox, _oy, _oc) in enumerate(bev_obstacles):
-                                    _outside = (_ox > _bound) if _td == "R" else (_ox < _bound)
-                                    if _outside:
-                                        bev_obstacles_beyond.append((_ox, _oy, _oc))
-                                    else:
-                                        _keep2.append((_ox, _oy, _oc))
-                                        _keep2_conf.append(
-                                            obstacle_conf[_i] if _i < len(obstacle_conf) else 1.0)
-                                if len(_keep2) != len(bev_obstacles):
-                                    print(f"[TURNSIDE] td={_td} bound={_bound:.0f} -> "
-                                          f"{len(bev_obstacles) - len(_keep2)} cono(s) a beyond",
-                                          flush=True)
-                                bev_obstacles, obstacle_conf = _keep2, _keep2_conf
-
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
                         # toda la carrera. PRIMARIA: posición lateral de un
@@ -921,27 +834,10 @@ class PPRuntime:
                                 cl_stats, bev_obstacles,
                                 corner_soon=bool(_corner_soon_meas),
                             )
-                            # cooldown: si acabamos de hacer RECUPERANDO, no
-                            # encadenar otro -- el chasis aún se asienta
-                            # (orillas473: doble RECUPERANDO -> heading a +42°).
-                            if measured_pass and self._pasado_cooldown > 0:
-                                measured_pass = False
                             if measured_pass:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
                                 self._pasado_from_measured = True
-                                # Ventana de recuperación: tras RECUPERANDO el
-                                # chasis se asienta y OrangeLineTracker re-adquiere
-                                # sobre datos ruidosos -> un near_y espurio y CERCA
-                                # (p.ej. base del rojo recién esquivado en hue
-                                # naranja) se CONGELA y manda a "beyond" un verde
-                                # de MI recta (orillas473/475). Durante estos
-                                # frames NO se filtra por la naranja (todo = mío)
-                                # y turn_dir no vota. Reusa el mismo mecanismo que
-                                # el cooldown post-giro.
-                                self._turn_recovery_frames = max(
-                                    self._turn_recovery_frames,
-                                    getattr(C, "RECUP_RECOVERY_FRAMES", 20))
                                 # Olvida el cono YA: la centerline del PRÓXIMO
                                 # frame deja de rodearlo -> el carro sale del
                                 # arco en vez de seguir clavando el volante
@@ -1006,17 +902,6 @@ class PPRuntime:
                             if _cap > 0.0:
                                 steer_deg = max(-_cap, min(_cap, steer_deg))
 
-                        # ── Tope de steer en esquiva ── con un obstáculo activo,
-                        # cap `steer_deg`. Radio de giro ≈ batalla/tan(steer): a
-                        # ~49° (obs 0.82, visto en pista) el radio es ~9cm -> el
-                        # carro PIVOTEA en vez de arquear, se clava a -50° y todo
-                        # lo que sigue (verde, cono de la recta siguiente) se
-                        # arruina. A ~32° el radio es ~16cm = un arco real.
-                        if pp_active and bev_obstacles:
-                            _dcap = float(getattr(C, "PP_DODGE_MAX_STEER_DEG", 0.0))
-                            if _dcap > 0.0:
-                                steer_deg = max(-_dcap, min(_dcap, steer_deg))
-
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
                         bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
@@ -1057,7 +942,6 @@ class PPRuntime:
                 if _corner_soon and self._pasado_hold > 0 and not _keep_measured:
                     self._pasado_hold = 0
                     self._pasado_from_measured = False
-                    self._pasado_cooldown = C.PASADO_COOLDOWN_FRAMES
                     self._last_recup_reason = f"pasado suprimido (esquina, oy={_oy:.0f})"
                 elif _corner_soon and _keep_measured and self._pasado_hold > 0:
                     self._last_recup_reason = (
@@ -1067,10 +951,6 @@ class PPRuntime:
                     self._pasado_hold -= 1
                     if self._pasado_hold == 0:
                         self._pasado_from_measured = False
-                        # pulso terminado -> arranca el cooldown anti doble RECUP
-                        self._pasado_cooldown = C.PASADO_COOLDOWN_FRAMES
-                elif self._pasado_cooldown > 0:
-                    self._pasado_cooldown -= 1
 
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
@@ -1117,10 +997,6 @@ class PPRuntime:
                 heading = _parse_heading(serial_ack)
                 if heading is not None:
                     self._last_heading = heading
-
-                _fd = _parse_front_dist(serial_ack)
-                if _fd is not None:
-                    self._front_cm = _fd
 
                 # Dirección de giro AUTORITATIVA del ESP32 (dir= en el ACK, L/R
                 # desde su 1er GIRANDO). Cubre esquinas 2-12; corrige cualquier

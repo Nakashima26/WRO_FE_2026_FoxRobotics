@@ -90,12 +90,6 @@ def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
     ys, xs = np.where(band > 0)
     if len(xs) < min_points:
         return None
-    # Los pixeles deben abarcar un rango ancho en X: una línea de esquina real
-    # cruza el BEV; el borde de un cono / columna de ruido no. Sin esto, ese
-    # ruido colaba un fit de ~60° (bajo MAX_SLOPE_DEG) que en line_side_is_near
-    # manda todo lo de adelante a "beyond" (orillas471).
-    if float(xs.max() - xs.min()) < getattr(C, "LINE_FIT_MIN_X_SPAN_PX", 150):
-        return None
     pts = np.column_stack([xs.astype(np.float32), (ys + y0b).astype(np.float32)])
     # DIST_HUBER (no DIST_L2): mínimos cuadrados le da todo el peso a los
     # outliers -- unos pocos pixeles de ruido lejos del eje de la línea bastaban
@@ -294,15 +288,6 @@ class OrangeLineTracker:
             yl = self.line_ema * yl + (1.0 - self.line_ema) * pyl
             yr = self.line_ema * yr + (1.0 - self.line_ema) * pyr
 
-        # El fit crudo ya pasó LINE_FIT_MAX_SLOPE_DEG, pero la mezcla EMA con una
-        # recta previa (posible tramo malo / vieja) puede dejar la recta final
-        # más inclinada. Re-chequea el resultado mezclado con el mismo tope; si
-        # se pasa, cae al fallback horizontal (classify usa oy > near_y).
-        ang = abs(float(np.degrees(np.arctan2(yr - yl, w - 1.0))))
-        ang = min(ang, 180.0 - ang)
-        if ang > C.LINE_FIT_MAX_SLOPE_DEG:
-            return None
-
         return (float(w - 1.0), float(yr - yl), 0.0, float(yl))
 
     def classify(self, ox: float, oy: float, robot_x: float, robot_y: float) -> bool | None:
@@ -311,29 +296,18 @@ class OrangeLineTracker:
         línea, mi recta); False si está del otro lado (siguiente recta).
         None si no hay línea estable todavía (no se puede clasificar).
 
-        Con LINE_CLASSIFY_REQUIRE_FIT (default) SOLO clasifica cuando hay un
-        ajuste de recta con pendiente real (self.stable["line"]). Sin él caía a
-        comparar `oy > near_y` — y ese fallback es justo el que rompía: tras un
-        RECUPERANDO el tracker re-adquiere sobre ruido, `near_y` se CONGELA en un
-        valor espurio y CERCA (base de un cono en hue naranja, reflejo) con
-        `line=None`, y un cono de MI recta que está "por encima" de ese near_y
-        queda `beyond` -> ignorado -> choque (orillas471/473/475/476). Con
-        LINE_FIT_MIN_X_SPAN_PX filtrando el ruido, `line is None` ya significa
-        casi siempre "no hay línea real" -> no opinar (None -> se trata como mío).
+        Usa la recta con pendiente cuando se pudo ajustar (self.stable["line"]);
+        si no hubo suficientes pixeles para ajustarla (línea muy ocluida/corta
+        en este momento), cae de vuelta a comparar solo Y contra near_y —
+        funciona igual de bien que antes cuando la línea SÍ es horizontal,
+        y es mejor que no clasificar nada.
         """
-        # NOTA: el "piso de cercanía" (un obstáculo casi bajo la nariz NO puede
-        # ser de la siguiente recta) vive en obstacle_memory.classify_and_split()
-        # y NO aquí, porque allí se puede exigir además confianza mínima (un
-        # fantasma de memoria desvaneciéndose no debe forzar esquiva). Ver
-        # C.CLASSIFY_FORCE_MINE_Y / C.CLASSIFY_FORCE_MINE_MIN_CONF.
         if not self.stable["seen"]:
             return None
         line = self.stable["line"]
         if line is not None:
             return line_side_is_near(ox, oy, line, robot_x, robot_y)
-        if getattr(C, "LINE_CLASSIFY_REQUIRE_FIT", True):
-            return None                       # sin ajuste real -> no clasificar
-        return oy > self.stable["near_y"]     # fallback histórico (frágil)
+        return oy > self.stable["near_y"]
 
 
 class TurnDirectionTracker:
