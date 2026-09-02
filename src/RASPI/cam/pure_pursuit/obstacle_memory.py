@@ -29,8 +29,7 @@ from . import config as C
 
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
-                 "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "next_seg", "_next_seg_streak")
+                 "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -84,16 +83,6 @@ class _Obs:
         self.beyond: bool | None = None
         self._cls_vote: bool | None = None    # cambio pendiente (True = a "más allá")
         self._cls_votes: int = 0              # frames seguidos apoyando ese cambio
-        # Latch por TAMAÑO de bbox de cámara (ver ObstacleMemory.flag_next_seg /
-        # el LOCK en runtime_nuevo). SOLO se activa cuando hay >=2 conos `mia` a
-        # la vez y el LOCK descartó éste por ser MUCHO más chico que el primario
-        # (recta siguiente proyecta bbox chico y estable; ver [DET] h=). Una vez
-        # True, classify_and_split() lo fuerza a `beyond` cada frame IGNORANDO la
-        # naranja y que su bbox crezca, hasta reset()/forget (el giro). Es el
-        # respaldo del clasificador por naranja para el caso de 2 conos con el
-        # carro ladeado, que es cuando la naranja falla (orillas496/498).
-        self.next_seg: bool = False
-        self._next_seg_streak: int = 0
 
 
 class ObstacleMemory:
@@ -626,13 +615,6 @@ class ObstacleMemory:
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
         for o in self._obs:
-            # Latch por bbox (ver flag_next_seg): cono de la recta SIGUIENTE
-            # fijado por tamaño cuando había 2 conos y el carro estaba ladeado
-            # (la naranja no era confiable). Va directo a `beyond`, sin naranja
-            # ni rescue, hasta reset()/forget.
-            if o.next_seg:
-                beyond.append((o.x, o.y, o.color))
-                continue
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             if result is not None:
                 want_beyond = (result is False)
@@ -675,51 +657,3 @@ class ObstacleMemory:
                 mine.append((o.x, o.y, o.color))
                 mine_conf.append(o.conf)
         return mine, beyond, mine_conf
-
-    def flag_next_seg(self, dropped_with_h: list[tuple[float, float, float]],
-                      primary_h: float) -> None:
-        """
-        Marca como "recta SIGUIENTE" (latch `_Obs.next_seg`) a un cono que el
-        LOCK de runtime_nuevo descartó por ser MUCHO más chico que el primario.
-        SOLO se llama cuando hay >=2 conos `mia` a la vez (es el único caso en
-        que la clasificación por naranja falla feo -- carro ladeado, 2 blobs
-        confunden el ajuste de recta). Con 1 cono la naranja manda, sin cambio.
-
-        dropped_with_h: [(x, y, h_bbox_camara), ...] de los conos NO primarios.
-        primary_h:      h del bbox de cámara del primario.
-
-        Latch tras NEXT_SEG_BBOX_FRAMES frames SEGUIDOS cumpliendo:
-          h <= NEXT_SEG_BBOX_MAX_PX  (absoluto: tan chico con otro grande = otra recta)
-          h <= NEXT_SEG_BBOX_RATIO * primary_h  (relativo: no latchear un cono
-               de mi recta que solo está algo más lejos)
-        Una vez True, classify_and_split() lo fuerza a `beyond` hasta reset()/
-        forget (el giro). Números de calibración en [DET] h= (orillas499):
-        cono de mi recta h~74-240, cono recta siguiente h~40-54.
-        """
-        max_h = getattr(C, "NEXT_SEG_BBOX_MAX_PX", 62.0)
-        ratio = getattr(C, "NEXT_SEG_BBOX_RATIO", 0.6)
-        need  = getattr(C, "NEXT_SEG_BBOX_FRAMES", 3)
-        # Si el propio primario es chico (<= max_h) NO se puede confiar en el
-        # bbox para desambiguar (ambos conos lejos / LOCK fijó al equivocado por
-        # continuidad de posición) -> no latchear nada este frame.
-        if primary_h <= max_h:
-            return
-        r2 = getattr(C, "LOCK_MATCH_RADIUS_PX", 70.0) ** 2
-        for (dx, dy, dh) in dropped_with_h:
-            best = None
-            bd = r2
-            for o in self._obs:
-                d = (o.x - dx) ** 2 + (o.y - dy) ** 2
-                if d < bd:
-                    bd, best = d, o
-            if best is None or best.next_seg:
-                continue
-            if 0.0 < dh <= max_h and dh <= ratio * primary_h:
-                best._next_seg_streak += 1
-                if best._next_seg_streak >= need:
-                    best.next_seg = True
-                    print(f"[NEXTSEG] latch {best.color[0]}@({best.x:.0f},{best.y:.0f}) "
-                          f"h={dh:.0f} <= {max_h:.0f} y <= {ratio:.2f}*{primary_h:.0f} "
-                          f"-> recta siguiente hasta el giro", flush=True)
-            else:
-                best._next_seg_streak = 0
