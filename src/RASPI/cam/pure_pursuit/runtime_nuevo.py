@@ -849,6 +849,18 @@ class PPRuntime:
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
                                 self._pasado_from_measured = True
+                                # Ventana de recuperación: tras RECUPERANDO el
+                                # chasis se asienta y OrangeLineTracker re-adquiere
+                                # sobre datos ruidosos -> un near_y espurio y CERCA
+                                # (p.ej. base del rojo recién esquivado en hue
+                                # naranja) se CONGELA y manda a "beyond" un verde
+                                # de MI recta (orillas473/475). Durante estos
+                                # frames NO se filtra por la naranja (todo = mío)
+                                # y turn_dir no vota. Reusa el mismo mecanismo que
+                                # el cooldown post-giro.
+                                self._turn_recovery_frames = max(
+                                    self._turn_recovery_frames,
+                                    getattr(C, "RECUP_RECOVERY_FRAMES", 20))
                                 # Olvida el cono YA: la centerline del PRÓXIMO
                                 # frame deja de rodearlo -> el carro sale del
                                 # arco en vez de seguir clavando el volante

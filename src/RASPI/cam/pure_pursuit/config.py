@@ -640,6 +640,13 @@ LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendie
 # 2026-08-28: 10->20 al pasar el pipeline de ~7fps a ~14fps (misma ventana en seg).
 TURN_RECOVERY_FRAMES = 20
 
+# 2026-09-01: misma idea pero tras un RECUPERANDO medido (esquiva de ángulo). El
+# chasis se asienta y OrangeLineTracker re-adquiere sobre ruido -> un near_y
+# espurio y CERCA se congela y clasifica "beyond" un cono de MI recta
+# (orillas473/475: rojo esquivado -> RECUPERANDO -> verde ignorado). Durante
+# estos frames no se filtra por la naranja (todo = mío) ni vota turn_dir.
+RECUP_RECOVERY_FRAMES = 20
+
 # Clasificación "mía" / "más allá" de la línea naranja
 # (obstacle_memory.classify_and_split): NO es un latch permanente. Cada frame se
 # re-evalúa contra la línea, pero para CAMBIAR el veredicto de un objeto hace
