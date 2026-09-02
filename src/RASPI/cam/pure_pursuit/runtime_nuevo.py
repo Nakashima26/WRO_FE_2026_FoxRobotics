@@ -841,15 +841,9 @@ class PPRuntime:
                             _lock = bev_obstacles[_li]
                             self._lock_xy = (_lock[0], _lock[1])
                             _dropped = [o for j, o in enumerate(bev_obstacles) if j != _li]
-                            # Latch por bbox: un cono descartado MUCHO más chico que
-                            # el primario, N frames seguidos -> recta SIGUIENTE ->
-                            # forzado a `beyond` hasta el giro (respaldo de la
-                            # naranja para 2 conos con el carro ladeado). Solo aquí,
-                            # que es el único punto donde hay >=2 conos `mia`.
-                            self.memory.flag_next_seg(
-                                [(o[0], o[1], _cam_h(o[0], o[1])) for o in _dropped],
-                                _cam_h(_lock[0], _lock[1]),
-                            )
+                            # (El latch "recta siguiente" por bbox ahora vive en
+                            # ObstacleMemory.classify_and_split() -- per-frame, no
+                            # depende del LOCK. flag_next_seg quedó sin usar.)
                             bev_obstacles_beyond.extend(_dropped)
                             _lkc = obstacle_conf[_li] if _li < len(obstacle_conf) else 1.0
                             bev_obstacles, obstacle_conf = [_lock], [_lkc]
