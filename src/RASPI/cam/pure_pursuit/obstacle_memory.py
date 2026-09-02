@@ -682,47 +682,24 @@ class ObstacleMemory:
         mine: list[tuple[float, float, str]] = []
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
-        _fm_px = getattr(C, "CLASSIFY_FORCE_MINE_BBOX_PX", 70.0)
-        _fm_cf = getattr(C, "CLASSIFY_FORCE_MINE_MIN_CONF", 0.65)
-        _ns_px = getattr(C, "NEXT_SEG_BBOX_MAX_PX", 62.0)
-        _ns_fr = getattr(C, "NEXT_SEG_BBOX_FRAMES", 3)
-        # ¿hay AHORA un cono claramente CERCA (bbox grande + fresco)? Si lo hay,
-        # cualquier OTRO cono con bbox chico es de la recta SIGUIENTE -- "el
-        # grande es mío, el chico es de la otra recta" (decisión del usuario).
-        _has_near = any(
-            oo.color in ("Red", "Green") and oo.cam_h >= _fm_px and oo.conf >= _fm_cf
-            for oo in self._obs)
         for o in self._obs:
-            # (1) Cono físicamente CERCA (bbox grande + conf fresca) = de MI
-            # recta, SIEMPRE. La naranja no vota: es justo cuando el carro está
-            # ladeado (esquivando) que la naranja miente y mandaba este cono a
-            # `beyond` -> no se esquivaba -> sin RECUPERANDO (orillas496/498/500).
-            if o.cam_h >= _fm_px and o.conf >= _fm_cf:
-                o._next_seg_streak = 0
+            # Cono físicamente CERCA (bbox de cámara grande + conf fresca) = de
+            # MI recta, SIEMPRE. La naranja no vota: es justo cuando el carro
+            # está ladeado (esquivando) que la naranja miente y mandaba este
+            # cono a `beyond` -> no se esquivaba -> sin RECUPERANDO -> GIRANDO
+            # (orillas496/498/500). El bbox NO miente con el yaw.
+            if (o.cam_h >= getattr(C, "CLASSIFY_FORCE_MINE_BBOX_PX", 70.0)
+                    and o.conf >= getattr(C, "CLASSIFY_FORCE_MINE_MIN_CONF", 0.65)):
                 mine.append((o.x, o.y, o.color))
                 mine_conf.append(o.conf)
                 continue
-            # (2) Latch "recta SIGUIENTE": ya fijado -> `beyond` sin más.
+            # Latch por bbox (ver flag_next_seg): cono de la recta SIGUIENTE
+            # fijado por tamaño cuando había 2 conos y el carro estaba ladeado
+            # (la naranja no era confiable). Va directo a `beyond`, sin naranja
+            # ni rescue, hasta reset()/forget.
             if o.next_seg:
                 beyond.append((o.x, o.y, o.color))
                 continue
-            # (3) Cono CHICO mientras hay uno CERCA -> recta siguiente. Va a
-            # `beyond` YA (se ignora desde el 1er frame) y tras _ns_fr frames
-            # seguidos se LATCHEA -> sigue `beyond` aunque el cercano ya se haya
-            # pasado y aunque su bbox crezca, hasta el giro (memory.reset()).
-            # No depende del LOCK ni de la naranja (orillas502: el 2º rojo no se
-            # guardaba como de la otra recta).
-            if (_has_near and o.color in ("Red", "Green")
-                    and 0.0 < o.cam_h <= _ns_px and o.conf >= _fm_cf):
-                o._next_seg_streak += 1
-                if o._next_seg_streak >= _ns_fr and not o.next_seg:
-                    o.next_seg = True
-                    print(f"[NEXTSEG] {o.color[0]}@({o.x:.0f},{o.y:.0f}) "
-                          f"camh={o.cam_h:.0f} (hay cono cerca) -> recta "
-                          f"siguiente, latch hasta el giro", flush=True)
-                beyond.append((o.x, o.y, o.color))
-                continue
-            o._next_seg_streak = 0
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             if result is not None:
                 want_beyond = (result is False)
