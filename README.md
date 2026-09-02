@@ -11,11 +11,17 @@
 ## Table of Contents
 
 1. [Vehicle Overview](#1-vehicle-overview)
+   - [1.1 Bill of Materials](#11-bill-of-materials)
 2. [Mechanical Design & Mobility](#2-mechanical-design--mobility)
+   - [2.1 Chassis selection](#21-chassis-selection) · [2.2 Wheels](#22-wheels) · [2.3 Drive system (torque vs. speed)](#23-drive-system-torque-vs-speed-analysis) · [2.4 Steering](#24-steering--rack-and-pinion-with-ackermann-geometry)
 3. [Power Architecture & Sensors](#3-power-architecture--sensors)
+   - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement)
 4. [Software Architecture](#4-software-architecture)
+   - [4.1 System overview](#41-system-overview--two-controllers-one-link) · [4.2 Inter-controller protocol ("V2")](#42-inter-controller-protocol-v2) · [4.3 Vision pipeline](#43-vision-pipeline-raspberry-pi--pure_pursuit) · [4.4 Obstacle handling](#44-obstacle-handling-obstacle-challenge) · [4.5 ESP32 state machine](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino) · [4.6 Cascade PID](#46-cascade-pid-always-running-underneath) · [4.7 Startup handshake](#47-startup-handshake) · [4.8 Development status](#48-development-status)
 5. [Systemic Thinking & Engineering Decisions](#5-systemic-thinking--engineering-decisions)
+   - [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log-high-level) · [5.4 Risk analysis](#54-risk-analysis)
 6. [How to Build & Run](#6-how-to-build--run)
+   - [6.1 Hardware](#61-hardware-requirements) · [6.2 ESP32 firmware](#62-esp32-firmware) · [6.3 Raspberry Pi software](#63-raspberry-pi-software) · [6.4 Calibration](#64-calibration-before-each-venue) · [6.5 Run](#65-run) · [6.6 Autostart & deployment](#66-autostart--deployment)
 7. [Repository Structure](#7-repository-structure)
 8. [Videos](#8-videos)
 9. [Photos](#9-photos)
@@ -42,7 +48,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 | Steering | Ackermann rack-and-pinion, SG90 servo |
 | High-level controller | Raspberry Pi 4 Model B (vision + Pure Pursuit) |
 | Real-time controller | ESP32 DevKit (FSM, PID, motor & sensor I/O) |
-| Inter-controller link | UART @ 115200 baud, line protocol "V2" (see §4.6) |
+| Inter-controller link | UART @ 115200 baud, line protocol "V2" (see §4.2) |
 | Vision | Raspberry Pi Camera v2 (FOV ≈ 62°), processed at 640 × 480 |
 | Distance sensors | HC-SR04 (5V) × 3 — left, right, front — via 5V↔3.3V level shifter |
 | IMU | MPU-6050 (gyroscope + accelerometer) |
@@ -51,11 +57,9 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 | Battery | 3S LiPo 11.1 V 2200 mAh |
 | Logic power | MINI560 step-down, 5 V |
 
-# Bill of Materials (BOM)
+## 1.1 Bill of Materials
 
----
-
-## Custom Manufactured Parts
+### Custom Manufactured Parts
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
@@ -77,7 +81,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 
 ---
 
-## LEGO Components
+### LEGO Components
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
@@ -91,7 +95,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 
 ---
 
-## Electronics
+### Electronics
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
@@ -107,7 +111,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 
 ---
 
-## Power System
+### Power System
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
@@ -115,7 +119,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 
 ---
 
-## Actuators
+### Actuators
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
@@ -124,7 +128,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 
 ---
 
-## Fasteners
+### Fasteners
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
@@ -132,7 +136,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 | 36 | M3 Nuts | Used to secure structural and electronic components. | 1 | Local Hardware Store | 0.05 USD |
 | 37 | M2 Nuts | Used to secure servo motor and servo pinion | 3 | Local Hardware Store | 0.15 USD |
 
-## Total Estimated Cost
+### Total Estimated Cost
 
 | Total |
 |---|
@@ -249,17 +253,17 @@ The Raspberry Pi and the ESP32 share the 5 V rail but the DC motor is fed straig
 
 The camera handles lane geometry (via a bird's-eye-view transform), the orange corner-line markers, and red/green pillar detection. Image processing runs on the Raspberry Pi 4 with OpenCV in real time and drives the Pure Pursuit planner.
 
-It is mounted front-center with a ~15° downward tilt. We tested a horizontal mount first, but that captured too much background, which slowed detection and added noise. Tilting it down focuses the field of view on the track and the obstacle zone, which cut both false positives and computational load. The exact tilt is baked into the bird's-eye-view homography during calibration (see §4.2), so the mount must not move after calibration.
+It is mounted front-center with a ~15° downward tilt. We tested a horizontal mount first, but that captured too much background, which slowed detection and added noise. Tilting it down focuses the field of view on the track and the obstacle zone, which cut both false positives and computational load. The exact tilt is baked into the bird's-eye-view homography during calibration (see §4.3), so the mount must not move after calibration.
 
 #### HC-SR04 ultrasonic sensors
 
-The left and right sensors drive lateral positioning and wall following. The **front** sensor was added for the Obstacle Challenge: because that round uses a segmented, stop-and-maneuver turn instead of a continuous arc (see §4.4), the car needs to know how far it is from the wall ahead so it can decide *when* to stop cruising and *which* maneuver (forward arc or reverse pivot) to run.
+The left and right sensors drive lateral positioning and wall following. The **front** sensor was added for the Obstacle Challenge: because that round uses a segmented, stop-and-maneuver turn instead of a continuous arc (see §4.5), the car needs to know how far it is from the wall ahead so it can decide *when* to stop cruising and *which* maneuver (forward arc or reverse pivot) to run.
 
 We originally tested VL53L0X time-of-flight sensors. On paper they win — ±3 mm accuracy versus ±15 mm for the HC-SR04, and a narrower beam. In practice, the black competition walls absorbed their 940 nm IR signal and consistently returned out-of-range readings at 300 mm. The HC-SR04 reflects off any surface regardless of color. We went with reliability over precision and made up the accuracy difference with software filtering (EMA on all three channels, plus a 5-sample median on the front channel to reject spikes before they can trigger a maneuver).
 
 #### MPU-6050 IMU
 
-The MPU-6050 gives heading and rotation data during cornering and recovery. The gyro Z axis is integrated each loop into `anguloGyro`, with a 1°/s deadband to suppress MEMS thermal drift on straights. On startup the firmware averages several hundred stationary samples to compute the gyro bias (`calcGyroOffsets`); if that offset comes back unusually large the firmware halves the integration scale as a safety net. The integrated heading is also sent back to the Pi in every acknowledgement so the vision side can dead-reckon obstacle positions (see §4.3).
+The MPU-6050 gives heading and rotation data during cornering and recovery. The gyro Z axis is integrated each loop into `anguloGyro`, with a 1°/s deadband to suppress MEMS thermal drift on straights. On startup the firmware averages several hundred stationary samples to compute the gyro bias (`calcGyroOffsets`); if that offset comes back unusually large the firmware halves the integration scale as a safety net. The integrated heading is also sent back to the Pi in every acknowledgement so the vision side can dead-reckon obstacle positions (see §4.4).
 
 ---
 
@@ -289,7 +293,40 @@ Why not one processor? Real-time GPIO timing (ultrasonic pulses, servo/motor PWM
 
 **Where to start reading the code:** the Pi loop is [`pure_pursuit/runtime_nuevo.py`](src/RASPI/cam/pure_pursuit/runtime_nuevo.py) (`run()` → per-frame block); the ESP32 loop is [`PurePursuit.ino`](src/ESP32/PurePursuit/PurePursuit.ino) (`loop()` → the `switch (estado)`). Every module is annotated in [Section 7](#7-repository-structure); tunables live in [`pure_pursuit/config.py`](src/RASPI/cam/pure_pursuit/config.py).
 
-### 4.2 Vision pipeline (Raspberry Pi — `pure_pursuit/`)
+### 4.2 Inter-controller protocol ("V2")
+
+One line per processed frame, newline-terminated, 115200 baud. The rest of Section 4 refers to these fields by name.
+
+**Pi → ESP32:**
+
+```
+V2,obs=+0.123,turn=0,state=pp,prio=1,mem=18,pp=1,pasado=0,intr=0
+```
+
+| Field | Meaning |
+|---|---|
+| `obs` | Normalized steering, `steer_deg / 60`, range −1…+1 (`+` = right). |
+| `turn` | Legacy directional hint — always `0`; turn direction is resolved on the ESP32 side. |
+| `state` | Human-readable label for the journal (e.g. `pp`, `avoid_red`). |
+| `prio` | `1` = an obstacle is actively being avoided → **ESP32 must not start a corner turn**. |
+| `mem` | Frames of obstacle memory still live → also blocks corner detection while `> 0`. |
+| `pp` | `1` = Pure Pursuit steering is authoritative (suspend the wall PID). |
+| `pasado` | One-frame pulse: the Pi confirms the car has *physically* cleared an obstacle → enter RECUPERANDO. |
+| `intr` | Interior-pass flag (disabled by default). |
+
+**ESP32 → Pi:**
+
+```
+ACK:V2,ang=12.34,est=S,dir=L,...debug...
+```
+
+| Field | Meaning |
+|---|---|
+| `ang` | Integrated IMU heading `anguloGyro` (degrees); resets to 0 at each turn. |
+| `est` | FSM state — `S` SIGUIENDO, `G` GIRANDO **or** MANIOBRA, `R` RECUPERANDO, `C` CRUCERO. |
+| `dir` | Track turn direction — `?` until the first turn, then `L` / `R`. |
+
+### 4.3 Vision pipeline (Raspberry Pi — `pure_pursuit/`)
 
 Entry point: `pure_pursuit/runtime_nuevo.py`. Per processed frame:
 
@@ -298,7 +335,7 @@ Entry point: `pure_pursuit/runtime_nuevo.py`. Per processed frame:
 3. **Pillar detection (`vision.py`)** — HSV masks for red and green, then contour filtering by area, **solidity** (compact blob ≈ 0.7–0.9, painted line < 0.4) and **aspect ratio** (< 2.2) so the mat's coloured lines are not mistaken for pillars.
 4. **Centerline (`centerline.py`)** — a floor-colour mask in the BEV, minus inflated "keep-out" disks around each obstacle. The keep-out is **asymmetric per the WRO rule**: a red pillar inflates further to its *left* (car passes on the right), a green pillar further to its *right*. Rows are sampled bottom-to-top; each row blends the free-gap center with the WRO pass-side using a weight that ramps up as the car nears the can (not a binary switch). A 1-D moving average plus a per-step Δx clamp keep the path within the servo's curvature limit.
 5. **Pure Pursuit (`controller.py`)** — a geometric pure-pursuit controller in BEV pixel space. Look-ahead is **adaptive**: it shrinks from 100 px toward 78 px as the nearest can closes *longitudinally*, so the car keeps translating and arcs around the can instead of pivoting in place. Output is slew-limited to 6°/frame to kill frame-to-frame steering whip.
-6. **Serialize** — the steering angle is normalized (`obs = steer_deg / 60`) and packed into one V2 line with the status flags (§4.6).
+6. **Serialize** — the steering angle is normalized (`obs = steer_deg / 60`) and packed into one V2 line with the status flags (§4.2).
 
 #### How the Pure Pursuit controller works
 
@@ -339,7 +376,7 @@ steer_deg = clamp(steer_deg, prev ± C.PP_STEER_SLEW_DEG)   # 6°/frame slew lim
 
 If `bev_calib.npz` is missing, the runtime falls back to a simple reactive PID on the pillar's x-position in the raw frame (`RED_TARGET_PX` / `GREEN_TARGET_PX`) so the car is never left without a controller.
 
-### 4.3 Obstacle handling (Obstacle Challenge)
+### 4.4 Obstacle handling (Obstacle Challenge)
 
 **Rolling obstacle memory (`obstacle_memory.py`).** The BEV only contains what the camera sees *now*; as the car closes on a can, the can leaves the bottom of the frame, its keep-out disc vanishes, and the centerline snaps back to center — cutting the corner onto the can. The memory fixes this: seen cans are stored as `(x, y, colour, confidence)` in robot-relative BEV coordinates and, every frame, the ego-motion is applied to every remembered can — forward travel from an assumed speed, rotation from the **real IMU heading change** in the ESP32 acknowledgement:
 
@@ -351,7 +388,7 @@ ds_px   *= turn_brake(dheading)
 self._advance(ds_px, dheading)     # each can: y += ds_px, then rotate −dheading about the robot
 ```
 
-Fresh detections are merged in, unseen cans decay in confidence and are pruned once genuinely passed. The inflated keep-out therefore persists until the car has physically cleared the can. The `heading_deg` this relies on is exactly the value the ESP32 integrates for its own control (see §4.5) and echoes back — one shared heading, so the map rotates by the same angle the car actually turned.
+Fresh detections are merged in, unseen cans decay in confidence and are pruned once genuinely passed. The inflated keep-out therefore persists until the car has physically cleared the can. The `heading_deg` this relies on is exactly the value the ESP32 integrates for its own control (see §4.6) and echoes back — one shared heading, so the map rotates by the same angle the car actually turned.
 
 **"Mine" vs "beyond the corner" (`corner_lines.py`).** The mat's orange corner lines are tracked row-by-row in the BEV. Each remembered can is classified as *mine* (on my straight, must be avoided) or *beyond* (on the next straight, ignore for now), with asymmetric hysteresis — quick to start avoiding, slow to stop — because starting to dodge is the safe side of a wrong call.
 
@@ -387,7 +424,7 @@ Condition 3 is what separates the two cases: same "can is now behind me" geometr
 
 This replaced an earlier approach that anchored the can's position when first seen and dead-reckoned it forward with an *assumed* speed and a bicycle model; that anchor drifted 200–400 mm within 1–2 s and fired either early (nose into the can) or far too late.
 
-### 4.4 ESP32 finite state machine (`src/ESP32/PurePursuit/PurePursuit.ino`)
+### 4.5 ESP32 finite state machine (`src/ESP32/PurePursuit/PurePursuit.ino`)
 
 ```
 enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA };
@@ -412,7 +449,7 @@ maniobraRetroceso = (distExt >  MANIOBRA_BACKOFF_MIN_CM);   // slack → short b
 
 **One flag switches the turn strategy:** `const bool rondaObstaculos` at the top of `PurePursuit.ino` — `true` for the Obstacle Challenge (CRUCERO/MANIOBRA), `false` for the Open Challenge (continuous GIRANDO). Everything else is shared.
 
-### 4.5 Cascade PID (always running underneath)
+### 4.6 Cascade PID (always running underneath)
 
 Even in Pure Pursuit mode the ESP32 computes its dual cascade PID every loop — it is the fallback, the RECUPERANDO/CRUCERO controller, and the blend term in SIGUIENDO.
 
@@ -451,39 +488,6 @@ float gz = mpu.getGyroZ() / gyroScale;
 if (abs(gz) < 1.0) gz = 0;        // 1°/s deadband
 anguloGyro += gz * dt;            // this is the value echoed back to the Pi
 ```
-
-### 4.6 Inter-controller protocol ("V2")
-
-One line per processed frame, newline-terminated, 115200 baud.
-
-**Pi → ESP32:**
-
-```
-V2,obs=+0.123,turn=0,state=pp,prio=1,mem=18,pp=1,pasado=0,intr=0
-```
-
-| Field | Meaning |
-|---|---|
-| `obs` | Normalized steering, `steer_deg / 60`, range −1…+1 (`+` = right). |
-| `turn` | Legacy directional hint — always `0`; turn direction is resolved on the ESP32 side. |
-| `state` | Human-readable label for the journal (e.g. `pp`, `avoid_red`). |
-| `prio` | `1` = an obstacle is actively being avoided → **ESP32 must not start a corner turn**. |
-| `mem` | Frames of obstacle memory still live → also blocks corner detection while `> 0`. |
-| `pp` | `1` = Pure Pursuit steering is authoritative (suspend the wall PID). |
-| `pasado` | One-frame pulse: the Pi confirms the car has *physically* cleared an obstacle → enter RECUPERANDO. |
-| `intr` | Interior-pass flag (disabled by default). |
-
-**ESP32 → Pi:**
-
-```
-ACK:V2,ang=12.34,est=S,dir=L,...debug...
-```
-
-| Field | Meaning |
-|---|---|
-| `ang` | Integrated IMU heading `anguloGyro` (degrees); resets to 0 at each turn. |
-| `est` | FSM state — `S` SIGUIENDO, `G` GIRANDO **or** MANIOBRA, `R` RECUPERANDO, `C` CRUCERO. |
-| `dir` | Track turn direction — `?` until the first turn, then `L` / `R`. |
 
 ### 4.7 Startup handshake
 
