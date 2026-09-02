@@ -732,14 +732,14 @@ FoxRobotics/
 
 | View | Filename |
 |---|---|
-| Front | `v-photos/front.jpg` |
-| Rear | `v-photos/rear.jpg` |
-| Left side | `v-photos/left.jpg` |
-| Right side | `v-photos/right.jpg` |
-| Top | `v-photos/top.jpg` |
-| Bottom (undercarriage) | `v-photos/bottom.jpg` |
-| Electronics close-up | `v-photos/electronics.jpg` |
-| Team photo | `t-photos/team.jpg` |
+| Front | `v-photos/front.jpeg` |
+| Rear | `v-photos/rear.jpeg` |
+| Left side | `v-photos/left.jpeg` |
+| Right side | `v-photos/right.jpeg` |
+| Top | `v-photos/top.jpeg` |
+| Bottom (undercarriage) | `v-photos/bottom.jpeg` |
+| Electronics close-up | `v-photos/electronics.jpeg` |
+| Team photo | `t-photos/team.jpeg` |
 
 ---
 
