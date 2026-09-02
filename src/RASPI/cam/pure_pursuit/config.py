@@ -513,6 +513,17 @@ OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
 # cono del SIGUIENTE segmento mal proyectado, y su falso PASADO le roba el
 # trigger de RECUPERANDO a la esquiva en curso (orillas487: 2do rojo a ~66px).
 OBS_MEM_PASSED_X_HALFWIDTH = 50.0
+# 2026-09-02: ...PERO x0 centrado NO es la única vía. Si el carro GIRÓ (IMU)
+# >= esto grados desde que vio la lata, fue una esquiva de ÁNGULO real y la
+# rodeó de verdad -> PASADO aunque su x0 quede de lado (verde slot 2, x0=144:
+# 56px de lado, pero el chasis giró ~50° -> hay que enderezar = RECUPERANDO).
+# Un cono del SIGUIENTE segmento NO acumula ese giro (aparece a media/final de
+# la esquiva) y además clasifica beyond -> ese SÍ se queda en DESCARTE_DE_LADO.
+# Antes (ee27dd1) el verde esquivado caía en DESCARTE y nunca mandaba
+# RECUPERANDO -> el ESP llegaba a la esquina ladeado y hacía la MANIOBRA a ~50°.
+# 30 > RECUP_MEAS_HEADING_DEG(25): "giro grande" inequívoco, no una esquiva
+# suave que PP endereza solo.
+OBS_MEM_PASSED_YAW_DEG = 30.0
 
 # 2026-09-01: LOCK al obstáculo primario (runtime_nuevo). Con >=2 conos se fija
 # uno (bbox de cámara más grande = más cerca; después por posición) y el resto
