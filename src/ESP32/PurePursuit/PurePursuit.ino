@@ -40,6 +40,10 @@ MPU6050 mpu(Wire);
 #define TRIG_F      14   // HC-SR04 frontal (ronda de obstáculos: CRUCERO/MANIOBRA)
 #define ECHO_F      33
 
+// ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
+const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
+
+
 // ── PWM ───────────────────────────────────────────────────────────────────────
 const int freqServo  = 50;
 const int resServo   = 16;
@@ -128,6 +132,13 @@ const unsigned long FIRST_V2_TIMEOUT_MS = 3000;     // si tras READY nunca llega
 unsigned long bootStartMs = 0;
 const unsigned long BOOT_WAIT_PI_MS = 1000;
 
+// One-shot: la primera vez que el carro va a rodar de verdad (tras pasar el gate
+// de WAIT_FIRST_V2) se re-anclan lastTurnTime y timeStart a ESE instante. Sin
+// esto ambos quedaban fijados en el READY (varios segundos antes), así que el
+// cooldownGiro y el gate de arranque ya estaban vencidos al primer frame de
+// marcha y una lectura ancha de la zona de salida podía disparar el giro 1.
+bool marchaIniciada = false;
+
 // ── FSM estados ───────────────────────────────────────────────────────────────
 // RECUPERANDO: la Pi confirma (piPasado=1) que el robot YA atravesó
 // físicamente un obstáculo — no que la cámara simplemente dejó de verlo
@@ -140,12 +151,11 @@ const unsigned long BOOT_WAIT_PI_MS = 1000;
 // ángulo (CRUCERO) hasta ~50cm de la pared y luego hace una maniobra por tramos
 // (MANIOBRA): pivote hacia adelante o EN REVERSA según qué tan pegado va a la
 // pared exterior del giro. Con rondaObstaculos=false nada de esto se usa.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA };
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO };
 Estado estado = SIGUIENDO;
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
-const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
-const int  FRONT_TURN_FWD_CM = 60;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
+const int  FRONT_TURN_FWD_CM = 70;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
                                        // (el arco necesita espacio adelante)
 const int  FRONT_TURN_REV_CM = 30;     // ... si será REVERSE (hay que estar cerca de la pared
                                        // para que el pivote en reversa no sobrepase)
@@ -172,7 +182,7 @@ const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa d
                                                     // bajarlo más o dejarlo en 0.
 const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // reversa no llegó a 88° -> frena y termina de frente
 const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin llegar a la pared -> MANIOBRA igual (red de seguridad anti-atasco)
-const unsigned long MANIOBRA_BACKOFF_MS     = 300;  // DESPUÉS de completar el pivote: retrocede este
+const unsigned long MANIOBRA_BACKOFF_MS     = 1000;  // DESPUÉS de completar el pivote: retrocede este
                                                     // tiempo para tomar distancia de la recta nueva.
                                                     // NO toca la geometría del pivote (ya calibrada).
 const int           MANIOBRA_BACKOFF_VEL    = 100;  // PWM del retroceso
@@ -204,7 +214,14 @@ const unsigned long recuperandoTimeoutMs = 1500;
 // ── Giros ─────────────────────────────────────────────────────────────────────
 bool direccionIzquierda = true;
 bool primerGiro         = false;
-int  AngGiro            =90;
+
+// Ángulo de giro objetivo — DISTINTO por tipo de ronda:
+//   ronda de obstáculos (rondaObstaculos=true) : ~90° reales (pivote/maniobra)
+//   ronda cerrada       (rondaObstaculos=false): 76° (el giro continuo se pasa
+//                                                por inercia, así que sale antes)
+const int ANG_GIRO_OBSTACULOS = 90;   // <- bájalo a 88 si se pasa en la de obstáculos
+const int ANG_GIRO_CERRADA    = 76;
+const int AngGiro = rondaObstaculos ? ANG_GIRO_OBSTACULOS : ANG_GIRO_CERRADA;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
 const int cooldownGiro     = 2000;   // ms entre giros
@@ -216,10 +233,33 @@ const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar (evita
                                  // falsos positivos por reflexión rasante del
                                  // ultrasónico cuando el chasis yawea fuerte)
 
+// Ronda cerrada: el trigger de giro se ARMA solo después de confirmar que el
+// carro ya está DENTRO de un pasillo (ambos laterales < umbralPared por varios
+// frames). Sin esto, una lectura ancha de la zona de salida dispara un giro
+// falso apenas arranca. Una vez armado se queda armado toda la carrera (no
+// retrasa esquinas reales, a diferencia de un grace por tiempo).
+bool giroArmado      = false;
+int  contadorPasillo = 0;
+const int PASILLO_FRAMES = 3;   // frames seguidos con AMBAS paredes < umbralPared para armar
+
+// Ronda cerrada: al acercarse a la pared de ENFRENTE se baja la velocidad para
+// darle tiempo a detectarEsquina() de leer limpio qué lado se abre antes de
+// llegar a la esquina (a full 180 el carro se pasaba antes de confirmar).
+const int FRONT_SLOWDOWN_CM  = 60;    // pared de frente más cerca que esto -> frena un poco
+const int VEL_APROX_CERRADA  = 140;   // velocidad reducida en la aproximación a la esquina
+
 // ── Carrera ───────────────────────────────────────────────────────────────────
 int  turnsCompleted      = 0;
 bool raceFinished        = false;
 const int TURNS_PER_RACE = 12;
+
+// ── Terminando (regreso al área de salida) ───────────────────────────────────
+// Al completar la última vuelta el carro NO frena de golpe: entra en TERMINANDO,
+// que maneja igual que SIGUIENDO (visión + PID) pero SIN buscar esquinas y solo
+// durante TERMINANDO_MS, para meterse en el área de salida y ahí sí frenar.
+// Sube/baja este tiempo según la distancia que falte hasta la zona de salida.
+const unsigned long TERMINANDO_MS = 1000;
+unsigned long terminandoEntryMs   = 0;
 
 // ── Filtro EMA para ultrasonidos ──────────────────────────────────────────────
 float alpha         = 0.85;
@@ -239,8 +279,13 @@ void escribirServo(int angulo) {
   ledcWrite(SERVO_PIN, duty);
 }
 
+// Techo del PWM del motor — DISTINTO por tipo de ronda:
+//   ronda de obstáculos (rondaObstaculos=true) : 100 (maniobras lentas y finas)
+//   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
+const int MOTOR_MAX = rondaObstaculos ? 100 : 180;
+
 void setMotor(int velocidad) {
-  velocidad = constrain(velocidad, 0, 100);
+  velocidad = constrain(velocidad, 0, MOTOR_MAX);
   ledcWrite(PWMA, velocidad);
 }
 
@@ -310,6 +355,21 @@ void decidirManiobra(long distL, long distR) {
   maniobraDecidida = true;
 }
 
+// Arranca el regreso al área de salida. Se llama al completar la última vuelta
+// EN LUGAR de frenar en seco (raceFinished=true): el carro sigue manejando como
+// en SIGUIENDO durante TERMINANDO_MS y después frena (ver terminando()).
+void iniciarTerminando() {
+  estado            = TERMINANDO;
+  terminandoEntryMs = millis();
+  Serial.print("-> TERMINANDO ");
+  Serial.print(turnsCompleted);
+  Serial.print("/");
+  Serial.print(TURNS_PER_RACE);
+  Serial.print(" (");
+  Serial.print(TERMINANDO_MS);
+  Serial.println(" ms hacia el area de salida)");
+}
+
 // Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
 // (recta nueva desde 0) y vuelve a SIGUIENDO. Cuenta el giro.
 void finalizarManiobra() {
@@ -326,7 +386,7 @@ void finalizarManiobra() {
   maniobraFase     = -1;
   estado           = SIGUIENDO;
   turnsCompleted++;
-  if (turnsCompleted >= TURNS_PER_RACE) raceFinished = true;
+  if (turnsCompleted >= TURNS_PER_RACE) iniciarTerminando();
   Serial.print("MANIOBRA completada ");
   Serial.print(turnsCompleted);
   Serial.print("/");
@@ -571,6 +631,19 @@ void controlPID(long distL, long distR) {
     obsBiasNorm   = 0.0;
     outputFinal   = outputWall + outputGyro;
 
+  } else if (!rondaObstaculos) {
+    // ── Ronda ABIERTA (sin obstáculos) ─────────────────────────────────────
+    // Se ignora por completo la visión / Pure Pursuit de la Pi: el carro se
+    // maneja SOLO con wall PID (centra entre paredes) + gyro PID (mantiene el
+    // heading hacia anguloObjetivo). Los giros los dispara el propio ESP32 con
+    // detectarEsquina(); la Pi solo se usa para el ACK del heading.
+    piPurePursuit  = false;
+    piPriority     = false;
+    piMemoryFrames = 0;
+    turnHint       = 0;
+    obsBiasNorm    = 0.0;
+    outputFinal    = outputWall + outputGyro;
+
   } else if (estado == RECUPERANDO || (estado == CRUCERO && cruceroCerca)) {
     // RECUPERANDO, y CRUCERO SOLO cuando ya está cerca de la pared (cruceroCerca):
     // control por gyro hacia anguloObjetivo + wall PID, SIN visión — porque ahí el
@@ -654,11 +727,31 @@ void controlPID(long distL, long distR) {
 
   // ── Debug UART ────────────────────────────────────────────────────────────
   Serial.print(" | Mode:");
-  Serial.print(piPurePursuit ? "PP" : (piAlive ? "V1" : "FALLBACK"));
+  Serial.print(!rondaObstaculos ? "ABIERTA"
+               : (piPurePursuit ? "PP" : (piAlive ? "V1" : "FALLBACK")));
   Serial.print(" | Wall:");   Serial.print(outputWall);
   Serial.print(" | Gyro:");   Serial.print(outputGyro);
   Serial.print(" | Vis:");    Serial.print(outputVision);
   Serial.print(" | Servo:");  Serial.print(centroServo + (int)outputFinal);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Terminando — regreso al área de salida tras la última vuelta
+// ═══════════════════════════════════════════════════════════════════════════════
+// Mismo control que SIGUIENDO (controlPID: PP/visión + wall/gyro PID) pero SIN
+// detectarEsquina() y acotado a TERMINANDO_MS. Al vencer el tiempo frena y marca
+// la carrera como terminada (raceFinished) — el loop() ya deja el carro parado.
+void terminando(long distL, long distR) {
+  velocidadMotor = 180;
+  controlPID(distL, distR);
+
+  if (millis() - terminandoEntryMs >= TERMINANDO_MS) {
+    raceFinished = true;
+    setMotor(0);
+    escribirServo(centroServo);
+    Serial.println("TERMINANDO completado -> STOP");
+  }
 }
 
 
@@ -767,6 +860,15 @@ void loop() {
     return;
   }
 
+  // Arranque REAL del carro (ya pasó WAIT_PI y WAIT_FIRST_V2): re-ancla timeStart
+  // aquí para que (millis()-timeStart) mida desde que empieza a rodar, no desde
+  // el READY. La protección de fondo contra el giro-falso de arranque es el
+  // latch giroArmado (abajo), no un grace por tiempo.
+  if (!marchaIniciada) {
+    marchaIniciada = true;
+    timeStart      = millis();
+  }
+
   mpu.update();
   actualizarGyro();
 
@@ -778,24 +880,31 @@ void loop() {
   long distL = (long)distL_filtrada;
   long distR = (long)distR_filtrada;
 
-  // Sensor frontal: solo se usa en la ronda de obstáculos (CRUCERO/MANIOBRA).
-  // Mediana de 5 (rechaza picos) + un EMA suave encima.
-  long distF = 0;
-  if (rondaObstaculos) {
-    long distF_med = medianaFront(leerDistancia(TRIG_F, ECHO_F));
-    distF_filtrada = filtroEMA(distF_med, distF_filtrada);
-    distF = (long)distF_filtrada;
-  }
+  // Sensor frontal: en ronda de obstáculos alimenta CRUCERO/MANIOBRA; en ronda
+  // cerrada sirve para frenar un poco al acercarse a la pared de enfrente
+  // (FRONT_SLOWDOWN_CM). Mediana de 5 (rechaza picos) + un EMA suave encima.
+  long distF_med = medianaFront(leerDistancia(TRIG_F, ECHO_F));
+  distF_filtrada = filtroEMA(distF_med, distF_filtrada);
+  long distF = (long)distF_filtrada;
 
   switch (estado) {
 
     case SIGUIENDO: {
       velocidadMotor = 180;
 
+      // Ronda cerrada: si la pared de ENFRENTE ya está cerca, baja la velocidad
+      // en la aproximación para que detectarEsquina() alcance a confirmar qué
+      // lado se abre antes de que el carro se pase la esquina.
+      if (!rondaObstaculos && distF > 0 && distF < FRONT_SLOWDOWN_CM) {
+        velocidadMotor = VEL_APROX_CERRADA;
+      }
+
       // La Pi confirma que el robot ya atravesó físicamente el obstáculo
       // (evento de un solo frame) -> entrar a RECUPERANDO. Ya no depende de
       // que la cámara simplemente haya dejado de verlo.
-      if (piPasado) {
+      // En ronda ABIERTA (!rondaObstaculos) no hay obstáculos: se ignora el
+      // pulso y el carro sigue en puro wall+gyro PID.
+      if (piPasado && rondaObstaculos) {
         estado = RECUPERANDO;
         recuperandoEntryMs = millis();
         integralWall  = 0; prevErrorWall  = 0;
@@ -839,7 +948,7 @@ void loop() {
       bool chasisAlineado = fabs(anguloGyro) < 25.0f;
 
       if ((millis() - lastTurnTime > cooldownGiro)
-          && millis() - timeStart > 3000)
+          && millis() - timeStart > 500)
       {
         if (rondaObstaculos) {
           // Ronda de obstáculos: NO giro continuo. Si la recta ya está limpia
@@ -859,16 +968,29 @@ void loop() {
           } else {
             contadorFront = 0;
           }
-        } else if (!bloqueadoPorObstaculo && detectarEsquina(distL, distR)) {
-          // Ronda abierta: giro continuo de siempre.
-          estado     = GIRANDO;
-          anguloGyro = 0;
-          if (!primerGiro) {
-            direccionIzquierda = (distL > distR);
-            primerGiro         = true;
+        } else {
+          // Ronda cerrada: giro continuo. El trigger NO se habilita hasta que el
+          // carro confirmó estar en un pasillo (ambas paredes < umbralPared por
+          // PASILLO_FRAMES) -> la zona de salida ancha no dispara el giro 1.
+          if (!giroArmado) {
+            if (distL < umbralPared && distR < umbralPared) contadorPasillo++;
+            else                                            contadorPasillo = 0;
+            if (contadorPasillo >= PASILLO_FRAMES) {
+              giroArmado = true;
+              Serial.println("Giro ARMADO (pasillo confirmado)");
+            }
           }
-          piPurePursuit = false;   // suspender PP durante el giro
-          Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
+
+          if (giroArmado && !bloqueadoPorObstaculo && detectarEsquina(distL, distR)) {
+            estado     = GIRANDO;
+            anguloGyro = 0;
+            if (!primerGiro) {
+              direccionIzquierda = (distL > distR);
+              primerGiro         = true;
+            }
+            piPurePursuit = false;   // suspender PP durante el giro
+            Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
+          }
         }
       }
       break;
@@ -928,7 +1050,7 @@ void loop() {
         turnsCompleted++;
 
         if (turnsCompleted >= TURNS_PER_RACE) {
-          raceFinished = true;
+          iniciarTerminando();
         }
 
         Serial.print("Giro completado ");
@@ -1163,6 +1285,15 @@ void loop() {
       }
       break;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TERMINANDO — tras la última vuelta: maneja como SIGUIENDO (sin esquinas)
+    // durante TERMINANDO_MS para entrar al área de salida, luego frena.
+    // ═══════════════════════════════════════════════════════════════════════════
+    case TERMINANDO: {
+      terminando(distL, distR);
+      break;
+    }
   }
 
   // ── Log periódico ─────────────────────────────────────────────────────────
@@ -1171,11 +1302,12 @@ void loop() {
   else if (estado == RECUPERANDO) Serial.print("RECUPERANDO");
   else if (estado == CRUCERO)     Serial.print("CRUCERO");
   else if (estado == MANIOBRA)    Serial.print("MANIOBRA");
+  else if (estado == TERMINANDO)  Serial.print("TERMINANDO");
   else                             Serial.print("SIGUIENDO");
   Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
   Serial.print(" | L:");        Serial.print(distL);
   Serial.print(" | R:");        Serial.print(distR);
-  if (rondaObstaculos) { Serial.print(" | F:"); Serial.print(distF); }
+  Serial.print(" | F:"); Serial.print(distF);
   Serial.print(" | Ang:");      Serial.print(anguloGyro);
   Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
   Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
