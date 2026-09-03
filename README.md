@@ -278,16 +278,16 @@ Responsibility is split across two processors by hardware strength:
  ┌───────────────────────────────────────────┐    V2     ┌────────────────────────────────────┐
  │ Camera → BEV homography → floor centerline│   UART    │ readPiSerial()  →  parse V2        │
  │ Pillar detection (HSV) + corner-line track│  ──────►  │                                    │
- │ Rolling obstacle memory (dead reckoning)  │  115200   │ 5-state FSM                        │
+ │ Rolling obstacle memory (dead reckoning)  │  115200   │ 6-state FSM                        │
  │ Pure Pursuit geometric controller         │           │  SIGUIENDO / GIRANDO / RECUPERANDO │
- │ RECUPERANDO trigger (measured state)      │  ◄──────  │  CRUCERO / MANIOBRA                │
+ │ RECUPERANDO trigger (measured state)      │  ◄──────  │  CRUCERO / MANIOBRA / TERMINANDO   │
  │ builds one V2 line per processed frame    │  ACK:V2   │ cascade PID (wall + gyro)          │
  └───────────────────────────────────────────┘   ang=    │ servo + motor PWM, HC-SR04, MPU    │
                                                est= dir= └────────────────────────────────────┘
 ```
 
 - The **Pi** decides *where to steer*: it turns the camera frame into a top-down view, extracts a drivable centerline, runs a Pure Pursuit controller against it, and reduces the result to a single normalized steering value plus a few status flags. It processes 1 of every 3 captured frames (~12–15 Hz effective).
-- The **ESP32** decides *how to drive*: it owns the 50 Hz control loop, the finite state machine, corner detection, the recovery behaviour, and every actuator. It treats the Pi's steering value as the primary reference while Pure Pursuit is active, and falls back to its own wall + gyro PID if the Pi goes silent for more than 800 ms.
+- The **ESP32** decides *how to drive*: it owns the 50 Hz control loop, the finite state machine, corner detection, the recovery behaviour, and every actuator. In the Obstacle round it treats the Pi's steering value as the primary reference while Pure Pursuit is active, and falls back to its own wall + gyro PID if the Pi goes silent for more than 800 ms. In the Open round it ignores the Pi's steer altogether and runs on wall + gyro PID the whole time (§4.5).
 
 Why not one processor? Real-time GPIO timing (ultrasonic pulses, servo/motor PWM, gyro sampling) and non-deterministic OpenCV latency don't coexist well on one core. Linux can't guarantee a µs-accurate pulse while an HSV pass is running; a microcontroller can't run OpenCV. Splitting them lets each run at its own natural rate, and a late UART packet just means the ESP32 reuses the last command instead of stalling. This trade-off is analyzed in [Section 5](#5-systemic-thinking--engineering-decisions).
 
@@ -427,16 +427,17 @@ This replaced an earlier approach that anchored the can's position when first se
 ### 4.5 ESP32 finite state machine (`src/ESP32/PurePursuit/PurePursuit.ino`)
 
 ```
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA };
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO };
 ```
 
 | State | Role |
 |---|---|
-| **SIGUIENDO** | Normal driving. Steering = Pi's Pure Pursuit value, blended with a light gyro correction (weight 0.12) and, only on a clean straight, the wall PID (weight 0.30). Watches for the next corner and for obstacle flags from the Pi. |
-| **GIRANDO** | Continuous 90° corner (**Open round only**). Servo held at full lock, motor speed ramped down in steps as `|anguloGyro|` grows, exits at `|anguloGyro| ≥ 90°`. The first corner latches the track's turn direction from whichever wall opened up. 12 corners = 3 laps → race finished. |
-| **RECUPERANDO** | Entered on the Pi's `pasado=1` pulse. Vision is handed off; wall PID + gyro PID (with widened limits) straighten the chassis back into the lane. Exits when the heading error settles (with a timeout safety net for corners where one wall legitimately reads "open"). |
+| **SIGUIENDO** | Normal driving. In the **Obstacle round**, steering = Pi's Pure Pursuit value, blended with a light gyro correction (weight 0.12) and, only on a clean straight, the wall PID (weight 0.30). In the **Open round** the Pi's steer is ignored entirely — steering is pure wall PID + gyro PID (see §4.5.1). Watches for the next corner and for obstacle flags from the Pi. |
+| **GIRANDO** | Continuous corner (**Open round only**). Servo held at full lock, motor speed ramped down in steps as `\|anguloGyro\|` grows, exits at `\|anguloGyro\| ≥ AngGiro` — **76°** in the Open round (the continuous turn coasts the rest on inertia) vs. 90° for the Obstacle round. The first corner latches the track's turn direction from whichever wall opened up. 12 corners = 3 laps → `TERMINANDO`. |
+| **RECUPERANDO** | *(Obstacle round)* Entered on the Pi's `pasado=1` pulse. Vision is handed off; wall PID + gyro PID (with widened limits) straighten the chassis back into the lane. Exits when the heading error settles (with a timeout safety net for corners where one wall legitimately reads "open"). |
 | **CRUCERO** | *(Obstacle round)* Straight is clean and a corner is near (front sensor < 80 cm). The car drives straight on heading toward the wall: far away, vision keeps the centerline straight; once inside `CRUCERO_GYRO_CM`, control is pure gyro + wall PID. A new obstacle sends it back to SIGUIENDO. |
 | **MANIOBRA** | *(Obstacle round)* Replaces the continuous turn. At 30–60 cm from the wall a one-time decision is latched: **turn direction** = the side whose wall is open; **forward arc vs. reverse pivot** = chosen from the distance to the *outer* wall of the turn (tight against it → reverse pivot; room to swing → forward arc). A multi-phase sub-machine runs it, with motor-**coast** phases inserted between every direction reversal (plugging the H-bridge under load destroyed a TB6612 during testing). An optional short straight back-off afterward buys room on the new straight. Then it straightens, zeroes the heading for the new straight, counts the turn and returns to SIGUIENDO. |
+| **TERMINANDO** | Entered automatically after the 12th turn **instead of braking on the spot**. Drives exactly like SIGUIENDO (same controller, but corner detection disabled) for `TERMINANDO_MS` (~1 s, tunable) so the car rolls forward into the start area, then cuts the motor and ends the race. Keeps the finish inside the start section instead of wherever the last corner happened to end. |
 
 The turn-direction is latched once (all corners of a WRO track turn the same way); the forward-vs-reverse choice is made fresh at every corner from the distance to the **outer** wall of the turn ([`decidirManiobra()`](src/ESP32/PurePursuit/PurePursuit.ino)):
 
@@ -447,7 +448,25 @@ maniobraReversa   = (distExt >= HUG_CM);                    // room to swing →
 maniobraRetroceso = (distExt >  MANIOBRA_BACKOFF_MIN_CM);   // slack → short back-off after
 ```
 
-**One flag switches the turn strategy:** `const bool rondaObstaculos` at the top of `PurePursuit.ino` — `true` for the Obstacle Challenge (CRUCERO/MANIOBRA), `false` for the Open Challenge (continuous GIRANDO). Everything else is shared.
+**One flag switches the whole driving profile:** `const bool rondaObstaculos` at the top of `PurePursuit.ino`.
+
+| | Open Challenge (`false`) | Obstacle Challenge (`true`) |
+|---|---|---|
+| Steering source | ESP32 wall PID + gyro PID **only** — the Pi's Pure Pursuit steer, `prio`/`mem`/`pasado` flags are all ignored | Pi Pure Pursuit centerline; PID as blend / fallback / RECUPERANDO |
+| Corner turn | continuous `GIRANDO` | `CRUCERO` → `MANIOBRA` segmented |
+| Turn target `AngGiro` | 76° (the continuous turn coasts the rest on inertia) | 90° |
+| Motor PWM ceiling `MOTOR_MAX` | 180 — fast; the in-turn speed ramp does the slowing | 100 — slow, for fine maneuvers |
+| `RECUPERANDO` / obstacle handling | never entered | active |
+
+`TERMINANDO` and the cascade PID run in both.
+
+#### 4.5.1 Open-round corner hardening
+
+With the Pi's vision out of the loop, three guards keep the continuous turn honest:
+
+- **`giroArmado` — corridor arm.** `detectarEsquina()` is not allowed to fire a turn until the car has first confirmed it is *inside* a corridor: both side walls < 100 cm for `PASILLO_FRAMES` (3) consecutive frames. A wide reading in the start zone therefore can't trigger a false first turn. Once armed it stays armed for the whole run, so real corners are never delayed by it (unlike a fixed time lockout).
+- **Front-wall approach slow-down.** When the front sensor sees the end wall closer than `FRONT_SLOWDOWN_CM` (60 cm), speed drops to `VEL_APROX_CERRADA` (140) so `detectarEsquina()` gets a clean read of which side opens before the car is on top of the corner.
+- **`marchaIniciada` timer re-anchor.** The start-guard timer (`timeStart`) is reset to the instant the car actually starts rolling — not to when `READY` arrived seconds earlier — so its window is measured from roll-off.
 
 ### 4.6 Cascade PID (always running underneath)
 
@@ -495,8 +514,8 @@ anguloGyro += gz * dt;            // this is the value echoed back to the Pi
 2. Pi waits for the start button on **GPIO 17**.
 3. Camera warm-up (~40 frames discarded to settle exposure).
 4. Pi sends `READY` ×3; the ESP32 has been blocking in `setup()` waiting for it.
-5. ESP32 replies `ACK:READY`, then **holds the motor at zero until the first real V2 line arrives** (a gate so the car never rolls forward on the fallback PID before Pure Pursuit is actually streaming).
-6. Main loop runs until 12 turns are counted.
+5. ESP32 replies `ACK:READY`, then **holds the motor at zero until the first real V2 line arrives** (a gate so the car never rolls forward on the fallback PID before Pure Pursuit is actually streaming). On the first frame it then rolls, `marchaIniciada` re-anchors the start-guard timer to that instant.
+6. Main loop runs until 12 turns are counted, then `TERMINANDO` drives ~1 s more into the start area and stops.
 
 ### 4.8 Development status
 
@@ -507,6 +526,8 @@ anguloGyro += gz * dt;            // this is the value echoed back to the Pi
 | Pure Pursuit geometric controller | both | Complete, track-tuned |
 | ESP32 cascade PID + fallback | both | Complete |
 | Continuous corner turn (GIRANDO) | Open | Complete, track-tuned |
+| Open-round pure-PID mode + corner hardening (`giroArmado`, approach slow-down) | Open | Implemented, not track-tuned |
+| Return-to-start finish (TERMINANDO) | both | Implemented, not track-tuned |
 | Pillar detection (HSV + shape filter) | Obstacle | Complete |
 | Asymmetric WRO keep-out in centerline | Obstacle | Complete |
 | Rolling obstacle memory (dead reckoning) | Obstacle | Complete, track-tuned |
@@ -567,6 +588,7 @@ The IMU heading is the shared currency: the ESP32 integrates it for its own cont
 | v2.4 | Adaptive look-ahead (longitudinal distance) | Short fixed look-ahead made the car pivot, not arc | Car keeps translating and arcs around cans |
 | v2.5 | Dead-reckoning "anchor" RECUPERANDO trigger → measured-state trigger | Anchor integrated un-measured speed, drifted 200–400 mm | Recovery fires when the state actually shows a crooked chassis |
 | v2.6 (`SectionTurning`) | Continuous turn → segmented CRUCERO/MANIOBRA for the Obstacle round; added front ultrasonic; coast phases in the H-bridge sequence | Blind arc unreliable with a can at the corner mouth; plugging killed a TB6612 | Deterministic corners; tuning on track |
+| v2.7 (`SectionTurning`) | Open round runs pure wall+gyro PID (Pi steer ignored); per-round `AngGiro`/`MOTOR_MAX`; `giroArmado` corridor arm + front-wall approach slow-down; `TERMINANDO` finish state | Open round doesn't need vision and was inheriting obstacle-round speed caps; wide start-zone reading fired a false first turn; car braked in place wherever the last corner ended | Open round faster and self-contained; false first turn removed; finish lands in the start section |
 
 ### 5.4 Risk analysis
 
@@ -578,6 +600,7 @@ The IMU heading is the shared currency: the ESP32 integrates it for its own cont
 | Can leaves FOV mid-dodge → ghost obstacle | Medium | Medium — phantom keep-out | Confidence decay; prune-on-pass; memory disabled during turns |
 | UART packet delayed by OpenCV load | Medium | Low — one stale command | ESP32 reuses last command; 800 ms timeout → autonomous wall+gyro fallback |
 | Corner missed / mis-counted | Low | High — wrong lap count or direction | Conservative thresholds; 2 s cool-down; `prio`/`mem` block detection while dodging; front-sensor debounce in the Obstacle round |
+| False first turn from a wide start-zone reading (Open round) | Medium | High — wrong direction latched for the whole run | `giroArmado`: corner detection stays disabled until both walls read < 100 cm for 3 frames; timers re-anchored to roll-off |
 | MANIOBRA runs the car into the outer wall | Medium | High — DQ | Forward/reverse chosen from measured outer-wall distance; reverse-timeout fallback; optional post-maneuver back-off |
 | H-bridge damage from direction reversal under load | Low (mitigated) | High — dead driver | Motor-coast phase inserted before every direction change (learned the hard way) |
 | Servo driven into its end stop | Low | Low | Firmware clamps servo command to 20°–150° |
@@ -698,7 +721,7 @@ FoxRobotics/
 │   │   │   └── _archive/                  # Superseded runtimes
 │   │   └── tests/                         # UART diagnostics + kinematic simulation
 │   └── ESP32/
-│       ├── PurePursuit/PurePursuit.ino    #  ← CURRENT firmware — V2 protocol, 5-state FSM
+│       ├── PurePursuit/PurePursuit.ino    #  ← CURRENT firmware — V2 protocol, 6-state FSM
 │       ├── Controller_PI/Controller_PI.ino# Legacy Open-only firmware (cascade PID + 3-state FSM)
 │       ├── _archive/                      # Previous firmware iteration
 │       └── TestCodes/                     # Per-peripheral bring-up sketches (servo, gyro, motor, US, serial)
