@@ -243,9 +243,10 @@ const int cooldownGiro     = 1000;   // ms entre giros
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
 const int umbralPared  = 100;   // cm — pared "desaparece" → esquina
-const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar (evita
-                                 // falsos positivos por reflexión rasante del
-                                 // ultrasónico cuando el chasis yawea fuerte)
+const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar
+const int FRONT_ESQUINA_MAX = 110;  // lateral abierto solo cuenta como esquina si
+                                    // además hay pared de frente < esto (anti
+                                    // giro-falso por glitch de un lateral).
 
 // Ronda cerrada: el trigger de giro se ARMA solo después de confirmar que el
 // carro ya está DENTRO de un pasillo (ambos laterales < umbralPared por varios
@@ -267,8 +268,13 @@ const unsigned long ARMA_GIRO_TIMEOUT_MS = 2500;
 // Ronda cerrada: al acercarse a la pared de ENFRENTE se baja la velocidad para
 // darle tiempo a detectarEsquina() de leer limpio qué lado se abre antes de
 // llegar a la esquina (a full 180 el carro se pasaba antes de confirmar).
-const int FRONT_SLOWDOWN_CM  = 60;    // pared de frente más cerca que esto -> frena un poco
-const int VEL_APROX_CERRADA  = 140;   // velocidad reducida en la aproximación a la esquina
+const int FRONT_SLOWDOWN_CM  = 90;    // pared de frente más cerca que esto -> frena un poco
+const int VEL_APROX_CERRADA  = 120;   // velocidad reducida en la aproximación a la esquina
+
+// Antes del PRIMER giro el carro va lento: la aproximación va más tranquila
+// (menos yaw del PID de centrado), el lateral lee limpio y detectarEsquina
+// confirma a tiempo. Después del giro 1 -> velocidad normal.
+const int VEL_INICIAL = 110;
 
 // ── Carrera ───────────────────────────────────────────────────────────────────
 int  turnsCompleted      = 0;
@@ -288,6 +294,14 @@ float alpha         = 0.85;
 float distL_filtrada = 0;
 float distR_filtrada = 0;
 float distF_filtrada = 0;   // sensor frontal (solo ronda de obstáculos)
+
+// Mediana de 3 previa al EMA en los laterales — rechaza picos de 1 frame
+// (rasante por yaw / crosstalk) que si no cruzaban umbralPared y disparaban
+// un giro falso.
+long bufL[3] = {200, 200, 200};
+long bufR[3] = {200, 200, 200};
+int  idxL = 0;
+int  idxR = 0;
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -338,6 +352,13 @@ long medianaFront(long nueva) {
     for (int j = i + 1; j < 3; j++)
       if (s[j] < s[i]) { long t = s[i]; s[i] = s[j]; s[j] = t; }
   return s[1];
+}
+
+long mediana3(long nueva, long buf[3], int &idx) {
+  buf[idx] = nueva;
+  idx = (idx + 1) % 3;
+  long a = buf[0], b = buf[1], c = buf[2];
+  return max(min(a, b), min(max(a, b), c));
 }
 
 // Decide dirección de giro (lado con hueco > umbralPared) y FORWARD vs REVERSE
@@ -453,13 +474,10 @@ void actualizarGyro() {
   anguloGyro += gz * dt;
 }
 
-bool detectarEsquina(long distL, long distR) {
-  bool apertura = (distL > umbralPared) || (distR > umbralPared);
-  // Histéresis en vez de reset duro: un solo frame < umbralPared (ruido /
-  // geometría al borde del umbral) ya NO borra la cuenta, solo la baja 1 ->
-  // necesita esquinaDebounce frames NO-apertura seguidos para des-armar,
-  // simétrico con el armado. Satura en esquinaDebounce para no acumular de más
-  // durante toda la aproximación.
+bool detectarEsquina(long distL, long distR, long distF) {
+  bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
+  bool apertura = paredFrente && ((distL > umbralPared) || (distR > umbralPared));
+  // Histéresis en vez de reset duro; satura en esquinaDebounce.
   if (apertura) contadorEsquina = min(contadorEsquina + 1, (int)esquinaDebounce);
   else          contadorEsquina = max(contadorEsquina - 1, 0);
   return contadorEsquina >= esquinaDebounce;
@@ -949,8 +967,8 @@ void loop() {
   mpu.update();
   actualizarGyro();
 
-  long distL_raw = leerDistancia(TRIG_L, ECHO_L);
-  long distR_raw = leerDistancia(TRIG_R, ECHO_R);
+  long distL_raw = mediana3(leerDistancia(TRIG_L, ECHO_L), bufL, idxL);
+  long distR_raw = mediana3(leerDistancia(TRIG_R, ECHO_R), bufR, idxR);
   distL_filtrada = filtroEMA(distL_raw, distL_filtrada);
   distR_filtrada = filtroEMA(distR_raw, distR_filtrada);
 
@@ -967,13 +985,13 @@ void loop() {
   switch (estado) {
 
     case SIGUIENDO: {
-      velocidadMotor = 180;
+      velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : 180;
 
       // Ronda cerrada: si la pared de ENFRENTE ya está cerca, baja la velocidad
       // en la aproximación para que detectarEsquina() alcance a confirmar qué
       // lado se abre antes de que el carro se pase la esquina.
       if (!rondaObstaculos && distF > 0 && distF < FRONT_SLOWDOWN_CM) {
-        velocidadMotor = VEL_APROX_CERRADA;
+        velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
       }
 
       // La Pi confirma que el robot ya atravesó físicamente el obstáculo
@@ -1064,7 +1082,7 @@ void loop() {
             }
           }
 
-          if (giroArmado && !bloqueadoPorObstaculo && detectarEsquina(distL, distR)) {
+          if (giroArmado && !bloqueadoPorObstaculo && detectarEsquina(distL, distR, distF)) {
             estado     = GIRANDO;
             anguloGyro = 0;
             if (!primerGiro) {
@@ -1112,9 +1130,11 @@ void loop() {
     case GIRANDO: {
       float delta = abs(anguloGyro);
 
-      if      (delta < 45) velocidadMotor = 165;
-      else if (delta < 70) velocidadMotor = 145;
-      else                 velocidadMotor = 120;
+      if (turnsCompleted == 0) {
+        velocidadMotor = VEL_INICIAL;   // primera curva: lento todo el arco, sin salto
+      } else if (delta < 45) velocidadMotor = 165;
+      else if (delta < 70)   velocidadMotor = 145;
+      else                   velocidadMotor = 120;
 
       setMotor(velocidadMotor);
       escribirServo(direccionIzquierda ? 150 : 20);
