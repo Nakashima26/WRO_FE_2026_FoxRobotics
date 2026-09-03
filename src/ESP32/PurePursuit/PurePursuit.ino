@@ -55,6 +55,20 @@ float KpWall = 1.0;
 float KiWall = 0.0;
 float KdWall = 1.2;
 
+// Ronda ABIERTA: en vez de centrar entre paredes (distL-distR -> 0), una vez que
+// ya se sabe el sentido de giro de la pista, el wall PID mantiene esta distancia
+// fija a la pared INTERIOR (la del lado hacia donde gira). Menos "hunting" y
+// línea más corta en rectas anchas; además la pared interior no "desaparece" en
+// las esquinas (esa es la exterior), así que el PID no se clava. 
+const float WALL_HOLD_CM = 25.0;
+
+// El error de UNA sola pared tiene ~la mitad de ganancia geométrica que
+// distL-distR (al desplazarte lateralmente solo cambia un sensor, no dos). Sin
+// re-escalar, el término de pared no le gana al gyro PID —que tras cada giro
+// continuo defiende un heading viciado (~13°, el giro se pasa por inercia)— y el
+// carro se ABRE hacia la pared de afuera en vez de pegarse a la de adentro.
+const float WALL_HOLD_GAIN = 1.8;
+
 float errorWall    = 0;
 float prevErrorWall = 0;
 float integralWall  = 0;
@@ -104,7 +118,7 @@ const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
 float visionSteerGain = 80.0;
 float turnHintGain    = 7.0;
 
-// Ganancia Pure Pursuit: obs = steer_deg / 35 → steerDeg = obs * 35 = steer_deg
+// Ganancia Pure Pursuit: obs = steer_deg / 60 → steerDeg = obs * 60 = steer_deg
 const float ppSteerGain = 60.0;
 
 // Cuánto se deflecta el servo por cada grado de PP.  steerDeg sale de la
@@ -224,7 +238,7 @@ const int ANG_GIRO_CERRADA    = 76;
 const int AngGiro = rondaObstaculos ? ANG_GIRO_OBSTACULOS : ANG_GIRO_CERRADA;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
-const int cooldownGiro     = 2000;   // ms entre giros
+const int cooldownGiro     = 1000;   // ms entre giros
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
@@ -236,11 +250,19 @@ const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar (evita
 // Ronda cerrada: el trigger de giro se ARMA solo después de confirmar que el
 // carro ya está DENTRO de un pasillo (ambos laterales < umbralPared por varios
 // frames). Sin esto, una lectura ancha de la zona de salida dispara un giro
-// falso apenas arranca. Una vez armado se queda armado toda la carrera (no
-// retrasa esquinas reales, a diferencia de un grace por tiempo).
+// falso apenas arranca. Una vez armado se queda armado toda la carrera.
 bool giroArmado      = false;
 int  contadorPasillo = 0;
 const int PASILLO_FRAMES = 3;   // frames seguidos con AMBAS paredes < umbralPared para armar
+
+// Fallback: si el carro arranca pegado a una pared, o justo antes de una esquina,
+// UN lateral ya lee "abierto" (>umbralPared) desde el frame 0 y el path de
+// pasillo (AMBAS < umbralPared) NUNCA se cumple -> giroArmado se queda en false
+// para siempre y el carro avanza sin girar nunca ("ciclado"). Este timeout lo
+// arma igual pasado este tiempo desde el arranque real. NO retrasa esquinas
+// reales: el path de pasillo ya arma antes cuando puede, y el cooldownGiro
+// (2000 ms) impide un giro 1 prematuro de todos modos.
+const unsigned long ARMA_GIRO_TIMEOUT_MS = 2500;
 
 // Ronda cerrada: al acercarse a la pared de ENFRENTE se baja la velocidad para
 // darle tiempo a detectarEsquina() de leer limpio qué lado se abre antes de
@@ -300,20 +322,22 @@ void motorCoast() {
 void motorAdelante() { digitalWrite(A1, HIGH); digitalWrite(A2, LOW); }
 void motorReversa()  { digitalWrite(A1, LOW);  digitalWrite(A2, HIGH); }
 
-// Mediana de las últimas 5 lecturas del sensor frontal. El HC-SR04 frontal
+// Mediana de las últimas 3 lecturas del sensor frontal. El HC-SR04 frontal
 // tira picos (55 <-> 199) por multipath / eco perdido; la mediana los rechaza,
 // el EMA no. Sin esto un pico espurio disparaba MANIOBRA antes de la esquina.
+// 3 (no 5): con 5 el retraso de la mediana metía tarde el slowdown y el carro
+// llegaba con poca pista a la esquina.
 long medianaFront(long nueva) {
-  static long buf[5] = {200, 200, 200, 200, 200};
+  static long buf[3] = {200, 200, 200};
   static int  idx = 0;
   buf[idx] = nueva;
-  idx = (idx + 1) % 5;
-  long s[5];
-  for (int i = 0; i < 5; i++) s[i] = buf[i];
-  for (int i = 0; i < 5; i++)
-    for (int j = i + 1; j < 5; j++)
+  idx = (idx + 1) % 3;
+  long s[3];
+  for (int i = 0; i < 3; i++) s[i] = buf[i];
+  for (int i = 0; i < 3; i++)
+    for (int j = i + 1; j < 3; j++)
       if (s[j] < s[i]) { long t = s[i]; s[i] = s[j]; s[j] = t; }
-  return s[2];
+  return s[1];
 }
 
 // Decide dirección de giro (lado con hueco > umbralPared) y FORWARD vs REVERSE
@@ -405,7 +429,11 @@ long leerDistancia(int trig, int echo) {
   delayMicroseconds(10);
   digitalWrite(trig, LOW);
 
-  long dur  = pulseIn(echo, HIGH, 7000);
+  // 6000 us: 100 cm ida+vuelta = 5882 us, cubre todo el rango útil (umbralPared
+  // = 100 cm incluido). El caso "sin eco" es justo el de la esquina y quema el
+  // timeout completo cada loop -> con 6000 en vez de 7000 el loop respira un
+  // poco más rápido cuando más importa.
+  long dur  = pulseIn(echo, HIGH, 6000);
   long dist = dur * 0.034 / 2;
   if (dist == 0 || dist > 200) dist = 200;
   return dist;
@@ -427,8 +455,13 @@ void actualizarGyro() {
 
 bool detectarEsquina(long distL, long distR) {
   bool apertura = (distL > umbralPared) || (distR > umbralPared);
-  if (apertura) contadorEsquina++;
-  else          contadorEsquina = 0;
+  // Histéresis en vez de reset duro: un solo frame < umbralPared (ruido /
+  // geometría al borde del umbral) ya NO borra la cuenta, solo la baja 1 ->
+  // necesita esquinaDebounce frames NO-apertura seguidos para des-armar,
+  // simétrico con el armado. Satura en esquinaDebounce para no acumular de más
+  // durante toda la aproximación.
+  if (apertura) contadorEsquina = min(contadorEsquina + 1, (int)esquinaDebounce);
+  else          contadorEsquina = max(contadorEsquina - 1, 0);
   return contadorEsquina >= esquinaDebounce;
 }
 
@@ -601,8 +634,50 @@ void controlPID(long distL, long distR) {
   if (dt < 0.01) dt = 0.01;
 
   // ── Siempre calculamos wall y gyro (se usan en fallback y logs) ───────────
-  errorWall = distL - distR;
+  bool wallHold = (!rondaObstaculos && primerGiro);
+
+  // Ventana entre "se perdió la pared que venía siguiendo" y "entra GIRANDO"
+  // (~esquinaDebounce frames): la distancia de ese lado ya vale 200 (saturada),
+  // así que si dejamos el wall PID trabajando, errorWall se clava en el clamp
+  // ±50 y suelta un steerazo (+ golpe de derivada KdWall) ANTES de girar ->
+  // GIRANDO arranca desde una pose perturbada. En la ronda abierta congelamos
+  // el término de pared en esa ventana; el gyro PID mantiene el rumbo hasta el
+  // giro. (En la de obstáculos NO se toca: RECUPERANDO/CRUCERO usan errorWall.)
+  bool esquinaInminente = !rondaObstaculos
+                          && ((distL > umbralPared) || (distR > umbralPared));
+
+  if (esquinaInminente) {
+    errorWall     = 0;
+    prevErrorWall = 0;   // sin patada de derivada al congelar
+  } else if (wallHold) {
+    // Ronda abierta con sentido de giro ya conocido: seguir la pared INTERIOR a
+    // WALL_HOLD_CM en vez de centrar. Giro izq -> interior = distL; giro der ->
+    // interior = distR. El signo se elige para que quede IGUAL que distL-distR:
+    // errorWall > 0 -> el carro vira y distL baja / distR sube.
+    //   giro izq (interior=distL): errorWall = distL - HOLD
+    //       distL > HOLD (abierto) -> +  -> vira a la interior (izq), distL baja. OK
+    //   giro der (interior=distR): errorWall = HOLD - distR
+    //       distR > HOLD (abierto) -> -  -> vira a la interior (der), distR baja. OK
+    long  distInt = direccionIzquierda ? distL : distR;
+    float e       = direccionIzquierda ? (distInt - WALL_HOLD_CM)
+                                       : (WALL_HOLD_CM - distInt);
+    errorWall = e * WALL_HOLD_GAIN;   // compensa la mitad de ganancia de 1 pared
+  } else {
+    // Antes del 1er giro (dirección aún desconocida) o ronda de obstáculos:
+    // comportamiento de siempre, centrar entre ambas paredes.
+    errorWall = distL - distR;
+  }
   errorWall = constrain(errorWall, -50, 50);
+
+  // Ronda abierta en hold: el heading de referencia (anguloObjetivo) que dejó el
+  // último giro continuo está viciado — el giro se pasa por inercia, así que el
+  // gyro PID se pasa la recta "corrigiéndolo" y empuja al carro hacia la pared
+  // de AFUERA. Mientras las DOS paredes existan, re-referencia anguloObjetivo
+  // poco a poco al heading actual: el gyro pasa a ser solo amortiguador y la
+  // pared interior manda. (Mismo truco que usa CRUCERO en la ronda de obstáculos.)
+  if (wallHold && distL <= umbralPared && distR <= umbralPared) {
+    anguloObjetivo += (anguloGyro - anguloObjetivo) * 0.05f;
+  }
   integralWall += errorWall * dt;
   integralWall  = constrain(integralWall, -40, 40);
   float derivWall  = (errorWall - prevErrorWall) / dt;
@@ -730,6 +805,8 @@ void controlPID(long distL, long distR) {
   Serial.print(!rondaObstaculos ? "ABIERTA"
                : (piPurePursuit ? "PP" : (piAlive ? "V1" : "FALLBACK")));
   Serial.print(" | Wall:");   Serial.print(outputWall);
+  Serial.print(" | eWall:");  Serial.print(errorWall);
+  Serial.print(esquinaInminente ? "(esq)" : (wallHold ? "(hold)" : "(center)"));
   Serial.print(" | Gyro:");   Serial.print(outputGyro);
   Serial.print(" | Vis:");    Serial.print(outputVision);
   Serial.print(" | Servo:");  Serial.print(centroServo + (int)outputFinal);
@@ -978,6 +1055,12 @@ void loop() {
             if (contadorPasillo >= PASILLO_FRAMES) {
               giroArmado = true;
               Serial.println("Giro ARMADO (pasillo confirmado)");
+            } else if (millis() - timeStart > ARMA_GIRO_TIMEOUT_MS) {
+              // Nunca se confirmó pasillo (arrancó pegado a una pared / antes de
+              // una esquina). Armar por tiempo para que el carro no se quede
+              // sin girar nunca.
+              giroArmado = true;
+              Serial.println("Giro ARMADO (timeout)");
             }
           }
 
