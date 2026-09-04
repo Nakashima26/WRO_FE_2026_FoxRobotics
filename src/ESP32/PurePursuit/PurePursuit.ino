@@ -244,32 +244,30 @@ const int cooldownGiro     = 1000;   // ms entre giros
 int contadorEsquina    = 0;
 const int umbralPared  = 100;   // cm — pared "desaparece" → esquina
 const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar
-const int FRONT_ESQUINA_MAX = 110;  // lateral abierto solo cuenta como esquina si
+const int FRONT_ESQUINA_MAX = 100;  // lateral abierto solo cuenta como esquina si
                                     // además hay pared de frente < esto (anti
                                     // giro-falso por glitch de un lateral).
-
-// Ronda cerrada: el trigger de giro se ARMA solo después de confirmar que el
-// carro ya está DENTRO de un pasillo (ambos laterales < umbralPared por varios
-// frames). Sin esto, una lectura ancha de la zona de salida dispara un giro
-// falso apenas arranca. Una vez armado se queda armado toda la carrera.
-bool giroArmado      = false;
-int  contadorPasillo = 0;
-const int PASILLO_FRAMES = 3;   // frames seguidos con AMBAS paredes < umbralPared para armar
-
-// Fallback: si el carro arranca pegado a una pared, o justo antes de una esquina,
-// UN lateral ya lee "abierto" (>umbralPared) desde el frame 0 y el path de
-// pasillo (AMBAS < umbralPared) NUNCA se cumple -> giroArmado se queda en false
-// para siempre y el carro avanza sin girar nunca ("ciclado"). Este timeout lo
-// arma igual pasado este tiempo desde el arranque real. NO retrasa esquinas
-// reales: el path de pasillo ya arma antes cuando puede, y el cooldownGiro
-// (2000 ms) impide un giro 1 prematuro de todos modos.
-const unsigned long ARMA_GIRO_TIMEOUT_MS = 2500;
 
 // Ronda cerrada: al acercarse a la pared de ENFRENTE se baja la velocidad para
 // darle tiempo a detectarEsquina() de leer limpio qué lado se abre antes de
 // llegar a la esquina (a full 180 el carro se pasaba antes de confirmar).
 const int FRONT_SLOWDOWN_CM  = 90;    // pared de frente más cerca que esto -> frena un poco
 const int VEL_APROX_CERRADA  = 120;   // velocidad reducida en la aproximación a la esquina
+
+// Giro 1: detectarEsquina espera a ver la pared de enfrente (paredFrente), así
+// que confirma tarde y el carro tiende a pasarse. Red de seguridad SOLO en el
+// giro 1: a menos de FRONT_SLOWDOWN2_CM de la pared de enfrente, corta a
+// VEL_APROX2 (más lento que VEL_INICIAL) para que la esquina tardía no raspe.
+const int FRONT_SLOWDOWN2_CM = 60;
+const int VEL_APROX2         = 90;
+
+// Giro 1: si detectarEsquina NO disparó y ya estás muy cerca de la pared de
+// enfrente -> girá igual, hacia el lado con más hueco (distL vs distR). Cubre
+// el caso "vengo despegado de la pared interior y el lateral nunca la perdió
+// limpio". El frontal baja gradual y fiable dentro de ~1 m, así que es un
+// trigger más estable que el lateral en esa aproximación. Subilo si el arco de
+// 90° raspa la pared de enfrente al arrancar desde acá.
+const int FRONT_FORCE_GIRO_CM = 45;
 
 // Antes del PRIMER giro el carro va lento: la aproximación va más tranquila
 // (menos yaw del PID de centrado), el lateral lee limpio y detectarEsquina
@@ -727,7 +725,7 @@ void controlPID(long distL, long distR) {
   } else if (!rondaObstaculos) {
     // ── Ronda ABIERTA (sin obstáculos) ─────────────────────────────────────
     // Se ignora por completo la visión / Pure Pursuit de la Pi: el carro se
-    // maneja SOLO con wall PID (centra entre paredes) + gyro PID (mantiene el
+    // maneja con wall PID (centra entre paredes) + gyro PID (mantiene el
     // heading hacia anguloObjetivo). Los giros los dispara el propio ESP32 con
     // detectarEsquina(); la Pi solo se usa para el ACK del heading.
     piPurePursuit  = false;
@@ -735,7 +733,11 @@ void controlPID(long distL, long distR) {
     piMemoryFrames = 0;
     turnHint       = 0;
     obsBiasNorm    = 0.0;
-    outputFinal    = outputWall + outputGyro;
+    // ANTES del 1er giro -> SOLO gyro (heading recto hacia anguloObjetivo=0),
+    // SIN wall PID: así el carro no "cazapared" ni se ladea en la aproximación
+    // a la esquina 1. Es un test para aislar si la inclinación del centrado es
+    // lo que traba/retrasa el giro 1. DESPUÉS del 1er giro -> wall + gyro normal.
+    outputFinal    = primerGiro ? (outputWall + outputGyro) : outputGyro;
 
   } else if (estado == RECUPERANDO || (estado == CRUCERO && cruceroCerca)) {
     // RECUPERANDO, y CRUCERO SOLO cuando ya está cerca de la pared (cruceroCerca):
@@ -957,8 +959,9 @@ void loop() {
 
   // Arranque REAL del carro (ya pasó WAIT_PI y WAIT_FIRST_V2): re-ancla timeStart
   // aquí para que (millis()-timeStart) mida desde que empieza a rodar, no desde
-  // el READY. La protección de fondo contra el giro-falso de arranque es el
-  // latch giroArmado (abajo), no un grace por tiempo.
+  // el READY -> el grace de arranque (millis()-timeStart > 500) y el cooldownGiro
+  // cuentan desde la marcha real. Contra el giro-falso en la zona de salida queda
+  // ese grace + el gate de pared de frente de detectarEsquina() (paredFrente).
   if (!marchaIniciada) {
     marchaIniciada = true;
     timeStart      = millis();
@@ -967,8 +970,8 @@ void loop() {
   mpu.update();
   actualizarGyro();
 
-  long distL_raw = mediana3(leerDistancia(TRIG_L, ECHO_L), bufL, idxL);
-  long distR_raw = mediana3(leerDistancia(TRIG_R, ECHO_R), bufR, idxR);
+  long distL_raw = leerDistancia(TRIG_L, ECHO_L);
+  long distR_raw = leerDistancia(TRIG_R, ECHO_R);
   distL_filtrada = filtroEMA(distL_raw, distL_filtrada);
   distR_filtrada = filtroEMA(distR_raw, distR_filtrada);
 
@@ -992,6 +995,13 @@ void loop() {
       // lado se abre antes de que el carro se pase la esquina.
       if (!rondaObstaculos && distF > 0 && distF < FRONT_SLOWDOWN_CM) {
         velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
+      }
+
+      // Giro 1 nada más: ya muy cerca de la pared de enfrente -> crawl, para
+      // absorber la detección tardía de detectarEsquina (paredFrente) sin raspar.
+      if (!rondaObstaculos && turnsCompleted == 0
+          && distF > 0 && distF < FRONT_SLOWDOWN2_CM) {
+        velocidadMotor = min(velocidadMotor, VEL_APROX2);
       }
 
       // La Pi confirma que el robot ya atravesó físicamente el obstáculo
@@ -1064,25 +1074,14 @@ void loop() {
             contadorFront = 0;
           }
         } else {
-          // Ronda cerrada: giro continuo. El trigger NO se habilita hasta que el
-          // carro confirmó estar en un pasillo (ambas paredes < umbralPared por
-          // PASILLO_FRAMES) -> la zona de salida ancha no dispara el giro 1.
-          if (!giroArmado) {
-            if (distL < umbralPared && distR < umbralPared) contadorPasillo++;
-            else                                            contadorPasillo = 0;
-            if (contadorPasillo >= PASILLO_FRAMES) {
-              giroArmado = true;
-              Serial.println("Giro ARMADO (pasillo confirmado)");
-            } else if (millis() - timeStart > ARMA_GIRO_TIMEOUT_MS) {
-              // Nunca se confirmó pasillo (arrancó pegado a una pared / antes de
-              // una esquina). Armar por tiempo para que el carro no se quede
-              // sin girar nunca.
-              giroArmado = true;
-              Serial.println("Giro ARMADO (timeout)");
-            }
-          }
+          // Ronda cerrada: giro continuo de siempre.
+          bool giroNormal  = !bloqueadoPorObstaculo && detectarEsquina(distL, distR, distF);
+          // Red de seguridad SOLO giro 1: detectarEsquina no disparó y ya
+          // estás pegado a la pared de enfrente -> girá igual hacia el hueco.
+          bool giroForzado = (turnsCompleted == 0 && !primerGiro
+                              && distF > 0 && distF < FRONT_FORCE_GIRO_CM);
 
-          if (giroArmado && !bloqueadoPorObstaculo && detectarEsquina(distL, distR, distF)) {
+          if (giroNormal || giroForzado) {
             estado     = GIRANDO;
             anguloGyro = 0;
             if (!primerGiro) {
@@ -1090,6 +1089,8 @@ void loop() {
               primerGiro         = true;
             }
             piPurePursuit = false;   // suspender PP durante el giro
+            if (giroForzado && !giroNormal)
+              Serial.println("Giro 1 FORZADO (pared de enfrente)");
             Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
           }
         }
