@@ -242,6 +242,7 @@ const int cooldownGiro     = 1000;   // ms entre giros
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
+int contadorForzado    = 0;   // debounce de giroForzado (giro 1, ver FRONT_FORCE_GIRO_CM)
 const int umbralPared  = 100;   // cm — pared "desaparece" → esquina
 const int esquinaDebounce = 2;  // lecturas consecutivas antes de confiar
 const int FRONT_ESQUINA_MAX = 100;  // lateral abierto solo cuenta como esquina si
@@ -267,7 +268,14 @@ const int VEL_APROX2         = 90;
 // limpio". El frontal baja gradual y fiable dentro de ~1 m, así que es un
 // trigger más estable que el lateral en esa aproximación. Subilo si el arco de
 // 90° raspa la pared de enfrente al arrancar desde acá.
-const int FRONT_FORCE_GIRO_CM = 45;
+const int FRONT_FORCE_GIRO_CM = 37;
+
+// giroForzado sin debounce disparaba con UN solo glitch de crosstalk/multipath
+// del frontal (distF < 45 por 1-2 frames aunque la pared real estuviera a más
+// de 1 m) -> giro falso en plena recta. 3 frames SEGUIDOS (reset duro, sin
+// histéresis) antes de forzar — es una red de seguridad, no la ruta rápida, así
+// que puede permitirse ser estricta.
+const int FORZADO_DEBOUNCE = 3;
 
 // Antes del PRIMER giro el carro va lento: la aproximación va más tranquila
 // (menos yaw del PID de centrado), el lateral lee limpio y detectarEsquina
@@ -1078,8 +1086,11 @@ void loop() {
           bool giroNormal  = !bloqueadoPorObstaculo && detectarEsquina(distL, distR, distF);
           // Red de seguridad SOLO giro 1: detectarEsquina no disparó y ya
           // estás pegado a la pared de enfrente -> girá igual hacia el hueco.
-          bool giroForzado = (turnsCompleted == 0 && !primerGiro
+          // Debounce duro: un glitch de 1-2 frames no alcanza a forzar el giro.
+          bool forzadoCond = (turnsCompleted == 0 && !primerGiro
                               && distF > 0 && distF < FRONT_FORCE_GIRO_CM);
+          contadorForzado  = forzadoCond ? min(contadorForzado + 1, FORZADO_DEBOUNCE) : 0;
+          bool giroForzado = (contadorForzado >= FORZADO_DEBOUNCE);
 
           if (giroNormal || giroForzado) {
             estado     = GIRANDO;
