@@ -53,7 +53,7 @@ const int resMotor   = 8;
 // ── PID Paredes (ultrasónicos) ────────────────────────────────────────────────
 float KpWall = 1.0;
 float KiWall = 0.0;
-float KdWall = 1.2;
+float KdWall = 1.35;
 
 // Ronda ABIERTA: en vez de centrar entre paredes (distL-distR -> 0), una vez que
 // ya se sabe el sentido de giro de la pista, el wall PID mantiene esta distancia
@@ -67,7 +67,7 @@ const float WALL_HOLD_CM = 25.0;
 // re-escalar, el término de pared no le gana al gyro PID —que tras cada giro
 // continuo defiende un heading viciado (~13°, el giro se pasa por inercia)— y el
 // carro se ABRE hacia la pared de afuera en vez de pegarse a la de adentro.
-const float WALL_HOLD_GAIN = 1.8;
+const float WALL_HOLD_GAIN = 2;
 
 float errorWall    = 0;
 float prevErrorWall = 0;
