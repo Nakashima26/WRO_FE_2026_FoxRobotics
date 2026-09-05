@@ -205,6 +205,10 @@ const int           MANIOBRA_BACKOFF_VEL    = 100;  // PWM del retroceso
 const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pared exterior del giro
                                                     // (la que sigues) está a MÁS de esto. Si vas
                                                     // pegado a ella, retroceder recto no ayuda.
+// Tier "lejos de la pared exterior": si terminó la maniobra con MUCHA holgura
+// (distExt > FAR_CM) retrocede más tiempo, para separarse bien de la recta nueva.
+const int           MANIOBRA_BACKOFF_FAR_CM = 90;
+const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
 unsigned long cruceroEntryMs = 0;
 bool cruceroCerca      = false;        // en CRUCERO: true = cerca de la pared -> pura gyro+wall (sin visión)
 int  contadorFront     = 0;            // debounce del sensor frontal
@@ -308,6 +312,17 @@ const int FRONT_FORCE_GIRO_CM = 37;
 // que puede permitirse ser estricta.
 const int FORZADO_DEBOUNCE = 3;
 
+// Wall panic: un lateral crítico (< WALL_PANIC_CM) -> empujón FIJO al centro que
+// escala al acercarse, ENCIMA de todo el control (visión, wall PID, gyro-hold).
+// Cubre "esquiva hacia una pared sin espacio": la lata está del lado interior, el
+// carro se pega a la pared, visión/wall PID no alcanzan y sin esto se clava y
+// muere (orillas690 g6). Prefiere rozar la lata a incrustarse en la pared. Solo
+// ronda de obstáculos. WALL_PANIC_CM apretado: el carro no debería llegar ahí.
+const int   WALL_PANIC_CM   = 14;
+const float WALL_PANIC_GAIN = 2.8f;
+const int   WALL_PANIC_DEB  = 2;
+int contadorPanicL = 0, contadorPanicR = 0;
+
 // Antes del PRIMER giro el carro va lento: la aproximación va más tranquila
 // (menos yaw del PID de centrado), el lateral lee limpio y detectarEsquina
 // confirma a tiempo. Después del giro 1 -> velocidad normal.
@@ -353,7 +368,7 @@ void escribirServo(int angulo) {
 }
 
 // Techo del PWM del motor — DISTINTO por tipo de ronda:
-//   ronda de obstáculos (rondaObstaculos=true) : 100 (maniobras lentas y finas)
+//   ronda de obstáculos (rondaObstaculos=true) : 110 (maniobras lentas y finas)
 //   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
 const int MOTOR_MAX = rondaObstaculos ? 110 : 180;
 
@@ -748,6 +763,17 @@ void controlPID(long distL, long distR) {
   float outputGyro = KpGyro * errorGyro + KiGyro * integralGyro + KdGyro * derivGyro;
   prevErrorGyro = errorGyro;
 
+  // ── Wall panic (ver consts) — se suma al final en cualquier branch de servo.
+  // Convención "centroServo + X": X positivo = izquierda.
+  float wallPanic = 0.0;
+  if (rondaObstaculos) {
+    contadorPanicL = (distL > 0 && distL < WALL_PANIC_CM) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
+    contadorPanicR = (distR > 0 && distR < WALL_PANIC_CM) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
+    if (contadorPanicR >= WALL_PANIC_DEB) wallPanic += (WALL_PANIC_CM - distR) * WALL_PANIC_GAIN;  // cerca DER -> izq
+    if (contadorPanicL >= WALL_PANIC_DEB) wallPanic -= (WALL_PANIC_CM - distL) * WALL_PANIC_GAIN;  // cerca IZQ -> der
+    wallPanic = constrain(wallPanic, -30.0f, 30.0f);
+  }
+
   // ── Decisión según modo ───────────────────────────────────────────────────
   bool piAlive = (millis() - lastPiMsgMs) <= piTimeoutMs;
   float outputVision = 0.0;
@@ -779,11 +805,15 @@ void controlPID(long distL, long distR) {
     // lo que traba/retrasa el giro 1. DESPUÉS del 1er giro -> wall + gyro normal.
     outputFinal    = primerGiro ? (outputWall + outputGyro) : outputGyro;
 
-  } else if (estado == RECUPERANDO || (estado == CRUCERO && cruceroCerca)) {
-    // RECUPERANDO, y CRUCERO SOLO cuando ya está cerca de la pared (cruceroCerca):
-    // control por gyro hacia anguloObjetivo + wall PID, SIN visión — porque ahí el
-    // centerline ya curva para "esquivar" la pared del fondo y enchueca el carro.
-    // CRUCERO lejos cae al branch piPurePursuit de abajo (visión, centerline recto).
+  } else if (estado == RECUPERANDO
+             || (estado == CRUCERO && cruceroCerca)
+             || (estado == SIGUIENDO && !piPriority && piMemoryFrames <= 0)) {
+    // RECUPERANDO, CRUCERO cerca de la pared, y SIGUIENDO en recta LIMPIA (sin
+    // obstáculo mío): el RUMBO lo maneja el gyro hacia anguloObjetivo (NO la
+    // visión — el centerline curva hacia la esquina y enchueca el carro). La
+    // visión solo maneja el rumbo para esquivar (piPriority/memoria) -> branch
+    // piPurePursuit de abajo. En SIGUIENDO se suma un centrado lateral por visión
+    // capado (visCorr, más abajo) que NO toca el rumbo.
     // Recalcular error SIN el cap de ±20 usado en controlPID general.
     float errorGyroRecup = anguloObjetivo - anguloGyro;
     errorGyroRecup = constrain(errorGyroRecup, -60, 60);   // más margen real
@@ -792,28 +822,46 @@ void controlPID(long distL, long distR) {
     prevErrorGyro = errorGyroRecup;
     outputRecup = constrain(outputRecup, -60, 60);   // más rango de servo
 
-    // CRUCERO: además CENTRA en el carril con el wall PID (KiWall=0, así que
-    // outputWall es solo P+D, sin integral rancio). PERO solo mientras AMBAS
+    // CRUCERO y SIGUIENDO: además CENTRA en el carril con el wall PID (KiWall=0, así
+    // que outputWall es solo P+D, sin integral rancio). PERO solo mientras AMBAS
     // paredes existen; en cuanto una se abre (esquina) errorWall = distL - distR
     // se dispararía y clavaría el servo -> ahí, pura gyro.
     float wallCorr = 0.0;
-    if (estado == CRUCERO && distL <= umbralPared && distR <= umbralPared) {
+    if (estado != RECUPERANDO && distL <= umbralPared && distR <= umbralPared) {
       wallCorr = constrain(outputWall * CRUCERO_WALL_BLEND, -25.0f, 25.0f);
       // El heading de referencia post-MANIOBRA está viciado (no gira exacto 90°).
       // Mientras las paredes centran, re-referencia anguloObjetivo hacia el heading
-      // ACTUAL poco a poco -> el gyro deja de "defender" el heading chueco y solo
-      // amortigua; las paredes son la referencia real. Sin esto el carro derivaba
-      // lap a lap.
-      anguloObjetivo += (anguloGyro - anguloObjetivo) * 0.05f;
+      // ACTUAL poco a poco. SOLO en CRUCERO, SOLO si el chasis ya está casi recto
+      // (|anguloGyro| < 12) y con clamp ±12: el offset de maniobra es de pocos
+      // grados. Sin ese gate, un CRUCERO largo tras una esquiva dejaba que
+      // anguloObjetivo persiguiera un yaw que se iba de mano -> el carro terminaba
+      // a −30° y clasificaba el rojo del final de la recta como "beyond" -> lo
+      // ignoraba (orillas684). En SIGUIENDO anguloObjetivo ES la recta y queda fijo.
+      if (estado == CRUCERO && fabs(anguloGyro) < 12.0f) {
+        anguloObjetivo += (anguloGyro - anguloObjetivo) * 0.05f;
+        anguloObjetivo  = constrain(anguloObjetivo, -12.0f, 12.0f);
+      }
     }
 
-    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr), 20, 150);
+    // Centrado lateral por VISIÓN, SOLO en SIGUIENDO (recta). El centerline centra
+    // en el carril y NO depende de los ultrasónicos -> cubre el caso de un lateral
+    // muerto (lee 200) que deja al wall PID sin centrar y el carro se va contra la
+    // pared tras una esquiva (orillas690, giro 6). En CRUCERO NO: ahí el centerline
+    // ya curva hacia la esquina. Capado (±15) para que centre pero no maneje el rumbo.
+    float visCorr = 0.0;
+    if (estado == SIGUIENDO && piAlive && piPurePursuit) {
+      visCorr = constrain(-(obsBiasNorm * ppSteerGain) * 0.5f, -15.0f, 15.0f);
+    }
+
+    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic), 20, 150);
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
-    Serial.print(estado == CRUCERO ? " | Mode:CRUCERO" : " | Mode:RECUPERANDO");
+    Serial.print(estado == CRUCERO ? " | Mode:CRUCERO"
+                 : (estado == SIGUIENDO ? " | Mode:SIG-GYRO" : " | Mode:RECUPERANDO"));
     Serial.print(" | ErrGyro:"); Serial.print(errorGyroRecup);
     Serial.print(" | Wall:");    Serial.print(wallCorr);
+    Serial.print(" | Vis:");     Serial.print(visCorr);
     Serial.print(" | Servo:");   Serial.print(servoRecup);
     return;
 
@@ -837,7 +885,7 @@ void controlPID(long distL, long distR) {
     }
 
     int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
-    servoAngle = constrain(servoAngle, 20, 150);
+    servoAngle = constrain(servoAngle + (int)wallPanic, 20, 150);
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
 
@@ -857,7 +905,7 @@ void controlPID(long distL, long distR) {
   }
 
   outputFinal = constrain(outputFinal, -25, 25);
-  escribirServo(centroServo + (int)outputFinal);
+  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, 20, 150));
   setMotor(velocidadMotor);
 
   // ── Debug UART ────────────────────────────────────────────────────────────
@@ -1153,16 +1201,18 @@ void loop() {
       bool headingOk = abs(errorGyro) < headingSettleDeg;
       bool timedOut  = (millis() - recuperandoEntryMs) > recuperandoTimeoutMs;
 
-      if (piPriority) {
-        // Reapareció un obstáculo (o uno nuevo) → vuelve a esquivar
-        estado = SIGUIENDO;
-      } else if ((headingOk)) {
-        // Ya centrado y alineado → visión retoma el control normal.
-        // timedOut: red de seguridad si wallOk nunca se cumple (p.ej. cerca
-        // de una esquina real, donde un lado lee "sin pared" legítimamente).
-        // Ronda de obstáculos: si además NO queda obstáculo mío, pasa a CRUCERO
-        // (va derecho por ángulo hacia la esquina). Con objeto presente -> a
-        // SIGUIENDO para esquivarlo, luego RECUPERANDO, luego CRUCERO.
+      // NO se aborta por piPriority: primero recuperar la recta (heading hacia
+      // anguloObjetivo). Un obstáculo visto con el chasis todavía chueco suele ser
+      // el que ya se pasó, o uno de la recta siguiente por encima de la esquina —
+      // abortar aquí mandaba el carro hacia él. Con el chasis derecho, SIGUIENDO/
+      // visión lo maneja bien. timedOut acota por si headingOk no llega (esquina
+      // real: un lado lee "sin pared" y errorGyro nunca baja del umbral).
+      if (headingOk || timedOut) {
+        // Ronda de obstáculos: si NO queda obstáculo mío, pasa a CRUCERO (va
+        // derecho hacia la esquina y re-referencia anguloObjetivo poco a poco
+        // -> compensa el error de la maniobra que si no se acumula "abriendo"
+        // vuelta a vuelta; el runaway lo acota ahora el gate |anguloGyro|<12 +
+        // clamp ±12 en controlPID). Con objeto presente -> SIGUIENDO a esquivarlo.
         if (rondaObstaculos && !piPriority && piMemoryFrames <= 0) {
           cruceroEntryMs = millis();
           cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
@@ -1171,7 +1221,6 @@ void loop() {
           lateralDropCount   = 0;
           giroSucioArmado    = false;
           estado         = CRUCERO;
-          Serial.println("-> CRUCERO (post-recup)");
         } else {
           estado = SIGUIENDO;
         }
@@ -1459,7 +1508,10 @@ void loop() {
         motorReversa();
         escribirServo(centroServo);
         setMotor(MANIOBRA_BACKOFF_VEL);
-        unsigned long backoffMs = maniobraRetroceso ? MANIOBRA_BACKOFF_MS : MANIOBRA_BACKOFF_FWD_MS;
+        unsigned long backoffMs;
+        if      (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
+        else if (maniobraDistExt > MANIOBRA_BACKOFF_FAR_CM)    backoffMs = MANIOBRA_BACKOFF_FAR_MS;
+        else                                                  backoffMs = MANIOBRA_BACKOFF_MS;
         if (millis() - maniobraFaseMs >= backoffMs) {
           motorCoast();
           maniobraFaseMs = millis();
