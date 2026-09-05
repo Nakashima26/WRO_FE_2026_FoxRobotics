@@ -41,7 +41,7 @@ MPU6050 mpu(Wire);
 #define ECHO_F      33
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
-const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
+const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
 
 
 // ── PWM ───────────────────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ const int  FRONT_CRUCERO_CM = 80;      // SIGUIENDO -> CRUCERO (recta ya limpia,
 const int  CRUCERO_GYRO_CM  = 80;      // dentro de CRUCERO: > esto -> visión (centerline recto);
                                        // <= esto -> pura gyro + wall PID (el centerline ya
                                        // curva para "esquivar" la pared del fondo y enchueca)
-const int  MANIOBRA_OVERSHOOT_DEG = 12; // sale del pivote a (AngGiro - esto): el carro sigue
+const int  MANIOBRA_OVERSHOOT_DEG = 5; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
 const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
@@ -196,11 +196,13 @@ const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa d
                                                     // bajarlo más o dejarlo en 0.
 const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // reversa no llegó a 88° -> frena y termina de frente
 const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin llegar a la pared -> MANIOBRA igual (red de seguridad anti-atasco)
-const unsigned long MANIOBRA_BACKOFF_MS     = 1000;  // DESPUÉS de completar el pivote: retrocede este
-                                                    // tiempo para tomar distancia de la recta nueva.
-                                                    // NO toca la geometría del pivote (ya calibrada).
+const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
+                                       // no los laterales) antes de disparar MANIOBRA
+const int CRUCERO_PARED_DEBOUNCE = 3;  // ídem, cuando SÍ hay lateral abierta confirmando
+const unsigned long MANIOBRA_BACKOFF_MS     = 750;   // retrocede esto tras el pivote (REV con holgura)
+const unsigned long MANIOBRA_BACKOFF_FWD_MS = 500;   // retrocede esto tras el pivote (FWD)
 const int           MANIOBRA_BACKOFF_VEL    = 100;  // PWM del retroceso
-const int           MANIOBRA_BACKOFF_MIN_CM = 50;   // SOLO retrocede si la pared exterior del giro
+const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pared exterior del giro
                                                     // (la que sigues) está a MÁS de esto. Si vas
                                                     // pegado a ella, retroceder recto no ayuda.
 unsigned long cruceroEntryMs = 0;
@@ -214,6 +216,33 @@ long maniobraDistExt   = 0;
 int  maniobraFase      = -1;           // -1=sin init  0=frenar-antes  1=pivote  2=frenar-después  3=frenar-y-reintentar-fwd  4=retroceso-post  5=frenar-tras-retroceso
 unsigned long maniobraFaseMs   = 0;    // inicio de la fase actual (para las pausas de freno)
 unsigned long maniobraPivoteMs = 0;    // inicio del pivote (para la rampa y el timeout de reversa)
+float maniobraInclinacionEntrada = 0;  // anguloGyro (recta actual) justo al entrar a la maniobra
+
+// Rectas con el cajón de estacionamiento: el borde del cajón tapa a ratos el
+// lateral que debería "abrirse" en la esquina, así que justo en el frame en
+// que dF llega a su umbral de giro, paredAbierta puede leer false -> enLaPared
+// nunca dispara y la maniobra termina saliendo por cruceroLargo (el timeout,
+// ya muy metida en la esquina). En vez de exigir paredAbierta EN ESE frame, se
+// cuenta cuántas veces el lateral hacia el que se gira pasa de "pared" a
+// "abierta" desde que dF entra a LATERAL_WATCH_CM: una esquina limpia cae 0-1
+// veces; el cajón la hace oscilar y suma varias -> arma giroSucioArmado (ver
+// case CRUCERO). El giro NUNCA se dispara SOLO por esto: sigue exigiendo
+// distF <= umbral, porque el frontal solo puede leer "sin pared" por eco
+// perdido con el lateral perfectamente bien — Y a su vez giroSucioArmado
+// tampoco se arma con una sola lectura: distL/distR NO tienen mediana (a
+// diferencia de distF/medianaFront), solo EMA con alpha=0.85, que con un solo
+// eco malo (raw=200) ya salta el filtrado muy por encima de umbralPared en 1
+// frame. LATERAL_OPEN_DEBOUNCE exige que el lateral se sostenga "abierto"
+// LATERAL_OPEN_DEBOUNCE frames SEGUIDOS antes de contar la caída — un pico de
+// ruido de 1 frame no confirma nada, hace falta apertura real (aunque breve)
+// para sumar.
+const int  LATERAL_WATCH_CM      = 70;   // dF por debajo de esto -> arranca la vigilancia
+const int  LATERAL_DROP_MIN      = 3;    // caídas confirmadas del lateral para armar el trigger alterno
+const int  LATERAL_OPEN_DEBOUNCE = 2;    // frames seguidos "abierto" para confirmar UNA caída
+bool lateralWatchActivo = false;
+int  lateralOpenStreak  = 0;   // frames consecutivos actuales con el lateral vigilado "abierto"
+int  lateralDropCount   = 0;
+bool giroSucioArmado    = false;
 
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
 const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alineado"
@@ -238,7 +267,9 @@ const int ANG_GIRO_CERRADA    = 76;
 const int AngGiro = rondaObstaculos ? ANG_GIRO_OBSTACULOS : ANG_GIRO_CERRADA;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
-const int cooldownGiro     = 1000;   // ms entre giros
+const int COOLDOWN_GIRO_OBSTACULOS = 3000;
+const int COOLDOWN_GIRO_ABIERTA    = 1000;
+const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_GIRO_ABIERTA;
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
@@ -391,10 +422,7 @@ void decidirManiobra(long distL, long distR) {
 
   // ── FWD vs REVERSE ── SIEMPRE fresco, según la pared EXTERIOR del giro
   //    (giro der -> exterior = izq/distL; giro izq -> exterior = der/distR).
-  //    Si esa pared saliera "abierta" (raro en la exterior), usa la otra.
-  long distExt;
-  if (maniobraGirarDer)  distExt = (distL <= umbralPared) ? distL : distR;
-  else                   distExt = (distR <= umbralPared) ? distR : distL;
+  long distExt = maniobraGirarDer ? distL : distR;
   maniobraDistExt  = distExt;
   maniobraReversa  = (maniobraDistExt >= HUG_CM);
 
@@ -460,7 +488,7 @@ long leerDistancia(int trig, int echo) {
   // = 100 cm incluido). El caso "sin eco" es justo el de la esquina y quema el
   // timeout completo cada loop -> con 6000 en vez de 7000 el loop respira un
   // poco más rápido cuando más importa.
-  long dur  = pulseIn(echo, HIGH, 6000);
+  long dur  = pulseIn(echo, HIGH, 7000);
   long dist = dur * 0.034 / 2;
   if (dist == 0 || dist > 200) dist = 200;
   return dist;
@@ -610,6 +638,8 @@ void parsePiMessage(String line) {
     //   gd    : maniobraGirarDer (1 = giro a la derecha)
     //   dL/dR : ultrasónicos laterales filtrados (cm)
     //   dF    : ultrasónico frontal filtrado (cm)  — 0 si rondaObstaculos=false
+    //   drop  : lateralDropCount (CRUCERO: caídas del lateral vigilado, ver LATERAL_WATCH_CM)
+    //   sucio : giroSucioArmado (1 = esquina "sucia" armada, el giro va a disparar sin paredAbierta)
     Serial2.print(",fase="); Serial2.print(maniobraFase);
     Serial2.print(",rev=");  Serial2.print(maniobraReversa ? 1 : 0);
     Serial2.print(",gd=");   Serial2.print(maniobraGirarDer ? 1 : 0);
@@ -617,6 +647,8 @@ void parsePiMessage(String line) {
     Serial2.print(",dR=");   Serial2.print((long)distR_filtrada);
     Serial2.print(",dF=");   Serial2.print((long)distF_filtrada);
     Serial2.print(",cerca="); Serial2.print(cruceroCerca ? 1 : 0);  // CRUCERO: 1 = gyro+wall (sin visión)
+    Serial2.print(",drop=");  Serial2.print(lateralDropCount);
+    Serial2.print(",sucio="); Serial2.print(giroSucioArmado ? 1 : 0);
     Serial2.println();
     return;
   }
@@ -1075,6 +1107,10 @@ void loop() {
               contadorFront   = 0;
               cruceroEntryMs  = millis();
               cruceroCerca    = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
+              lateralWatchActivo = false;
+              lateralOpenStreak  = 0;
+              lateralDropCount   = 0;
+              giroSucioArmado    = false;
               estado          = CRUCERO;
               Serial.println("-> CRUCERO");
             }
@@ -1130,6 +1166,10 @@ void loop() {
         if (rondaObstaculos && !piPriority && piMemoryFrames <= 0) {
           cruceroEntryMs = millis();
           cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
+          lateralWatchActivo = false;
+          lateralOpenStreak  = 0;
+          lateralDropCount   = 0;
+          giroSucioArmado    = false;
           estado         = CRUCERO;
           Serial.println("-> CRUCERO (post-recup)");
         } else {
@@ -1201,8 +1241,43 @@ void loop() {
 
       if (piPriority || piMemoryFrames > 0) {
         estado = SIGUIENDO;             // apareció obstáculo mío -> a esquivarlo
-        contadorFront = 0;
+        contadorFront      = 0;
+        lateralWatchActivo = false;
+        lateralOpenStreak  = 0;
+        lateralDropCount   = 0;
+        giroSucioArmado    = false;
         break;
+      }
+
+      bool paredAbierta = (distL > umbralPared || distR > umbralPared);
+
+      // ── Vigilancia de "caídas" del lateral (ver comentario junto a
+      // LATERAL_WATCH_CM más arriba) ── arranca al entrar a la ventana y ya no
+      // se desactiva por jitter de dF; solo se resetea al entrar a CRUCERO o
+      // al disparar la maniobra. Vigila el lateral hacia el que YA se sabe que
+      // gira la pista (primerGiro latcheado desde la curva 1); si aún no se
+      // sabe (curva 1), usa paredAbierta (cualquier lado) como fallback.
+      if (!lateralWatchActivo && distF > 0 && distF <= LATERAL_WATCH_CM) {
+        lateralWatchActivo = true;
+        lateralOpenStreak  = 0;
+      }
+      if (lateralWatchActivo) {
+        bool ladoVigilado = primerGiro
+            ? (direccionIzquierda ? (distL > umbralPared) : (distR > umbralPared))
+            : paredAbierta;
+        if (ladoVigilado) {
+          lateralOpenStreak++;
+          // Cuenta la caída UNA vez, al confirmarse (no en cada frame que sigue
+          // abierto) — LATERAL_OPEN_DEBOUNCE frames seguidos, no 1 solo, porque
+          // distL/distR solo tienen EMA (sin mediana como distF) y un eco malo
+          // aislado puede cruzar umbralPared en un único frame.
+          if (lateralOpenStreak == LATERAL_OPEN_DEBOUNCE) {
+            lateralDropCount++;
+            if (lateralDropCount >= LATERAL_DROP_MIN) giroSucioArmado = true;
+          }
+        } else {
+          lateralOpenStreak = 0;
+        }
       }
 
       // Preview de la decisión para elegir el UMBRAL frontal: REVERSE necesita
@@ -1218,19 +1293,36 @@ void loop() {
       }
       int _umbralFront = _revPrev ? FRONT_TURN_REV_CM : FRONT_TURN_FWD_CM;
 
-      // La maniobra SOLO dispara si de verdad estás en una esquina = una pared
-      // lateral ABIERTA (>umbralPared). Sin esto, un pico de ruido de dF disparaba
-      // la maniobra en medio de la recta (carro encajonado, ninguna pared abierta)
-      // y decidirManiobra caía al fallback y giraba al lado equivocado.
-      bool paredAbierta = (distL > umbralPared || distR > umbralPared);
-      bool enLaPared    = (distF > 0 && distF <= _umbralFront && paredAbierta);
+      // Esquina del cajón de estacionamiento (turno 4/8/12): el obstáculo chico
+      // + el borde del cajón generan eco errático del lateral entre 60-100cm
+      // (a veces el sonido pasa por el hueco, a veces rebota en el borde) --
+      // por debajo de 40cm el frontal salió limpio y monotónico en los logs, así
+      // que ahí se ignora la lateral por completo y se depende solo del
+      // frontal con el umbral REV fijo. Resto de los giros: la maniobra sigue
+      // exigiendo pared lateral ABIERTA, o giroSucioArmado como red de
+      // seguridad si el cajón tapara el lateral en otra esquina no prevista.
+      bool esquinaConCajon = ((turnsCompleted % 4) == 3);
+      bool enLaPared;
+      int  debounceNecesario;
+      if (esquinaConCajon) {
+        enLaPared         = (distF > 0 && distF <= FRONT_TURN_REV_CM);
+        debounceNecesario = CRUCERO_FRONT_DEBOUNCE;
+      } else {
+        enLaPared         = (distF > 0 && distF <= _umbralFront && (paredAbierta || giroSucioArmado));
+        debounceNecesario = paredAbierta ? CRUCERO_PARED_DEBOUNCE : CRUCERO_FRONT_DEBOUNCE;
+      }
       bool cruceroLargo = (millis() - cruceroEntryMs) > CRUCERO_TIMEOUT_MS;  // red de seguridad
 
       if (enLaPared) contadorFront++;
       else           contadorFront = 0;
 
-      if (contadorFront >= esquinaDebounce || cruceroLargo) {
-        contadorFront = 0;
+      if (contadorFront >= debounceNecesario || cruceroLargo) {
+        bool _fueSucio = giroSucioArmado;
+        contadorFront      = 0;
+        lateralWatchActivo = false;
+        lateralOpenStreak  = 0;
+        lateralDropCount   = 0;
+        giroSucioArmado    = false;
         decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada
         maniobraFase  = -1;              // MANIOBRA hará el phase-init
         piPurePursuit = false;
@@ -1239,6 +1331,7 @@ void loop() {
         Serial.print(maniobraReversa ? " REVERSA" : " FORWARD");
         Serial.print(" distExt="); Serial.print(maniobraDistExt);
         Serial.print(" distF=");   Serial.print(distF);
+        Serial.print(_fueSucio ? " SUCIO" : "");
         Serial.println(cruceroLargo ? " TIMEOUT" : "");
       }
       break;
@@ -1254,22 +1347,19 @@ void loop() {
     //                       MANIOBRA_FRENO_MS, luego arranca reversa -> fase 1
     //     1 PIVOTE        : servo (contrario si REV) + motor, con rampa, hasta EXIT_DEG
     //                       (REV atascada -> fase 3: frena y termina de frente)
-    //     2 COAST-FIN     : frena tras el pivote. Sin retroceso -> cierra.
-    //                       Con retroceso -> fase 4.
-    //     4 RETROCESO-POST: motor en reversa MANIOBRA_BACKOFF_MS — toma distancia
-    //                       de la recta nueva. SOLO si maniobraRetroceso (pared
-    //                       exterior > MANIOBRA_BACKOFF_MIN_CM). -> fase 5
+    //     2 COAST-FIN     : frena tras el pivote -> fase 4.
+    //     4 RETROCESO-POST: motor en reversa — MANIOBRA_BACKOFF_MS si venía REV
+    //                       con holgura (maniobraRetroceso), MANIOBRA_BACKOFF_FWD_MS
+    //                       si FWD. -> fase 5
     //     5 COAST         : frena tras el retroceso, luego cierra
     //     3 FRENAR-Y-FWD  : coast, luego re-arranca el pivote de frente
-    //   FWD sin retroceso: phase-init -> fase 1 directo (mismo sentido, sin coast)
-    //   -> EXIT_DEG -> cierra. FWD con retroceso: fase 1 -> fase 2 (coast para
-    //   invertir a reversa) -> fase 4 -> fase 5 -> cierra.
     //   Fin: endereza, resetea (recta nueva desde 0), turnsCompleted++, SIGUIENDO.
     // ═══════════════════════════════════════════════════════════════════════════
     case MANIOBRA: {
       if (!maniobraDecidida) decidirManiobra(distL, distR);   // safety (normalmente CRUCERO ya decidió)
 
       if (maniobraFase < 0) {   // phase-init (una vez por maniobra)
+        maniobraInclinacionEntrada = anguloGyro;
         // REV -> coast (0) -> pivote en reversa (1)
         // FWD -> pivote de frente (1) directo (mismo sentido que CRUCERO, sin coast)
         if (maniobraReversa) {
@@ -1285,7 +1375,11 @@ void loop() {
       }
 
       float delta = abs(anguloGyro);
-      const int EXIT_DEG = AngGiro - MANIOBRA_OVERSHOOT_DEG;   // sale antes: la inercia completa
+      // Ángulo objetivo ajustado por la inclinación de entrada: derecha=negativo,
+      // izquierda=positivo (empírico). Ya inclinado hacia el giro -> gira menos.
+      float signoGiro = maniobraGirarDer ? -1.0f : 1.0f;
+      float anguloObjetivoManiobra = constrain(AngGiro - maniobraInclinacionEntrada * signoGiro, 70.0f, 110.0f);
+      const float EXIT_DEG = anguloObjetivoManiobra - MANIOBRA_OVERSHOOT_DEG;   // sale antes: la inercia completa
 
       // ── Fase 0: FRENAR (el motor viene de frente de CRUCERO) antes de invertir ─
       if (maniobraFase == 0) {
@@ -1333,27 +1427,21 @@ void loop() {
         }
 
         if (delta >= EXIT_DEG) {
-          if (maniobraReversa || maniobraRetroceso) {
-            // REV: hay que frenar antes de volver a adelante.
-            // FWD con retroceso: frenar antes de invertir a reversa (fase 4).
-            maniobraFase   = 2;
-            maniobraFaseMs = millis();
-            motorCoast();
-            escribirServo(centroServo);
-          } else {
-            finalizarManiobra();          // FWD sin retroceso: mismo sentido, cierra ya
-          }
+          maniobraFase   = 2;
+          maniobraFaseMs = millis();
+          motorCoast();
+          escribirServo(centroServo);
         }
         break;
       }
 
       // ── Fase 2: FRENAR tras el pivote ───────────────────────────────────
-      //   sin retroceso -> cierra. con retroceso -> fase 4 (retroceso-post).
+      //   REV pegado (sin holgura) -> cierra. Resto (holgura o FWD) -> fase 4.
       if (maniobraFase == 2) {
         motorCoast();
         escribirServo(centroServo);
         if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) {
-          if (maniobraRetroceso) {
+          if (maniobraRetroceso || !maniobraReversa) {
             motorReversa();               // motor parado -> arranca en reversa
             maniobraFaseMs = millis();
             maniobraFase   = 4;
@@ -1365,13 +1453,14 @@ void loop() {
       }
 
       // ── Fase 4: RETROCESO-POST — toma distancia de la recta nueva ─────────
-      //   servo centrado, retrocede recto MANIOBRA_BACKOFF_MS. NO toca el
-      //   heading final (el pivote ya llegó a EXIT_DEG).
+      //   servo centrado, retrocede recto. NO toca el heading final (el pivote
+      //   ya llegó a EXIT_DEG).
       if (maniobraFase == 4) {
         motorReversa();
         escribirServo(centroServo);
         setMotor(MANIOBRA_BACKOFF_VEL);
-        if (millis() - maniobraFaseMs >= MANIOBRA_BACKOFF_MS) {
+        unsigned long backoffMs = maniobraRetroceso ? MANIOBRA_BACKOFF_MS : MANIOBRA_BACKOFF_FWD_MS;
+        if (millis() - maniobraFaseMs >= backoffMs) {
           motorCoast();
           maniobraFaseMs = millis();
           maniobraFase   = 5;

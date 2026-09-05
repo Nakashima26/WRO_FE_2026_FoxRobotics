@@ -543,6 +543,15 @@ OBS_MEM_PASSED_X_HALFWIDTH = 50.0
 # 30 > RECUP_MEAS_HEADING_DEG(25): "giro grande" inequívoco, no una esquiva
 # suave que PP endereza solo.
 OBS_MEM_PASSED_YAW_DEG = 30.0
+# 2026-09-04: "centrado" (x0 dentro de PASSED_X_HALFWIDTH) por sí solo NO basta
+# -- un obstáculo puede aparecer centrado a distancia y aun así requerir una
+# esquiva fuerte en curso cuando el carro ya está cerca (steer grande). Ese caso
+# es del trigger MEDIDO (yaw real), no de este respaldo "de frente", que fue
+# pensado para el obstáculo que de verdad no necesita esquivarse. Exige que el
+# steer ACTUAL esté por debajo de esto para contar como "centrado" -- si hay
+# esquiva en curso, este respaldo se queda callado y deja pasar el rebase al
+# trigger medido.
+OBS_MEM_PASSED_FRONT_STEER_MAX_DEG = 12.0
 
 # 2026-09-01: LOCK al obstáculo primario (runtime_nuevo). Con >=2 conos se fija
 # uno (bbox de cámara más grande = más cerca; después por posición) y el resto

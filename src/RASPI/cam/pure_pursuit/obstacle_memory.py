@@ -421,12 +421,16 @@ class ObstacleMemory:
 
     # ── Poda ────────────────────────────────────────────────────────────────────
 
-    def _prune(self) -> bool:
+    def _prune(self, steer_deg: float = 0.0) -> bool:
         """
         Poda obstáculos vencidos.  Distingue POR QUÉ sale cada uno, porque
         "perdí la confianza" (decay) y "quedó detrás del robot" (lo rebasé
         físicamente) no son el mismo evento — solo el segundo debe disparar
         RECUPERANDO en el ESP32 (ver runtime_nuevo.py / PurePursuit.ino).
+
+        steer_deg: comando de dirección ACTUAL (frame anterior). Usado para
+        que la vía "centrado" (ver más abajo) no dispare en medio de una
+        esquiva activa — ver OBS_MEM_PASSED_FRONT_STEER_MAX_DEG.
 
         Retorna True si en esta llamada algún obstáculo se descartó
         específicamente por quedar detrás del robot ("evento pasado").
@@ -455,6 +459,8 @@ class ObstacleMemory:
         # Se usa x0 (fijo) y no o.x, que _advance rota con el yaw.
         pass_halfw = getattr(C, "OBS_MEM_PASSED_X_HALFWIDTH", 50.0)
         pass_yaw   = getattr(C, "OBS_MEM_PASSED_YAW_DEG", 30.0)
+        front_steer_max = getattr(C, "OBS_MEM_PASSED_FRONT_STEER_MAX_DEG", 12.0)
+        steering_now = abs(steer_deg) > front_steer_max
         kept: list[_Obs] = []
         passed = False
         for o in self._obs:
@@ -466,7 +472,7 @@ class ObstacleMemory:
                 self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue
             if o.y > behind_y:                       # ya quedó detrás del robot
-                centered = abs(o.x0 - self.rx) <= pass_halfw
+                centered = abs(o.x0 - self.rx) <= pass_halfw and not steering_now
                 have_h = o.heading0 is not None and self._prev_heading is not None
                 yawed = (abs((self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0)
                          if have_h else 0.0)
@@ -637,7 +643,7 @@ class ObstacleMemory:
         self._advance(ds_px, ds_anchor, dheading)
         self._merge(new_obs)
         self._dedupe()
-        self.last_passed = self._prune()
+        self.last_passed = self._prune(steer_deg)
 
         # Alineado 1:1, mismo orden, con la lista que se retorna abajo --
         # quien la consuma (detect_centerline vía obstacle_conf=) puede
