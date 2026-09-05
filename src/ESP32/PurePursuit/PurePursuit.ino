@@ -177,7 +177,7 @@ const int  FRONT_CRUCERO_CM = 80;      // SIGUIENDO -> CRUCERO (recta ya limpia,
 const int  CRUCERO_GYRO_CM  = 80;      // dentro de CRUCERO: > esto -> visión (centerline recto);
                                        // <= esto -> pura gyro + wall PID (el centerline ya
                                        // curva para "esquivar" la pared del fondo y enchueca)
-const int  MANIOBRA_OVERSHOOT_DEG = 5; // sale del pivote a (AngGiro - esto): el carro sigue
+const int  MANIOBRA_OVERSHOOT_DEG = 8; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
 const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
@@ -199,8 +199,8 @@ const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin lleg
 const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
                                        // no los laterales) antes de disparar MANIOBRA
 const int CRUCERO_PARED_DEBOUNCE = 3;  // ídem, cuando SÍ hay lateral abierta confirmando
-const unsigned long MANIOBRA_BACKOFF_MS     = 750;   // retrocede esto tras el pivote (REV con holgura)
-const unsigned long MANIOBRA_BACKOFF_FWD_MS = 500;   // retrocede esto tras el pivote (FWD)
+const unsigned long MANIOBRA_BACKOFF_MS     = 700;   // retrocede esto tras el pivote (REV con holgura)
+const unsigned long MANIOBRA_BACKOFF_FWD_MS = 700;   // retrocede esto tras el pivote (FWD)
 const int           MANIOBRA_BACKOFF_VEL    = 100;  // PWM del retroceso
 const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pared exterior del giro
                                                     // (la que sigues) está a MÁS de esto. Si vas
@@ -355,7 +355,7 @@ void escribirServo(int angulo) {
 // Techo del PWM del motor — DISTINTO por tipo de ronda:
 //   ronda de obstáculos (rondaObstaculos=true) : 100 (maniobras lentas y finas)
 //   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
-const int MOTOR_MAX = rondaObstaculos ? 100 : 180;
+const int MOTOR_MAX = rondaObstaculos ? 110 : 180;
 
 void setMotor(int velocidad) {
   velocidad = constrain(velocidad, 0, MOTOR_MAX);
