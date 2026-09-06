@@ -21,7 +21,7 @@
 5. [Systemic Thinking & Engineering Decisions](#5-systemic-thinking--engineering-decisions)
    - [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log) · [5.4 Risk analysis](#54-risk-analysis) · [5.5 Failure & Incident log](#55-failure--incident-log)
 6. [Testing & Validation](#6-testing--validation)
-   - [6.1 How we test](#61-how-we-test) · [6.2 Results to date](#62-results-to-date) · [6.3 Validation matrix](#63-validation-matrix) · [6.4 Pre-run checklist](#64-pre-run-checklist-each-venue)
+   - [6.1 How we test](#61-how-we-test) · [6.2 Results to date](#62-results-to-date) · [6.3 Validation matrix](#63-validation-matrix) · [6.4 Pre-run checklist](#64-pre-run-checklist-each-venue) · [6.5 Milestones](#65-milestones)
 7. [How to Build & Run](#7-how-to-build--run)
    - [7.1 Hardware](#71-hardware-requirements) · [7.2 ESP32 firmware](#72-esp32-firmware) · [7.3 Raspberry Pi software](#73-raspberry-pi-software) · [7.4 Calibration](#74-calibration-before-each-venue) · [7.5 Run](#75-run) · [7.6 Autostart & deployment](#76-autostart--deployment)
 8. [Repository Structure](#8-repository-structure)
@@ -839,6 +839,66 @@ Figures are from our own test runs and recorded HUD footage, not lab instrumenta
 5. Firmware — `rondaObstaculos` set for the round; correct build flashed.
 6. Pi input voltage checked **at the Pi**, not just at the PCB ([ERR-08](#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring)); battery voltage logged; `journalctl` clean at idle.
 7. Start-up handshake — LED on GPIO 27 lights, button on GPIO 17 responds, `ACK:READY` seen.
+
+### 6.5 Milestones
+
+The project arc, oldest first. Full acceptance criteria follow for the milestones that decide competition results and are not yet fully validated (M8–M11). `Status`: **Completed** · **Partially validated** (bar met in testing, evidence not fully logged) · **Under test** · **In progress** · **Not started**.
+
+| # | Milestone | Date | Status |
+|---|---|---|---|
+| M1 | Functional, structurally stable chassis that integrates every component | 2026-04 | Completed |
+| M2 | Per-peripheral test sketches — each ultrasonic, the servo and the DC motor bench-tested in isolation ([`src/ESP32/TestCodes/`](src/ESP32/TestCodes/)) | 2026-05 | Completed |
+| M3 | Base wiring / circuit design, validated on a breadboard | 2026-04 | Completed |
+| M4 | Custom PCB laid out to fit the finished mechanical model and free up space in the vehicle ([§3.3](#33-pcb--wiring)) | 2026-04 → 05 | Completed |
+| M5 | First integrated firmware — every peripheral driven from one control loop | 2026-05 | Completed |
+| M6 | Raspberry Pi ↔ ESP32 link — V2 line protocol, deploy service, live view ([§4.2](#42-inter-controller-protocol-v2)) | 2026-06 | Completed |
+| M7 | Colour sensing wired to steering **and** throttle — the car reacts to a pillar (red/green detection prototyped 2026-05/06; integrated and tested on-track 2026-08) | 2026-06 → 08 | Completed |
+| M8 | Open Challenge, full autonomous run — see [MIL-01](#mil-01--open-challenge-full-autonomous-run) | 2026-08-28 | Partially validated |
+| M9 | Efficient obstacle-avoidance algorithm — see [MIL-02](#mil-02--obstacle-avoidance-standard-layouts) | 2026-08 → 09 | Under test |
+| M10 | Every obstacle-round layout covered — see [MIL-03](#mil-03--obstacle-challenge-full-layout-coverage) | — | In progress |
+| M11 | Parking inside the bay — see [MIL-04](#mil-04--parking-maneuver) | — | Not started |
+
+#### MIL-01 — Open Challenge, full autonomous run
+
+| | |
+|---|---|
+| **Objective** | Complete the Open Challenge on a randomized track, direction chosen by the car, with no intervention. |
+| **Related work** | Iteration log v1.3, v2.4, v3.2; [ERR-02](#err-02--wall-error-goes-blind-at-high-yaw), [ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner) |
+| **Acceptance criteria** | 3 laps / 12 corners completed · track direction latched automatically (no pre-set) · no wall contact · finishes inside the start section · the full 30-point clean score · within the 3-minute round limit · zero human intervention. |
+| **Current record** | 10 complete runs from varied start positions and field configurations after the corner-detection work; ~12 s per run at 60 % motor. |
+| **Evidence pending** | Per-run video links · exact commit SHA per run · CW/CCW split across the 10 runs · battery voltage before/after. |
+| **Status** | **Partially validated** — the bar is met; the run-by-run evidence is not yet logged. |
+
+#### MIL-02 — Obstacle avoidance, standard layouts
+
+| | |
+|---|---|
+| **Objective** | Complete the Obstacle Challenge on layouts where no pillar straddles the corner sightline: every pillar passed on the WRO-correct side. |
+| **Related work** | Iteration log v2.3, v2.5, v2.8, v2.9, v3.0; [ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing), [ERR-07](#err-07--recuperando-trigger-tied-to-assumed-linear-speed) |
+| **Acceptance criteria** | 3 laps / 12 corners · every pillar passed on the correct side (red → pass on its right, green → on its left) · no pillar contact · no wall contact · segmented turns (`CRUCERO → MANIOBRA`) complete without an outer-wall hit · within the 3-minute round limit · zero intervention. |
+| **Current record** | Passes reliably on standard layouts. The pivot-trap fix was confirmed clean at session orillas 417 — both pillars cleared, all 12 turns. Parking not included (MIL-04). |
+| **Evidence pending** | Clean-run / attempt count · video · the specific layouts run · RECUPERANDO true-fire / false-fire tally from the HUD footage. |
+| **Status** | **Under test** — very close; the outstanding gap is full layout coverage (MIL-03). |
+
+#### MIL-03 — Obstacle Challenge, full layout coverage
+
+| | |
+|---|---|
+| **Objective** | The MIL-02 result across *every* WRO-legal pillar layout — including a pillar right at the corner mouth or straddling the corner sightline. |
+| **Related work** | [ERR-09](#err-09--separating-my-straight-from-the-next-straight-open); iteration log v3.1 (mid-turn detector, logging only) |
+| **Acceptance criteria** | As MIL-02, held across the full layout space, with no regression on standard layouts. |
+| **Current record** | Not met. Blocked on the *mine vs. beyond* classification ([ERR-09](#err-09--separating-my-straight-from-the-next-straight-open)) — a pillar visible over the corner is sometimes assigned to the wrong straight. The mid-turn detector runs in log-only mode to measure its reliability before it is wired in. |
+| **Status** | **In progress** — current focus. |
+
+#### MIL-04 — Parking maneuver
+
+| | |
+|---|---|
+| **Objective** | After the final lap of the Obstacle Challenge, park fully inside the marked bay. |
+| **Related work** | §4.8 (Parking maneuver — in development) |
+| **Acceptance criteria** | Vehicle fully within the parking-bay limits · no contact with the bay walls · within the 3-minute round time limit. |
+| **Current record** | Not started — the parking algorithm is not yet designed. Full obstacle-round completion (MIL-03) comes first. |
+| **Status** | **Not started.** |
 
 ---
 
