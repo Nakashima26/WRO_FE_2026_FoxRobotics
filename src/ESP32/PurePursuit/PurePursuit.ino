@@ -169,14 +169,18 @@ enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO };
 Estado estado = SIGUIENDO;
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
-const int  FRONT_TURN_FWD_CM = 70;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
+const int  FRONT_TURN_FWD_CM = 75;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
                                        // (el arco necesita espacio adelante)
 const int  FRONT_TURN_REV_CM = 30;     // ... si será REVERSE (hay que estar cerca de la pared
                                        // para que el pivote en reversa no sobrepase)
-const int  FRONT_CRUCERO_CM = 80;      // SIGUIENDO -> CRUCERO (recta ya limpia, esquina cerca)
-const int  CRUCERO_GYRO_CM  = 80;      // dentro de CRUCERO: > esto -> visión (centerline recto);
+const int  FRONT_CRUCERO_CM = 90;      // SIGUIENDO -> CRUCERO (recta ya limpia, esquina cerca)
+const int  CRUCERO_GYRO_CM  = 90;      // dentro de CRUCERO: > esto -> visión (centerline recto);
                                        // <= esto -> pura gyro + wall PID (el centerline ya
                                        // curva para "esquivar" la pared del fondo y enchueca)
+const int  CRUCERO_STRAIGHTEN_DEG = 15; // en CRUCERO, si el chasis entró/quedó chueco > esto,
+                                        // fuerza gyro-hold para enderezar aunque dF > CRUCERO_GYRO_CM
+                                        // (un obstáculo que se quedó `mia` hasta la esquina deja
+                                        // el chasis ladeado y la MANIOBRA entra tardísima; orillas693 g5)
 const int  MANIOBRA_OVERSHOOT_DEG = 8; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
@@ -318,8 +322,8 @@ const int FORZADO_DEBOUNCE = 3;
 // carro se pega a la pared, visión/wall PID no alcanzan y sin esto se clava y
 // muere (orillas690 g6). Prefiere rozar la lata a incrustarse en la pared. Solo
 // ronda de obstáculos. WALL_PANIC_CM apretado: el carro no debería llegar ahí.
-const int   WALL_PANIC_CM   = 14;
-const float WALL_PANIC_GAIN = 2.8f;
+const int   WALL_PANIC_CM   = 18;
+const float WALL_PANIC_GAIN = 2.4f;
 const int   WALL_PANIC_DEB  = 2;
 int contadorPanicL = 0, contadorPanicR = 0;
 
@@ -1208,12 +1212,14 @@ void loop() {
       // visión lo maneja bien. timedOut acota por si headingOk no llega (esquina
       // real: un lado lee "sin pared" y errorGyro nunca baja del umbral).
       if (headingOk || timedOut) {
-        // Ronda de obstáculos: si NO queda obstáculo mío, pasa a CRUCERO (va
-        // derecho hacia la esquina y re-referencia anguloObjetivo poco a poco
-        // -> compensa el error de la maniobra que si no se acumula "abriendo"
-        // vuelta a vuelta; el runaway lo acota ahora el gate |anguloGyro|<12 +
-        // clamp ±12 en controlPID). Con objeto presente -> SIGUIENDO a esquivarlo.
-        if (rondaObstaculos && !piPriority && piMemoryFrames <= 0) {
+        // Sin obstáculo prioritario -> CRUCERO (va derecho hacia la esquina). Un
+        // `mem` rezagado NO cuenta si hay pared adelante (distF < FRONT_CRUCERO_CM):
+        // recién recuperé y la pared enfrente dice "esquina" -> esa lata es de la
+        // recta siguiente (la naranja ya no la clasifica `beyond`), commit a
+        // CRUCERO. Si se va a SIGUIENDO, el obs fantasma de esa lata tira el carro
+        // contra la pared en la boca de la esquina (orillas696 g5).
+        bool paredAdelante = (distF > 0 && distF < FRONT_CRUCERO_CM);
+        if (rondaObstaculos && !piPriority && (piMemoryFrames <= 0 || paredAdelante)) {
           cruceroEntryMs = millis();
           cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
           lateralWatchActivo = false;
@@ -1276,19 +1282,31 @@ void loop() {
       if (piPasado) piPasado = false;   // pulso viejo/rezagado: CRUCERO ya mantiene heading
       // Cerca de la pared -> pura gyro+wall (controlPID lo enruta con cruceroCerca).
       // Lejos -> visión (el centerline todavía va recto).
-      bool _cercaAntes = cruceroCerca;
-      cruceroCerca = (distF > 0 && distF <= CRUCERO_GYRO_CM);
-      if (cruceroCerca && !_cercaAntes) {
-        // Acabamos de cortar visión. El heading ACTUAL es el que visión dejó
-        // (recto), NO el anguloObjetivo viejo (que quedó chueco tras una maniobra
-        // que se pasó/quedó corta). Adóptalo como referencia para no volver a él.
+      // TAMBIÉN gyro-hold si el chasis está chueco (> CRUCERO_STRAIGHTEN_DEG): hay
+      // que enderezar antes de la esquina sin importar dF.
+      bool _cercaAntes    = cruceroCerca;
+      bool _cercaPorFrente = (distF > 0 && distF <= CRUCERO_GYRO_CM);
+      bool _cercaPorChueco = (fabs(anguloGyro) > CRUCERO_STRAIGHTEN_DEG);
+      cruceroCerca = _cercaPorFrente || _cercaPorChueco;
+      if (cruceroCerca && !_cercaAntes && _cercaPorFrente
+          && fabs(anguloGyro) < CRUCERO_STRAIGHTEN_DEG) {
+        // Cortamos visión por el frontal CON el chasis ~recto: adopta el heading
+        // actual como referencia (lo que visión dejó, recto) y no vuelvas al
+        // anguloObjetivo viejo. Si entramos a gyro-hold por estar CHUECO, NO
+        // hacer esto -> ese heading es justo el que hay que corregir.
         anguloObjetivo = anguloGyro;
         integralGyro   = 0;
         prevErrorGyro  = 0;
       }
       controlPID(distL, distR);
 
-      if (piPriority || piMemoryFrames > 0) {
+      // Sale a SIGUIENDO por un obstáculo SOLO si NO hay pared adelante
+      // (distF >= FRONT_CRUCERO_CM: la entrada a CRUCERO fue un eco falso, ya
+      // pasó). Con pared adelante estás comprometido con la esquina: la lata es
+      // de la recta siguiente mal clasificada o ruido, y esquivarla en la boca
+      // mata la maniobra (orillas696 g5).
+      bool _paredAdelanteCru = (distF > 0 && distF < FRONT_CRUCERO_CM);
+      if ((piPriority || piMemoryFrames > 0) && !_paredAdelanteCru) {
         estado = SIGUIENDO;             // apareció obstáculo mío -> a esquivarlo
         contadorFront      = 0;
         lateralWatchActivo = false;
