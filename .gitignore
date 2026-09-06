@@ -20,6 +20,7 @@ env/
 # IDE / OS
 .vscode/
 .idea/
+.history/
 *.DS_Store
 Thumbs.db
 *.swp

@@ -15,7 +15,7 @@
 2. [Mechanical Design & Mobility](#2-mechanical-design--mobility)
    - [2.1 Chassis selection](#21-chassis-selection) · [2.2 Wheels](#22-wheels) · [2.3 Drive system (torque vs. speed)](#23-drive-system-torque-vs-speed-analysis) · [2.4 Steering](#24-steering--rack-and-pinion-with-ackermann-geometry) · [2.5 Custom parts & assembly](#25-custom-parts--assembly)
 3. [Power Architecture & Sensors](#3-power-architecture--sensors)
-   - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement)
+   - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement) · [3.3 PCB & wiring](#33-pcb--wiring)
 4. [Software Architecture](#4-software-architecture)
    - [4.1 System overview](#41-system-overview--two-controllers-one-link) · [4.2 Inter-controller protocol ("V2")](#42-inter-controller-protocol-v2) · [4.3 Vision pipeline](#43-vision-pipeline-raspberry-pi--pure_pursuit) · [4.4 Obstacle handling](#44-obstacle-handling-obstacle-challenge) · [4.5 ESP32 state machine](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino) · [4.6 Cascade PID](#46-cascade-pid-always-running-underneath) · [4.7 Startup handshake](#47-startup-handshake) · [4.8 Development status](#48-development-status)
 5. [Systemic Thinking & Engineering Decisions](#5-systemic-thinking--engineering-decisions)
@@ -311,6 +311,32 @@ We originally tested VL53L0X time-of-flight sensors. On paper they win — ±3 m
 #### MPU-6050 IMU
 
 The MPU-6050 gives heading and rotation data during cornering and recovery. The gyro Z axis is integrated each loop into `anguloGyro`, with a 1°/s deadband to suppress MEMS thermal drift on straights. On startup the firmware averages several hundred stationary samples to compute the gyro bias (`calcGyroOffsets`); if that offset comes back unusually large the firmware halves the integration scale as a safety net. The integrated heading is also sent back to the Pi in every acknowledgement so the vision side can dead-reckon obstacle positions (see §4.4).
+
+### 3.3 PCB & wiring
+
+A custom two-layer PCB is the vehicle's backplane: it distributes power and carries every signal line between the ESP32, the sensors and the motor driver, so there is no breadboard or flying-wire harness to work loose. This is what let the front ultrasonic go in in under 30 minutes ([§1.1](#11-design-goals)) — the header was already there. The full editable KiCad project is in [`electrical/WRO_RevA/`](electrical/WRO_RevA/).
+
+**Schematic** ([`schemes/schematic.png`](schemes/schematic.png)):
+
+<p align="center">
+  <img src="schemes/schematic.png" width="760" alt="KiCad schematic">
+</p>
+
+The ESP32 DevKit (`U1`) sits at the centre. Battery voltage (~11.1 V, 3S) comes in at the `VCC` screw terminal (`J1`) and splits two ways: the motor driver takes it directly, and a MINI560 buck (`V1`, bulk caps `C1`–`C4`) drops it to the 5 V logic rail. The RDB-14450 driver (`U2`) takes `PWM_MOTOR` / `AIN1` / `AIN2` from the ESP32 and drives `MOTOR_1/2` out to the screw terminal `J5`. The four HC-SR04s land on headers `US1`–`US4` (5 V / TRIG / ECHO / GND); their 5 V echo lines return through a BOB-12009 level shifter (`U3`) that steps `ECHO1`–`ECHO4` down to 3.3 V for the ESP32. The MPU-6050 (`U4`) is on I²C. The `TO_PI` header (`J3`) is the entire link to the Raspberry Pi — `RX` / `TX` for the V2 protocol, `READY` for the handshake, `PRGN` for the start button (`SW1`), plus 3.3 V / GND. Two status LEDs (`D1` PWR, `D2` READY) complete the operator interface from [§4.7](#47-startup-handshake).
+
+**Populated board** ([`schemes/pcb_render.png`](schemes/pcb_render.png)):
+
+<p align="center">
+  <img src="schemes/pcb_render.png" width="600" alt="3D render of the populated PCB">
+</p>
+
+**Board outline** ([`electrical/PCB_dimensions.png`](electrical/PCB_dimensions.png)):
+
+<p align="center">
+  <img src="electrical/PCB_dimensions.png" width="420" alt="PCB outline and dimensions">
+</p>
+
+The board is a custom non-rectangular shape (~55 mm at its widest) that nests into the chassis around the Raspberry Pi 4 and the drivetrain — the electronics-first packaging from [§1.1](#11-design-goals) in physical form. The cut-outs and the mounting-hole row let the PCB, the steering and the sensor mounts share one footprint without stacking height.
 
 ---
 
@@ -828,7 +854,7 @@ Figures are from our own test runs and recorded HUD footage, not lab instrumenta
 - 3S LiPo 2200 mAh, MINI560 step-down
 - Start button (Pi GPIO 17), status LED (Pi GPIO 27)
 
-Wiring: `schemes/wiring_diagram.png` and `schemes/schematic.png`; the PCB is the KiCad project under `electrical/WRO_RevA/`.
+Wiring and board: [`schemes/schematic.png`](schemes/schematic.png), [`schemes/pcb_render.png`](schemes/pcb_render.png), [`electrical/PCB_dimensions.png`](electrical/PCB_dimensions.png), walked through in [§3.3](#33-pcb--wiring); the full KiCad project is under [`electrical/WRO_RevA/`](electrical/WRO_RevA/).
 
 **Pin map (ESP32):** HC-SR04 L `TRIG 27 / ECHO 32`, R `TRIG 26 / ECHO 35`, F `TRIG 14 / ECHO 33`; motor `PWMA 23 / A1 18 / A2 19`; servo `13`; MPU-6050 on I²C; UART to Pi on `Serial2 RX 17 / TX 16`.
 
@@ -936,7 +962,7 @@ FoxRobotics/
 │       └── TestCodes/                     # Per-peripheral bring-up sketches (servo, gyro, motor, US, serial)
 │
 ├── electrical/WRO_RevA/                   # KiCad project — schematic, PCB layout, 3D models
-├── schemes/                               # schematic.png, wiring_diagram.png
+├── schemes/                               # schematic.png, pcb_render.png (see README §3.3)
 ├── models/
 │   ├── CAD/                               # SolidWorks parts + assemblies
 │   ├── STL/                               # 3D-printable parts
