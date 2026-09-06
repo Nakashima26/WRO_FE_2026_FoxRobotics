@@ -11,20 +11,22 @@
 ## Table of Contents
 
 1. [Vehicle Overview](#1-vehicle-overview)
-   - [1.1 Bill of Materials](#11-bill-of-materials)
+   - [1.1 Design goals](#11-design-goals) · [1.2 Bill of Materials](#12-bill-of-materials)
 2. [Mechanical Design & Mobility](#2-mechanical-design--mobility)
-   - [2.1 Chassis selection](#21-chassis-selection) · [2.2 Wheels](#22-wheels) · [2.3 Drive system (torque vs. speed)](#23-drive-system-torque-vs-speed-analysis) · [2.4 Steering](#24-steering--rack-and-pinion-with-ackermann-geometry)
+   - [2.1 Chassis selection](#21-chassis-selection) · [2.2 Wheels](#22-wheels) · [2.3 Drive system (torque vs. speed)](#23-drive-system-torque-vs-speed-analysis) · [2.4 Steering](#24-steering--rack-and-pinion-with-ackermann-geometry) · [2.5 Custom parts & assembly](#25-custom-parts--assembly)
 3. [Power Architecture & Sensors](#3-power-architecture--sensors)
    - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement)
 4. [Software Architecture](#4-software-architecture)
    - [4.1 System overview](#41-system-overview--two-controllers-one-link) · [4.2 Inter-controller protocol ("V2")](#42-inter-controller-protocol-v2) · [4.3 Vision pipeline](#43-vision-pipeline-raspberry-pi--pure_pursuit) · [4.4 Obstacle handling](#44-obstacle-handling-obstacle-challenge) · [4.5 ESP32 state machine](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino) · [4.6 Cascade PID](#46-cascade-pid-always-running-underneath) · [4.7 Startup handshake](#47-startup-handshake) · [4.8 Development status](#48-development-status)
 5. [Systemic Thinking & Engineering Decisions](#5-systemic-thinking--engineering-decisions)
-   - [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log-high-level) · [5.4 Risk analysis](#54-risk-analysis)
-6. [How to Build & Run](#6-how-to-build--run)
-   - [6.1 Hardware](#61-hardware-requirements) · [6.2 ESP32 firmware](#62-esp32-firmware) · [6.3 Raspberry Pi software](#63-raspberry-pi-software) · [6.4 Calibration](#64-calibration-before-each-venue) · [6.5 Run](#65-run) · [6.6 Autostart & deployment](#66-autostart--deployment)
-7. [Repository Structure](#7-repository-structure)
-8. [Videos](#8-videos)
-9. [Photos](#9-photos)
+   - [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log) · [5.4 Risk analysis](#54-risk-analysis) · [5.5 Failure & Incident log](#55-failure--incident-log)
+6. [Testing & Validation](#6-testing--validation)
+   - [6.1 How we test](#61-how-we-test) · [6.2 Results to date](#62-results-to-date) · [6.3 Validation matrix](#63-validation-matrix) · [6.4 Pre-run checklist](#64-pre-run-checklist-each-venue)
+7. [How to Build & Run](#7-how-to-build--run)
+   - [7.1 Hardware](#71-hardware-requirements) · [7.2 ESP32 firmware](#72-esp32-firmware) · [7.3 Raspberry Pi software](#73-raspberry-pi-software) · [7.4 Calibration](#74-calibration-before-each-venue) · [7.5 Run](#75-run) · [7.6 Autostart & deployment](#76-autostart--deployment)
+8. [Repository Structure](#8-repository-structure)
+9. [Videos](#9-videos)
+10. [Photos](#10-photos)
 
 ---
 
@@ -49,7 +51,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 | High-level controller | Raspberry Pi 4 Model B (vision + Pure Pursuit) |
 | Real-time controller | ESP32 DevKit (FSM, PID, motor & sensor I/O) |
 | Inter-controller link | UART @ 115200 baud, line protocol "V2" (see §4.2) |
-| Vision | Raspberry Pi Camera v2 (FOV ≈ 62°), processed at 640 × 480 |
+| Vision | Raspberry Pi Camera, NoIR wide-angle lens (FOV ≈ 120°), processed at 640 × 480 |
 | Distance sensors | HC-SR04 (5V) × 3 — left, right, front — via 5V↔3.3V level shifter |
 | IMU | MPU-6050 (gyroscope + accelerometer) |
 | Drive motor | N20 DC gear motor (50:1) + 2:1 LEGO stage → 100:1 total |
@@ -57,7 +59,18 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 | Battery | 3S LiPo 11.1 V 2200 mAh |
 | Logic power | MINI560 step-down, 5 V |
 
-## 1.1 Bill of Materials
+## 1.1 Design goals
+
+One reliable vehicle that finishes **both** challenges — scoring for completing three laps consistently over completing them fast. Everything below follows from that.
+
+- **Fixed architecture from day one: Raspberry Pi 4 + ESP32.** The Pi does *all* image processing and vision; the ESP32 does *all* peripheral I/O — both sensing and actuation. This split was decided before the first line of code and never revisited.
+- **Small footprint for maneuverability.** Comfortably inside the rulebook envelope with ~10 cm of margin on width and length — the car is ≈ 20 × 10 cm, deliberately smaller than the limit so it has room to maneuver in the obstacle field.
+- **Mechanically extensible.** The chassis and the PCB were designed so components could be added later without a redesign. This paid off directly: the front ultrasonic — added for the obstacle-round segmented turn (see [§4.5](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino)) — went from idea to mounted-and-wired in under 30 minutes because both the chassis and the PCB already had the space and a spare header.
+- **Tight-turn capable.** Rack-and-pinion steering driving both wheels symmetrically ([§2.4](#24-steering--rack-and-pinion-with-ackermann-geometry)) so the car can take the obstacle-round corners without a multi-point turn.
+- **Room for a printed differential** so the rear wheels can turn at different speeds through a corner without scrub.
+- **Electronics-first packaging.** The chassis was sized around the electronics — the Raspberry Pi 4 above all — and the PCB was then laid out to fit the finished mechanical model, not the other way around.
+
+## 1.2 Bill of Materials
 
 ### Custom Manufactured Parts
 
@@ -220,6 +233,38 @@ The firmware never commands the full mechanical range: `escribirServo()` is clam
 
 A direct arm only controls one wheel directly. The opposite knuckle, linked by a fixed-length tie rod, gets an angle that's geometrically correct only at center — producing toe error everywhere else. The rack pushes both tie rods symmetrically, so both wheels get the right angle at every steering position. Combined with the Ackermann geometry of the knuckles, each wheel tracks its own correct turning radius. No lateral scrub, and steering response is linear across the full range.
 
+### 2.5 Custom parts & assembly
+
+Every structural part is 3D-printed in SUNLU PLA on a Bambu Lab A1. The mechanical model was built first; the PCB was then laid out to fit it. Editable SolidWorks parts are in [`models/CAD/`](models/CAD/), printable meshes in [`models/STL/`](models/STL/), isometric renders in [`models/renders/`](models/renders/).
+
+<p align="center">
+  <img src="models/renders/VehicleRender.png" width="520" alt="Full vehicle CAD assembly">
+</p>
+
+| Render | Part | Function / design note |
+|---|---|---|
+| <img src="models/renders/BaseChasis.png" width="200" alt="BaseChasis render"> | **BaseChasis** | Main structure. Sized around the electronics (Raspberry Pi 4 first); carries the PCB, steering, drivetrain and every sensor mount. |
+| <img src="models/renders/TopShell.png" width="200" alt="TopShell render"> | **TopShell** | Top cover — closes the electronics bay and protects the wiring. |
+| <img src="models/renders/ServoGearDirection.png" width="200" alt="ServoGearDirection render"> | **ServoGearDirection** | Pinion pressed onto the SG90 output shaft — module 1, 14 teeth. |
+| <img src="models/renders/Cremallera.png" width="200" alt="Cremallera render"> | **Cremallera** (rack) | Module 1, 11 teeth, 27.5 mm travel. Converts servo rotation into lateral travel for the tie rods. |
+| <img src="models/renders/LinkageDirection.png" width="200" alt="LinkageDirection render"> | **LinkageDirection** ×2 | Tie rods from the rack ends to the steering knuckles — symmetric, so both wheels get the correct angle at every rack position. |
+| <img src="models/renders/SteeringKnuckle.png" width="200" alt="SteeringKnuckle render"> | **SteeringKnuckle** ×2 | Front-wheel pivots; their geometry sets the Ackermann steering angles. |
+| <img src="models/renders/Differential.png" width="200" alt="Differential render"> | **Differential** (Ring / Planet ×2 / Pinion / Sun) | Printed open differential — lets the rear wheels turn at different speeds through a corner. |
+| <img src="models/renders/DCsupport.png" width="200" alt="DCsupport render"> | **DCsupport** | Mounts the N20 gear motor to the chassis. |
+| <img src="models/renders/UltrasonicSupport.png" width="200" alt="UltrasonicSupport render"> | **UltrasonicSupport** ×3 | Two identical side mounts; one slightly smaller front mount, added later for the obstacle-round segmented turn. |
+| <img src="models/renders/CameraCage.png" width="200" alt="Camera cage render"> | **CameraHold** | Structure in charge of holding the camera. Sets the fixed ~15° downward tilt the BEV homography is calibrated against ([§3.2](#32-sensor-selection-and-placement)). |
+
+#### Assembly order
+
+1. **Chassis base** — the reference part everything mounts to.
+2. **Steering** — press the pinion onto the servo and seat the servo in the chassis; slide in the rack; link each rack end to a SteeringKnuckle with a LinkageDirection tie rod; fit the knuckles and the front LEGO axles.
+3. **Drivetrain** — N20 motor into the DCsupport; assemble the printed differential; rear LEGO axles with bushings.
+4. **Sensor mounts** — the two side UltrasonicSupports (identical) and the smaller front one; the camera cage (base + back + front) with the camera.
+5. **Electronics** — PCB onto the chassis bosses; wire the Pi 4, ESP32, the three HC-SR04 (through the level shifter), the MPU-6050, the TB6612 + motor, the servo, and the start button + status LED.
+6. **TopShell** — close the bay.
+
+All fasteners are M3 (M2 nuts on the servo horn and pinion).
+
 ---
 
 # 3. Power Architecture & Sensors
@@ -254,6 +299,8 @@ The Raspberry Pi and the ESP32 share the 5 V rail but the DC motor is fed straig
 The camera handles lane geometry (via a bird's-eye-view transform), the orange corner-line markers, and red/green pillar detection. Image processing runs on the Raspberry Pi 4 with OpenCV in real time and drives the Pure Pursuit planner.
 
 It is mounted front-center with a ~15° downward tilt. We tested a horizontal mount first, but that captured too much background, which slowed detection and added noise. Tilting it down focuses the field of view on the track and the obstacle zone, which cut both false positives and computational load. The exact tilt is baked into the bird's-eye-view homography during calibration (see §4.3), so the mount must not move after calibration.
+
+The lens is a wide-angle **NoIR** unit (~120° FOV), chosen over the original ~63° lens so the camera sees far enough ahead to react to a pillar and read the corner on the same frame. The wide lens ships without an IR-cut filter, which gave the raw image a heavy red cast and broke every HSV mask. The libcamera capture pipeline pins white-balance instead of letting it float — `libcamerasrc awb-enable=false colour-gains=<1.2,1.5>` — so the correction holds across venue lighting, and the pillar HSV ranges were re-tuned on the corrected image (see [ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame)).
 
 #### HC-SR04 ultrasonic sensors
 
@@ -291,7 +338,7 @@ Responsibility is split across two processors by hardware strength:
 
 Why not one processor? Real-time GPIO timing (ultrasonic pulses, servo/motor PWM, gyro sampling) and non-deterministic OpenCV latency don't coexist well on one core. Linux can't guarantee a µs-accurate pulse while an HSV pass is running; a microcontroller can't run OpenCV. Splitting them lets each run at its own natural rate, and a late UART packet just means the ESP32 reuses the last command instead of stalling. This trade-off is analyzed in [Section 5](#5-systemic-thinking--engineering-decisions).
 
-**Where to start reading the code:** the Pi loop is [`pure_pursuit/runtime_nuevo.py`](src/RASPI/cam/pure_pursuit/runtime_nuevo.py) (`run()` → per-frame block); the ESP32 loop is [`PurePursuit.ino`](src/ESP32/PurePursuit/PurePursuit.ino) (`loop()` → the `switch (estado)`). Every module is annotated in [Section 7](#7-repository-structure); tunables live in [`pure_pursuit/config.py`](src/RASPI/cam/pure_pursuit/config.py).
+**Where to start reading the code:** the Pi loop is [`pure_pursuit/runtime_nuevo.py`](src/RASPI/cam/pure_pursuit/runtime_nuevo.py) (`run()` → per-frame block); the ESP32 loop is [`PurePursuit.ino`](src/ESP32/PurePursuit/PurePursuit.ino) (`loop()` → the `switch (estado)`). Every module is annotated in [Section 8](#8-repository-structure); tunables live in [`pure_pursuit/config.py`](src/RASPI/cam/pure_pursuit/config.py).
 
 ### 4.2 Inter-controller protocol ("V2")
 
@@ -571,24 +618,37 @@ The IMU heading is the shared currency: the ESP32 integrates it for its own cont
 
 **Trade-off 6 — forward arc vs. reverse pivot inside MANIOBRA.** A forward arc needs clear space ahead to swing through; a reverse pivot needs the car close to the wall first. Rather than pick one, the firmware measures the distance to the outer wall of the turn and chooses per corner, with a reverse-timeout that bails out into a forward finish if the pivot stalls.
 
-### 5.3 Iteration log (high level)
+### 5.3 Iteration log
 
-| Stage | Change | Why | Outcome |
-|---|---|---|---|
-| v1.0 | Single-loop PID on `distL−distR`, VL53L0X ToF | Baseline | ToF failed on black walls; wall contacts at high yaw |
-| v1.1 | VL53L0X → HC-SR04 | IR absorbed by black walls | Reliable wall reads at all distances |
-| v1.2 | Removed `Ki` from both PID loops | Integral windup released at corner entry | Corner-entry overshoot eliminated |
-| v1.3 | Added cascade PID (outer lateral + inner heading) | HC-SR04 oblique-angle error past ~30° yaw | Wall contacts eliminated |
-| v1.4 | EMA filter on ultrasonic reads | Spikes in curved sections | Lateral noise cut |
-| v1.5 | Progressive speed ramp + gyro deadband | Corner-exit positioning; MEMS drift on straights | Repeatable corner exits, stable straights |
-| v2.0 | Added Raspberry Pi vision + UART "V2" protocol | ESP32 alone can't run OpenCV in real time | Vision and control decoupled, each at its own rate |
-| v2.1 | Reactive pillar-offset PID → BEV + Pure Pursuit | No path model; reaction curve hard to tune | Geometric steering; look-ahead as the single knob |
-| v2.2 | BEV calibration 4 → 9 points (RANSAC) | 4-point fit was exact, no error rejection | Homography usable over the full centerline range |
-| v2.3 | Rolling obstacle memory with IMU-rotated map | Can leaves frame → centerline cuts the corner | Keep-out persists until the can is physically passed |
-| v2.4 | Adaptive look-ahead (longitudinal distance) | Short fixed look-ahead made the car pivot, not arc | Car keeps translating and arcs around cans |
-| v2.5 | Dead-reckoning "anchor" RECUPERANDO trigger → measured-state trigger | Anchor integrated un-measured speed, drifted 200–400 mm | Recovery fires when the state actually shows a crooked chassis |
-| v2.6 (`SectionTurning`) | Continuous turn → segmented CRUCERO/MANIOBRA for the Obstacle round; added front ultrasonic; coast phases in the H-bridge sequence | Blind arc unreliable with a can at the corner mouth; plugging killed a TB6612 | Deterministic corners; tuning on track |
-| v2.7 (`SectionTurning`) | Open round runs pure wall+gyro PID (Pi steer ignored); per-round `AngGiro`/`MOTOR_MAX`; `giroArmado` corridor arm + front-wall approach slow-down; `TERMINANDO` finish state | Open round doesn't need vision and was inheriting obstacle-round speed caps; wide start-zone reading fired a false first turn; car braked in place wherever the last corner ended | Open round faster and self-contained; false first turn removed; finish lands in the start section |
+Structural changes and the tuning passes that revealed something — routine per-run parameter tuning in `config.py` between track sessions is not listed. Each row links to the commit that introduced the change. `Status`: **Shipped** (on `main`, track-validated) · **On branch** (implemented, still tuning) · **Superseded** (replaced by a later row) · **Reverted** (tried on track, backed out).
+
+| Stage | Date | Change | Why it changed | Evidence | Status |
+|---|---|---|---|---|---|
+| Mechanical + PCB | 2026-04-13 → 04-24 | Chassis, rack-and-pinion steering, printed differential and power PCB, designed from scratch | New vehicle every season | `283078e` … `51ea239` | Shipped |
+| First firmware | 2026-05-09 | Single-loop PID on `distL − distR`, VL53L0X ToF ×2, 3-state FSM (`Controller_PI.ino`) | First open-round lap | `61544cb` | Superseded |
+| v1.1 — ToF → ultrasonic | 2026-05 | Both VL53L0X replaced with HC-SR04 | ToF lost the black wall past ~70 cm — [ERR-01](#err-01--vl53l0x-lost-the-black-wall-past-70-cm) | `61544cb` era | Shipped |
+| v1.2 — remove the integrators | 2026-05 → 06 | `Ki = 0` on both PID loops | Integral wound up on the straights and released as one impulse at corner entry → overshoot into the far wall | `Controller_PI.ino` history | Shipped |
+| v1.3 — cascade PID | 2026-05 → 06 | Outer loop (wall error → target heading) + inner loop (heading → servo, via IMU) | The `distL − distR` error goes blind past ~30° of yaw — [ERR-02](#err-02--wall-error-goes-blind-at-high-yaw) | `Controller_PI.ino` history | Shipped |
+| Camera integration | 2026-05-23 | Pi camera, track-edge detection, BEV calibration tool (`calibrate.py`) | Lane geometry the ultrasonics can't see | `21fe8df`, `5797487` | Superseded |
+| Two-controller split + deploy infra | 2026-06-08 → 06-09 | Pi ↔ ESP32 over UART; `wro-runtime.service`, VNC, push-to-deploy CI | OpenCV latency and µs GPIO timing can't share one core ([§5.2](#52-key-engineering-trade-offs)) | `69f82a9`, `a065d78` | Shipped |
+| v2.0 — Pure Pursuit + centerline | 2026-06-13 → 06-22 | BEV homography → floor centerline → geometric Pure Pursuit (`pure_pursuit/`) | Reactive pillar-offset PID had no path model — over-reacted near, under-reacted far | `95f3744`, `e494d8c`, `556266b` | Shipped |
+| Camera lens FOV 63° → 120° | 2026-07 → 08-07 | Wide-angle NoIR lens (swapped over the July break); on return, pinned white-balance (`awb-enable=false colour-gains=<1.2,1.5>`) and re-tuned the obstacle RGB ranges | Needed more forward range for the obstacle round; the wide lens has no IR-cut filter, so the raw image had a heavy red cast — [ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame) | `945c2f1` | Shipped |
+| v2.1 — offline sim | 2026-08-11 | Kinematic bicycle sim (`pure_pursuit_sim.py`, 520 lines) + `runtime_nuevo.py` | Tune controller logic without track time | `0a2c5d2` | Shipped |
+| v2.2 — BEV calibration 4 → 9 points | 2026-08-13 | RANSAC fit over a 3×3 marker grid | A 4-point fit is exact — no way to reject a mis-click or check reprojection error | `daf1e03` | Shipped |
+| v2.3 — corner-line detection | 2026-08-17 → 08-19 | Orange / blue ground-line tracking in the BEV | Turn trigger + a "my straight vs. the next one" boundary for obstacles | `d3a611e`, `8edc1b8` | Shipped |
+| v2.4 — wall-aware steering (`ParedCenterline`) | 2026-08-20 → 08-21 | Centerline biased by ultrasonic wall distance; V2 protocol fixes | Centerline alone drifted toward the outer wall on wide corners | merges `f5066e1`, `24b2ec7` | Shipped |
+| Open round validated | 2026-08-28 | — | 10 complete autonomous runs from varied start positions and field configs → focus moved to the Obstacle Challenge | [§6.2](#62-results-to-date) | Shipped |
+| v2.5 — rolling obstacle memory | 2026-08-24 → 08-27 | Seen cans kept in a robot-relative map, advanced by assumed speed + **real IMU heading** from the ACK | Can leaves the frame → keep-out vanishes → centerline cuts the corner onto it | `a41ac0e`, `3c96abf`, `57d3218` | Shipped |
+| v2.6 — hot start + run recording | 2026-08-28 | Pipeline runs disarmed during the button delay; ESP32 gated on the first V2 line; MJPG `.avi` HUD capture from button-press | Cold camera/serial cost ~2 s at the start; every run now leaves a reviewable artifact | `3245c1c`, `2355caf`, `f257371` | Shipped |
+| v2.7 — undervoltage fix → frame-rate rescale | 2026-08-28 | Re-fed the Pi through 22 AWG leads (was dropping 0.3 V PCB→Pi → brown-outs, garbled frames); loop went ~7 → ~14 Hz; re-scaled every per-frame knob (slew, recovery frames, look-ahead floor) | Half the tunables were calibrated at 7 Hz and were now firing twice as fast — [ERR-08](#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring) | `e4ca4f9`, `1a19cdb` | Shipped |
+| v2.8 — pivot-trap root cause | 2026-08-28 → 08-29 | `LOOKAHEAD_MIN_PX` 60 → 78 (60 saturated the PP geometry); adaptive look-ahead + steer-gain re-keyed on the **longitudinal** gap; `forget_color_obstacles()` on pass so the centerline un-bends | Near a can the steer term hit ±0.9 (≈ full lock) → the car pivoted in place instead of arcing; `y` never advanced, RECUPERANDO never armed — [ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing) | `1daf563` | Shipped |
+| v2.9 — RECUPERANDO: anchor → measured state | 2026-08-28 → 08-29 | Retired the geometric dead-reckoning anchor; the trigger now reads the centerline avoidance weight, a heading snapshot, and the memory's own "is a can still in the way" test (`ARM` / `CLEAR` / `SKEW`) | The anchor integrated an *assumed* linear speed and drifted 200–400 mm in 1–2 s whenever the car had to turn hard — [ERR-07](#err-07--recuperando-trigger-tied-to-assumed-linear-speed) | `f24c547` → `25d0565` → **`52549c8`** | Shipped |
+| v2.10 — turn-direction from the orange line | 2026-08-31 | Direction latched from the orange corner-line slope **during the run**, not pre-set | A pre-set direction is one more thing to get wrong at check-in | `a72a751`, `e641817` | Shipped |
+| v2.11 — exterior cone at the corner mouth | 2026-08-31 | A can right at the corner: drive straight past it, *then* turn | The blind turn arc would sweep into it | `4e5ca40` | Shipped |
+| v2.12 — camera-safe service restart | 2026-08-31 | CI + ops use `stop → sleep 4 → start`, never `systemctl restart` | `restart` doesn't release the CSI device — camera wedges, LED stays dark | `9aff6c9` | Shipped |
+| v3.0 — segmented turns (`SectionTurning`) | 2026-09-01 | Obstacle round only: `GIRANDO` → `CRUCERO` (cruise to a set distance on the front sensor) → `MANIOBRA` (forward arc **or** reverse pivot from outer-wall distance); motor-coast phase before every direction reversal | A can at the corner mouth makes a blind 90° arc a coin-flip; a missing coast delay had already killed a driver + a motor — [ERR-04](#err-04--tb6612-and-motor-destroyed-by-a-reversal-with-no-coast-delay) | `9219f17` (+386 lines to `.ino`) | On branch |
+| v3.1 — mid-turn cone detector | 2026-08-31 | `mid_turn.py` — raw per-frame BEV projections (rolling memory is off during a pivot); **Phase 1: log only** | A can first seen *during* the turn ends up beside the car afterwards → clipped | `6b0b5c7` | On branch (logging) |
+| v3.2 — Open round runs pure PID | 2026-09-03 → 09-04 | Open round ignores the Pi steer — wall + gyro PID only; per-round `AngGiro` / `MOTOR_MAX`; `giroArmado` corridor-arm; front-wall approach slow-down; `TERMINANDO` finish | Open round doesn't need vision and was inheriting obstacle-round speed caps; a wide start-zone reading latched a false first turn — [ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner) | `626fc91`, `13e05c1` | On branch |
 
 ### 5.4 Risk analysis
 
@@ -605,13 +665,162 @@ The IMU heading is the shared currency: the ESP32 integrates it for its own cont
 | H-bridge damage from direction reversal under load | Low (mitigated) | High — dead driver | Motor-coast phase inserted before every direction change (learned the hard way) |
 | Servo driven into its end stop | Low | Low | Firmware clamps servo command to 20°–150° |
 
+### 5.5 Failure & Incident log
+
+Post-mortems for the failures that changed the design — what happened, the confirmed or suspected root cause, and what shipped in response. Several of these are the "learned the hard way" behind a row of the risk table in [§5.4](#54-risk-analysis).
+
+#### ERR-01 — VL53L0X lost the black wall past 70 cm
+
+| | |
+|---|---|
+| **First seen** | 2026-05, first wall-following bring-up |
+| **Setup** | Two VL53L0X, one per side — the same left/right wall-distance job the HC-SR04s do now. |
+| **Symptom** | Against the matte-black outer wall the effective range collapsed: past ~70 cm the sensor stopped returning correct distances. White walls read to spec. |
+| **Impact** | No usable lateral reference on the black-walled portions of the track — roughly half the perimeter. |
+| **Root cause** | The 940 nm IR is absorbed by the matte-black surface; too little returns for a time-of-flight solve. A single sensor on the bench reproduced it, so not a wiring or I²C fault. |
+| **Fix** | Switched both channels to HC-SR04 ultrasonic (`61544cb` era) — sound reflects off any surface regardless of colour. Traded ±3 mm for ±15 mm and closed the gap in software (EMA on all channels, a 5-sample median on the front channel, the cascade PID). |
+| **Status** | Resolved. Trade-off in [§5.2](#52-key-engineering-trade-offs). |
+
+#### ERR-02 — wall error goes blind at high yaw
+
+| | |
+|---|---|
+| **First seen** | 2026-05 — one of the earliest problems, open-round bring-up |
+| **Symptom** | On corner entry and recovery the car kept drifting into a wall even though the PID output stayed small and stable. |
+| **Root cause** | The HC-SR04's ~15° beam cone hits the wall obliquely once the chassis is yawed; both sensors over-report by similar amounts, so `distL − distR` sits near zero while the car is visibly crabbing toward one wall. This is inherent to the sensor geometry and is **still true today**. |
+| **Fix** | The cascade PID stops the car *acting* on the blind error: the **outer** loop turns lateral wall error into a target heading, the **inner** loop drives the servo to that heading from the **IMU** ([§4.6](#46-cascade-pid-always-running-underneath)). At high yaw the wall term is unreliable but the inner loop is still steering on a good heading signal, so the car tracks true and re-centres once the walls read cleanly again. |
+| **Status** | Mitigated by design — the sensor limitation remains; the IMU inner loop is what keeps it from mattering. This cascade is also the fallback / RECUPERANDO / CRUCERO law and the blend term in SIGUIENDO. |
+
+#### ERR-03 — wide-angle NoIR lens put a red cast on every frame
+
+| | |
+|---|---|
+| **First seen** | 2026-07, after the lens swap; corrected on return, 2026-08-07 |
+| **Change that caused it** | Moved from a ~63° lens to a ~120° wide-angle lens to see far enough ahead to react to a pillar and read the corner on the same frame. The wide lens has no IR-cut filter (NoIR). |
+| **Symptom** | Every frame came out heavily red-tinted. HSV masks for the floor, the orange line and the red/green pillars all broke. |
+| **Root cause** | With no IR-cut filter the sensor integrates near-IR the eye doesn't see; on this sensor it lands mostly in the red channel. |
+| **Fix** | Pinned the libcamera pipeline to fixed white-balance — `libcamerasrc awb-enable=false colour-gains=<1.2,1.5>` — so auto-WB can't chase the cast, then re-tuned the red/green HSV ranges on the corrected image (`945c2f1`, 2026-08-07, and the `vision.py` range passes after it). |
+| **Status** | Resolved. The wide FOV is now a net win — more track and obstacle zone per frame. |
+
+#### ERR-04 — TB6612 and motor destroyed by a reversal with no coast delay
+
+| | |
+|---|---|
+| **First seen** | 2026-08 → 09, `SectionTurning` MANIOBRA bring-up |
+| **Symptom** | While testing the maneuver, the code switched the motor from forward to reverse with no gap between the two. A current spike followed; **one TB6612 driver and one N20 motor were lost.** |
+| **Root cause** | Software, not hardware: the forward → reverse transition energised the H-bridge in the opposite direction while the motor was still spinning. Back-EMF plus shoot-through current during the flip exceeded the driver's rating (classic "plugging"). |
+| **Fix** | Every direction change in the firmware — forward↔reverse, in MANIOBRA and everywhere else — now passes through a mandatory motor-coast phase (`A1 = A2 = LOW`, `MANIOBRA_FRENO_MS = 300`) so the motor spins down before the opposite direction is energised (`9219f17`). |
+| **Status** | Resolved. No recurrence since the coast phase went in. Risk table: "H-bridge damage from direction reversal under load". |
+
+#### ERR-05 — ultrasonic beam cone bounces off the corner
+
+| | |
+|---|---|
+| **First seen** | 2026-08, open-round corner tuning |
+| **Symptom** | The car would sail past a corner opening — it "thought" it had not reached the end wall yet when it had actually passed the turn point some time earlier. |
+| **Root cause** | The front HC-SR04's beam cone widens with distance; far from the end wall it catches the *corner* geometry and returns a longer bounce path, so the front distance reads larger than the true straight-ahead gap. Corner detection kept waiting. |
+| **Fix** | The car slows to `VEL_APROX_CERRADA` once the front sensor drops below `FRONT_SLOWDOWN_CM` (60 cm) — more time to read *which* side opens before it is on top of the corner. Plus EMA + a 5-sample front-channel median to reject spikes, and a multi-frame confirmation before a turn is accepted. In the Obstacle round the same read drives `CRUCERO → MANIOBRA` instead of a continuous arc. |
+| **Verification** | 10 complete open-round runs from varied start positions and field configurations after these changes. |
+| **Status** | Resolved. |
+
+#### ERR-06 — the car pivoted in place instead of arcing
+
+| | |
+|---|---|
+| **First seen** | 2026-08-28, sessions ~orillas 414–416, right after the frame-rate doubled ([ERR-08](#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring)) |
+| **Symptom** | Approaching a can, the car rotated on the spot instead of driving a curve around it. The can's `y` in the BEV barely moved (≈ 40 mm/s) — turning, not translating. RECUPERANDO then never fired (the memory never saw the can go behind the axis) so the car dug deeper in. |
+| **Root cause** | (1) the obstacle steer term jumped to ±0.9 — near full lock — which pivots this chassis at cruise PWM; (2) `LOOKAHEAD_MIN_PX = 60` saturated the Pure Pursuit geometry, and the adaptive look-ahead / steer-gain keyed on **Euclidean** distance, so a can level with the car but off to the side kept those relaxed and the car drove past the point it should have turned. |
+| **Fix** | `LOOKAHEAD_MIN_PX` 60 → 78; adaptive look-ahead (100 → 78 px) and `_distance_steer_gain` (0.30 → 1.0) re-keyed on the **longitudinal** gap; on a confirmed pass the runtime calls `memory.forget_color_obstacles()` so the centerline un-bends and the car eases out (`1daf563`). |
+| **Verification** | Session orillas 417: dodge steer ±0.4–0.7, the can's `y` advanced through the pass = arc not pivot, both cans cleared, all 12 turns completed. |
+| **Status** | Resolved. |
+
+#### ERR-07 — RECUPERANDO trigger tied to assumed linear speed
+
+| | |
+|---|---|
+| **First seen** | 2026-08-28, on-track (`f24c547` geom v1, `25d0565` geom v2) |
+| **Symptom** | The recover-into-lane state fired either too early — nosing into the can it was meant to have cleared — or seconds too late, after the car had already straightened badly. Worst whenever the pass needed a large heading change. |
+| **Root cause** | The trigger anchored the can's position when first seen and dead-reckoned it forward using an **assumed linear speed** through a bicycle model. With no measurement feedback the anchor drifted 200–400 mm in 1–2 s, and a hard dodge — car rotating, barely translating — broke the speed assumption entirely. `SPEED_SCALE` at 1.0 / 0.35 / 0.60 were all wrong somewhere. |
+| **Fix** | Retired the anchor (`52549c8`). `_measured_recup_trigger` reads state that is already measured: **ARM** when the centerline's avoidance weight near the axis has been high for several frames (snapshot the heading), **CLEAR** when the rolling memory places no can in the path, fire only if **SKEW** — `|heading − snapshot| ≥ 25°`. A gentle dodge that straightens itself never stops for a recovery. |
+| **Status** | Resolved. Finding a dodge shape that armed RECUPERANDO *reliably* was the single longest debugging effort of the obstacle round. Full history in [§4.4](#44-obstacle-handling-obstacle-challenge). |
+
+#### ERR-08 — Raspberry Pi undervoltage from undersized power wiring
+
+| | |
+|---|---|
+| **First seen** | 2026-08 |
+| **Symptom** | Frames processed poorly or not at all; the Pi would sometimes power off mid-run. Intermittent, load-dependent. |
+| **Root cause** | ~0.3 V drop between the PCB 5 V rail and the Pi's input on undersized power leads. Under vision + steering load the Pi input sagged below its undervoltage threshold and it throttled or browned out. |
+| **Fix** | Re-ran the Pi feed in 22 AWG. The rail held; the processing loop went from ~7 fps to ~14 fps. |
+| **Follow-on** | The frame-rate jump then destabilised the evasion tuning — several knobs were expressed per-frame, and doubling the rate doubled their effect. Every per-frame parameter was re-scaled (iteration log v2.7); the pivot-trap ([ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing)) surfaced in the same window. |
+| **Status** | Resolved (wiring). Pi input voltage is now on the pre-run checklist. |
+
+#### ERR-09 — separating "my straight" from "the next straight" *(open)*
+
+| | |
+|---|---|
+| **First seen** | 2026-09, `SectionTurning` |
+| **Symptom** | A can on the *next* straight, visible over the corner, is sometimes treated as an obstacle on the current straight (or vice-versa). Wrong classification → an unnecessary dodge, or a real can ignored. |
+| **Current handling** | `corner_lines.py` tracks the orange corner line row-by-row in the BEV and labels each remembered can *mine* / *beyond* with asymmetric hysteresis (quick to start avoiding, slow to stop). Tried and reverted: locking onto the primary can by camera-bbox height (`601ea8d` … `ad4f71e`, 2026-09-02 — bbox too noisy frame to frame). |
+| **Impact** | The main reason the obstacle round is not yet complete on every field configuration. Simple layouts pass reliably; a can straddling the corner sightline does not. |
+| **Status** | **Open — active work.** |
+
 ---
 
-# 6. How to Build & Run
+# 6. Testing & Validation
 
-### 6.1 Hardware requirements
+### 6.1 How we test
 
-- Raspberry Pi 4 (2 GB+), Raspberry Pi Camera v2
+Almost all tuning is done from **recorded track runs**. The runtime writes a combined camera + bird's-eye-view HUD to an MJPG `.avi` from the moment the start button is pressed, with the decision journal burned in (`[DET]` detections, `[MTURN]` mid-turn detector, `[RECUParm]` recovery arm-state, `[PPDIAG]` Pure Pursuit diagnostics); `journalctl -u wro-runtime.service` captures the same lines on the Pi. Sessions are numbered sequentially (`orillasNNN`) — the counter has incremented on every integrated run since the Pi ↔ ESP32 link came up in June 2026 and is now around **700**. The loop is: run on track → review HUD + log → change **one** thing → re-run the same configuration.
+
+| Tool | Scope | Runs without |
+|---|---|---|
+| `pure_pursuit/pure_pursuit_sim.py` | Kinematic bicycle sim of centerline + Pure Pursuit + obstacle-memory logic | car, track |
+| `pure_pursuit/test_vision.py` | HSV masks, pillar shape filter, BEV warp — live camera or a recorded clip | ESP32, motors |
+| `src/RASPI/tests/` | UART framing diagnostics, kinematic simulation | car |
+| `src/ESP32/TestCodes/` | Per-peripheral bring-up — servo sweep, gyro read, motor direction, ultrasonic ping, serial echo | full firmware |
+
+### 6.2 Results to date
+
+**Open Challenge — validated.** After the corner-detection work ([ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner)): **10 complete autonomous runs** from varied start positions and field configurations, no wall contact, correct finish. Three laps in ~12 s at 60 % motor speed. Reference run: [YouTube](https://youtu.be/orP-BNSG-6s).
+
+**Obstacle Challenge — in progress.** Simple layouts: the car completes the round comfortably. Layouts with a can straddling the corner sightline still fail on the *mine vs. beyond* classification ([ERR-09](#err-09--separating-my-straight-from-the-next-straight-open)) — the current blocker. The pivot-trap fix ([ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing)) was confirmed clean at orillas 417 (both cans cleared, 12 turns). Segmented turns (`CRUCERO → MANIOBRA`) are being tuned on track. The parking maneuver is **not yet designed** — full obstacle-round completion comes first.
+
+### 6.3 Validation matrix
+
+Figures are from our own test runs and recorded HUD footage, not lab instrumentation — treat them as working estimates.
+
+| # | Quantity | Method | Result |
+|---|---|---|---|
+| 1 | End-to-end Open pass rate | Clean runs / attempts, varied start + config | 10 documented clean; total attempt count not logged |
+| 2 | Open lap time | Stopwatch, 3 laps at 60 % motor | ~12 s |
+| 3 | Obstacle round, simple layouts | Clean runs / attempts | Passes reliably — exact ratio not logged |
+| 4 | Obstacle round, can across the corner sightline | Clean runs / attempts | Fails — see [ERR-09](#err-09--separating-my-straight-from-the-next-straight-open) |
+| 5 | Pivot-trap fix | Dodge-steer amplitude + can `y` progression, recorded | orillas 417: steer ±0.4–0.7, `y` advances = arc |
+| 6 | Gyro heading total over a full run | Integrated rotation vs. the 1080° geometric total (12 × 90°), one measured run | ~1010° vs. 1080° — ≈ 6.5 % low. Does not accumulate: heading is zeroed at every turn and the wall + centerline correction on each straight absorbs the residual |
+| 7 | BEV projection accuracy | Marker position in the warped view vs. its real floor position, inside the calibrated area | ≈ ±5 cm within the calibrated area |
+| 8 | Minimum turning radius | Full-lock circle at competition speed | ≈ 18 cm (approx.; not measured separately left/right) |
+| 9 | MANIOBRA forward-vs-reverse decision | `decidirManiobra()` choice vs. what the corner needed | No wrong choice in recent testing (weeks of runs) |
+| 10 | RECUPERANDO trigger accuracy | Per recorded dodge: fired only when the chassis was actually crooked | No mis-fire in recent sessions since the measured-state trigger ([ERR-07](#err-07--recuperando-trigger-tied-to-assumed-linear-speed)); systematic count still pending |
+| 11 | Pillar colour classification | Recorded runs under venue-like light, red/green confusion count | No known misclassifications after the white-balance fix ([ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame)); earlier colour-ID bugs resolved |
+
+### 6.4 Pre-run checklist (each venue)
+
+1. Camera warm-up — ~40 discard frames, stable exposure.
+2. BEV homography — recalibrate if the mount was touched; check the reprojection residual from `calibrate.py`.
+3. HSV ranges — re-tune floor / orange line in `config.py` and red / green pillars in `vision.py` for the venue lighting (auto-WB / auto-gain stay off).
+4. Vision-only sanity check — `python -m pure_pursuit.test_vision`, no ESP32, no motors.
+5. Firmware — `rondaObstaculos` set for the round; correct build flashed.
+6. Pi input voltage checked **at the Pi**, not just at the PCB ([ERR-08](#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring)); battery voltage logged; `journalctl` clean at idle.
+7. Start-up handshake — LED on GPIO 27 lights, button on GPIO 17 responds, `ACK:READY` seen.
+
+---
+
+# 7. How to Build & Run
+
+### 7.1 Hardware requirements
+
+- Raspberry Pi 4 (2 GB+), Raspberry Pi Camera + NoIR wide-angle lens (~120°)
 - ESP32 DevKit
 - HC-SR04 × 3 (left, right, front) + 5 V↔3.3 V level shifter
 - MPU-6050 IMU
@@ -623,7 +832,7 @@ Wiring: `schemes/wiring_diagram.png` and `schemes/schematic.png`; the PCB is the
 
 **Pin map (ESP32):** HC-SR04 L `TRIG 27 / ECHO 32`, R `TRIG 26 / ECHO 35`, F `TRIG 14 / ECHO 33`; motor `PWMA 23 / A1 18 / A2 19`; servo `13`; MPU-6050 on I²C; UART to Pi on `Serial2 RX 17 / TX 16`.
 
-### 6.2 ESP32 firmware
+### 7.2 ESP32 firmware
 
 ```bash
 arduino-cli core install esp32:esp32
@@ -638,10 +847,10 @@ arduino-cli upload  -p COM5 --fqbn esp32:esp32:esp32 src/ESP32/PurePursuit/PureP
 
 Replace `COM5` with your port. `src/ESP32/Controller_PI/Controller_PI.ino` is the older Open-only firmware, kept for reference.
 
-### 6.3 Raspberry Pi software
+### 7.3 Raspberry Pi software
 
 ```bash
-git clone https://github.com/Nakashima26/FoxRobotics.git
+git clone https://github.com/Nakashima26/WRO_FE_2026_FoxRobotics.git FoxRobotics
 cd FoxRobotics
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -652,7 +861,7 @@ pip install -r requirements.txt
 
 [`requirements.txt`](requirements.txt) lists the Python runtime dependencies with minimum versions and documents the apt / Arduino packages that live outside pip. To pin the exact set from the competition Pi, run `pip freeze > requirements.lock.txt` there.
 
-### 6.4 Calibration (before each venue)
+### 7.4 Calibration (before each venue)
 
 All commands run from `src/RASPI/cam/`. Full guide: [`pure_pursuit/INSTRUCCIONES.md`](src/RASPI/cam/pure_pursuit/INSTRUCCIONES.md).
 
@@ -668,7 +877,7 @@ python -m pure_pursuit.test_vision                 # live camera
 python -m pure_pursuit.test_vision --video clip.mp4 # recorded clip
 ```
 
-### 6.5 Run
+### 7.5 Run
 
 ```bash
 cd src/RASPI/cam
@@ -679,7 +888,7 @@ python -m pure_pursuit.runtime_nuevo --serial-port /dev/serial0 --record-orillas
 
 Startup: the LED on GPIO 27 lights → press the button on GPIO 17 → camera warm-up → `READY` handshake with the ESP32 → the car starts. It stops itself after 12 counted turns (3 laps).
 
-### 6.6 Autostart & deployment
+### 7.6 Autostart & deployment
 
 ```bash
 sudo ./scripts/install_autostart_pi.sh
@@ -691,7 +900,7 @@ installs `deploy/systemd/wro-runtime.service`, which runs `pure_pursuit/runtime_
 
 ---
 
-# 7. Repository Structure
+# 8. Repository Structure
 
 ```
 FoxRobotics/
@@ -730,7 +939,8 @@ FoxRobotics/
 ├── schemes/                               # schematic.png, wiring_diagram.png
 ├── models/
 │   ├── CAD/                               # SolidWorks parts + assemblies
-│   └── STL/                               # 3D-printable parts
+│   ├── STL/                               # 3D-printable parts
+│   └── renders/                           # Isometric PNG renders (README §2.5)
 ├── deploy/
 │   ├── systemd/wro-runtime.service        # Pi autostart → runs pure_pursuit/runtime_nuevo.py
 │   └── systemd/wro-vnc.service            # VNC for the live camera view
@@ -747,7 +957,7 @@ FoxRobotics/
 
 ---
 
-# 8. Videos
+# 9. Videos
 
 | Challenge | Link |
 |---|---|
@@ -757,7 +967,7 @@ FoxRobotics/
 
 ---
 
-# 9. Photos
+# 10. Photos
 
 Full-size images are in [`v-photos/`](v-photos/) (vehicle) and [`t-photos/`](t-photos/) (team).
 
@@ -783,6 +993,8 @@ Full-size images are in [`v-photos/`](v-photos/) (vehicle) and [`t-photos/`](t-p
 ---
 
 ## License
+
+Released under the [MIT License](LICENSE) — free to use, modify and build on, code and documentation alike, with attribution.
 
 This repository is public as required by WRO Future Engineers rules and will remain public for at least 12 months after the competition.
 
