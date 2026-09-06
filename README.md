@@ -1,7 +1,7 @@
 # WRO 2026 — Future Engineers | Self-Driving Car
 
 > **Team:** FoxRobotics
-> **| Members:** Erick Blanco · Jesse Banda · Cesar Ahumada
+> **| Members:** Erick Blanco · Jesse Banda · César Emiliano Ahumada
 > **| Coach:** Daniel Millan
 > **| Country / Region:** México — Baja California
 > **| Season:** 2026
@@ -27,6 +27,8 @@
 8. [Repository Structure](#8-repository-structure)
 9. [Videos](#9-videos)
 10. [Photos](#10-photos)
+
+**Companion document:** [Engineering Journal](ENGINEERING_JOURNAL.md) — the dated, phase-by-phase build log, from the pre-repo design work through today, tied to commits. [§5.3 Iteration log](#53-iteration-log) and [§6.5 Milestones](#65-milestones) are the thematic views of the same history.
 
 ---
 
@@ -648,6 +650,8 @@ The IMU heading is the shared currency: the ESP32 integrates it for its own cont
 
 Structural changes and the tuning passes that revealed something — routine per-run parameter tuning in `config.py` between track sessions is not listed. Each row links to the commit that introduced the change. `Status`: **Shipped** (on `main`, track-validated) · **On branch** (implemented, still tuning) · **Superseded** (replaced by a later row) · **Reverted** (tried on track, backed out).
 
+A dated, phase-by-phase account of the same history — including the pre-repo design and per-peripheral bring-up work — is in the [Engineering Journal](ENGINEERING_JOURNAL.md).
+
 | Stage | Date | Change | Why it changed | Evidence | Status |
 |---|---|---|---|---|---|
 | Mechanical + PCB | 2026-04-13 → 04-24 | Chassis, rack-and-pinion steering, printed differential and power PCB, designed from scratch | New vehicle every season | `283078e` … `51ea239` | Shipped |
@@ -844,6 +848,8 @@ Figures are from our own test runs and recorded HUD footage, not lab instrumenta
 
 The project arc, oldest first. Full acceptance criteria follow for the milestones that decide competition results and are not yet fully validated (M8–M11). `Status`: **Completed** · **Partially validated** (bar met in testing, evidence not fully logged) · **Under test** · **In progress** · **Not started**.
 
+The [Engineering Journal](ENGINEERING_JOURNAL.md) places these milestones on the dated build timeline, alongside the work between them.
+
 | # | Milestone | Date | Status |
 |---|---|---|---|
 | M1 | Functional, structurally stable chassis that integrates every component | 2026-04 | Completed |
@@ -1038,7 +1044,8 @@ FoxRobotics/
 ├── v-photos/                              # Vehicle photos         (pending upload)
 ├── video/video.md                        # Competition run video links
 ├── requirements.txt                      # Pi Python dependencies (+ apt / Arduino notes)
-└── README.md
+├── README.md
+└── ENGINEERING_JOURNAL.md                # Dated, phase-by-phase build log (companion to §5.3 / §6.5)
 ```
 
 ---
