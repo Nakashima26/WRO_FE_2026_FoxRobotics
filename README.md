@@ -412,6 +412,28 @@ Entry point: `pure_pursuit/runtime_nuevo.py`. Per processed frame:
 5. **Pure Pursuit (`controller.py`)** — a geometric pure-pursuit controller in BEV pixel space. Look-ahead is **adaptive**: it shrinks from 100 px toward 78 px as the nearest can closes *longitudinally*, so the car keeps translating and arcs around the can instead of pivoting in place. Output is slew-limited to 6°/frame to kill frame-to-frame steering whip.
 6. **Serialize** — the steering angle is normalized (`obs = steer_deg / 60`) and packed into one V2 line with the status flags (§4.2).
 
+```mermaid
+flowchart TB
+    A["Capture — threaded grabber<br/>Pi camera 640×480 BGR, drops stale buffers"]
+    B["BEV homography (bev.py)<br/>IPM warp to 400×400 top-down, 2 mm/px<br/>from bev_calib.npz (9-point RANSAC)"]
+    C["Pillar detection (vision.py)<br/>HSV red/green + area + solidity + aspect ratio"]
+    D["Centerline (centerline.py)<br/>floor mask minus asymmetric keep-out disks<br/>red inflates left, green inflates right<br/>pass-side weight ramps with distance"]
+    E["Rolling obstacle memory (obstacle_memory.py)<br/>ego-motion: assumed speed + real IMU heading from ACK<br/>confidence decay, prune-on-pass"]
+    F{"Measured RECUPERANDO trigger<br/>ARM / CLEAR / SKEW — see §4.4"}
+    G["Pure Pursuit (controller.py)<br/>geometric, look-ahead 100 to 78 px adaptive<br/>slew-limited 6°/frame"]
+    H["Serialize one V2 line<br/>obs = steer_deg / 60, plus prio / mem / pp / pasado"]
+    A --> B
+    B --> C
+    B --> D
+    C --> E
+    E --> D
+    E --> F
+    D --> G
+    G --> H
+    F --> H
+    H --> Z(["UART to ESP32 @ 115200"])
+```
+
 #### How the Pure Pursuit controller works
 
 Pure Pursuit is a path-tracking method: instead of reacting to an *error signal*, the controller looks a fixed distance ahead along the path — the **look-ahead** — picks the point on the centerline at that distance, and computes the single steering angle whose turning arc, starting from the car's current pose, passes exactly through that point. Every frame the target point moves forward along the centerline and the car "chases" it, so the trajectory is always a smooth arc onto the path rather than a hand-tuned reaction curve.
@@ -495,6 +517,20 @@ ARM && CLEAR && SKEW  →  emit pasado=1  (one-frame pulse)  →  ESP32 enters R
 CLEAR but never SKEW for RECUP_MEAS_GENTLE_FRAMES  →  disarm quietly, no RECUPERANDO
 ```
 
+```mermaid
+flowchart TB
+    S(["Each processed frame"]) --> ARM{"Centerline avoidance weight near the car axis<br/>>= ARM_W for ARM_FRAMES consecutive frames?"}
+    ARM -- no --> S
+    ARM -- yes --> SNAP["Snapshot heading_ref = current heading<br/>(the straight's heading)"]
+    SNAP --> CLR{"Memory places NO red/green can both far enough ahead<br/>of the axis AND close enough to the side to be in the way?<br/>held CLEAR_FRAMES frames (or 1 if a corner is imminent)"}
+    CLR -- no --> HOLD["Keep dodging (pasado = 0)"]
+    HOLD --> CLR
+    CLR -- yes --> SKEW{"abs(heading − heading_ref) >= 25° ?"}
+    SKEW -- "yes" --> FIRE["Emit pasado = 1 (one-frame pulse)<br/>trigger disarms — fires once per dodge"]
+    SKEW -- "no, for GENTLE_FRAMES" --> DIS["Disarm quietly — the gentle dodge<br/>straightens itself, no RECUPERANDO"]
+    FIRE --> ESP(["ESP32: SIGUIENDO → RECUPERANDO<br/>wall + gyro PID realigns the chassis"])
+```
+
 Condition 3 is what separates the two cases: same "can is now behind me" geometry, but only the crooked one triggers a recovery. The trigger disarms on fire, so it emits **once per dodge** — a can that lingers in memory while the ESP32 straightens can't re-fire it. The can positions it checks are the same `(x, y)` the memory maintains — corrected by fresh detections while the can is visible, and carried by the *same* ego-motion the centerline uses once it isn't (see the memory snippet above) — so the trigger and the path always agree on where the can is.
 
 This replaced an earlier approach that anchored the can's position when first seen and dead-reckoned it forward with an *assumed* speed and a bicycle model; that anchor drifted 200–400 mm within 1–2 s and fired either early (nose into the can) or far too late.
@@ -504,6 +540,40 @@ This replaced an earlier approach that anchored the can's position when first se
 ```
 enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO };
 ```
+
+```mermaid
+stateDiagram-v2
+    [*] --> WAIT_PI: setup() blocks on READY
+    WAIT_PI --> WAIT_FIRST_V2: READY acknowledged
+    WAIT_FIRST_V2 --> SIGUIENDO: first V2 line (motor gated at 0 until here)
+
+    SIGUIENDO --> RECUPERANDO: pasado=1, obstacle physically cleared [Obstacle]
+    SIGUIENDO --> GIRANDO: corner detected, cooldown elapsed [Open]
+    SIGUIENDO --> CRUCERO: straight clean, front sensor < FRONT_CRUCERO_CM [Obstacle]
+
+    RECUPERANDO --> SIGUIENDO: heading settled or timeout, lane clear
+    RECUPERANDO --> CRUCERO: heading settled or timeout, wall ahead [Obstacle]
+
+    GIRANDO --> SIGUIENDO: reaches AngGiro, turn counted, heading re-zeroed
+    GIRANDO --> TERMINANDO: 12th turn
+
+    CRUCERO --> SIGUIENDO: a new "mine" obstacle appears, not yet committed
+    CRUCERO --> MANIOBRA: front sensor at turn threshold (debounced), or CRUCERO timeout
+
+    MANIOBRA --> SIGUIENDO: sub-sequence done, turn counted, new straight from 0
+    MANIOBRA --> TERMINANDO: 12th turn
+
+    TERMINANDO --> [*]: drive like SIGUIENDO for TERMINANDO_MS, then stop
+
+    note right of MANIOBRA
+      Phase machine (a motor-coast precedes every reversal — H-bridge safety):
+      0 coast, 1 pivot (forward arc or reverse) to EXIT_DEG,
+      2 coast, 4 straight back-off, 5 coast, then finish.
+      Phase 3 = reverse stalled, coast, restart the pivot forward.
+    end note
+```
+
+*This is the complete state machine as it stands on branch `SectionTurning` — the current firmware. One flag, `const bool rondaObstaculos`, selects the profile. `false` (Open Challenge): only `SIGUIENDO` / `GIRANDO` / `RECUPERANDO` / `TERMINANDO` are reachable and corners are the continuous `GIRANDO` arc. `true` (Obstacle Challenge): `GIRANDO` is replaced by the segmented `CRUCERO` → `MANIOBRA` sequence and the `pasado`-driven `RECUPERANDO` is enabled. `RECUPERANDO` never aborts on a new obstacle — it straightens the chassis first, then hands back to `SIGUIENDO`, or to `CRUCERO` if the corner is already in reach. The `main` branch still carries an earlier 3-state cut (`SIGUIENDO` / `RECUPERANDO` / `GIRANDO`); the `SectionTurning` merge is tracked as iteration log v3.0. `WAIT_PI` / `WAIT_FIRST_V2` are the startup handshake (§4.7).*
 
 | State | Role |
 |---|---|
@@ -592,6 +662,26 @@ anguloGyro += gz * dt;            // this is the value echoed back to the Pi
 5. ESP32 replies `ACK:READY`, then **holds the motor at zero until the first real V2 line arrives** (a gate so the car never rolls forward on the fallback PID before Pure Pursuit is actually streaming). On the first frame it then rolls, `marchaIniciada` re-anchors the start-guard timer to that instant.
 6. Main loop runs until 12 turns are counted, then `TERMINANDO` drives ~1 s more into the start area and stops.
 
+```mermaid
+sequenceDiagram
+    participant Pi as Raspberry Pi
+    participant ESP as ESP32
+    Pi->>Pi: Light LED on GPIO 27 ("Pi is up")
+    Pi->>Pi: Wait for start button (GPIO 17)
+    Pi->>Pi: Camera warm-up (~40 frames discarded)
+    Note over ESP: setup() is blocking, waiting for READY
+    Pi->>ESP: READY x3
+    ESP->>Pi: ACK:READY
+    Note over ESP: Motor held at 0 until the first V2 line
+    Pi->>ESP: First V2 line (obs + flags)
+    Note over ESP: Car rolls — start-guard timer re-anchored to this instant
+    loop Every processed frame (~12-15 Hz)
+        Pi->>ESP: V2 line — obs, prio, mem, pp, pasado
+        ESP->>Pi: ACK:V2 — ang (heading), est (S/G/R), dir (?/L/R)
+    end
+    Note over ESP: 12 turns counted, then roll ~1 s into start zone and stop
+```
+
 ### 4.8 Development status
 
 | Module | Challenge | Status |
@@ -618,16 +708,31 @@ anguloGyro += gz * dt;            // this is the value echoed back to the Pi
 
 ### 5.1 Subsystem interaction map
 
-```
-  [HC-SR04 L/R] ─dist─► OUTER PID ─heading_sp─► INNER PID ─┐
-  [HC-SR04 F]   ─dist───────────────► CRUCERO/MANIOBRA ────┤
-  [MPU-6050]    ─heading──────────────────────────────────►├─► servo + motor
-                       │                                    │
-  [Pi camera] ─► BEV ─► centerline ─► Pure Pursuit ─obs────►┤
-                       │                    ▲               │
-                       └─ obstacle memory ◄─┴─ ACK: heading ┘
-                              │
-                       prio / mem / pasado ─► ESP32 FSM transitions
+```mermaid
+flowchart LR
+    subgraph PI["Raspberry Pi 4 — vision and planning"]
+        CAM["Pi camera"] --> BEV["BEV homography"]
+        BEV --> PD["Pillar detection (HSV)"]
+        BEV --> CL["Centerline<br/>asymmetric keep-out"]
+        PD --> OM["Rolling obstacle memory"]
+        OM --> CL
+        OM --> TRG["RECUPERANDO trigger"]
+        CL --> PP["Pure Pursuit"]
+    end
+    subgraph ESP["ESP32 — real-time control"]
+        OUT["OUTER PID<br/>wall centering"] --> INN["INNER PID<br/>heading via IMU"]
+        FSM["Finite state machine"]
+        SEG["CRUCERO / MANIOBRA<br/>segmented turn"]
+        INN --> ACT(["servo + motor PWM"])
+        FSM --> ACT
+        SEG --> ACT
+    end
+    USLR["HC-SR04 left / right"] --> OUT
+    USF["HC-SR04 front"] --> SEG
+    IMU["MPU-6050"] --> INN
+    PP -- "obs (V2 @ 115200)" --> FSM
+    TRG -- "prio / mem / pasado" --> FSM
+    IMU -- "ACK: heading" --> OM
 ```
 
 The IMU heading is the shared currency: the ESP32 integrates it for its own control *and* ships it back so the Pi's obstacle memory can rotate its map by the exact same angle. Everything the Pi decides reaches the ESP32 as four flags and one number; everything the ESP32 knows about its own state reaches the Pi as three fields. Neither side can stall the other.
