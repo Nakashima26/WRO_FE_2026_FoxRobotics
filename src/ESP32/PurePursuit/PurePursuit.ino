@@ -181,12 +181,13 @@ const int  CRUCERO_STRAIGHTEN_DEG = 15; // en CRUCERO, si el chasis entró/qued�
                                         // fuerza gyro-hold para enderezar aunque dF > CRUCERO_GYRO_CM
                                         // (un obstáculo que se quedó `mia` hasta la esquina deja
                                         // el chasis ladeado y la MANIOBRA entra tardísima; orillas693 g5)
-const int  MANIOBRA_OVERSHOOT_DEG = 8; // sale del pivote a (AngGiro - esto): el carro sigue
+const int  MANIOBRA_OVERSHOOT_DEG = 10; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
 const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
 const int  MANIOBRA_VEL_REV  = 100;     // PWM objetivo del motor en la reversa-pivote
 const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el golpe de corriente)
+
 const float CRUCERO_WALL_BLEND = 0.8f; // en CRUCERO: cuánto del wall PID se mezcla para CENTRAR
                                        // en el carril (0 = solo heading, 1 = wall PID completo).
                                        // Solo aplica mientras ambas paredes existen.
@@ -203,6 +204,56 @@ const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin lleg
 const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
                                        // no los laterales) antes de disparar MANIOBRA
 const int CRUCERO_PARED_DEBOUNCE = 3;  // ídem, cuando SÍ hay lateral abierta confirmando
+
+// ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
+// En 716 la maniobra salía con el carro rotando 40-60° sin control; la
+// recuperación no alcanzaba a frenarlo y ~5 s después CRUCERO leía la pose
+// chueca/descentrada (un lateral "abierto" por el yaw + dF~25 que era un CONO
+// del tramo, no una pared) como esquina nueva -> disparaba otra MANIOBRA falsa
+// -> oscilación divergente hasta chocar el verde. Estas dos constantes cortan
+// el re-disparo; NO afectan a cruceroLargo (la red anti-atasco).
+const unsigned long MANIOBRA_MIN_GAP_MS   = 3000; // el trigger por frontal exige al menos
+                                                  // esto desde el último giro. Dos esquinas
+                                                  // reales nunca caen tan seguidas (la
+                                                  // maniobra + aproximación ya tarda varios s).
+const unsigned long CRUCERO_YIELD_LATA_MS = 1500; // ventana tras ENTRAR a CRUCERO en la que
+                                                  // una lata `mia` con dF corto se trata como
+                                                  // lata (no esquina) y devuelve a SIGUIENDO
+                                                  // para esquivarla. Fuera de esta ventana
+                                                  // manda el "commit" de orillas696.
+
+// ── SETTLE de fin de MANIOBRA (runs 716/718/719) ─────────────────────────────
+// El pivote (sobre todo REVERSA + backoff) entrega con velocidad angular: al
+// llamar finalizarManiobra() con el carro TODAVÍA girando, se zeraba anguloGyro
+// desde una mentira y RECUPERANDO/SIGUIENDO sobre-corregían 40-100° -> el carro
+// terminaba encajado contra una pared un par de vueltas después. Antes de cerrar
+// se hace coast + servo centro y se espera a que |ΔanguloGyro/Δt| baje del
+// umbral por N samples (o venza el timeout).
+const unsigned long MANIOBRA_SETTLE_SAMPLE_MS  = 40;    // cada cuánto se mide la velocidad angular
+const float         MANIOBRA_SETTLE_RATE_DPS   = 30.0f; // deg/s por debajo de esto = "ya no rota"
+const int           MANIOBRA_SETTLE_QUIETO_N   = 3;     // samples lentos SEGUIDOS para cerrar (~120 ms)
+const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igual aunque no se aquiete
+
+// ── Residual de giro: hace a MANIOBRA_OVERSHOOT_DEG NO crítico ───────────────
+// finalizarManiobra() zeraba el heading a ciegas -> si el pivote sub/sobre-giró
+// (varía con batería/piso/calibración del gyro), el carro arrancaba la recta
+// nueva chueco y "se iba abriendo". Ahora se pasa el RESIDUAL real vs la recta
+// nueva (que es 90° - inclinación de entrada) a la recuperación: over o under,
+// SIGUIENDO/RECUPERANDO terminan de cuadrar el giro. OVERSHOOT_DEG solo decide
+// cuándo el pivote suelta hacia el settle, ya no la precisión del heading final.
+const float MANIOBRA_RESIDUAL_MAX_DEG = 30.0f;  // tope del residual que se pasa a la recuperación
+
+// ── Contra-sesgo de RECUPERANDO tras esquivar (run 2026-09-07) ───────────────
+// RECUPERANDO solo endereza el RUMBO, no re-centra la POSICIÓN. Tras esquivar
+// quedas desplazado hacia el lado de la esquiva y la lógica siguiente arranca
+// descentrada (y eso se acumula vuelta a vuelta hasta encajar el carro). En vez
+// de apuntar a 0, RECUPERANDO apunta unos grados al lado CONTRARIO de la
+// esquiva: traslada el carro de vuelta al centro; al salir se restaura
+// anguloObjetivo y sigue la lógica normal (centrarse o esquivar el siguiente).
+const float         RECUP_DODGE_BIAS_DEG        = 6.0f;  // objetivo de RECUPERANDO (grados, signo = contrario a la esquiva)
+const float         RECUP_DODGE_BIAS_MIN_OBS    = 0.25f; // |obs| tuvo que superar esto para contar como esquiva real
+const unsigned long RECUP_DODGE_BIAS_MAX_AGE_MS = 1500;  // la esquiva tiene que haber sido RECIENTE
+
 const unsigned long MANIOBRA_BACKOFF_MS     = 700;   // retrocede esto tras el pivote (REV con holgura)
 const unsigned long MANIOBRA_BACKOFF_FWD_MS = 700;   // retrocede esto tras el pivote (FWD)
 const int           MANIOBRA_BACKOFF_VEL    = 100;  // PWM del retroceso
@@ -221,10 +272,18 @@ bool maniobraGirarDer  = false;
 bool maniobraReversa   = false;
 bool maniobraRetroceso = false;        // true = hay espacio (pared exterior > MANIOBRA_BACKOFF_MIN_CM) -> retrocede un poco DESPUÉS de la maniobra
 long maniobraDistExt   = 0;
-int  maniobraFase      = -1;           // -1=sin init  0=frenar-antes  1=pivote  2=frenar-después  3=frenar-y-reintentar-fwd  4=retroceso-post  5=frenar-tras-retroceso
+int  maniobraFase      = -1;           // -1=sin init  0=frenar-antes  1=pivote  2=frenar-después  3=frenar-y-reintentar-fwd  4=retroceso-post  5=frenar-tras-retroceso  6=settle (esperar que deje de rotar)
 unsigned long maniobraFaseMs   = 0;    // inicio de la fase actual (para las pausas de freno)
 unsigned long maniobraPivoteMs = 0;    // inicio del pivote (para la rampa y el timeout de reversa)
 float maniobraInclinacionEntrada = 0;  // anguloGyro (recta actual) justo al entrar a la maniobra
+// Fase 6 (SETTLE): esperar a que la velocidad angular baje antes de cerrar.
+unsigned long maniobraSettleMs      = 0;   // inicio de la fase 6
+unsigned long maniobraSettleSampMs  = 0;   // millis del último sample de rate
+float         maniobraSettleAngPrev = 0.0f;// anguloGyro en el último sample
+int           maniobraSettleQuieto  = 0;   // samples consecutivos con rate por debajo del umbral
+float         maniobraIdealRot      = 0.0f;// rotación (con signo) que deja el chasis cuadrado con la
+                                           // recta nueva; finalizarManiobra() pasa (anguloGyro - esto)
+                                           // como residual a la recuperación (ver MANIOBRA_RESIDUAL_MAX_DEG)
 
 // Rectas con el cajón de estacionamiento: el borde del cajón tapa a ratos el
 // lateral que debería "abrirse" en la esquina, así que justo en el frame en
@@ -253,7 +312,7 @@ int  lateralDropCount   = 0;
 bool giroSucioArmado    = false;
 
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
-const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alineado"
+const float headingSettleDeg = 4.0;  // |errorGyro| por debajo de esto = "alineado"
 
 // Red de seguridad: si el robot entra a RECUPERANDO cerca de una esquina real
 // (donde un ultrasónico lee "sin pared" legítimamente, no por desalineación),
@@ -261,6 +320,18 @@ const float headingSettleDeg = 8.0;  // |errorGyro| por debajo de esto = "alinea
 // Este timeout fuerza la salida aunque wallOk/headingOk no se hayan cumplido.
 unsigned long recuperandoEntryMs = 0;
 const unsigned long recuperandoTimeoutMs = 1500;
+// Piso de duración de RECUPERANDO: aunque headingOk se cumpla antes, se queda
+// DERECHO (gyro-hold, sin evaluar esquiva ni CRUCERO) este tiempo, para que las
+// lecturas (frontal/laterales) se calmen tras el latiguazo del esquive. Sin
+// esto, salir en el frame en que el frontal engancha el siguiente obstáculo
+// mandaba el carro recto contra él (run 2026-09-07).
+const unsigned long recuperandoMinMs = 150;
+
+// Contra-sesgo de RECUPERANDO tras esquivar (ver consts RECUP_DODGE_BIAS_*).
+int           ultimaEsquivaDir      = 0;    // +1 = última esquiva fue a la DERECHA, -1 = IZQUIERDA, 0 = ninguna
+unsigned long ultimaEsquivaMs       = 0;    // millis de la última esquiva significativa
+float         recupBiasPrevObjetivo = 0.0f; // anguloObjetivo guardado antes de aplicar el sesgo
+bool          recupBiasActivo       = false;// hay un sesgo aplicado que hay que restaurar al salir de RECUPERANDO
 
 // ── Giros ─────────────────────────────────────────────────────────────────────
 bool direccionIzquierda = true;
@@ -273,6 +344,9 @@ bool primerGiro         = false;
 const int ANG_GIRO_OBSTACULOS = 90;   // <- bájalo a 88 si se pasa en la de obstáculos
 const int ANG_GIRO_CERRADA    = 76;
 const int AngGiro = rondaObstaculos ? ANG_GIRO_OBSTACULOS : ANG_GIRO_CERRADA;
+// MANIOBRA de FRENTE (arco hacia adelante, no reversa): objetivo un poco menor
+// que AngGiro — el arco fwd llega con más inercia y se pasa. La reversa usa AngGiro.
+const int ANG_GIRO_MANIOBRA_FWD = 84;
 unsigned long lastTurnTime = 0;
 int timeStart = 0;
 const int COOLDOWN_GIRO_OBSTACULOS = 3000;
@@ -374,7 +448,7 @@ void escribirServo(int angulo) {
 // Techo del PWM del motor — DISTINTO por tipo de ronda:
 //   ronda de obstáculos (rondaObstaculos=true) : 110 (maniobras lentas y finas)
 //   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
-const int MOTOR_MAX = rondaObstaculos ? 110 : 180;
+const int MOTOR_MAX = rondaObstaculos ? 120 : 180;
 
 void setMotor(int velocidad) {
   velocidad = constrain(velocidad, 0, MOTOR_MAX);
@@ -477,7 +551,11 @@ void finalizarManiobra() {
   velocidadMotor = 180;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
-  anguloGyro       = 0;
+  // Residual real vs la recta nueva (NO zerar a ciegas): si el pivote sub/sobre-
+  // giró, la recuperación termina de cuadrarlo. anguloObjetivo=0 => errorGyro =
+  // -residual. Clamp por si una lectura loca. (ver MANIOBRA_RESIDUAL_MAX_DEG)
+  anguloGyro       = constrain(anguloGyro - maniobraIdealRot,
+                               -MANIOBRA_RESIDUAL_MAX_DEG, MANIOBRA_RESIDUAL_MAX_DEG);
   anguloObjetivo   = 0;          // recta nueva: referencia desde cero
   lastTurnTime     = millis();
   maniobraDecidida = false;
@@ -489,6 +567,20 @@ void finalizarManiobra() {
   Serial.print(turnsCompleted);
   Serial.print("/");
   Serial.println(TURNS_PER_RACE);
+}
+
+// Entra a la fase 6 (SETTLE): coast + servo centro, y NO cierra la maniobra
+// hasta que el carro deje de rotar (o venza MANIOBRA_SETTLE_TIMEOUT_MS). Se
+// llama donde antes se llamaba finalizarManiobra() directo (fin de fase 2 REV
+// pegada, y fin de fase 5 tras el retroceso).
+void iniciarSettleManiobra() {
+  motorCoast();
+  escribirServo(centroServo);
+  maniobraFase          = 6;
+  maniobraSettleMs      = millis();
+  maniobraSettleSampMs  = millis();
+  maniobraSettleAngPrev = anguloGyro;
+  maniobraSettleQuieto  = 0;
 }
 
 
@@ -773,8 +865,16 @@ void controlPID(long distL, long distR) {
   if (rondaObstaculos) {
     contadorPanicL = (distL > 0 && distL < WALL_PANIC_CM) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
     contadorPanicR = (distR > 0 && distR < WALL_PANIC_CM) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
-    if (contadorPanicR >= WALL_PANIC_DEB) wallPanic += (WALL_PANIC_CM - distR) * WALL_PANIC_GAIN;  // cerca DER -> izq
-    if (contadorPanicL >= WALL_PANIC_DEB) wallPanic -= (WALL_PANIC_CM - distL) * WALL_PANIC_GAIN;  // cerca IZQ -> der
+    // No dejes que wallPanic pelee contra un esquive ACTIVO de la Pi: el lateral
+    // crítico del lado hacia el que la Pi vira suele ser el POSTE que rodea, no
+    // una pared -> empujarlo al centro tira el carro contra/al lado equivocado
+    // del poste (verde de recta 3, run 2026-09-07). El lado opuesto (overshoot
+    // contra la pared de enfrente) sí queda protegido.
+    bool piEsquivando = piPriority || piMemoryFrames > 0;
+    bool dodgeIzq = piEsquivando && obsBiasNorm < -0.15f;   // Pi vira izquierda (p.ej. verde)
+    bool dodgeDer = piEsquivando && obsBiasNorm >  0.15f;   // Pi vira derecha  (p.ej. rojo)
+    if (contadorPanicR >= WALL_PANIC_DEB && !dodgeDer) wallPanic += (WALL_PANIC_CM - distR) * WALL_PANIC_GAIN;  // cerca DER -> izq
+    if (contadorPanicL >= WALL_PANIC_DEB && !dodgeIzq) wallPanic -= (WALL_PANIC_CM - distL) * WALL_PANIC_GAIN;  // cerca IZQ -> der
     wallPanic = constrain(wallPanic, -30.0f, 30.0f);
   }
 
@@ -1096,6 +1196,15 @@ void loop() {
         velocidadMotor = min(velocidadMotor, VEL_APROX2);
       }
 
+      // Recordar la dirección de la última esquiva REAL. Cuando llega piPasado,
+      // obs ya suele estar cerca de 0 (la lata quedó atrás), así que el signo
+      // hay que latchearlo mientras la esquiva está en curso. Sirve para el
+      // contra-sesgo de RECUPERANDO (abajo).
+      if (rondaObstaculos && piPriority && fabs(obsBiasNorm) > RECUP_DODGE_BIAS_MIN_OBS) {
+        ultimaEsquivaDir = (obsBiasNorm > 0.0f) ? 1 : -1;   // obs>0 = esquiva a la DERECHA
+        ultimaEsquivaMs  = millis();
+      }
+
       // La Pi confirma que el robot ya atravesó físicamente el obstáculo
       // (evento de un solo frame) -> entrar a RECUPERANDO. Ya no depende de
       // que la cámara simplemente haya dejado de verlo.
@@ -1106,6 +1215,19 @@ void loop() {
         recuperandoEntryMs = millis();
         integralWall  = 0; prevErrorWall  = 0;
         integralGyro  = 0; prevErrorGyro  = 0;
+
+        // Contra-sesgo: RECUPERANDO solo endereza el RUMBO, no re-centra la
+        // POSICIÓN. Tras esquivar quedas desplazado hacia el lado de la
+        // esquiva. Apuntar el heading unos grados al lado CONTRARIO durante la
+        // recuperación traslada el carro de vuelta al centro; al salir se
+        // restaura anguloObjetivo (ver case RECUPERANDO). Solo si hubo una
+        // esquiva real y RECIENTE.
+        if (ultimaEsquivaDir != 0
+            && (millis() - ultimaEsquivaMs) < RECUP_DODGE_BIAS_MAX_AGE_MS) {
+          recupBiasPrevObjetivo = anguloObjetivo;
+          anguloObjetivo        = (float)ultimaEsquivaDir * RECUP_DODGE_BIAS_DEG;
+          recupBiasActivo       = true;
+        }
 
         // Consumir el pulso.  piPasado es un evento de UN frame en la Pi, pero
         // en el ESP32 se queda en 1 hasta que llega el siguiente mensaje V2
@@ -1204,6 +1326,7 @@ void loop() {
       bool wallOk    = abs(errorWall) < wallSettleCm;
       bool headingOk = abs(errorGyro) < headingSettleDeg;
       bool timedOut  = (millis() - recuperandoEntryMs) > recuperandoTimeoutMs;
+      bool dwellOk   = (millis() - recuperandoEntryMs) > recuperandoMinMs;
 
       // NO se aborta por piPriority: primero recuperar la recta (heading hacia
       // anguloObjetivo). Un obstáculo visto con el chasis todavía chueco suele ser
@@ -1211,15 +1334,22 @@ void loop() {
       // abortar aquí mandaba el carro hacia él. Con el chasis derecho, SIGUIENDO/
       // visión lo maneja bien. timedOut acota por si headingOk no llega (esquina
       // real: un lado lee "sin pared" y errorGyro nunca baja del umbral).
-      if (headingOk || timedOut) {
-        // Sin obstáculo prioritario -> CRUCERO (va derecho hacia la esquina). Un
-        // `mem` rezagado NO cuenta si hay pared adelante (distF < FRONT_CRUCERO_CM):
-        // recién recuperé y la pared enfrente dice "esquina" -> esa lata es de la
-        // recta siguiente (la naranja ya no la clasifica `beyond`), commit a
-        // CRUCERO. Si se va a SIGUIENDO, el obs fantasma de esa lata tira el carro
-        // contra la pared en la boca de la esquina (orillas696 g5).
+      // dwellOk: no salir aunque headingOk se cumpla, hasta pasar recuperandoMinMs
+      // (deja que el frontal/laterales se calmen antes de decidir esquiva/CRUCERO).
+      if ((headingOk || timedOut) && dwellOk) {
+        // Restaurar anguloObjetivo si RECUPERANDO venía con el contra-sesgo de
+        // esquiva (ya cumplió su función de trasladar el carro al centro).
+        if (recupBiasActivo) {
+          anguloObjetivo  = recupBiasPrevObjetivo;
+          recupBiasActivo = false;
+        }
+        // A CRUCERO SOLO si hay pared adelante (distF < FRONT_CRUCERO_CM); sin
+        // eso -> SIGUIENDO. Antes bastaba piMemoryFrames<=0: cuando `pasado=1`
+        // disparaba a media recta (memoria se limpia, sin pared enfrente) el
+        // carro commiteaba a CRUCERO->MANIOBRA y giraba contra la pared
+        // (recta 3, run 2026-09-07).
         bool paredAdelante = (distF > 0 && distF < FRONT_CRUCERO_CM);
-        if (rondaObstaculos && !piPriority && (piMemoryFrames <= 0 || paredAdelante)) {
+        if (rondaObstaculos && !piPriority && paredAdelante) {
           cruceroEntryMs = millis();
           cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
           lateralWatchActivo = false;
@@ -1306,7 +1436,19 @@ void loop() {
       // de la recta siguiente mal clasificada o ruido, y esquivarla en la boca
       // mata la maniobra (orillas696 g5).
       bool _paredAdelanteCru = (distF > 0 && distF < FRONT_CRUCERO_CM);
-      if ((piPriority || piMemoryFrames > 0) && !_paredAdelanteCru) {
+      bool _hayLataMia = (piPriority || piMemoryFrames > 0);
+      // Salida normal (orillas696 intacto): lata mía y NO hay pared adelante ->
+      // la entrada a CRUCERO fue un eco ya pasado, a esquivar.
+      bool _saleClaro = _hayLataMia && !_paredAdelanteCru;
+      // Salida run-2026-09-07: lata mía CON "pared adelante", pero recién entré a
+      // CRUCERO y el chasis está recto -> NO es una esquina en la que esté
+      // comprometido (esas se aproximan con tiempo y enderezando); ese dF corto
+      // es la lata. Devolver a SIGUIENDO para esquivarla. La ventana + el gate de
+      // ángulo dejan el commit de orillas696 (carro ya aproximando, chueco) intacto.
+      bool _saleLata  = _hayLataMia && _paredAdelanteCru
+                        && (millis() - cruceroEntryMs) < CRUCERO_YIELD_LATA_MS
+                        && fabs(anguloGyro) < CRUCERO_STRAIGHTEN_DEG;
+      if (_saleClaro || _saleLata) {
         estado = SIGUIENDO;             // apareció obstáculo mío -> a esquivarlo
         contadorFront      = 0;
         lateralWatchActivo = false;
@@ -1375,15 +1517,26 @@ void loop() {
         enLaPared         = (distF > 0 && distF <= FRONT_TURN_REV_CM);
         debounceNecesario = CRUCERO_FRONT_DEBOUNCE;
       } else {
-        enLaPared         = (distF > 0 && distF <= _umbralFront && (paredAbierta || giroSucioArmado));
+        // !_hayLataMia: si la cámara ve una lata `mia`, ese dF corto ES la lata
+        // (cono del tramo), no la pared de la esquina -> no dispares el giro por
+        // el frontal (run 2026-09-07: 6+ MANIOBRA falsas encadenadas, cada una a
+        // dF~25 con un rojo/verde enfrente). El _saleLata de arriba ya la mandó
+        // a SIGUIENDO a esquivar; cruceroLargo sigue como red anti-atasco.
+        enLaPared         = (distF > 0 && distF <= _umbralFront
+                             && (paredAbierta || giroSucioArmado)
+                             && !_hayLataMia);
         debounceNecesario = paredAbierta ? CRUCERO_PARED_DEBOUNCE : CRUCERO_FRONT_DEBOUNCE;
       }
       bool cruceroLargo = (millis() - cruceroEntryMs) > CRUCERO_TIMEOUT_MS;  // red de seguridad
+      // gapOk: dos MANIOBRA reales nunca caen < MANIOBRA_MIN_GAP_MS (la maniobra
+      // + aproximación ya tarda varios s). Si el trigger por frontal quiere
+      // disparar antes, es fantasma (run 2026-09-07). NO gatea cruceroLargo.
+      bool gapOk = (millis() - lastTurnTime) > MANIOBRA_MIN_GAP_MS;
 
       if (enLaPared) contadorFront++;
       else           contadorFront = 0;
 
-      if (contadorFront >= debounceNecesario || cruceroLargo) {
+      if ((contadorFront >= debounceNecesario && gapOk) || cruceroLargo) {
         bool _fueSucio = giroSucioArmado;
         contadorFront      = 0;
         lateralWatchActivo = false;
@@ -1427,6 +1580,14 @@ void loop() {
 
       if (maniobraFase < 0) {   // phase-init (una vez por maniobra)
         maniobraInclinacionEntrada = anguloGyro;
+        // Rotación ideal (con signo) para cuadrar con la recta nueva = 90° menos
+        // lo que ya venías inclinado hacia el giro. Se usa AngGiro (90), NO el
+        // ANG_GIRO_MANIOBRA_FWD (84): ese 84 es un ajuste de inercia para el
+        // TIMING del pivote fwd, no la geometría real de la recta.
+        {
+          float _sg = maniobraGirarDer ? -1.0f : 1.0f;
+          maniobraIdealRot = _sg * constrain(AngGiro - maniobraInclinacionEntrada * _sg, 70.0f, 110.0f);
+        }
         // REV -> coast (0) -> pivote en reversa (1)
         // FWD -> pivote de frente (1) directo (mismo sentido que CRUCERO, sin coast)
         if (maniobraReversa) {
@@ -1445,7 +1606,8 @@ void loop() {
       // Ángulo objetivo ajustado por la inclinación de entrada: derecha=negativo,
       // izquierda=positivo (empírico). Ya inclinado hacia el giro -> gira menos.
       float signoGiro = maniobraGirarDer ? -1.0f : 1.0f;
-      float anguloObjetivoManiobra = constrain(AngGiro - maniobraInclinacionEntrada * signoGiro, 70.0f, 110.0f);
+      int   angBaseManiobra = maniobraReversa ? AngGiro : ANG_GIRO_MANIOBRA_FWD;   // fwd gira menos (más inercia)
+      float anguloObjetivoManiobra = constrain(angBaseManiobra - maniobraInclinacionEntrada * signoGiro, 70.0f, 110.0f);
       const float EXIT_DEG = anguloObjetivoManiobra - MANIOBRA_OVERSHOOT_DEG;   // sale antes: la inercia completa
 
       // ── Fase 0: FRENAR (el motor viene de frente de CRUCERO) antes de invertir ─
@@ -1513,7 +1675,7 @@ void loop() {
             maniobraFaseMs = millis();
             maniobraFase   = 4;
           } else {
-            finalizarManiobra();
+            iniciarSettleManiobra();      // esperar a que deje de rotar -> cierra
           }
         }
         break;
@@ -1538,11 +1700,38 @@ void loop() {
         break;
       }
 
-      // ── Fase 5: FRENAR tras el retroceso, luego cerrar ───────────────────
+      // ── Fase 5: FRENAR tras el retroceso, luego SETTLE ──────────────────
       if (maniobraFase == 5) {
         motorCoast();
         escribirServo(centroServo);
-        if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) finalizarManiobra();
+        if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) iniciarSettleManiobra();
+        break;
+      }
+
+      // ── Fase 6: SETTLE — espera a que el carro DEJE de rotar antes de cerrar ─
+      //   El pivote (sobre todo REV + backoff) entrega con velocidad angular:
+      //   finalizarManiobra() zeraba anguloGyro con el carro girando -> la
+      //   recuperación arrancaba desde una mentira y sobre-corregía 40-100°
+      //   (runs 716/718/719, el carro terminaba encajado contra una pared).
+      //   Coast + servo centro; se cierra recién cuando |ΔanguloGyro/Δt| baja de
+      //   MANIOBRA_SETTLE_RATE_DPS por MANIOBRA_SETTLE_QUIETO_N samples, o al
+      //   vencer MANIOBRA_SETTLE_TIMEOUT_MS.
+      if (maniobraFase == 6) {
+        motorCoast();
+        escribirServo(centroServo);
+        unsigned long nowMs = millis();
+        if (nowMs - maniobraSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
+          float dtS  = (nowMs - maniobraSettleSampMs) / 1000.0f;
+          float rate = fabs(anguloGyro - maniobraSettleAngPrev) / (dtS > 0.001f ? dtS : 0.001f);
+          maniobraSettleAngPrev = anguloGyro;
+          maniobraSettleSampMs  = nowMs;
+          if (rate < MANIOBRA_SETTLE_RATE_DPS) maniobraSettleQuieto++;
+          else                                 maniobraSettleQuieto = 0;
+        }
+        if (maniobraSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N
+            || nowMs - maniobraSettleMs >= MANIOBRA_SETTLE_TIMEOUT_MS) {
+          finalizarManiobra();
+        }
         break;
       }
 

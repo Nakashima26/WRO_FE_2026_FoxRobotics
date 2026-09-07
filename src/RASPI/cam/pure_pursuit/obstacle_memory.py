@@ -472,16 +472,31 @@ class ObstacleMemory:
                 self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue
             if o.y > behind_y:                       # ya quedó detrás del robot
-                centered = abs(o.x0 - self.rx) <= pass_halfw and not steering_now
+                on_axis = abs(o.x0 - self.rx) <= pass_halfw
+                # Esquiva de DESPLAZAMIENTO LATERAL: la lata iba centrada y el
+                # carro SÍ está virando -- pero hacia el lado CONTRARIO de la
+                # lata (la esquiva de lado, casi sin rotar, así que la vía (b)
+                # por yaw no la agarra). Sin esto una esquiva lateral de una lata
+                # MÍA cae en DESCARTE_DE_LADO -> nunca manda pasado -> el ESP
+                # endereza encima de la lata que sigue ahí (run 2026-09-07).
+                # Excluye beyond (siguiente segmento) y exige steer > umbral.
+                steering_away = (
+                    steering_now
+                    and o.beyond is not True
+                    and (steer_deg > 0.0) != ((o.x0 - self.rx) > 0.0)
+                )
+                centered = on_axis and (not steering_now or steering_away)
                 have_h = o.heading0 is not None and self._prev_heading is not None
                 yawed = (abs((self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0)
                          if have_h else 0.0)
                 dodged = yawed >= pass_yaw and o.beyond is not True
                 if was_ahead and (centered or dodged):
+                    _via = ("lateral" if (centered and steering_away)
+                            else "frente" if centered else "esquiva")
                     self.last_prune_reason = (
                         f"PASADO y={o.y:.0f}>{behind_y} ymin={o.y_min:.0f} "
                         f"x0={o.x0:.0f} yaw={yawed:.0f} "
-                        f"{'frente' if centered else 'esquiva'} conf={o.conf:.2f}"
+                        f"{_via} conf={o.conf:.2f}"
                     )
                     passed = True
                 elif was_ahead:
@@ -618,6 +633,18 @@ class ObstacleMemory:
         if fl > dz:
             frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
             ds_px *= 1.0 - (1.0 - mn) * frac
+
+        # Freno por ESQUIVA LATERAL: el servo torcido para correrse de lado SIN
+        # rotar mucho (dheading chico) no lo agarra el freno de arriba, pero el
+        # avance de frente igual cae. Escala por |steer_deg| con zona muerta ALTA
+        # (correcciones de recta no lo tocan; solo la esquiva real). Compone con
+        # el freno por giro (una esquiva de latiguazo tiene ambos).
+        s_dz = getattr(C, "OBS_MEM_STEER_DEADZONE_DEG", 14.0)
+        s_fl = getattr(C, "OBS_MEM_STEER_FLOOR_DEG", 36.0)
+        s_mn = getattr(C, "OBS_MEM_STEER_SCALE_MIN", 0.45)
+        if s_fl > s_dz:
+            s_frac = min(1.0, max(0.0, abs(steer_deg) - s_dz) / (s_fl - s_dz))
+            ds_px *= 1.0 - (1.0 - s_mn) * s_frac
 
         # ── Avance del ancla "geom" ───────────────────────────────────────────
         # Dos estimaciones del avance de frente, se toma la MENOR:
