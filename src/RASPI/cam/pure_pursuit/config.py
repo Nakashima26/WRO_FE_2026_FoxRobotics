@@ -278,6 +278,20 @@ OBS_MEM_TURN_DEADZONE_DEG = 4.0
 OBS_MEM_TURN_FLOOR_DEG    = 12.0
 OBS_MEM_TURN_SCALE_MIN    = 0.3
 
+# ── Freno de ds_px por ESQUIVA LATERAL (obstacle_memory.update) ──
+# El freno por giro de arriba solo agarra esquivas ANGULARES (dheading grande).
+# Una esquiva de DESPLAZAMIENTO LATERAL vira fuerte el servo para correrse de
+# lado SIN rotar mucho el chasis -> dheading chico -> el freno por giro no la
+# toca, pero el avance de frente igual cae (el servo torcido derrapa / la Pi
+# baja la velocidad). Sin esto la lata esquivada se sobre-marcha, cruza
+# behind_y todavía enfrente y se poda (run 2026-09-07: verde/rojo de arranque).
+# Se escala ds_px por |steer_deg| con zona muerta ALTA: correcciones de recta
+# (steer < DEADZONE, obs<~0.23) NO lo tocan; solo la esquiva real.
+#   obs = steer_deg / 60  ->  DEADZONE 14°≈obs0.23,  FLOOR 36°≈obs0.60
+OBS_MEM_STEER_DEADZONE_DEG = 14.0
+OBS_MEM_STEER_FLOOR_DEG    = 36.0
+OBS_MEM_STEER_SCALE_MIN    = 0.45
+
 # ── Rebase LATERAL (obstacle_memory._prune) ──
 # En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el
 # mapa rota con el heading y la lata cruza el eje del robot al lado opuesto
