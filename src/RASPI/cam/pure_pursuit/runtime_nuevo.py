@@ -115,21 +115,6 @@ def _parse_direccion(ack: str) -> str | None:
     return val if val in ("L", "R") else None
 
 
-def _parse_fase(ack: str) -> int | None:
-    """fase= del ACK:V2 del ESP32: -1 (sin maniobra) .. 6 (settle). None si falta.
-    Se usa para reactivar la memoria de obstáculos en la COLA de la MANIOBRA
-    (fase >= MANIOBRA_TAIL_FASE_MEM), cuando el ESP ya dejó de pivotear."""
-    if not ack:
-        return None
-    idx = ack.find("fase=")
-    if idx < 0:
-        return None
-    try:
-        return int(ack[idx + 5:].split(",")[0])
-    except (ValueError, IndexError):
-        return None
-
-
 class PPRuntime:
     """
     Runtime Pure Pursuit con memoria de obstáculos.
@@ -156,10 +141,6 @@ class PPRuntime:
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._is_turning: bool = False
-        # MANIOBRA en su cola (fase>=N): el ESP ya dejó de pivotear y NO usa el
-        # obs de la Pi (su FSM maneja el servo). Con esto la memoria rodante se
-        # reactiva ANTES de est=S para adquirir el cono de la salida del giro.
-        self._maniobra_tail: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
         self._pasado_hold: int = 0   # frames restantes repitiendo pasado=1
@@ -687,14 +668,7 @@ class PPRuntime:
 
                         # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
                         # (Solo con obstáculos BEV reales — el far_hint NO entra aquí)
-                        # EXCEPCIÓN: en la COLA de la MANIOBRA (self._maniobra_tail,
-                        # fase>=MANIOBRA_TAIL_FASE_MEM) SÍ se corre memory.update():
-                        # el ESP ya no pivotea, el BEV es estable y —clave— durante
-                        # MANIOBRA el ESP ignora el obs de la Pi, así que esto NO
-                        # afecta el control del giro; solo deja el track + la
-                        # centerline TIBIOS para cuando salga a est=S (rectas
-                        # verde-primero: el carro arquea en vez de pivotear).
-                        if self._is_turning and not self._maniobra_tail:
+                        if self._is_turning:
                             bev_obstacles = []
                             obstacle_conf = []
                             # FASE 1 mid-turn: detección INSTANTÁNEA solo para
@@ -1108,18 +1082,7 @@ class PPRuntime:
                     self.turn_dir_tracker.set_esp_direction(_esp_dir)
 
                 estado_now = _parse_estado(serial_ack)
-                _fase_now = _parse_fase(serial_ack)
                 if estado_now is not None:
-                    # Cola de la MANIOBRA: fase >= N (backoff/frenos/settle). El
-                    # ESP ya no pivotea y —durante MANIOBRA— IGNORA el obs de la
-                    # Pi, así que reactivar la memoria acá no toca el control del
-                    # giro; solo adquiere el cono de la salida ANTES de est=S.
-                    # fase < N (pivote) sigue con memoria apagada: BEV basura.
-                    # Se mantiene el último valor si el ACK viene sin est=.
-                    self._maniobra_tail = (
-                        estado_now == "G" and _fase_now is not None
-                        and _fase_now >= getattr(C, "MANIOBRA_TAIL_FASE_MEM", 4)
-                    )
                     # Debounce: un est=G ESPURIO (ACK con ruido, "est=G fantasma
                     # tras verde") ya no dispara el wipe de memoria a media
                     # esquiva. Un giro real manda est=G muchos frames seguidos;
@@ -1191,15 +1154,9 @@ class PPRuntime:
                 # = aún enfrente) antes de soltarse, y si `pasado` salió por
                 # cruce real de y (PASADO) o por decaimiento de confianza
                 # (BAJA_CONF, que NO manda recuperando).
-                # fase  : fase= del ACK (-1 sin maniobra .. 6 settle)
-                # tail  : 1 = cola de MANIOBRA -> memoria REACTIVADA pese a est=G
-                # upd   : 1 = memory.update() corrió este frame (0 = giro, mapa ciego)
-                _mem_upd = int(not (self._is_turning and not self._maniobra_tail))
                 print(f"[MEMDBG] closest={self.memory.debug_closest()} "
                       f"prune={self.memory.last_prune_reason} "
-                      f"all={self.memory.debug_all()} "
-                      f"fase={'-' if _fase_now is None else _fase_now} "
-                      f"tail={int(self._maniobra_tail)} upd={_mem_upd}", flush=True)
+                      f"all={self.memory.debug_all()}", flush=True)
                 print(f"[RECUP] {self._last_recup_reason} "
                       f"armed={int(self._dodge_armed)} clr={self._recup_clear_count} "
                       f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "

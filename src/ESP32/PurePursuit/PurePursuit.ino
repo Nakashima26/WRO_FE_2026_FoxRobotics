@@ -185,7 +185,7 @@ Estado estado = SIGUIENDO;
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
 const int  FRONT_TURN_FWD_CM = 75;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
                                        // (el arco necesita espacio adelante)
-const int  FRONT_TURN_REV_CM = 30;     // ... si será REVERSE (hay que estar cerca de la pared
+const int  FRONT_TURN_REV_CM = 20;     // ... si será REVERSE (hay que estar cerca de la pared
                                        // para que el pivote en reversa no sobrepase)
 const int  FRONT_CRUCERO_CM = 90;      // SIGUIENDO -> CRUCERO (recta ya limpia, esquina cerca)
 const int  CRUCERO_GYRO_CM  = 90;      // dentro de CRUCERO: > esto -> visión (centerline recto);
@@ -305,7 +305,7 @@ const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pare
                                                     // pegado a ella, retroceder recto no ayuda.
 // Tier "lejos de la pared exterior": si terminó la maniobra con MUCHA holgura
 // (distExt > FAR_CM) retrocede más tiempo, para separarse bien de la recta nueva.
-const int           MANIOBRA_BACKOFF_FAR_CM = 80;
+const int           MANIOBRA_BACKOFF_FAR_CM = 70;
 const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
 
 // Grace post-esquiva: SIGUIENDO NO entra a CRUCERO por este tiempo tras el
