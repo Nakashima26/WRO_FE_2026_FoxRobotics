@@ -69,6 +69,20 @@ const float WALL_HOLD_CM = 25.0;
 // carro se ABRE hacia la pared de afuera en vez de pegarse a la de adentro.
 const float WALL_HOLD_GAIN = 2;
 
+// ── Seguir la pared EXTERIOR en la recta (ronda de obstáculos) ───────────────
+// wallCorr solo centra con AMBAS paredes. En la recta la pared INTERIOR está
+// ausente (dR/dL ~200) casi todo el tramo -> sin centrado lateral: tras esquivar
+// un cono el carro holdea el heading pero DERIVA lateralmente hacia el interior
+// (run 750 giro 10: dL 54->71 = se corre 17cm adentro con ang~+5) -> llega a la
+// esquina pegado a la pared/cono interior -> lo roza / la cola lo barre al
+// reversear. La pared EXTERIOR sí está SIEMPRE (dL 54-72). PID para mantener
+// EXT_WALL_TARGET_CM de ella -> el carro va parejo y a posición lateral estable
+// toda la recta, sin importar que falte la interior. Solo con dir de giro
+// conocida y cuando wallCorr (ambas paredes) NO está actuando.
+const float EXT_WALL_TARGET_CM = 50.0f; // distancia a mantener de la pared exterior
+const float EXT_WALL_GAIN      = 0.5f;  // grados de servo por cm de error
+const float EXT_WALL_MAX_DEG   = 15.0f; // tope de la corrección
+
 float errorWall    = 0;
 float prevErrorWall = 0;
 float integralWall  = 0;
@@ -234,11 +248,14 @@ const float         MANIOBRA_SETTLE_RATE_DPS   = 30.0f; // deg/s por debajo de e
 const int           MANIOBRA_SETTLE_QUIETO_N   = 3;     // samples lentos SEGUIDOS para cerrar (~120 ms)
 const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igual aunque no se aquiete
 
-// Fase 4 (retroceso-post): la reversa con algo de yaw residual SIGUE girando el
-// carro (run 724: pivote llegó a -96°, el backoff lo llevó a -137°). Si durante
-// fase 4 el heading se corre más de esto respecto al inicio de la fase, se corta
-// el retroceso YA y pasa a settle -> no acumula esos ~40° extra.
-const float MANIOBRA_BACKOFF_YAW_MAX_DEG = 12.0f;
+// Fase 4 (retroceso-post): la reversa a ciegas (servo centrado) sigue girando el
+// carro ~3-5° hacia adentro CADA maniobra (run 745: fase4->fase6 -7±2° sistemático,
+// asimetría mecánica + yaw residual). Si durante fase 4 el heading se corre más
+// de esto respecto al inicio de la fase, se corta el retroceso YA y pasa a settle.
+// 12 -> 4 (2026-09-08): a 12 casi nunca disparaba y dejaba acumular el drift; a 4
+// corta apenas empieza a rotar. Costo: el backoff toma menos distancia de la
+// recta nueva -- aceptable, rotar es peor. (run 724 fue -40°, esto lo cubre igual.)
+const float MANIOBRA_BACKOFF_YAW_MAX_DEG = 4.0f;
 
 // ── Residual de giro: hace a MANIOBRA_OVERSHOOT_DEG NO crítico ───────────────
 // finalizarManiobra() zeraba el heading a ciegas -> si el pivote sub/sobre-giró
@@ -265,6 +282,18 @@ const float MANIOBRA_RESIDUAL_MAX_DEG = 45.0f;  // tope del residual que se pasa
 // Mantener < 12 (fuga de CRUCERO) y < CRUCERO_STRAIGHTEN_DEG(15) (adopt) para
 // que esos dos no se lo coman.
 const float MANIOBRA_BIAS_AFUERA_DEG = 5.0f;
+// Tope duro de anguloObjetivo en la ronda de obstáculos. finalizarManiobra() lo
+// pone en ±BIAS_AFUERA (±5); la fuga de CRUCERO y el adopt de esquina lo
+// arrastran hacia el chasis chueco -> sin tope llegó a +14.8° en la vuelta 6 y
+// cada maniobra entraba más torcida hasta morir (run 747). Con Opción A +
+// residual handoff, ±5 YA es la referencia real; el tope deja ~3° de fuga para
+// correcciones chicas y CORTA el runaway.
+const float MANIOBRA_AO_CLAMP_DEG = 8.0f;
+// Tope de maniobraInclinacionEntrada: el wall-panic al llegar a la esquina
+// spikea anguloGyro +6-10° en 2-3 frames y fase-0 lo captura como inclinación
+// real -> envenena maniobraIdealRot/residual -> acumulación -> muere ~vuelta 8
+// (run 748). El chasis real no entra a la esquina a más de ~±8.
+const float MANIOBRA_INCL_ENTRADA_MAX_DEG = 10.0f;
 
 const unsigned long MANIOBRA_BACKOFF_MS     = 700;   // retrocede esto tras el pivote (REV con holgura)
 const unsigned long MANIOBRA_BACKOFF_FWD_MS = 700;   // retrocede esto tras el pivote (FWD)
@@ -979,7 +1008,7 @@ void controlPID(long distL, long distR) {
       // ignoraba (orillas684). En SIGUIENDO anguloObjetivo ES la recta y queda fijo.
       if (estado == CRUCERO && fabs(anguloGyro) < 12.0f) {
         anguloObjetivo += (anguloGyro - anguloObjetivo) * 0.05f;
-        anguloObjetivo  = constrain(anguloObjetivo, -12.0f, 12.0f);
+        anguloObjetivo  = constrain(anguloObjetivo, -MANIOBRA_AO_CLAMP_DEG, MANIOBRA_AO_CLAMP_DEG);
       }
     }
 
@@ -993,7 +1022,23 @@ void controlPID(long distL, long distR) {
       visCorr = constrain(-(obsBiasNorm * ppSteerGain) * 0.5f, -15.0f, 15.0f);
     }
 
-    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic), 20, 150);
+    // Seguir la pared EXTERIOR (ver EXT_WALL_* arriba). Solo cuando wallCorr
+    // (ambas paredes) NO actúa: interior ausente. Convención "centroServo + X":
+    // X>0 = izquierda. Exterior a la IZQ (giro der): si dL > target (lejos),
+    // steer izq (+) para acercarse.
+    float extWallCorr = 0.0f;
+    if (rondaObstaculos && primerGiro && wallCorr == 0.0f) {
+      long distExt = direccionIzquierda ? distR : distL;
+      long distIntW = direccionIzquierda ? distL : distR;
+      bool intAbierta = (distIntW <= 0 || distIntW > umbralPared);
+      if (distExt > 0 && distExt <= umbralPared && intAbierta) {
+        float err  = (float)distExt - EXT_WALL_TARGET_CM;   // >0 = lejos del exterior
+        float corr = constrain(err * EXT_WALL_GAIN, -EXT_WALL_MAX_DEG, EXT_WALL_MAX_DEG);
+        extWallCorr = direccionIzquierda ? -corr : +corr;
+      }
+    }
+
+    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), 20, 150);
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
@@ -1440,7 +1485,8 @@ void loop() {
         // actual como referencia (lo que visión dejó, recto) y no vuelvas al
         // anguloObjetivo viejo. Si entramos a gyro-hold por estar CHUECO, NO
         // hacer esto -> ese heading es justo el que hay que corregir.
-        anguloObjetivo = anguloGyro;
+        // Clamp: sin él este adopt llegó a +14.8° (run 747) -> acumulación.
+        anguloObjetivo = constrain(anguloGyro, -MANIOBRA_AO_CLAMP_DEG, MANIOBRA_AO_CLAMP_DEG);
         integralGyro   = 0;
         prevErrorGyro  = 0;
       }
@@ -1595,7 +1641,18 @@ void loop() {
       if (!maniobraDecidida) decidirManiobra(distL, distR);   // safety (normalmente CRUCERO ya decidió)
 
       if (maniobraFase < 0) {   // phase-init (una vez por maniobra)
-        maniobraInclinacionEntrada = anguloGyro;
+        // Clamp: en la aproximación a la esquina el wall-panic (dR~2-6, servo a
+        // tope) mete un pico de +6-10° en anguloGyro en 2-3 frames, y fase-0 lo
+        // captura como si fuera la inclinación real (run 748: chasis venía a ~+8,
+        // capturó +18.7). Eso envenena maniobraIdealRot -> el residual sale ~10°
+        // mal -> finalizarManiobra deja el heading mal -> la recta siguiente
+        // arranca chueca -> pico más grande la próxima -> muere en ~8 vueltas.
+        // El chasis real entrando a la esquina no pasa de ~±8 (mantuvo eso toda
+        // la recta). Un pico transitorio se recorta; una entrada REAL chueca se
+        // recorta también pero ahí el residual + RECUPERANDO terminan de cuadrar.
+        maniobraInclinacionEntrada = constrain(anguloGyro,
+                                     -MANIOBRA_INCL_ENTRADA_MAX_DEG,
+                                      MANIOBRA_INCL_ENTRADA_MAX_DEG);
         // Rotación ideal (con signo) para cuadrar con la recta nueva = 90° menos
         // lo que ya venías inclinado hacia el giro. Se usa AngGiro (90), NO el
         // ANG_GIRO_MANIOBRA_FWD (84): ese 84 es un ajuste de inercia para el
