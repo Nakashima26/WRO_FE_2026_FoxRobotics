@@ -236,6 +236,23 @@ OBS_MEM_DECAY      = 0.06    # confianza perdida por frame sin re-ver el obstác
                             # 2026-08-28: 0.12->0.06 al doblar fps (~7->~14), mismo decay/seg
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
+
+# ── Fade de la urgencia de esquiva SOLO para la centerline (2026-09-08) ──
+# Una vez que el carro YA rodeó un cono por ÁNGULO y la cámara lo PERDIÓ, la
+# MEMORIA del cono (no el cono) sigue acercándose por dead-reckon y la
+# centerline sigue curvando alrededor -> volante de más aunque ya vas girado
+# ("empujón" justo antes de PASADO, run 743: obs -0.35 -> -0.55 en yaw 45->54).
+# Se baja a ~0 el `conf` que ve detect_centerline (wgt = ramp * conf, centerline
+# .py) -> el fantasma deja de curvar el path y el carro rueda su propio arco.
+# NO toca o.conf real: _prune / decay / trigger de RECUPERANDO siguen igual, así
+# que ESTE fade NO puede disparar un RECUPERANDO falso.
+# Doble candado: yaw alto (comprometido) Y conf < FADE_CONF (cámara lo perdió).
+OBS_MEM_PATH_FADE_YAW_DEG  = 45.0   # yaw (deg) rodeado el cono para empezar a atenuar
+                                    # su peso en la centerline. Subir si el carro
+                                    # under-esquiva; bajar (~40) si aún sobre-gira.
+OBS_MEM_PATH_FADE_SPAN_DEG = 12.0   # grados extra de yaw sobre los que el peso baja a 0
+OBS_MEM_PATH_FADE_CONF     = 0.9    # SOLO atenúa si la conf ya cayó bajo esto (fantasma,
+                                    # no un cono trackeado). Cono a la vista (conf~1) -> intacto.
 OBS_MEM_BEHIND_PAD = -35    # 2026-08-28: -18 -> -75 (rojo bien) pero -75 mató al
                             # verde: layout con verde a 40cm de la pared EXTERIOR
                             # -> traverse gigante -> a y=305 el verde sigue 150mm
