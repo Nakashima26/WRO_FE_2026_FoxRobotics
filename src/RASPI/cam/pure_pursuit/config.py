@@ -516,20 +516,6 @@ RECUP_CORNER_TURN_DELAY_FRAMES = 3
 # a media esquiva -> RECUPERANDO deja de perder la lata que venía siguiendo.
 TURN_EST_G_CONFIRM_FRAMES = 2
 
-# ─── Reactivar la memoria de obstáculos en la COLA de la MANIOBRA ────────────
-# Fase del ACK (fase=) a partir de la cual la Pi vuelve a correr memory.update()
-# aunque el ESP siga reportando est=G. Fases MANIOBRA: -1 sin init, 0 frenar-
-# antes, 1 PIVOTE, 2 frenar-después, 3 frenar-y-fwd, 4 RETROCESO-POST, 5 frenar-
-# tras-retroceso, 6 SETTLE. A partir de 4 el ESP ya dejó de pivotear, el chasis
-# está ~alineado con la recta nueva y el BEV es estable; además durante MANIOBRA
-# el ESP maneja el servo con su FSM e IGNORA el obs de la Pi, así que adquirir
-# el cono acá NO afecta el giro — solo deja el track + la centerline listos para
-# cuando salga a est=S. Sin esto, el verde de la salida del giro (rectas
-# verde-primero S2/S4/S6/S8) se ignora ~40 frames, la memoria arranca de cero al
-# salir del giro y el carro reacciona tarde -> PIVOTE de 65° en vez de arco.
-# Subir a 5 si fase 4 (reversa) mete jitter en la posición del cono; bajar no.
-MANIOBRA_TAIL_FASE_MEM = 4
-
 # ─── Detector de obstáculos DURANTE el giro (mid_turn.py) ────────────────────
 # FASE 1: solo observa y registra (línea [MTURN] en journalctl). NO cambia el
 # steering ni manda nada al ESP32. Sirve para medir en pista si la detección
@@ -643,12 +629,9 @@ OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara
 
 # Red de seguridad para runtime_nuevo.py: si el ESP32 se queda atorado
 # reportando est=G (ack perdido, giro real que nunca termina, etc.), no
-# dejar la memoria de obstáculos apagada para siempre.
-# 3.0 -> 6.0 (2026-09-08): las MANIOBRAS reales (pivote + retroceso + settle)
-# tardan ~3.5-4s y SIEMPRE cruzaban los 3.0s -> el timeout saltaba a media
-# maniobra, forzaba un 2º memory.reset() (est=G x5x) y borraba lo que la cola
-# de MANIOBRA (fase>=4) acababa de adquirir. A 6.0 solo salta en un atasco real.
-TURN_TIMEOUT_S = 6.0
+# dejar la memoria de obstáculos apagada para siempre — un giro real dura
+# bastante menos que esto.
+TURN_TIMEOUT_S = 3.0
 
 # ─── Hint direccional (obstáculo lejano, fuera de rango BEV) ─────────────────
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
