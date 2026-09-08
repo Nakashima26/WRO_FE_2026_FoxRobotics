@@ -250,14 +250,11 @@ const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igu
 
 // Fase 4 (retroceso-post): la reversa a ciegas (servo centrado) giraba el carro
 // ~3-5° hacia adentro CADA maniobra (run 745: fase4->fase6 -7±2° sistemático,
-// asimetría mecánica + yaw residual). Antes esto lo "resolvía" cortando el
-// retroceso apenas el heading se movía 4° -> la reversa quedaba cortísima.
-// 2026-09-08 (tarde): ahora la fase 4 corre un lazo cerrado de heading
-// (aplicarReversaHold / KpRev·KiRev·KdRev) que mantiene el rumbo de entrada,
-// así el carro reversea RECTO y puede hacerlo por más tiempo. Esta constante
-// pasa a ser SOLO una red de seguridad dura: si aun con el PID el heading se
-// va tanto (PID mal tuneado, gyro loco, rueda trabada) se aborta el retroceso.
-const float MANIOBRA_BACKOFF_YAW_MAX_DEG = 18.0f;
+// asimetría mecánica + yaw residual). 2026-09-08 (tarde): la fase 4 corre un
+// lazo cerrado de heading (aplicarReversaHold / KpRev·KiRev·KdRev) que mantiene
+// el rumbo de entrada, así el carro reversea RECTO y puede hacerlo por más
+// tiempo. Se quitó el corte por yaw (>4° -> abortaba el retroceso): con el PID
+// manteniendo el rumbo ya no hace falta y cortaba la reversa antes de tiempo.
 
 // ── Residual de giro: hace a MANIOBRA_OVERSHOOT_DEG NO crítico ───────────────
 // finalizarManiobra() zeraba el heading a ciegas -> si el pivote sub/sobre-giró
@@ -308,7 +305,7 @@ const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pare
                                                     // pegado a ella, retroceder recto no ayuda.
 // Tier "lejos de la pared exterior": si terminó la maniobra con MUCHA holgura
 // (distExt > FAR_CM) retrocede más tiempo, para separarse bien de la recta nueva.
-const int           MANIOBRA_BACKOFF_FAR_CM = 90;
+const int           MANIOBRA_BACKOFF_FAR_CM = 80;
 const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
 
 // Grace post-esquiva: SIGUIENDO NO entra a CRUCERO por este tiempo tras el
@@ -339,7 +336,7 @@ int           maniobraSettleQuieto  = 0;   // samples consecutivos con rate por 
 float         maniobraIdealRot      = 0.0f;// rotación (con signo) que deja el chasis cuadrado con la
                                            // recta nueva; finalizarManiobra() pasa (anguloGyro - esto)
                                            // como residual a la recuperación (ver MANIOBRA_RESIDUAL_MAX_DEG)
-float         maniobraFase4AngIni   = 0.0f;// anguloGyro al entrar a fase 4 = setpoint del heading-hold de reversa (y ref del corte de seguridad)
+float         maniobraFase4AngIni   = 0.0f;// anguloGyro al entrar a fase 4 = setpoint del heading-hold de reversa
 
 // Rectas con el cajón de estacionamiento: el borde del cajón tapa a ratos el
 // lateral que debería "abrirse" en la esquina, así que justo en el frame en
@@ -368,7 +365,7 @@ int  lateralDropCount   = 0;
 bool giroSucioArmado    = false;
 
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
-const float headingSettleDeg = 5.0;  // |errorGyro| por debajo de esto = "alineado"
+const float headingSettleDeg = 6.0;  // |errorGyro| por debajo de esto = "alineado"
 
 // Red de seguridad: si el robot entra a RECUPERANDO cerca de una esquina real
 // (donde un ultrasónico lee "sin pared" legítimamente, no por desalineación),
@@ -381,7 +378,7 @@ const unsigned long recuperandoTimeoutMs = 1500;
 // recuperandoMinMs SEGUIDOS con el heading YA alineado -> recién ahí sale, ya
 // recto y con el frontal/laterales calmados. (2026-09-07: antes contaba desde
 // que ENTRABA a RECUPERANDO, no desde que llegaba al heading -> mal aplicado.)
-const unsigned long recuperandoMinMs = 150;
+const unsigned long recuperandoMinMs = 75;
 unsigned long headingOkSinceMs = 0;   // millis del 1er frame con headingOk (0 = aún no / se perdió)
 
 // ── Giros ─────────────────────────────────────────────────────────────────────
@@ -1792,7 +1789,7 @@ void loop() {
           if (maniobraRetroceso || !maniobraReversa) {
             motorReversa();               // motor parado -> arranca en reversa
             maniobraFaseMs      = millis();
-            maniobraFase4AngIni = anguloGyro;   // referencia del heading-hold + red de seguridad
+            maniobraFase4AngIni = anguloGyro;   // referencia (setpoint) del heading-hold de reversa
             integralRev   = 0;                  // PID de reversa limpio para esta fase 4
             prevErrorRev  = 0;
             lastRevHoldMs = millis();
@@ -1807,8 +1804,9 @@ void loop() {
       // ── Fase 4: RETROCESO-POST — toma distancia de la recta nueva ─────────
       //   Retrocede recto con heading-hold de lazo cerrado (aplicarReversaHold):
       //   el servo se corrige para mantener maniobraFase4AngIni en vez de quedar
-      //   fijo al centro -> ya NO acumula el giro "hacia adentro" y puede
-      //   reversear largo. backoffGirando queda solo como tope duro de seguridad.
+      //   fijo al centro -> ya NO acumula el giro "hacia adentro". Sale solo por
+      //   tiempo (backoffMs); el PID mantiene el rumbo, así que puede reversear
+      //   largo y estable sin cortarse por yaw.
       if (maniobraFase == 4) {
         motorReversa();
         aplicarReversaHold(maniobraFase4AngIni);   // lazo cerrado: reversa RECTA (antes: servo al centro)
@@ -1817,11 +1815,7 @@ void loop() {
         if      (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
         else if (maniobraDistExt > MANIOBRA_BACKOFF_FAR_CM)    backoffMs = MANIOBRA_BACKOFF_FAR_MS;
         else                                                  backoffMs = MANIOBRA_BACKOFF_MS;
-        // Red de seguridad dura: con el heading-hold trabajando esto NO debería
-        // dispararse; si lo hace es que el PID no puede mantener el rumbo
-        // (mal tuneado, gyro loco, rueda trabada) -> aborta el retroceso.
-        bool backoffGirando = fabs(anguloGyro - maniobraFase4AngIni) > MANIOBRA_BACKOFF_YAW_MAX_DEG;
-        if (millis() - maniobraFaseMs >= backoffMs || backoffGirando) {
+        if (millis() - maniobraFaseMs >= backoffMs) {
           motorCoast();
           maniobraFaseMs = millis();
           maniobraFase   = 5;
