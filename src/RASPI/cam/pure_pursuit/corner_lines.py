@@ -187,12 +187,28 @@ class OrangeLineTracker:
         self._candidate: dict | None = None
         self._candidate_count = 0
         self._lost_count = 0
+        # Dead-reckon de near_y cuando la línea se pierde CERCA de la esquina
+        # (ver ORANGE_DR_* en config). `_out` es lo que devolvió update() este
+        # frame -- puede ser self.stable (real) o una lectura estimada; classify()
+        # usa _out, no self.stable.
+        self._dr_ny: float | None = None
+        self._dr_frames = 0
+        self._dr_latched = False   # el ancla estuvo "en la boca" -> no expira hasta reset()
+        self._post_turn_cd = 0     # tras reset(): ignora TODA lectura de naranja N frames
+        self._out: dict = self.stable
 
     def reset(self):
         self.stable = {"seen": False, "near_y": None, "line": None}
         self._candidate = None
         self._candidate_count = 0
         self._lost_count = 0
+        self._dr_ny = None
+        self._dr_frames = 0
+        self._dr_latched = False
+        # Cooldown post-giro: la línea que se ve recién girado suele ser la que
+        # se acaba de pasar (o su residual) -> no clasificar contra ella.
+        self._post_turn_cd = int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 12))
+        self._out = self.stable
 
     def _matches_candidate(self, raw: dict) -> bool:
         if self._candidate is None or raw["seen"] != self._candidate["seen"]:
@@ -201,12 +217,26 @@ class OrangeLineTracker:
             return True
         return abs(raw["near_y"] - self._candidate["near_y"]) <= self.tolerance_px
 
-    def update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict:
+    def update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None,
+              ds_px: float = 0.0, in_turn_cooldown: bool = False) -> dict:
         """
         bev_hsv: ver detect_lines() -- si el caller ya convirtió bev_bgr a
         HSV este frame (runtime_nuevo.py lo hace para compartirla con
         detect_centerline()), pásala aquí para no repetir la conversión.
+
+        ds_px / in_turn_cooldown: para el dead-reckon de near_y cuando la línea
+        se pierde CERCA de la esquina (ver ORANGE_DR_* en config). ds_px = px
+        que la línea se acerca al robot este frame (== el ds_px de la memoria).
         """
+        # Cooldown post-giro: ignora TODA lectura de naranja estos frames (la que
+        # se ve recién girado es la del giro que se acaba de hacer). NO se
+        # re-acumula candidato ni se toca el DR.
+        if self._post_turn_cd > 0:
+            self._post_turn_cd -= 1
+            self.stable = {"seen": False, "near_y": None, "line": None}
+            self._out = self.stable
+            return self._out
+
         if bev_hsv is None:
             bev_hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
         raw = detect_lines(bev_bgr, bev_hsv=bev_hsv)["Orange"]
@@ -227,7 +257,41 @@ class OrangeLineTracker:
             self._apply_candidate(dict(self._candidate), bev_hsv,
                                   bev_bgr.shape[1])
 
-        return self.stable
+        # self.stable es SIEMPRE la lectura real del tracker (nunca la estimada).
+        dr_min_y = float(getattr(C, "ORANGE_DR_MIN_ANCHOR_Y", 240.0))
+        dr_max_f = int(getattr(C, "ORANGE_DR_MAX_FRAMES", 8))
+        dr_latch_y = float(getattr(C, "ORANGE_DR_LATCH_Y", 290.0))
+        if self.stable["seen"]:
+            ny = self.stable["near_y"]
+            if ny is not None and ny >= dr_min_y:
+                # línea real y CERCA: re-ancla el DR. Si llegó a la "boca"
+                # (>= LATCH_Y) queda latcheada -> al perderse NO expira: todo lo
+                # que se vea después es siguiente segmento hasta el giro.
+                self._dr_ny = float(ny)
+                self._dr_latched = (ny >= dr_latch_y)
+            else:
+                self._dr_ny = None
+                self._dr_latched = False
+            self._dr_frames = 0
+            self._out = self.stable
+            return self._out
+
+        # línea NO vista: ¿la mantenemos "marcada"?
+        _dr_ok = (self._dr_ny is not None and not in_turn_cooldown
+                  and (self._dr_latched or self._dr_frames < dr_max_f))
+        if _dr_ok:
+            if not self._dr_latched and ds_px > 0.0:
+                self._dr_ny += ds_px          # sin latch: marcha unos frames
+            self._dr_frames += 1              # latcheada: SIT, solo cuenta
+            self._out = {"seen": True, "near_y": self._dr_ny,
+                         "line": None, "dead_reckoned": True}
+            return self._out
+
+        self._dr_ny = None
+        self._dr_frames = 0
+        self._dr_latched = False
+        self._out = self.stable
+        return self._out
 
     def _apply_candidate(self, cand: dict, bev_hsv: np.ndarray, w: int) -> None:
         """Acepta la lectura persistida, suavizándola contra el estado previo."""
@@ -302,12 +366,22 @@ class OrangeLineTracker:
         funciona igual de bien que antes cuando la línea SÍ es horizontal,
         y es mejor que no clasificar nada.
         """
-        if not self.stable["seen"]:
+        # _out = lo que devolvió el último update(): la lectura real o la
+        # ESTIMADA (dead_reckoned). Sin update() previo, cae a self.stable.
+        s = getattr(self, "_out", None) or self.stable
+        if not s["seen"]:
             return None
-        line = self.stable["line"]
+        line = s.get("line")
         if line is not None:
-            return line_side_is_near(ox, oy, line, robot_x, robot_y)
-        return oy > self.stable["near_y"]
+            res = line_side_is_near(ox, oy, line, robot_x, robot_y)
+        else:
+            res = oy > s["near_y"]
+        # La línea ESTIMADA solo puede decir "beyond" (diferir la esquiva),
+        # nunca "mía" (hacerla): si se equivoca, el peor caso es no esquivar
+        # algo que debía, nunca esquivar en la boca de la esquina.
+        if s.get("dead_reckoned") and res is True:
+            return None
+        return res
 
 
 class TurnDirectionTracker:

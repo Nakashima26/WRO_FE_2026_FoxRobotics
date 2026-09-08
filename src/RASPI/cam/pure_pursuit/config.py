@@ -688,6 +688,34 @@ LINE_TRACK_NEAR_Y_EMA     = 0.4  # peso de la lectura nueva al mezclar near_y (E
 LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendiente:
                                  # amortigua el "baile" de la diagonal frame a frame.
 
+# ── Dead-reckon de la línea naranja (clasificación mía / siguiente-recta) ──
+# Si la línea se pierde de vista CERCA de la esquina (chasis ladeado tras una
+# recuperación suave), sin ella runtime clasifica TODO como `mia` y el carro
+# intenta esquivar el rojo del SIGUIENTE tramo en la boca de la esquina (bug
+# 2026-09-07, "siempre la misma vuelta"). Tras el hold del tracker, se estima
+# near_y unos frames marchándola por ds_px. GUARDAS (todas):
+#  - solo si la última lectura REAL tuvo near_y >= MIN_ANCHOR_Y -> proyección
+#    BEV fiable (una línea vista de LEJOS, near_y chico, es basura -> NO se
+#    estima, comportamiento actual). Cubre "la venía viendo de lejos, esquivé,
+#    la perdí" -> no genera línea fantasma.
+#  - solo MAX_FRAMES frames sin re-verla -> acota el error acumulado del ds_px.
+#  - nunca en el cooldown post-giro ni tras un reset del tracker (línea pre-giro
+#    no aplica a la recta nueva).
+#  - la línea ESTIMADA solo puede clasificar `beyond` (diferir la esquiva),
+#    NUNCA `mia` -> si se equivoca, el peor caso es "no esquiva algo que debía"
+#    (lo agarra la maniobra / el siguiente tramo), nunca "esquiva en la boca de
+#    la esquina" (fatal). Ver OrangeLineTracker.classify().
+ORANGE_DR_MIN_ANCHOR_Y = 240.0   # px BEV; la línea real debió estar al menos así de cerca
+ORANGE_DR_MAX_FRAMES   = 8       # frames que se estima sin volver a verla (si NO latcheó)
+ORANGE_DR_LATCH_Y      = 290.0   # px BEV; si la línea real llegó a estar ASÍ de cerca ("boca
+                                 # de esquina") antes de perderse -> LATCH: no expira a los
+                                 # MAX_FRAMES, se mantiene marcada hasta el giro (todo lo que
+                                 # se vea después es siguiente segmento). La detección real
+                                 # de una línea nueva la re-ancla / la suelta.
+ORANGE_POST_TURN_CD_FRAMES = 12  # tras reset() del tracker (giro): ignora TODA lectura de
+                                 # naranja estos frames -- la que se ve recién girado suele
+                                 # ser la del giro que se acaba de hacer.
+
 # Frames tras TERMINAR un giro durante los cuales NO se filtra por la línea
 # naranja (todo cuenta como "mi recta", sin excepción) — justo al salir de
 # un giro, OrangeLineTracker se reseteó y apenas está re-acumulando lecturas

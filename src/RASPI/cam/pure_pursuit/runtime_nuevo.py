@@ -708,7 +708,14 @@ class PPRuntime:
                         # el tracker con persistencia (no detect_lines() cruda)
                         # para no "bailar" entre el segmento ocluido y el
                         # despejado frame a frame.
-                        line_info = {"Orange": self.line_tracker.update(bev_frame, bev_hsv=bev_hsv)}
+                        # ds_px: px que la línea se acerca al robot este frame
+                        # (== el ds_px de la memoria) — para el dead-reckon de
+                        # near_y si se pierde cerca de la esquina (ORANGE_DR_*).
+                        _dr_ds_px = ((C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX
+                                     if dt_s > 0 else 0.0)
+                        line_info = {"Orange": self.line_tracker.update(
+                            bev_frame, bev_hsv=bev_hsv, ds_px=_dr_ds_px,
+                            in_turn_cooldown=(self._turn_recovery_frames > 0))}
 
                         # ── Cooldown post-giro: justo al salir de un giro,
                         # OrangeLineTracker se reseteó y apenas está re-
