@@ -463,6 +463,30 @@ class ObstacleMemory:
         steering_now = abs(steer_deg) > front_steer_max
         kept: list[_Obs] = []
         passed = False
+
+        # ── PASADO por PIVOTE ────────────────────────────────────────────────
+        # Ver OBS_MEM_PIVOT_PASS_ENABLED / OBS_MEM_PATH_FADE_* en config.
+        _piv_on   = getattr(C, "OBS_MEM_PIVOT_PASS_ENABLED", True)
+        _piv_yaw  = (getattr(C, "OBS_MEM_PATH_FADE_YAW_DEG", 45.0)
+                     + getattr(C, "OBS_MEM_PATH_FADE_SPAN_DEG", 12.0))
+        _piv_conf = getattr(C, "OBS_MEM_PATH_FADE_CONF", 0.9)
+
+        def _yaw_since(_o: "_Obs") -> float:
+            if _o.heading0 is None or self._prev_heading is None:
+                return 0.0
+            return abs((self._prev_heading - _o.heading0 + 180.0) % 360.0 - 180.0)
+
+        # ¿Queda algún cono de color TODAVÍA por esquivar (fresco, adelante, no
+        # rodeado)? Si sí, NO se dispara el PASADO por pivote de OTRO cono -- la
+        # esquiva sigue en curso y enderezar clavaría el que falta.
+        _piv_pending = _piv_on and any(
+            _o2.color in ("Red", "Green")
+            and _o2.beyond is not True
+            and _o2.conf >= C.OBS_MEM_MIN_CONF
+            and _yaw_since(_o2) < _piv_yaw
+            for _o2 in self._obs
+        )
+
         for o in self._obs:
             was_ahead = o.y_min < ahead_gate
             if o.conf < C.OBS_MEM_MIN_CONF:
@@ -471,6 +495,24 @@ class ObstacleMemory:
                 # decaer latas que nunca se rodearon -- revertido.)
                 self.last_prune_reason = f"BAJA_CONF y={o.y:.0f} conf={o.conf:.2f}"
                 continue
+
+            # PASADO por PIVOTE: el fade de centerline ya apagó este cono (yaw
+            # muy por encima de lo rodeado + la cámara lo perdió) y no queda
+            # otro cono fresco por esquivar -> la esquiva terminó de hecho.
+            # Dispara sin esperar a que la `y` dead-reckon cruce behind_y (que
+            # en pivote llega ~15° tarde). Ver OBS_MEM_PIVOT_PASS_ENABLED.
+            if (_piv_on and not _piv_pending
+                    and was_ahead and o.beyond is not True
+                    and o.color in ("Red", "Green")
+                    and o.conf < _piv_conf
+                    and _yaw_since(o) >= _piv_yaw):
+                self.last_prune_reason = (
+                    f"PASADO(pivote) yaw={_yaw_since(o):.0f} "
+                    f"conf={o.conf:.2f} y={o.y:.0f}"
+                )
+                passed = True
+                continue
+
             if o.y > behind_y:                       # ya quedó detrás del robot
                 on_axis = abs(o.x0 - self.rx) <= pass_halfw
                 # Esquiva de DESPLAZAMIENTO LATERAL: la lata iba centrada y el
