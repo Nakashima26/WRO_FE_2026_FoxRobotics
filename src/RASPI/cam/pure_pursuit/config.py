@@ -115,6 +115,18 @@ CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # círculo ("brinco hacia adentro"). 90px = arco de
                               # salida limpio, sin sesgar tanto tramo por delante
                               # que estorbe a la siguiente lata.
+
+# ── Cap del steer de APROXIMACIÓN a un cono de color (2026-09-08) ────────────
+# Un VERDE a la izquierda del eje pide ~2x el desplazamiento lateral de un ROJO
+# (se pasa por su izquierda, regla WRO) -> la centerline satura el steer DESDE
+# LEJOS (medido: obs -0.63 / steer -37°, ang pivotea a +43°) mientras que un
+# rojo a la MISMA distancia se estanca en ~+18° y arquea limpio. Mientras el
+# cono está LEJOS (y < _Y) se capa |steer| a lo que el rojo ya hace bien -> el
+# verde RAMPEA/arquea en vez de pivotear. Al acercarse (y >= _Y) el cap se
+# suelta: si la geometría pide más para no rozarlo, que lo dé. NO aplica si ya
+# hay un cono CERCA (ese sí puede necesitar el steer completo). 0 = sin cap.
+CENTERLINE_COLOR_APPROACH_MAX_STEER_DEG = 26.0
+CENTERLINE_COLOR_APPROACH_Y            = 300.0   # px BEV; y del cono por debajo de esto = "lejos"
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 CENTERLINE_DEBUG      = False  # 2026-08-29: APAGADO. El log [CLDBG] fila-a-fila
                               # llenaba el journal de la Pi (74MB) y rotaba los
