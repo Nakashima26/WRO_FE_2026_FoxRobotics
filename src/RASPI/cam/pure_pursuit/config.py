@@ -247,9 +247,14 @@ OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
 # NO toca o.conf real: _prune / decay / trigger de RECUPERANDO siguen igual, así
 # que ESTE fade NO puede disparar un RECUPERANDO falso.
 # Doble candado: yaw alto (comprometido) Y conf < FADE_CONF (cámara lo perdió).
-OBS_MEM_PATH_FADE_YAW_DEG  = 45.0   # yaw (deg) rodeado el cono para empezar a atenuar
+OBS_MEM_PATH_FADE_YAW_DEG  = 38.0   # yaw (deg) rodeado el cono para empezar a atenuar
                                     # su peso en la centerline. Subir si el carro
-                                    # under-esquiva; bajar (~40) si aún sobre-gira.
+                                    # under-esquiva; bajar si aún sobre-gira / RECUPERANDO
+                                    # entra tarde. 45->38 (2026-09-08): en el verde grande
+                                    # RECUPERANDO entraba tan tarde que casi/rozaba la pared
+                                    # -> el pivote-PASADO ahora dispara a yaw ~50 (era 57).
+                                    # Sigue doble-candado con conf<0.9; esquivas normales
+                                    # (yaw 20-25°, cono a la vista) no lo tocan.
 OBS_MEM_PATH_FADE_SPAN_DEG = 12.0   # grados extra de yaw sobre los que el peso baja a 0
 OBS_MEM_PATH_FADE_CONF     = 0.9    # SOLO atenúa si la conf ya cayó bajo esto (fantasma,
                                     # no un cono trackeado). Cono a la vista (conf~1) -> intacto.
