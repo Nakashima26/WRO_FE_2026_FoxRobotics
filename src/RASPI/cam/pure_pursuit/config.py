@@ -117,15 +117,19 @@ CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # que estorbe a la siguiente lata.
 
 # ── Cap del steer de APROXIMACIÓN a un cono de color (2026-09-08) ────────────
-# Un VERDE a la izquierda del eje pide ~2x el desplazamiento lateral de un ROJO
-# (se pasa por su izquierda, regla WRO) -> la centerline satura el steer DESDE
-# LEJOS (medido: obs -0.63 / steer -37°, ang pivotea a +43°) mientras que un
-# rojo a la MISMA distancia se estanca en ~+18° y arquea limpio. Mientras el
-# cono está LEJOS (y < _Y) se capa |steer| a lo que el rojo ya hace bien -> el
-# verde RAMPEA/arquea en vez de pivotear. Al acercarse (y >= _Y) el cap se
-# suelta: si la geometría pide más para no rozarlo, que lo dé. NO aplica si ya
-# hay un cono CERCA (ese sí puede necesitar el steer completo). 0 = sin cap.
-CENTERLINE_COLOR_APPROACH_MAX_STEER_DEG = 26.0
+# DESACTIVADO 2026-09-08. Idea original: un VERDE pide ~2x el desplazamiento de
+# un ROJO -> la centerline saturaba el steer de lejos y el carro pivoteaba, así
+# que se capaba |steer| a 26° mientras el cono estaba "lejos" (y_BEV < _Y) y se
+# soltaba al cruzar _Y. En pista (orillas771, 1ra corrida con esto) el cap clavó
+# el steer en exactamente -26.0°/obs -0.433 por ~1.5s en la esquiva del verde
+# del segmento 4: no pudo cerrar el arco, se comió la pared de enfrente
+# (dF 61->24) y se fue contra la exterior (dL 41->28) -> RECUPERANDO tarde con
+# overshoot -> choque en el giro 4. La corrida anterior sin el cap (orillas770,
+# commit 493af83) usó 27-37° libremente en 415 frames e hizo 12/12 limpio.
+# El release por y_BEV >= 300 es estructuralmente tarde (a esa Y el cono ya te
+# pasó de lado) y `_prev_steer_deg = steer_deg` clava el slew al valor capado.
+# 0 = sin cap.
+CENTERLINE_COLOR_APPROACH_MAX_STEER_DEG = 0.0
 CENTERLINE_COLOR_APPROACH_Y            = 300.0   # px BEV; y del cono por debajo de esto = "lejos"
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 CENTERLINE_DEBUG      = False  # 2026-08-29: APAGADO. El log [CLDBG] fila-a-fila
