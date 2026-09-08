@@ -248,14 +248,16 @@ const float         MANIOBRA_SETTLE_RATE_DPS   = 30.0f; // deg/s por debajo de e
 const int           MANIOBRA_SETTLE_QUIETO_N   = 3;     // samples lentos SEGUIDOS para cerrar (~120 ms)
 const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igual aunque no se aquiete
 
-// Fase 4 (retroceso-post): la reversa a ciegas (servo centrado) sigue girando el
-// carro ~3-5° hacia adentro CADA maniobra (run 745: fase4->fase6 -7±2° sistemático,
-// asimetría mecánica + yaw residual). Si durante fase 4 el heading se corre más
-// de esto respecto al inicio de la fase, se corta el retroceso YA y pasa a settle.
-// 12 -> 4 (2026-09-08): a 12 casi nunca disparaba y dejaba acumular el drift; a 4
-// corta apenas empieza a rotar. Costo: el backoff toma menos distancia de la
-// recta nueva -- aceptable, rotar es peor. (run 724 fue -40°, esto lo cubre igual.)
-const float MANIOBRA_BACKOFF_YAW_MAX_DEG = 4.0f;
+// Fase 4 (retroceso-post): la reversa a ciegas (servo centrado) giraba el carro
+// ~3-5° hacia adentro CADA maniobra (run 745: fase4->fase6 -7±2° sistemático,
+// asimetría mecánica + yaw residual). Antes esto lo "resolvía" cortando el
+// retroceso apenas el heading se movía 4° -> la reversa quedaba cortísima.
+// 2026-09-08 (tarde): ahora la fase 4 corre un lazo cerrado de heading
+// (aplicarReversaHold / KpRev·KiRev·KdRev) que mantiene el rumbo de entrada,
+// así el carro reversea RECTO y puede hacerlo por más tiempo. Esta constante
+// pasa a ser SOLO una red de seguridad dura: si aun con el PID el heading se
+// va tanto (PID mal tuneado, gyro loco, rueda trabada) se aborta el retroceso.
+const float MANIOBRA_BACKOFF_YAW_MAX_DEG = 18.0f;
 
 // ── Residual de giro: hace a MANIOBRA_OVERSHOOT_DEG NO crítico ───────────────
 // finalizarManiobra() zeraba el heading a ciegas -> si el pivote sub/sobre-giró
@@ -277,6 +279,9 @@ const float MANIOBRA_RESIDUAL_MAX_DEG = 45.0f;  // tope del residual que se pasa
 // que aunque la recuperación salga corta el carro deriva hacia la pared, no
 // hacia una lata. NO es un error a corregir: es el objetivo. Costo: recorre la
 // recta un poco cangrejo y el wall PID pelea contra este offset fijo.
+// TAMBIÉN compensa la DERIVA mecánica del chasis (tira hacia adentro): sin este
+// +5 el carro se va abriendo hacia adentro toda la recta y termina chocando
+// obstáculos de la recta siguiente. NO bajarlo a 0.
 //   giro DER -> exterior = izquierda -> anguloGyro positivo -> +BIAS
 //   giro IZQ -> exterior = derecha   -> -BIAS
 // Mantener < 12 (fuga de CRUCERO) y < CRUCERO_STRAIGHTEN_DEG(15) (adopt) para
@@ -334,7 +339,7 @@ int           maniobraSettleQuieto  = 0;   // samples consecutivos con rate por 
 float         maniobraIdealRot      = 0.0f;// rotación (con signo) que deja el chasis cuadrado con la
                                            // recta nueva; finalizarManiobra() pasa (anguloGyro - esto)
                                            // como residual a la recuperación (ver MANIOBRA_RESIDUAL_MAX_DEG)
-float         maniobraFase4AngIni   = 0.0f;// anguloGyro al entrar a fase 4 (corta el backoff si sigue girando)
+float         maniobraFase4AngIni   = 0.0f;// anguloGyro al entrar a fase 4 = setpoint del heading-hold de reversa (y ref del corte de seguridad)
 
 // Rectas con el cajón de estacionamiento: el borde del cajón tapa a ratos el
 // lateral que debería "abrirse" en la esquina, así que justo en el frame en
@@ -363,7 +368,7 @@ int  lateralDropCount   = 0;
 bool giroSucioArmado    = false;
 
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
-const float headingSettleDeg = 4.0;  // |errorGyro| por debajo de esto = "alineado"
+const float headingSettleDeg = 5.0;  // |errorGyro| por debajo de esto = "alineado"
 
 // Red de seguridad: si el robot entra a RECUPERANDO cerca de una esquina real
 // (donde un ultrasónico lee "sin pared" legítimamente, no por desalineación),
@@ -633,6 +638,47 @@ void iniciarSettleManiobra() {
   maniobraSettleSampMs  = millis();
   maniobraSettleAngPrev = anguloGyro;
   maniobraSettleQuieto  = 0;
+}
+
+// ── Heading-hold en REVERSA (fase 4 de la MANIOBRA) ──────────────────────────
+// Retroceder con el servo fijo al centro NO sale recto: la asimetría mecánica
+// + el yaw residual del pivote giran el chasis -7±2° "hacia adentro" cada
+// maniobra (run 745). Antes se tapaba cortando el retroceso a los 4° (reversa
+// cortísima); ahora se cierra el lazo sobre anguloGyro.
+//
+// OJO: en reversa el servo actúa INVERTIDO respecto a marcha adelante — con el
+// servo a la IZQUIERDA (>centro) el chasis rota a la DERECHA. Lo confirman los
+// pivotes de la fase 1 ("servo CONTRARIO al giro": maniobraGirarDer -> servo
+// 150/izq para cerrar un giro a la derecha). Por eso el término de control va
+// con signo NEGADO respecto al PID de gyro de controlPID().
+//
+// Gains no-const a propósito: se tunean en pista igual que KpGyro/KpWall.
+float KpRev = 2.4f;
+float KiRev = 0.6f;   // ataca el sesgo sistemático; se resetea al entrar a fase 4
+float KdRev = 0.30f;
+float integralRev  = 0;
+float prevErrorRev = 0;
+unsigned long lastRevHoldMs = 0;
+const float REV_HOLD_I_CLAMP  = 20.0f;  // tope del integral (grados·s)
+const float REV_HOLD_OUT_MAX  = 34.0f;  // tope de |servo - centro| durante la fase 4
+
+// Mantiene anguloGyro en headingRef mientras el carro retrocede recto en fase 4.
+// Escribe el servo directo (como escribirServo(centroServo) al que reemplaza).
+void aplicarReversaHold(float headingRef) {
+  unsigned long now = millis();
+  float dt = (now - lastRevHoldMs) / 1000.0f;
+  lastRevHoldMs = now;
+  if (dt < 0.001f || dt > 0.2f) dt = 0.02f;   // arranque de fase / hueco de loop
+
+  float err   = headingRef - anguloGyro;      // >0 => falta rotar a la IZQ (CCW)
+  integralRev = constrain(integralRev + err * dt, -REV_HOLD_I_CLAMP, REV_HOLD_I_CLAMP);
+  float deriv = (err - prevErrorRev) / dt;    // headingRef fijo -> sin patada de setpoint
+  prevErrorRev = err;
+
+  // Signo NEGADO vs el PID de adelante: en reversa, servo izq -> el chasis va der.
+  float out = -(KpRev * err + KiRev * integralRev + KdRev * deriv);
+  out = constrain(out, -REV_HOLD_OUT_MAX, REV_HOLD_OUT_MAX);
+  escribirServo(constrain(centroServo + (int)out, 20, 150));
 }
 
 
@@ -1746,7 +1792,10 @@ void loop() {
           if (maniobraRetroceso || !maniobraReversa) {
             motorReversa();               // motor parado -> arranca en reversa
             maniobraFaseMs      = millis();
-            maniobraFase4AngIni = anguloGyro;   // referencia para cortar si sigue girando
+            maniobraFase4AngIni = anguloGyro;   // referencia del heading-hold + red de seguridad
+            integralRev   = 0;                  // PID de reversa limpio para esta fase 4
+            prevErrorRev  = 0;
+            lastRevHoldMs = millis();
             maniobraFase        = 4;
           } else {
             iniciarSettleManiobra();      // esperar a que deje de rotar -> cierra
@@ -1756,17 +1805,21 @@ void loop() {
       }
 
       // ── Fase 4: RETROCESO-POST — toma distancia de la recta nueva ─────────
-      //   servo centrado, retrocede recto. Si el heading se corre > YAW_MAX
-      //   respecto al inicio de la fase, el retroceso está GIRANDO el carro
-      //   (reversa + yaw residual) -> se corta YA hacia settle (run 724).
+      //   Retrocede recto con heading-hold de lazo cerrado (aplicarReversaHold):
+      //   el servo se corrige para mantener maniobraFase4AngIni en vez de quedar
+      //   fijo al centro -> ya NO acumula el giro "hacia adentro" y puede
+      //   reversear largo. backoffGirando queda solo como tope duro de seguridad.
       if (maniobraFase == 4) {
         motorReversa();
-        escribirServo(centroServo);
+        aplicarReversaHold(maniobraFase4AngIni);   // lazo cerrado: reversa RECTA (antes: servo al centro)
         setMotor(MANIOBRA_BACKOFF_VEL);
         unsigned long backoffMs;
         if      (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
         else if (maniobraDistExt > MANIOBRA_BACKOFF_FAR_CM)    backoffMs = MANIOBRA_BACKOFF_FAR_MS;
         else                                                  backoffMs = MANIOBRA_BACKOFF_MS;
+        // Red de seguridad dura: con el heading-hold trabajando esto NO debería
+        // dispararse; si lo hace es que el PID no puede mantener el rumbo
+        // (mal tuneado, gyro loco, rueda trabada) -> aborta el retroceso.
         bool backoffGirando = fabs(anguloGyro - maniobraFase4AngIni) > MANIOBRA_BACKOFF_YAW_MAX_DEG;
         if (millis() - maniobraFaseMs >= backoffMs || backoffGirando) {
           motorCoast();
