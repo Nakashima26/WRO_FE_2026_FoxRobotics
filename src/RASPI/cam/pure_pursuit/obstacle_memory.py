@@ -467,8 +467,12 @@ class ObstacleMemory:
         # ── PASADO por PIVOTE ────────────────────────────────────────────────
         # Ver OBS_MEM_PIVOT_PASS_ENABLED / OBS_MEM_PATH_FADE_* en config.
         _piv_on   = getattr(C, "OBS_MEM_PIVOT_PASS_ENABLED", True)
-        _piv_yaw  = (getattr(C, "OBS_MEM_PATH_FADE_YAW_DEG", 45.0)
-                     + getattr(C, "OBS_MEM_PATH_FADE_SPAN_DEG", 12.0))
+        # Umbral ALTO para "queda otro cono por esquivar" (_piv_pending): que la
+        # guarda sea conservadora. Umbral propio (más bajo) para DISPARAR el
+        # pivote-pass -> RECUPERANDO entra antes, con menos ángulo cruzado.
+        _piv_yaw_pending = (getattr(C, "OBS_MEM_PATH_FADE_YAW_DEG", 45.0)
+                            + getattr(C, "OBS_MEM_PATH_FADE_SPAN_DEG", 12.0))
+        _piv_yaw  = getattr(C, "OBS_MEM_PIVOT_PASS_YAW_DEG", _piv_yaw_pending)
         _piv_conf = getattr(C, "OBS_MEM_PATH_FADE_CONF", 0.9)
 
         def _yaw_since(_o: "_Obs") -> float:
@@ -483,7 +487,7 @@ class ObstacleMemory:
             _o2.color in ("Red", "Green")
             and _o2.beyond is not True
             and _o2.conf >= C.OBS_MEM_MIN_CONF
-            and _yaw_since(_o2) < _piv_yaw
+            and _yaw_since(_o2) < _piv_yaw_pending
             for _o2 in self._obs
         )
 

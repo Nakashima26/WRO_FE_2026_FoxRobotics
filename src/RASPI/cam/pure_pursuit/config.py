@@ -319,10 +319,26 @@ OBS_MEM_TURN_SCALE_MIN    = 0.3
 # behind_y todavía enfrente y se poda (run 2026-09-07: verde/rojo de arranque).
 # Se escala ds_px por |steer_deg| con zona muerta ALTA: correcciones de recta
 # (steer < DEADZONE, obs<~0.23) NO lo tocan; solo la esquiva real.
-#   obs = steer_deg / 60  ->  DEADZONE 14°≈obs0.23,  FLOOR 36°≈obs0.60
-OBS_MEM_STEER_DEADZONE_DEG = 14.0
-OBS_MEM_STEER_FLOOR_DEG    = 36.0
-OBS_MEM_STEER_SCALE_MIN    = 0.45
+#   obs = steer_deg / 60  ->  DEADZONE 22°≈obs0.37,  FLOOR 50°≈obs0.83
+# 2026-09-08 (tarde): 14/36/0.45 -> 22/50/0.72. A 14/36/0.45 este freno
+# agarraba CUALQUIER esquiva (steer>14° = casi todas): el cono esquivado se
+# quedaba "enfrente" en la memoria muchos frames -> prio/mem/obs seguían altos
+# -> el carro sostenía el full-lock y no arqueaba, y el PASADO medido entraba
+# tardísimo (RECUPERANDO a -50/-60°). Ahora solo un pivote de verdad
+# (steer > ~22°) lo toca, y suave (0.72). El freno por |dheading| (OBS_MEM_TURN_*)
+# y la rampa de arranque (OBS_MEM_LAUNCH_RAMP_S) siguen cubriendo los casos que
+# este freno atendía.
+OBS_MEM_STEER_DEADZONE_DEG = 22.0
+OBS_MEM_STEER_FLOOR_DEG    = 50.0
+OBS_MEM_STEER_SCALE_MIN    = 0.72
+
+# ── Umbral de yaw del PASADO por PIVOTE (obstacle_memory._prune) ──
+# Antes el trigger del pivote-pass usaba FADE_YAW + FADE_SPAN (38+12 = 50°) ->
+# RECUPERANDO entraba recién con el chasis 50-62° cruzado (herr enorme, sobre-
+# corrige y oscila). Desacoplado: el pivote-pass ahora dispara a este yaw, sin
+# arrastrar el tuning del fade de centerline. La guarda `_piv_pending` (no
+# enderezar si queda otro cono por esquivar) SIGUE usando el umbral alto (50).
+OBS_MEM_PIVOT_PASS_YAW_DEG = 36.0
 
 # ── Rebase LATERAL (obstacle_memory._prune) ──
 # En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el
