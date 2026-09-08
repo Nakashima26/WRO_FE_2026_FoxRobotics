@@ -253,6 +253,16 @@ OBS_MEM_PATH_FADE_YAW_DEG  = 45.0   # yaw (deg) rodeado el cono para empezar a a
 OBS_MEM_PATH_FADE_SPAN_DEG = 12.0   # grados extra de yaw sobre los que el peso baja a 0
 OBS_MEM_PATH_FADE_CONF     = 0.9    # SOLO atenúa si la conf ya cayó bajo esto (fantasma,
                                     # no un cono trackeado). Cono a la vista (conf~1) -> intacto.
+
+# ── PASADO por PIVOTE (obstacle_memory._prune) ──
+# Cuando el fade de arriba ya llevó el peso de un cono a 0 (yaw >= FADE_YAW +
+# FADE_SPAN Y conf < FADE_CONF), la centerline dejó de curvar por él: la esquiva
+# TERMINÓ de hecho. En una esquiva de cono CENTRADO el carro pivotea y la `y`
+# dead-reckon tarda ~15° más en cruzar behind_y -> sin esto RECUPERANDO entra
+# con el carro ya encarado a la pared (run 743/744). Dispara PASADO en ese
+# momento, sin esperar la `y`. Mismo doble-candado que el fade + guarda extra:
+# NO dispara si queda otro cono de color fresco (yaw < umbral) por esquivar.
+OBS_MEM_PIVOT_PASS_ENABLED = True
 OBS_MEM_BEHIND_PAD = -35    # 2026-08-28: -18 -> -75 (rojo bien) pero -75 mató al
                             # verde: layout con verde a 40cm de la pared EXTERIOR
                             # -> traverse gigante -> a y=305 el verde sigue 150mm
