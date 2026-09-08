@@ -350,7 +350,8 @@ OBS_MEM_STEER_SCALE_MIN    = 0.72
 # corrige y oscila). Desacoplado: el pivote-pass ahora dispara a este yaw, sin
 # arrastrar el tuning del fade de centerline. La guarda `_piv_pending` (no
 # enderezar si queda otro cono por esquivar) SIGUE usando el umbral alto (50).
-OBS_MEM_PIVOT_PASS_YAW_DEG = 36.0
+OBS_MEM_PIVOT_PASS_YAW_DEG = 45.0   # 36 -> 45 (2026-09-08): a 36 disparaba temprano y
+                                   # RECUPERANDO enderezaba con el cono aún al lado (roce)
 
 # ── Rebase LATERAL (obstacle_memory._prune) ──
 # En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el
