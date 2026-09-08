@@ -167,15 +167,21 @@ class ObstacleMemory:
         phi_a = math.radians(dheading_deg)
         cos_a, sin_a = math.cos(phi_a), math.sin(phi_a)
 
+        freeze_c = getattr(C, "OBS_MEM_FREEZE_CONF", 0.0)
         for o in self._obs:
-            # 1) avance: la lata se acerca → baja en la imagen
-            uy = (o.y - self.ry) + ds_px
-            ux = (o.x - self.rx)
-            # 2) giro: rotar el vector relativo al robot
-            rx_new = ux * cos_p - uy * sin_p
-            ry_new = ux * sin_p + uy * cos_p
-            o.x = self.rx + rx_new
-            o.y = self.ry + ry_new
+            # Confianza ya decaída (varios frames sin match) -> NO extrapolar la
+            # posición del MAPA: un dead-reckon de baja confianza que sigue
+            # "acercándose" jitterea el obs justo antes de PASADO (ver
+            # OBS_MEM_FREEZE_CONF). Se congela x/y; el ancla geom sí avanza.
+            if not (freeze_c > 0.0 and o.conf < freeze_c):
+                # 1) avance: la lata se acerca → baja en la imagen
+                uy = (o.y - self.ry) + ds_px
+                ux = (o.x - self.rx)
+                # 2) giro: rotar el vector relativo al robot
+                rx_new = ux * cos_p - uy * sin_p
+                ry_new = ux * sin_p + uy * cos_p
+                o.x = self.rx + rx_new
+                o.y = self.ry + ry_new
 
             # Ancla "geom": misma forma, rotación con signo físico (phi_a), sin
             # re-anclado por detecciones -> ego-movimiento puro desde (x0,y0).
@@ -633,18 +639,6 @@ class ObstacleMemory:
         if fl > dz:
             frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
             ds_px *= 1.0 - (1.0 - mn) * frac
-
-        # Freno por ESQUIVA LATERAL: el servo torcido para correrse de lado SIN
-        # rotar mucho (dheading chico) no lo agarra el freno de arriba, pero el
-        # avance de frente igual cae. Escala por |steer_deg| con zona muerta ALTA
-        # (correcciones de recta no lo tocan; solo la esquiva real). Compone con
-        # el freno por giro (una esquiva de latiguazo tiene ambos).
-        s_dz = getattr(C, "OBS_MEM_STEER_DEADZONE_DEG", 14.0)
-        s_fl = getattr(C, "OBS_MEM_STEER_FLOOR_DEG", 36.0)
-        s_mn = getattr(C, "OBS_MEM_STEER_SCALE_MIN", 0.45)
-        if s_fl > s_dz:
-            s_frac = min(1.0, max(0.0, abs(steer_deg) - s_dz) / (s_fl - s_dz))
-            ds_px *= 1.0 - (1.0 - s_mn) * s_frac
 
         # ── Avance del ancla "geom" ───────────────────────────────────────────
         # Dos estimaciones del avance de frente, se toma la MENOR:
