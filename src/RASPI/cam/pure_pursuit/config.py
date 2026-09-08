@@ -236,6 +236,15 @@ OBS_MEM_DECAY      = 0.06    # confianza perdida por frame sin re-ver el obstác
                             # 2026-08-28: 0.12->0.06 al doblar fps (~7->~14), mismo decay/seg
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
+# Congelar la posición del MAPA (o.x/o.y) de un obstáculo cuya confianza ya
+# decayó bajo esto (varios frames sin match de detección): NO seguir extrapolando
+# su dead-reckon. Un obstáculo de baja confianza que sigue "acercándose" por
+# dead-reckon jitterea el obs justo antes de PASADO y sube el steer de vuelta
+# (run 2026-09-08: empujón final del trompo del verde, obs -0.33 -> -0.55 en los
+# últimos 4 frames con conf 1.00 -> 0.76). Se congela hasta re-detección (snap por
+# _refresh_obs) o poda por decay (BAJA_CONF). El ancla geom (xr/yr) NO se congela.
+# 0 = desactivado.
+OBS_MEM_FREEZE_CONF = 0.85
 OBS_MEM_BEHIND_PAD = -35    # 2026-08-28: -18 -> -75 (rojo bien) pero -75 mató al
                             # verde: layout con verde a 40cm de la pared EXTERIOR
                             # -> traverse gigante -> a y=305 el verde sigue 150mm
@@ -277,20 +286,6 @@ OBS_MEM_LAUNCH_RAMP_S = 1.2
 OBS_MEM_TURN_DEADZONE_DEG = 4.0
 OBS_MEM_TURN_FLOOR_DEG    = 12.0
 OBS_MEM_TURN_SCALE_MIN    = 0.3
-
-# ── Freno de ds_px por ESQUIVA LATERAL (obstacle_memory.update) ──
-# El freno por giro de arriba solo agarra esquivas ANGULARES (dheading grande).
-# Una esquiva de DESPLAZAMIENTO LATERAL vira fuerte el servo para correrse de
-# lado SIN rotar mucho el chasis -> dheading chico -> el freno por giro no la
-# toca, pero el avance de frente igual cae (el servo torcido derrapa / la Pi
-# baja la velocidad). Sin esto la lata esquivada se sobre-marcha, cruza
-# behind_y todavía enfrente y se poda (run 2026-09-07: verde/rojo de arranque).
-# Se escala ds_px por |steer_deg| con zona muerta ALTA: correcciones de recta
-# (steer < DEADZONE, obs<~0.23) NO lo tocan; solo la esquiva real.
-#   obs = steer_deg / 60  ->  DEADZONE 14°≈obs0.23,  FLOOR 36°≈obs0.60
-OBS_MEM_STEER_DEADZONE_DEG = 14.0
-OBS_MEM_STEER_FLOOR_DEG    = 36.0
-OBS_MEM_STEER_SCALE_MIN    = 0.45
 
 # ── Rebase LATERAL (obstacle_memory._prune) ──
 # En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el

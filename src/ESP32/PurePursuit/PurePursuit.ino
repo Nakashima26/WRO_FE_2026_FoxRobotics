@@ -181,7 +181,7 @@ const int  CRUCERO_STRAIGHTEN_DEG = 15; // en CRUCERO, si el chasis entró/qued�
                                         // fuerza gyro-hold para enderezar aunque dF > CRUCERO_GYRO_CM
                                         // (un obstáculo que se quedó `mia` hasta la esquina deja
                                         // el chasis ladeado y la MANIOBRA entra tardísima; orillas693 g5)
-const int  MANIOBRA_OVERSHOOT_DEG = 11; // sale del pivote a (AngGiro - esto): el carro sigue
+const int  MANIOBRA_OVERSHOOT_DEG = 14; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
 const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
@@ -251,22 +251,20 @@ const float MANIOBRA_RESIDUAL_MAX_DEG = 45.0f;  // tope del residual que se pasa
                                                // (run 724: subido 30->45 -- el clamp escondía un
                                                //  error REAL grande; RECUPERANDO clampea a 60 igual)
 
-// ── Contra-sesgo de RECUPERANDO tras esquivar (run 2026-09-07) ───────────────
-// RECUPERANDO solo endereza el RUMBO, no re-centra la POSICIÓN. Tras esquivar
-// quedas desplazado hacia el lado de la esquiva y la lógica siguiente arranca
-// descentrada (y eso se acumula vuelta a vuelta hasta encajar el carro). En vez
-// de apuntar a 0, RECUPERANDO apunta unos grados al lado CONTRARIO de la
-// esquiva: traslada el carro de vuelta al centro; al salir se restaura
-// anguloObjetivo y sigue la lógica normal (centrarse o esquivar el siguiente).
-const float         RECUP_DODGE_BIAS_DEG        = 6.0f;  // objetivo de RECUPERANDO (grados, signo = contrario a la esquiva)
-const float         RECUP_DODGE_BIAS_MIN_OBS    = 0.25f; // |obs| tuvo que superar esto para contar como esquiva real
-const unsigned long RECUP_DODGE_BIAS_MAX_AGE_MS = 1500;  // la esquiva tiene que haber sido RECIENTE
-const float         RECUP_DODGE_BIAS_MAX_YAW_DEG = 12.0f; // SOLO aplica el contra-sesgo si el chasis
-                                                          // entró a RECUPERANDO casi recto (esquiva
-                                                          // LATERAL). Si venís yawed 20-40° (esquiva
-                                                          // ANGULAR) el objetivo es 0, no ±6 -- el ±6
-                                                          // hacía que RECUP se pasara de largo y
-                                                          // oscilara (run 726: -17°→+64°→...).
+// ── Sesgo hacia AFUERA al cerrar la MANIOBRA (2026-09-07) ────────────────────
+// finalizarManiobra() ponía anguloObjetivo=0 = "apunta derecho por el carril".
+// El carro venía terminando chueco hacia ADENTRO de la curva -> si RECUPERANDO/
+// CRUCERO no cuadraban perfecto, se metía hacia el centro/un obstáculo. En vez
+// de 0, el objetivo de la recta nueva se pone unos grados hacia la pared
+// EXTERIOR del giro (signo = lado de afuera): el PID de giro lo MANTIENE, así
+// que aunque la recuperación salga corta el carro deriva hacia la pared, no
+// hacia una lata. NO es un error a corregir: es el objetivo. Costo: recorre la
+// recta un poco cangrejo y el wall PID pelea contra este offset fijo.
+//   giro DER -> exterior = izquierda -> anguloGyro positivo -> +BIAS
+//   giro IZQ -> exterior = derecha   -> -BIAS
+// Mantener < 12 (fuga de CRUCERO) y < CRUCERO_STRAIGHTEN_DEG(15) (adopt) para
+// que esos dos no se lo coman.
+const float MANIOBRA_BIAS_AFUERA_DEG = 5.0f;
 
 const unsigned long MANIOBRA_BACKOFF_MS     = 700;   // retrocede esto tras el pivote (REV con holgura)
 const unsigned long MANIOBRA_BACKOFF_FWD_MS = 700;   // retrocede esto tras el pivote (FWD)
@@ -351,12 +349,6 @@ const unsigned long recuperandoTimeoutMs = 1500;
 // que ENTRABA a RECUPERANDO, no desde que llegaba al heading -> mal aplicado.)
 const unsigned long recuperandoMinMs = 150;
 unsigned long headingOkSinceMs = 0;   // millis del 1er frame con headingOk (0 = aún no / se perdió)
-
-// Contra-sesgo de RECUPERANDO tras esquivar (ver consts RECUP_DODGE_BIAS_*).
-int           ultimaEsquivaDir      = 0;    // +1 = última esquiva fue a la DERECHA, -1 = IZQUIERDA, 0 = ninguna
-unsigned long ultimaEsquivaMs       = 0;    // millis de la última esquiva significativa
-float         recupBiasPrevObjetivo = 0.0f; // anguloObjetivo guardado antes de aplicar el sesgo
-bool          recupBiasActivo       = false;// hay un sesgo aplicado que hay que restaurar al salir de RECUPERANDO
 
 // ── Giros ─────────────────────────────────────────────────────────────────────
 bool direccionIzquierda = true;
@@ -584,7 +576,10 @@ void finalizarManiobra() {
   // -residual. Clamp por si una lectura loca. (ver MANIOBRA_RESIDUAL_MAX_DEG)
   anguloGyro       = constrain(anguloGyro - maniobraIdealRot,
                                -MANIOBRA_RESIDUAL_MAX_DEG, MANIOBRA_RESIDUAL_MAX_DEG);
-  anguloObjetivo   = 0;          // recta nueva: referencia desde cero
+  // Recta nueva: en vez de apuntar a 0, apunta unos grados hacia la pared
+  // EXTERIOR del giro que se acaba de hacer (ver MANIOBRA_BIAS_AFUERA_DEG).
+  anguloObjetivo   = maniobraGirarDer ? +MANIOBRA_BIAS_AFUERA_DEG
+                                      : -MANIOBRA_BIAS_AFUERA_DEG;
   lastTurnTime     = millis();
   maniobraDecidida = false;
   maniobraFase     = -1;
@@ -797,12 +792,10 @@ void parsePiMessage(String line) {
     //   eg   : errorGyro (anguloObjetivo - anguloGyro, capado ±20 en controlPID)
     //   srv  : último ángulo escrito al servo (80 = centro; <80 der, >80 izq)
     //   tc   : turnsCompleted — qué esquina física va (0..12)
-    //   cb   : recupBiasActivo (1 = RECUPERANDO con contra-sesgo de esquiva)
     Serial2.print(",ao=");   Serial2.print(anguloObjetivo, 1);
     Serial2.print(",eg=");   Serial2.print(errorGyro, 1);
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
-    Serial2.print(",cb=");   Serial2.print(recupBiasActivo ? 1 : 0);
     Serial2.println();
     return;
   }
@@ -1239,15 +1232,6 @@ void loop() {
         velocidadMotor = min(velocidadMotor, VEL_APROX2);
       }
 
-      // Recordar la dirección de la última esquiva REAL. Cuando llega piPasado,
-      // obs ya suele estar cerca de 0 (la lata quedó atrás), así que el signo
-      // hay que latchearlo mientras la esquiva está en curso. Sirve para el
-      // contra-sesgo de RECUPERANDO (abajo).
-      if (rondaObstaculos && piPriority && fabs(obsBiasNorm) > RECUP_DODGE_BIAS_MIN_OBS) {
-        ultimaEsquivaDir = (obsBiasNorm > 0.0f) ? 1 : -1;   // obs>0 = esquiva a la DERECHA
-        ultimaEsquivaMs  = millis();
-      }
-
       // La Pi confirma que el robot ya atravesó físicamente el obstáculo
       // (evento de un solo frame) -> entrar a RECUPERANDO. Ya no depende de
       // que la cámara simplemente haya dejado de verlo.
@@ -1259,23 +1243,6 @@ void loop() {
         headingOkSinceMs   = 0;   // el dwell arranca recién cuando se alcance el heading
         integralWall  = 0; prevErrorWall  = 0;
         integralGyro  = 0; prevErrorGyro  = 0;
-
-        // Contra-sesgo: RECUPERANDO solo endereza el RUMBO, no re-centra la
-        // POSICIÓN. Tras esquivar quedas desplazado hacia el lado de la
-        // esquiva. Apuntar el heading unos grados al lado CONTRARIO durante la
-        // recuperación traslada el carro de vuelta al centro; al salir se
-        // restaura anguloObjetivo (ver case RECUPERANDO). Solo si hubo una
-        // esquiva real y RECIENTE.
-        // fabs(anguloGyro) < MAX_YAW: solo esquivas LATERALES (chasis casi recto).
-        // Una esquiva ANGULAR entra yawed 20-40° -> el ±6 la hacía sobre-pasar
-        // y oscilar; ahí RECUPERANDO tiene que ir a 0, no a ±6 (run 726).
-        if (ultimaEsquivaDir != 0
-            && (millis() - ultimaEsquivaMs) < RECUP_DODGE_BIAS_MAX_AGE_MS
-            && fabs(anguloGyro) < RECUP_DODGE_BIAS_MAX_YAW_DEG) {
-          recupBiasPrevObjetivo = anguloObjetivo;
-          anguloObjetivo        = (float)ultimaEsquivaDir * RECUP_DODGE_BIAS_DEG;
-          recupBiasActivo       = true;
-        }
 
         // Consumir el pulso.  piPasado es un evento de UN frame en la Pi, pero
         // en el ESP32 se queda en 1 hasta que llega el siguiente mensaje V2
@@ -1392,12 +1359,6 @@ void loop() {
       // headingOk), o cuando vence el timeout (esquina real: un lado lee "sin
       // pared" y errorGyro nunca baja del umbral).
       if (dwellOk || timedOut) {
-        // Restaurar anguloObjetivo si RECUPERANDO venía con el contra-sesgo de
-        // esquiva (ya cumplió su función de trasladar el carro al centro).
-        if (recupBiasActivo) {
-          anguloObjetivo  = recupBiasPrevObjetivo;
-          recupBiasActivo = false;
-        }
         // A CRUCERO SOLO si hay pared adelante (distF < FRONT_CRUCERO_CM); sin
         // eso -> SIGUIENDO. Antes bastaba piMemoryFrames<=0: cuando `pasado=1`
         // disparaba a media recta (memoria se limpia, sin pared enfrente) el
