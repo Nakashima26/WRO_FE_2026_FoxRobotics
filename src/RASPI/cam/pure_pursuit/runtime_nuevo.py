@@ -978,6 +978,29 @@ class PPRuntime:
                             if _cap > 0.0:
                                 steer_deg = max(-_cap, min(_cap, steer_deg))
 
+                        # ── Cap del steer de APROXIMACIÓN a un cono de color ──
+                        # El verde satura el steer desde lejos (pasa por su
+                        # izquierda -> ~2x el desplazamiento del rojo) y pivotea.
+                        # Mientras el cono esté LEJOS (y < _Y) se capa a lo que el
+                        # rojo ya hace bien -> arco, no pivote. Al acercarse se
+                        # suelta. NO si ya hay un cono CERCA. Ver config.
+                        _capd = float(getattr(
+                            C, "CENTERLINE_COLOR_APPROACH_MAX_STEER_DEG", 0.0))
+                        if _capd > 0.0 and pp_active and bev_obstacles:
+                            _capy = float(getattr(
+                                C, "CENTERLINE_COLOR_APPROACH_Y", 300.0))
+                            _far_color = any(
+                                c in ("Red", "Green") and oy < _capy
+                                for (ox, oy, c) in bev_obstacles)
+                            _near_color = any(
+                                c in ("Red", "Green") and oy >= _capy
+                                for (ox, oy, c) in bev_obstacles)
+                            if _far_color and not _near_color:
+                                steer_deg = max(-_capd, min(_capd, steer_deg))
+                                # baseline del slew = valor capado -> al soltar
+                                # el cap (cono cerca) no hay salto, sigue rampa.
+                                self.controller._prev_steer_deg = steer_deg
+
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
                         bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
