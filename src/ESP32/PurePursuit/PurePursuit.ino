@@ -181,7 +181,7 @@ const int  CRUCERO_STRAIGHTEN_DEG = 15; // en CRUCERO, si el chasis entró/qued�
                                         // fuerza gyro-hold para enderezar aunque dF > CRUCERO_GYRO_CM
                                         // (un obstáculo que se quedó `mia` hasta la esquina deja
                                         // el chasis ladeado y la MANIOBRA entra tardísima; orillas693 g5)
-const int  MANIOBRA_OVERSHOOT_DEG = 10; // sale del pivote a (AngGiro - esto): el carro sigue
+const int  MANIOBRA_OVERSHOOT_DEG = 11; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
 const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
@@ -234,6 +234,12 @@ const float         MANIOBRA_SETTLE_RATE_DPS   = 30.0f; // deg/s por debajo de e
 const int           MANIOBRA_SETTLE_QUIETO_N   = 3;     // samples lentos SEGUIDOS para cerrar (~120 ms)
 const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igual aunque no se aquiete
 
+// Fase 4 (retroceso-post): la reversa con algo de yaw residual SIGUE girando el
+// carro (run 724: pivote llegó a -96°, el backoff lo llevó a -137°). Si durante
+// fase 4 el heading se corre más de esto respecto al inicio de la fase, se corta
+// el retroceso YA y pasa a settle -> no acumula esos ~40° extra.
+const float MANIOBRA_BACKOFF_YAW_MAX_DEG = 12.0f;
+
 // ── Residual de giro: hace a MANIOBRA_OVERSHOOT_DEG NO crítico ───────────────
 // finalizarManiobra() zeraba el heading a ciegas -> si el pivote sub/sobre-giró
 // (varía con batería/piso/calibración del gyro), el carro arrancaba la recta
@@ -241,7 +247,9 @@ const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igu
 // nueva (que es 90° - inclinación de entrada) a la recuperación: over o under,
 // SIGUIENDO/RECUPERANDO terminan de cuadrar el giro. OVERSHOOT_DEG solo decide
 // cuándo el pivote suelta hacia el settle, ya no la precisión del heading final.
-const float MANIOBRA_RESIDUAL_MAX_DEG = 30.0f;  // tope del residual que se pasa a la recuperación
+const float MANIOBRA_RESIDUAL_MAX_DEG = 45.0f;  // tope del residual que se pasa a la recuperación
+                                               // (run 724: subido 30->45 -- el clamp escondía un
+                                               //  error REAL grande; RECUPERANDO clampea a 60 igual)
 
 // ── Contra-sesgo de RECUPERANDO tras esquivar (run 2026-09-07) ───────────────
 // RECUPERANDO solo endereza el RUMBO, no re-centra la POSICIÓN. Tras esquivar
@@ -253,6 +261,12 @@ const float MANIOBRA_RESIDUAL_MAX_DEG = 30.0f;  // tope del residual que se pasa
 const float         RECUP_DODGE_BIAS_DEG        = 6.0f;  // objetivo de RECUPERANDO (grados, signo = contrario a la esquiva)
 const float         RECUP_DODGE_BIAS_MIN_OBS    = 0.25f; // |obs| tuvo que superar esto para contar como esquiva real
 const unsigned long RECUP_DODGE_BIAS_MAX_AGE_MS = 1500;  // la esquiva tiene que haber sido RECIENTE
+const float         RECUP_DODGE_BIAS_MAX_YAW_DEG = 12.0f; // SOLO aplica el contra-sesgo si el chasis
+                                                          // entró a RECUPERANDO casi recto (esquiva
+                                                          // LATERAL). Si venís yawed 20-40° (esquiva
+                                                          // ANGULAR) el objetivo es 0, no ±6 -- el ±6
+                                                          // hacía que RECUP se pasara de largo y
+                                                          // oscilara (run 726: -17°→+64°→...).
 
 const unsigned long MANIOBRA_BACKOFF_MS     = 700;   // retrocede esto tras el pivote (REV con holgura)
 const unsigned long MANIOBRA_BACKOFF_FWD_MS = 700;   // retrocede esto tras el pivote (FWD)
@@ -264,6 +278,15 @@ const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pare
 // (distExt > FAR_CM) retrocede más tiempo, para separarse bien de la recta nueva.
 const int           MANIOBRA_BACKOFF_FAR_CM = 90;
 const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
+
+// Grace post-esquiva: SIGUIENDO NO entra a CRUCERO por este tiempo tras el
+// último frame CON obstáculo activo. La Pi manda `pasado=1` unos frames DESPUÉS
+// de bajar prio/mem; sin el grace, SIGUIENDO ya saltó a CRUCERO y `case CRUCERO`
+// se traga el pulso -> RECUPERANDO nunca corre -> el chasis queda chueco
+// entrando a la esquina siguiente (run 724).
+const unsigned long POST_DODGE_CRUCERO_GRACE_MS = 400;
+unsigned long ultimoObstaculoMs = 0;   // millis del último V2 con piPriority || piMemoryFrames>0
+
 unsigned long cruceroEntryMs = 0;
 bool cruceroCerca      = false;        // en CRUCERO: true = cerca de la pared -> pura gyro+wall (sin visión)
 int  contadorFront     = 0;            // debounce del sensor frontal
@@ -284,6 +307,7 @@ int           maniobraSettleQuieto  = 0;   // samples consecutivos con rate por 
 float         maniobraIdealRot      = 0.0f;// rotación (con signo) que deja el chasis cuadrado con la
                                            // recta nueva; finalizarManiobra() pasa (anguloGyro - esto)
                                            // como residual a la recuperación (ver MANIOBRA_RESIDUAL_MAX_DEG)
+float         maniobraFase4AngIni   = 0.0f;// anguloGyro al entrar a fase 4 (corta el backoff si sigue girando)
 
 // Rectas con el cajón de estacionamiento: el borde del cajón tapa a ratos el
 // lateral que debería "abrirse" en la esquina, así que justo en el frame en
@@ -320,12 +344,13 @@ const float headingSettleDeg = 4.0;  // |errorGyro| por debajo de esto = "alinea
 // Este timeout fuerza la salida aunque wallOk/headingOk no se hayan cumplido.
 unsigned long recuperandoEntryMs = 0;
 const unsigned long recuperandoTimeoutMs = 1500;
-// Piso de duración de RECUPERANDO: aunque headingOk se cumpla antes, se queda
-// DERECHO (gyro-hold, sin evaluar esquiva ni CRUCERO) este tiempo, para que las
-// lecturas (frontal/laterales) se calmen tras el latiguazo del esquive. Sin
-// esto, salir en el frame en que el frontal engancha el siguiente obstáculo
-// mandaba el carro recto contra él (run 2026-09-07).
+// Dwell de RECUPERANDO: NO sale en el mismísimo frame en que roza headingOk
+// (ahí las lecturas están más sucias por el latiguazo). Tiene que llevar
+// recuperandoMinMs SEGUIDOS con el heading YA alineado -> recién ahí sale, ya
+// recto y con el frontal/laterales calmados. (2026-09-07: antes contaba desde
+// que ENTRABA a RECUPERANDO, no desde que llegaba al heading -> mal aplicado.)
 const unsigned long recuperandoMinMs = 150;
+unsigned long headingOkSinceMs = 0;   // millis del 1er frame con headingOk (0 = aún no / se perdió)
 
 // Contra-sesgo de RECUPERANDO tras esquivar (ver consts RECUP_DODGE_BIAS_*).
 int           ultimaEsquivaDir      = 0;    // +1 = última esquiva fue a la DERECHA, -1 = IZQUIERDA, 0 = ninguna
@@ -438,8 +463,11 @@ int  idxR = 0;
 // Actuadores
 // ═══════════════════════════════════════════════════════════════════════════════
 
+int ultimoServo = 80;   // último ángulo escrito al servo — para debug en el ACK
+
 void escribirServo(int angulo) {
   angulo = constrain(angulo, 0, 180);
+  ultimoServo = angulo;
   int pulso = map(angulo, 0, 180, 500, 2500);
   int duty  = (pulso * ((1 << resServo) - 1)) / 20000;
   ledcWrite(SERVO_PIN, duty);
@@ -685,6 +713,10 @@ void parsePiMessage(String line) {
       piMemoryFrames = max(0L, s.toInt());
     }
 
+    // Marca del último frame CON obstáculo activo -> grace post-esquiva de
+    // SIGUIENDO->CRUCERO (deja aterrizar el pulso `pasado`).
+    if (piPriority || piMemoryFrames > 0) ultimoObstaculoMs = millis();
+
     // pp  — campo nuevo en V2; ausente en mensajes V1 → pp=false por defecto
     idx = line.indexOf(",pp=");
     if (idx >= 0) {
@@ -760,6 +792,17 @@ void parsePiMessage(String line) {
     Serial2.print(",cerca="); Serial2.print(cruceroCerca ? 1 : 0);  // CRUCERO: 1 = gyro+wall (sin visión)
     Serial2.print(",drop=");  Serial2.print(lateralDropCount);
     Serial2.print(",sucio="); Serial2.print(giroSucioArmado ? 1 : 0);
+    // ── DEBUG heading/control (2026-09-07: "heading es mi pata de palo") ──
+    //   ao   : anguloObjetivo — el TARGET de heading que persigue el gyro PID
+    //   eg   : errorGyro (anguloObjetivo - anguloGyro, capado ±20 en controlPID)
+    //   srv  : último ángulo escrito al servo (80 = centro; <80 der, >80 izq)
+    //   tc   : turnsCompleted — qué esquina física va (0..12)
+    //   cb   : recupBiasActivo (1 = RECUPERANDO con contra-sesgo de esquiva)
+    Serial2.print(",ao=");   Serial2.print(anguloObjetivo, 1);
+    Serial2.print(",eg=");   Serial2.print(errorGyro, 1);
+    Serial2.print(",srv=");  Serial2.print(ultimoServo);
+    Serial2.print(",tc=");   Serial2.print(turnsCompleted);
+    Serial2.print(",cb=");   Serial2.print(recupBiasActivo ? 1 : 0);
     Serial2.println();
     return;
   }
@@ -1213,6 +1256,7 @@ void loop() {
       if (piPasado && rondaObstaculos) {
         estado = RECUPERANDO;
         recuperandoEntryMs = millis();
+        headingOkSinceMs   = 0;   // el dwell arranca recién cuando se alcance el heading
         integralWall  = 0; prevErrorWall  = 0;
         integralGyro  = 0; prevErrorGyro  = 0;
 
@@ -1222,8 +1266,12 @@ void loop() {
         // recuperación traslada el carro de vuelta al centro; al salir se
         // restaura anguloObjetivo (ver case RECUPERANDO). Solo si hubo una
         // esquiva real y RECIENTE.
+        // fabs(anguloGyro) < MAX_YAW: solo esquivas LATERALES (chasis casi recto).
+        // Una esquiva ANGULAR entra yawed 20-40° -> el ±6 la hacía sobre-pasar
+        // y oscilar; ahí RECUPERANDO tiene que ir a 0, no a ±6 (run 726).
         if (ultimaEsquivaDir != 0
-            && (millis() - ultimaEsquivaMs) < RECUP_DODGE_BIAS_MAX_AGE_MS) {
+            && (millis() - ultimaEsquivaMs) < RECUP_DODGE_BIAS_MAX_AGE_MS
+            && fabs(anguloGyro) < RECUP_DODGE_BIAS_MAX_YAW_DEG) {
           recupBiasPrevObjetivo = anguloObjetivo;
           anguloObjetivo        = (float)ultimaEsquivaDir * RECUP_DODGE_BIAS_DEG;
           recupBiasActivo       = true;
@@ -1275,6 +1323,7 @@ void loop() {
           // por ángulo hasta la pared). El obstáculo "beyond" de la recta
           // siguiente no cuenta: la Pi ya lo excluye de prio/mem.
           if (!piPriority && piMemoryFrames <= 0
+              && (millis() - ultimoObstaculoMs > POST_DODGE_CRUCERO_GRACE_MS)
               && distF > 0 && distF < FRONT_CRUCERO_CM) {
             contadorFront++;
             if (contadorFront >= esquinaDebounce) {
@@ -1325,8 +1374,13 @@ void loop() {
 
       bool wallOk    = abs(errorWall) < wallSettleCm;
       bool headingOk = abs(errorGyro) < headingSettleDeg;
+      // El dwell arranca cuando el heading YA se alcanzó (no desde que entró a
+      // RECUPERANDO). Si se pierde, se re-arma.
+      if (headingOk) { if (headingOkSinceMs == 0) headingOkSinceMs = millis(); }
+      else           { headingOkSinceMs = 0; }
       bool timedOut  = (millis() - recuperandoEntryMs) > recuperandoTimeoutMs;
-      bool dwellOk   = (millis() - recuperandoEntryMs) > recuperandoMinMs;
+      bool dwellOk   = (headingOkSinceMs != 0)
+                       && (millis() - headingOkSinceMs > recuperandoMinMs);
 
       // NO se aborta por piPriority: primero recuperar la recta (heading hacia
       // anguloObjetivo). Un obstáculo visto con el chasis todavía chueco suele ser
@@ -1334,9 +1388,10 @@ void loop() {
       // abortar aquí mandaba el carro hacia él. Con el chasis derecho, SIGUIENDO/
       // visión lo maneja bien. timedOut acota por si headingOk no llega (esquina
       // real: un lado lee "sin pared" y errorGyro nunca baja del umbral).
-      // dwellOk: no salir aunque headingOk se cumpla, hasta pasar recuperandoMinMs
-      // (deja que el frontal/laterales se calmen antes de decidir esquiva/CRUCERO).
-      if ((headingOk || timedOut) && dwellOk) {
+      // Sale cuando llevás recuperandoMinMs SEGUIDOS ya alineado (dwellOk implica
+      // headingOk), o cuando vence el timeout (esquina real: un lado lee "sin
+      // pared" y errorGyro nunca baja del umbral).
+      if (dwellOk || timedOut) {
         // Restaurar anguloObjetivo si RECUPERANDO venía con el contra-sesgo de
         // esquiva (ya cumplió su función de trasladar el carro al centro).
         if (recupBiasActivo) {
@@ -1672,8 +1727,9 @@ void loop() {
         if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) {
           if (maniobraRetroceso || !maniobraReversa) {
             motorReversa();               // motor parado -> arranca en reversa
-            maniobraFaseMs = millis();
-            maniobraFase   = 4;
+            maniobraFaseMs      = millis();
+            maniobraFase4AngIni = anguloGyro;   // referencia para cortar si sigue girando
+            maniobraFase        = 4;
           } else {
             iniciarSettleManiobra();      // esperar a que deje de rotar -> cierra
           }
@@ -1682,8 +1738,9 @@ void loop() {
       }
 
       // ── Fase 4: RETROCESO-POST — toma distancia de la recta nueva ─────────
-      //   servo centrado, retrocede recto. NO toca el heading final (el pivote
-      //   ya llegó a EXIT_DEG).
+      //   servo centrado, retrocede recto. Si el heading se corre > YAW_MAX
+      //   respecto al inicio de la fase, el retroceso está GIRANDO el carro
+      //   (reversa + yaw residual) -> se corta YA hacia settle (run 724).
       if (maniobraFase == 4) {
         motorReversa();
         escribirServo(centroServo);
@@ -1692,7 +1749,8 @@ void loop() {
         if      (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
         else if (maniobraDistExt > MANIOBRA_BACKOFF_FAR_CM)    backoffMs = MANIOBRA_BACKOFF_FAR_MS;
         else                                                  backoffMs = MANIOBRA_BACKOFF_MS;
-        if (millis() - maniobraFaseMs >= backoffMs) {
+        bool backoffGirando = fabs(anguloGyro - maniobraFase4AngIni) > MANIOBRA_BACKOFF_YAW_MAX_DEG;
+        if (millis() - maniobraFaseMs >= backoffMs || backoffGirando) {
           motorCoast();
           maniobraFaseMs = millis();
           maniobraFase   = 5;
