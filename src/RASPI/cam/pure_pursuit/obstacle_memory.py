@@ -677,7 +677,28 @@ class ObstacleMemory:
         # atenuar la urgencia de esquiva de un obstáculo que lleva varios
         # frames sin verse de verdad (solo arrastrado por posición asumida)
         # en vez de tratarlo con la misma autoridad que uno recién visto.
-        self.last_confidences = [o.conf for o in self._obs]
+        #
+        # Fade EXTRA por yaw (ver OBS_MEM_PATH_FADE_* en config): un cono que el
+        # carro YA rodeó por ÁNGULO y la cámara PERDIÓ deja de curvar la
+        # centerline -- si no, la MEMORIA acercándose por dead-reckon mete
+        # volante de más aunque ya vas girado (run 743). SOLO afecta este valor
+        # para la centerline; o.conf (que ven _prune / decay / trigger) NO se
+        # toca -> este fade no puede disparar RECUPERANDO en falso.
+        _f_yaw  = getattr(C, "OBS_MEM_PATH_FADE_YAW_DEG", 0.0)
+        _f_span = getattr(C, "OBS_MEM_PATH_FADE_SPAN_DEG", 12.0)
+        _f_conf = getattr(C, "OBS_MEM_PATH_FADE_CONF", 0.9)
+        _lc: list[float] = []
+        for o in self._obs:
+            w = o.conf
+            if (_f_yaw > 0.0 and o.conf < _f_conf
+                    and self._prev_heading is not None
+                    and o.heading0 is not None):
+                _yw = abs((self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0)
+                if _yw > _f_yaw:
+                    _k = max(0.0, 1.0 - (_yw - _f_yaw) / max(1.0, _f_span))
+                    w *= _k
+            _lc.append(w)
+        self.last_confidences = _lc
 
         return [(o.x, o.y, o.color) for o in self._obs]
 
