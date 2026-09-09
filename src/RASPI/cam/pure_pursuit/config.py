@@ -714,8 +714,16 @@ PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cu
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
 PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
 
-LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
+LINE_MIN_RUN_PX   = 6   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)
+                          # 2026-09-09: 8 -> 6. A ~55° (giro CCW) la línea de esquina
+                          # cruza cada fila del BEV con una corrida corta -> con 8 no
+                          # calificaba ninguna fila y 'seen' entraba ~8 frames tarde
+                          # en la boca de la esquina (journal 13:59:49: seen salta de
+                          # None a near_y=277 de golpe). Esos frames ciegos dejan un
+                          # cono de la recta siguiente como `mia` -> RECUPERANDO se
+                          # retrasa y el chasis sobre-gira (+46° medido). 6 sigue muy
+                          # por encima del ruido disperso (MASK_CLOSE + contigüidad).
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
                           # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
 
@@ -770,14 +778,25 @@ LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la
                                     # naranja antes del run-length: puentea huecos de
                                     # 1-3 px por oclusión parcial / sombra para que un
                                     # segmento real no se parta en dos.
-LINE_TRACK_PERSIST_FRAMES = 6    # (2026-08-28: 3->6 al doblar fps ~7->~14) frames seguidos que una lectura nueva debe repetirse
+LINE_TRACK_PERSIST_FRAMES = 4    # (2026-08-28: 3->6 al doblar fps ~7->~14) frames seguidos que una lectura nueva debe repetirse
                                  # (mismo 'seen', near_y dentro de tolerancia) antes de
                                  # aceptarla como estado estable.
-LINE_TRACK_TOLERANCE_PX   = 20   # (antes 15) margen en near_y para seguir contando la
+                                 # 2026-09-09: 6 -> 4. En la diagonal a ~55° el near_y
+                                 # crudo salta >TOLERANCE_PX cada frame -> con 6 nunca
+                                 # se satisface y self.stable se CONGELA (journal
+                                 # 13:59:51: near_y clavado en 272.39125326987613 ~15
+                                 # frames). 4 + TOLERANCE 30 deja que el tracker siga
+                                 # una línea inclinada que se mueve.
+LINE_TRACK_TOLERANCE_PX   = 30   # (antes 15, luego 20) margen en near_y para seguir contando la
                                  # misma lectura como "la misma" entre frames.
-LINE_TRACK_HOLD_FRAMES    = 4    # (2026-08-28: 2->4 al doblar fps ~7->~14) si 'seen' se pierde, cuántos frames se mantiene la
+                                 # 2026-09-09: 20 -> 30 (ver PERSIST_FRAMES).
+LINE_TRACK_HOLD_FRAMES    = 6    # (2026-08-28: 2->4 al doblar fps ~7->~14) si 'seen' se pierde, cuántos frames se mantiene la
                                  # última línea estable antes de darla por perdida
                                  # (absorbe dropouts cortos). 0 = soltar de inmediato.
+                                 # 2026-09-09: 4 -> 6. A ~55° la línea desaparece 1-2
+                                 # frames seguido en plena curva (journal 14:00:04:
+                                 # seen:False toda la 2a mitad del giro) -> coastear
+                                 # en el último valor en vez de tirar seen:False.
 LINE_TRACK_NEAR_Y_EMA     = 0.4  # peso de la lectura nueva al mezclar near_y (EMA).
                                  # 1.0 = sin suavizado. Sube a 0.7 automáticamente cuando
                                  # la línea se ACERCA (near_y crece) para no frenar un
