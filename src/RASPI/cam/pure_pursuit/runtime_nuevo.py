@@ -713,6 +713,13 @@ class PPRuntime:
                         # near_y si se pierde cerca de la esquina (ORANGE_DR_*).
                         _dr_ds_px = ((C.ROBOT_SPEED_MMS * dt_s) / C.MM_PER_PX
                                      if dt_s > 0 else 0.0)
+                        # Mientras dura el giro/maniobra, re-armar el cooldown de
+                        # la naranja cada frame: el conteo ORANGE_POST_TURN_CD_FRAMES
+                        # arranca recién al TERMINAR la maniobra (la reversa dura
+                        # ~3s y al retroceder la cámara re-ve la línea del giro ->
+                        # latcheaba toda la recta nueva). Ver hold_cooldown().
+                        if self._is_turning:
+                            self.line_tracker.hold_cooldown()
                         line_info = {"Orange": self.line_tracker.update(
                             bev_frame, bev_hsv=bev_hsv, ds_px=_dr_ds_px,
                             in_turn_cooldown=(self._turn_recovery_frames > 0))}

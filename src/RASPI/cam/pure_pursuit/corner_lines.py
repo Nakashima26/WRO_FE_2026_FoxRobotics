@@ -207,8 +207,20 @@ class OrangeLineTracker:
         self._dr_latched = False
         # Cooldown post-giro: la línea que se ve recién girado suele ser la que
         # se acaba de pasar (o su residual) -> no clasificar contra ella.
-        self._post_turn_cd = int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 12))
+        self._post_turn_cd = int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20))
         self._out = self.stable
+
+    def hold_cooldown(self):
+        """Re-arma el cooldown post-giro SIN borrar el estado del tracker.
+        El caller lo llama cada frame mientras dura la maniobra de giro: así el
+        conteo de ORANGE_POST_TURN_CD_FRAMES empieza a bajar recién cuando la
+        maniobra TERMINA, no desde que arranca. La MANIOBRA reversa dura ~3s y al
+        retroceder la cámara vuelve a ver la línea del giro recién hecho -> con el
+        cooldown armado solo desde el inicio, expiraba a media maniobra y esa
+        línea latcheaba (near_y >= ORANGE_DR_LATCH_Y) toda la recta nueva."""
+        self._post_turn_cd = max(
+            self._post_turn_cd,
+            int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20)))
 
     def _matches_candidate(self, raw: dict) -> bool:
         if self._candidate is None or raw["seen"] != self._candidate["seen"]:
