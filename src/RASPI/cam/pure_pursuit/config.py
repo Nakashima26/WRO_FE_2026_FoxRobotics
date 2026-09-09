@@ -704,10 +704,11 @@ LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin 
 # ESP32 hace la maniobra de salida (PurePursuit.ino `case INICIO`) antes de
 # SIGUIENDO. Debajo del umbral -> arranque normal. La Pi NO hace nada más: el
 # pipeline corre igual que siempre y el ESP32 ignora `obs` durante su maniobra.
-# H 150-168: magenta, LEJOS del rojo de los conos (H 0-5 y 173-179) para que un
-# cono cercano NO empuje el ratio. Rango de ARRANQUE — calibrar con:
+# Rango ANCHO a propósito (el muro magenta se veía a 3% con un rango estrecho —
+# la cámara tira el tono hacia el azul por su blue-gain 1.5x). Es un chequeo de
+# "casi todo el frame es de este tono", no una detección fina. Calibrar fino con:
 #   python -m pure_pursuit.pick_color --image <frame_dentro_del_cajon>.jpg
-PARK_PINK_HSV       = [(np.array([150, 80, 50]), np.array([168, 255, 255]))]
+PARK_PINK_HSV       = [(np.array([135, 45, 40]), np.array([175, 255, 255]))]
 PARK_PINK_RATIO_MIN = 0.45   # fracción del ROI que debe ser magenta
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
