@@ -44,16 +44,8 @@ class Vision:
         self.cap = open_camera(cam_index)
 
         self.color_ranges = {
-            # Banda 2 (rojo azulado, wrap-around): hue 173 -> 177 (2026-09-09).
-            # 173-176 se solapaba con la pared rosa/magenta del estacionamiento
-            # (PARK_PINK_HSV hue 135-175, +blue-gain 1.5x de la cámara la empuja
-            # a ~174) -> la pared se detectaba como cono Red en las rectas 1/5/9
-            # y el carro giraba a "esquivarla" y chocaba (orillas808 ~45s: bbox
-            # Red sobre el panel de pared, ymin=262 x0=170, podado "frente" yaw=2).
-            # Un rojo de verdad en la cara sigue cubierto: su tono dominante cae
-            # en la banda 1 [0,5]; 177-179 es solo la cola azulada (rojo comp. ~178).
             "Red": [(np.array([0, 150, 40]), np.array([5, 255, 160])),
-                        (np.array([177, 150, 40]), np.array([179, 255, 160]))],
+                        (np.array([173, 150, 40]), np.array([179, 255, 160]))],
             # Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
             "Green": [(np.array([35,60,40]), np.array([75, 255, 200]))],           
             # "Pink": [(np.array([140, 100, 100]), np.array([170, 255, 255]))],
@@ -69,14 +61,6 @@ class Vision:
         solidez baja. Una lata se ve como un blob compacto → solidez alta.
         Ademas descarta bounding boxes con aspect ratio extremo (muy
         anchos/planos), típico de una línea diagonal o casi horizontal.
-
-        Y para Red: descarta blobs que NO bajan del ~40% superior del frame.
-        La pared rosa/magenta del estacionamiento (rectas 1/5/9) cae dentro del
-        rango Red aún con hue 177+ (su parte oscura lee hue 0-5), y su blob vive
-        SIEMPRE pegado al borde superior (bottom del bbox <= ~120 px de 480,
-        orillas808 ~45s). Un cono rojo real se apoya en el PISO: su bbox baja
-        mucho más, y uno "en la cara" llega casi al borde inferior -> ese umbral
-        no lo puede descartar. SOLO Red (no hay backdrop verde en la pista).
         """
         if np.count_nonzero(mask) < 500:
             return []
@@ -87,9 +71,7 @@ class Vision:
 
         MIN_SOLIDITY = 0.2   # blob compacto (lata) ~0.7-0.9; línea delgada suele ser < 0.4
         MAX_ASPECT   = 2.2    # w/h o h/w máximo permitido antes de considerarlo "línea"
-        RED_MIN_BBOX_BOTTOM = int(0.40 * frame.shape[0])   # ver docstring
 
-        _n_cnt = len(contours)
         for cnt in contours:
             area = cv2.contourArea(cnt)
             if area <= 1000:
@@ -100,23 +82,8 @@ class Vision:
             solidity = area / bbox_area if bbox_area > 0 else 0
             aspect = max(w, h) / max(1, min(w, h))
 
-            # DIAG 2026-09-09 (solo-log): TODO contorno rojo con área real, para
-            # calibrar el gate contra lo que ve el detector EN VIVO (no un frame
-            # de video). Quitar cuando el gate esté afinado.
-            if color_name == "Red":
-                _why = ("drop-sol" if solidity < MIN_SOLIDITY
-                        else "drop-asp" if aspect > MAX_ASPECT
-                        else "drop-top" if (y + h) < RED_MIN_BBOX_BOTTOM
-                        else "KEEP")
-                print(f"[REDBLOB] x={x} y={y} w={w} h={h} bottom={y + h}/{frame.shape[0]} "
-                      f"area={area:.0f} sol={solidity:.2f} asp={aspect:.2f} "
-                      f"thr={RED_MIN_BBOX_BOTTOM} ncnt={_n_cnt} -> {_why}", flush=True)
-
             if solidity < MIN_SOLIDITY or aspect > MAX_ASPECT:
                 continue
-
-            if color_name == "Red" and (y + h) < RED_MIN_BBOX_BOTTOM:
-                continue   # blob pegado al borde superior = pared del estacionamiento, no un cono
 
             objects.append((x, y, w, h))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
