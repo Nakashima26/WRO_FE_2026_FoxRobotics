@@ -56,17 +56,35 @@ def _row_max_runs(mask: np.ndarray) -> np.ndarray:
     return (running - reset_at).max(axis=1)
 
 
-def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
+def _find_near_line_row(mask: np.ndarray, min_run_px: int,
+                        min_span_px: int = 0, span_band_px: int = 12) -> float | None:
     """
     Retorna la Y (más cercana al robot, Y grande) de la primera fila con una
     corrida contigua >= min_run_px, escaneando desde el robot hacia adelante.
     None si ninguna fila califica.
+
+    Si min_span_px > 0: además exige que la naranja en +-span_band_px alrededor
+    de esa fila abarque >= min_span_px de ANCHO (xmax-xmin). Un obstáculo
+    rojo/naranja cercano proyecta en BEV un blob que cruza min_run_px pero
+    abarca poco ancho; una raya de esquina real abarca gran parte del BEV, y su
+    extensión sobrevive a que un cono la ocluya en el medio (el hueco no achica
+    xmax-xmin). Se prueba de la fila más cercana a la más lejana: si la más
+    cercana es un blob de cono pero hay una raya real detrás, devuelve la raya.
     """
     max_runs = _row_max_runs(mask)
     qualifying = np.where(max_runs >= min_run_px)[0]
     if qualifying.size == 0:
         return None
-    return float(qualifying.max())
+    if min_span_px <= 0:
+        return float(qualifying.max())
+    h = mask.shape[0]
+    for y in qualifying[::-1]:                       # de la más cercana al robot hacia afuera
+        y0 = max(0, int(y) - span_band_px)
+        y1 = min(h, int(y) + span_band_px + 1)
+        cols = np.where(mask[y0:y1, :].any(axis=0))[0]
+        if cols.size and int(cols[-1] - cols[0]) >= min_span_px:
+            return float(y)
+    return None
 
 
 def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
@@ -147,7 +165,11 @@ def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict
     """
     hsv = bev_hsv if bev_hsv is not None else cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
     mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
-    near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
+    near_y = _find_near_line_row(
+        mask, C.LINE_MIN_RUN_PX,
+        min_span_px=int(getattr(C, "LINE_MIN_SPAN_PX", 0)),
+        span_band_px=int(getattr(C, "LINE_SPAN_BAND_PX", 12)),
+    )
     return {"Orange": {"seen": near_y is not None, "near_y": near_y}}
 
 
