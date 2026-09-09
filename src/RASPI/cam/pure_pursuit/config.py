@@ -698,6 +698,21 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
+# ─── INICIO — salida del estacionamiento (solo ronda de obstáculos) ──────────
+# Al APRETAR EL BOTÓN (una sola vez) la Pi mide qué fracción del frame es
+# magenta/rosa. Si >= PARK_PINK_RATIO_MIN -> manda inicio=1 en cada V2 y el
+# ESP32 hace la maniobra de salida (PurePursuit.ino `case INICIO`) antes de
+# SIGUIENDO. Debajo del umbral -> arranque normal. La Pi NO hace nada más: el
+# pipeline corre igual que siempre y el ESP32 ignora `obs` durante su maniobra.
+# H 150-168: magenta, LEJOS del rojo de los conos (H 0-5 y 173-179) para que un
+# cono cercano NO empuje el ratio. Rango de ARRANQUE — calibrar con:
+#   python -m pure_pursuit.pick_color --image <frame_dentro_del_cajon>.jpg
+PARK_PINK_HSV       = [(np.array([150, 80, 50]), np.array([168, 255, 255]))]
+PARK_PINK_RATIO_MIN = 0.45   # fracción del ROI que debe ser magenta
+PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
+PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
+PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
+
 LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
