@@ -44,8 +44,8 @@ class Vision:
         self.cap = open_camera(cam_index)
 
         self.color_ranges = {
-            "Red": [(np.array([0, 150, 40]), np.array([5, 255, 160])),
-                        (np.array([173, 150, 40]), np.array([179, 255, 160]))],
+            "Red": [(np.array([0, 120, 70]), np.array([8, 255, 255])),
+                        (np.array([170, 120, 70]), np.array([179, 255, 255]))],
             # Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
             "Green": [(np.array([35,60,40]), np.array([75, 255, 200]))],           
             # "Pink": [(np.array([140, 100, 100]), np.array([170, 255, 255]))],
