@@ -276,14 +276,19 @@ OBS_MEM_PATH_FADE_CONF     = 0.9    # SOLO atenúa si la conf ya cayó bajo esto
                                     # no un cono trackeado). Cono a la vista (conf~1) -> intacto.
 
 # ── PASADO por PIVOTE (obstacle_memory._prune) ──
-# Cuando el fade de arriba ya llevó el peso de un cono a 0 (yaw >= FADE_YAW +
-# FADE_SPAN Y conf < FADE_CONF), la centerline dejó de curvar por él: la esquiva
-# TERMINÓ de hecho. En una esquiva de cono CENTRADO el carro pivotea y la `y`
-# dead-reckon tarda ~15° más en cruzar behind_y -> sin esto RECUPERANDO entra
-# con el carro ya encarado a la pared (run 743/744). Dispara PASADO en ese
-# momento, sin esperar la `y`. Mismo doble-candado que el fade + guarda extra:
-# NO dispara si queda otro cono de color fresco (yaw < umbral) por esquivar.
-OBS_MEM_PIVOT_PASS_ENABLED = True
+# DESACTIVADO 2026-09-08 (reporte del usuario, confirmado en orillas772).
+# Idea: cuando el fade ya llevó el peso de un cono a 0 (yaw >= FADE_YAW+SPAN Y
+# conf < FADE_CONF), declarar PASADO sin esperar a que la `y` dead-reckon cruce
+# behind_y (que en pivote de cono CENTRADO llega ~15° tarde, run 743/744).
+# PROBLEMA: dispara por YAW, no por posición del cono. En una esquiva dura el
+# carro acumula 45-67° de giro con el cono TODAVÍA al lado del morro
+# (orillas772: PASADO(pivote) yaw=67, cono en falta=+44px, x=144 pegado al
+# morro) -> prune prematuro de memoria -> pasado=1 -> RECUPERANDO endereza
+# ENCIMA del cono. El PASADO por posición (o.y > behind_y) + el trigger medido
+# ya cubren el rebase real; el atraso de ~15° en pivote centrado es mal menor.
+# Re-activar solo con un candado LATERAL (no disparar si el cono sigue dentro
+# de ±ancho-de-carro y no está cerca de behind_y).
+OBS_MEM_PIVOT_PASS_ENABLED = False
 OBS_MEM_BEHIND_PAD = -35    # 2026-08-28: -18 -> -75 (rojo bien) pero -75 mató al
                             # verde: layout con verde a 40cm de la pared EXTERIOR
                             # -> traverse gigante -> a y=305 el verde sigue 150mm
@@ -354,8 +359,15 @@ OBS_MEM_STEER_SCALE_MIN    = 0.72
 # corrige y oscila). Desacoplado: el pivote-pass ahora dispara a este yaw, sin
 # arrastrar el tuning del fade de centerline. La guarda `_piv_pending` (no
 # enderezar si queda otro cono por esquivar) SIGUE usando el umbral alto (50).
-OBS_MEM_PIVOT_PASS_YAW_DEG = 45.0   # 36 -> 45 (2026-09-08): a 36 disparaba temprano y
-                                   # RECUPERANDO enderezaba con el cono aún al lado (roce)
+OBS_MEM_PIVOT_PASS_YAW_DEG = 36.0   # 45 -> 36 (revert 2026-09-08). Subirlo a 45 para
+                                   # matar un roce hizo que la centerline siguiera
+                                   # clavando el volante 9° más de yaw -> latiguazos de
+                                   # 60°+, y ahí el `ahead_tol` del trigger medido se
+                                   # colapsa (tol=0 a |herr|>=58) -> PASADO(medido)
+                                   # dispara tarde/errático (orillas772: 7 giros y a
+                                   # rastras). 36 = config de orillas770 (12/12 limpio).
+                                   # El roce real se arregla metiéndole chequeo LATERAL
+                                   # al pivote-pass, no subiendo el yaw.
 
 # ── Rebase LATERAL (obstacle_memory._prune) ──
 # En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el
