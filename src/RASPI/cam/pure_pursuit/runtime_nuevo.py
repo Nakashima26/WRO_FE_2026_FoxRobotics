@@ -102,7 +102,27 @@ def _parse_estado(ack: str) -> str | None:
     val = ack[idx + 4: idx + 5]
     if val == "C":          # CRUCERO (ESP): la Pi lo trata igual que SIGUIENDO
         return "S"
-    return val if val in ("G", "R", "S") else None
+    # "I" = INICIO (ESP haciendo la maniobra de salida del estacionamiento) ->
+    # la Pi se queda en stand-down hasta ver "S" (ver run()).
+    return val if val in ("G", "R", "S", "I") else None
+
+
+def _park_pink_ratio(frame_bgr) -> float:
+    """Fracción de píxeles rosa/magenta (pared del cajón) en el frame, ignorando
+    la banda superior (C.PARK_PINK_ROI_TOP, fondo del venue). Ver `case INICIO`
+    en PurePursuit.ino y el bloque INICIO de config.py."""
+    if frame_bgr is None or frame_bgr.size == 0:
+        return 0.0
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    y0  = int(hsv.shape[0] * getattr(C, "PARK_PINK_ROI_TOP", 0.12))
+    roi = hsv[y0:, :]
+    mask = None
+    for lo, hi in C.PARK_PINK_HSV:
+        cur  = cv2.inRange(roi, lo, hi)
+        mask = cur if mask is None else (mask | cur)
+    if mask is None or mask.size == 0:
+        return 0.0
+    return float(np.count_nonzero(mask)) / float(mask.size)
 
 def _parse_direccion(ack: str) -> str | None:
     """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
@@ -170,6 +190,13 @@ class PPRuntime:
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
 
+        # ── INICIO — salida del estacionamiento ───────────────────────────────
+        self._esp_estado: str | None = None            # último est= visto en el ACK
+        self._inicio_estacionamiento: bool | None = None  # None = aún no decidido;
+                                                       # se resuelve UNA vez al armar
+        self._pink_samples: list[float] = []           # ratios de rosa del warmup
+        self._standdown_start: float | None = None     # t de entrada al stand-down (timeout)
+
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
 
@@ -206,7 +233,8 @@ class PPRuntime:
         mem_out = max(n_mem_obs, 1) if turn_block else n_mem_obs
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(has_obstacle)},mem={mem_out},pp=1,"
-                f"pasado={int(pasado)},intr={int(interior)}")
+                f"pasado={int(pasado)},intr={int(interior)},"
+                f"inicio={int(bool(self._inicio_estacionamiento))}")
 
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
 
@@ -573,6 +601,44 @@ class PPRuntime:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
 
+                # ── Stand-down mientras el ESP32 hace la maniobra INICIO ──────
+                # El ACK anterior trajo est=I: el ESP32 está saliendo del
+                # estacionamiento con su maniobra pre-programada. La Pi NO corre
+                # visión/BEV/centerline/memoria (el heading da vueltas 0->60->0 y
+                # ensuciaría el mapa rodante) — solo manda un V2 neutro y espera a
+                # ver "S". El dir= del ACK (L/R) sí se aprovecha: el ESP32 ya
+                # latcheó la dirección de giro de la pista.
+                if armed and self._esp_estado == "I":
+                    if self._standdown_start is None:
+                        self._standdown_start = time.perf_counter()
+                    _neutral = (f"V2,obs=+0.000,turn=0,state=inicio,prio=0,mem=0,"
+                                f"pp=1,pasado=0,intr=0,"
+                                f"inicio={int(bool(self._inicio_estacionamiento))}")
+                    self.serial_link.send_line(_neutral)
+                    _ack = self.serial_link.try_readline()
+                    _est = _parse_estado(_ack)
+                    if _est is not None:
+                        self._esp_estado = _est
+                    _h = _parse_heading(_ack)
+                    if _h is not None:
+                        self._last_heading = _h
+                    _d = _parse_direccion(_ack)
+                    if _d is not None:
+                        self.turn_dir_tracker.set_esp_direction(_d)
+                    # Red de seguridad: si el ACK se atora y "S" nunca llega, no
+                    # quedarse en stand-down para siempre.
+                    if (self._esp_estado == "I"
+                            and time.perf_counter() - self._standdown_start
+                                > getattr(C, "PARK_STANDDOWN_MAX_S", 12.0)):
+                        print("[INICIO] stand-down timeout — reanudando pipeline.", flush=True)
+                        self._esp_estado = "S"
+                    _tnow = time.perf_counter()
+                    self._last_update_t = _tnow   # dt de ~1 frame al reanudar
+                    t_prev_end = _tnow
+                    print(f"TX(inicio): {_neutral}" + (f" | RX: {_ack}" if _ack else ""),
+                          flush=True)
+                    continue
+
                 # FPS contador
                 fps_count += 1
                 now = time.perf_counter()
@@ -601,6 +667,27 @@ class PPRuntime:
                 processed_frame, positions = self.vision.process_frame(frame)
                 t_vis = time.perf_counter()
                 timing_ms["vis"] = (t_vis - now) * 1000.0
+
+                # ── INICIO: ¿arranco dentro del estacionamiento? ────────────
+                # DESARMADO: acumula el ratio de rosa del frame. Al ARMAR: se
+                # promedian las muestras y se decide UNA vez; el valor viaja en
+                # cada V2 como inicio= y el ESP32 lo consume en su 1er frame.
+                if not armed:
+                    try:
+                        self._pink_samples.append(_park_pink_ratio(processed_frame))
+                        if len(self._pink_samples) > C.PARK_PINK_SAMPLES:
+                            self._pink_samples.pop(0)
+                    except Exception:
+                        pass
+                elif self._inicio_estacionamiento is None:
+                    if not self._pink_samples:
+                        self._pink_samples.append(_park_pink_ratio(processed_frame))
+                    _pa = float(np.mean(self._pink_samples)) if self._pink_samples else 0.0
+                    self._inicio_estacionamiento = bool(_pa >= C.PARK_PINK_RATIO_MIN)
+                    print(f"[INICIO] pink_ratio avg={_pa:.2f} "
+                          f"(umbral {C.PARK_PINK_RATIO_MIN:.2f}, n={len(self._pink_samples)}) -> "
+                          f"{'MANIOBRA DE SALIDA' if self._inicio_estacionamiento else 'arranque normal'}",
+                          flush=True)
 
                 # ── Pipeline Pure Pursuit ────────────────────────────────────
                 steer_deg     = 0.0
@@ -1113,6 +1200,7 @@ class PPRuntime:
 
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
+                    self._esp_estado = estado_now   # p/ el stand-down de INICIO
                     # Debounce: un est=G ESPURIO (ACK con ruido, "est=G fantasma
                     # tras verde") ya no dispara el wipe de memoria a media
                     # esquiva. Un giro real manda est=G muchos frames seguidos;
