@@ -793,15 +793,22 @@ ORANGE_DR_LATCH_Y      = 290.0   # px BEV; si la línea real llegó a estar ASÍ
                                  # MAX_FRAMES, se mantiene marcada hasta el giro (todo lo que
                                  # se vea después es siguiente segmento). La detección real
                                  # de una línea nueva la re-ancla / la suelta.
-ORANGE_POST_TURN_CD_FRAMES = 20  # tras reset() del tracker (giro): ignora TODA lectura de
+ORANGE_POST_TURN_CD_FRAMES = 40  # tras reset() del tracker (giro): ignora TODA lectura de
                                  # naranja estos frames -- la que se ve recién girado suele
                                  # ser la del giro que se acaba de hacer.
                                  # 2026-09-08: 12 -> 20. Y runtime lo RE-ARMA cada frame
                                  # mientras _is_turning (line_tracker.hold_cooldown()), así
-                                 # que los 20 frames cuentan desde que TERMINA la maniobra,
-                                 # no desde que arranca. La MANIOBRA reversa (dir CC) dura
-                                 # ~3s y al retroceder re-ve la línea del giro -> con 12
-                                 # desde el inicio, latcheaba (near_y>=290) toda la recta.
+                                 # que los N frames cuentan desde que TERMINA la maniobra,
+                                 # no desde que arranca.
+                                 # 2026-09-08 pt2: 20 -> 40. Con 20 (~1.3s @16fps) la línea
+                                 # del giro que se acaba de hacer queda ARRASTRÁNDOSE en el
+                                 # borde inferior del BEV; ~2s después de "Giro terminado"
+                                 # (cooldown ya vencido) la cámara la re-agarra como fit
+                                 # REAL a near_y~319 -> LATCH (>=290) -> se congela 34
+                                 # frames dead_reckoned -> un VERDE de esa recta cae
+                                 # `beyond` 24 frames seguidos y NO se esquiva (orillas783).
+                                 # 40 (~2.5s) cubre hasta que el carro se aleja y la vieja
+                                 # sale del cuadro / cae bajo ORANGE_DR_MIN_ANCHOR_Y(240).
 
 # Frames tras TERMINAR un giro durante los cuales NO se filtra por la línea
 # naranja (todo cuenta como "mi recta", sin excepción) — justo al salir de
