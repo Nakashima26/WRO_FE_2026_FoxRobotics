@@ -879,31 +879,6 @@ class PPRuntime:
                         # cuenta como mi recta — mismo comportamiento de siempre).
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
-
-                        # ── VETO: la "naranja" es en realidad un CONO ──────────
-                        # Si near_y de la línea cae encima de un obstáculo en
-                        # memoria (rojo/verde cercano cuyo blob aliasea a naranja
-                        # en el BEV), esa "línea" no existe -> no clasificar
-                        # mine/beyond contra ella este frame (si no, reclasifica
-                        # a `beyond` el cono que estás esquivando). Ver
-                        # LINE_VS_OBSTACLE_VETO_PX en config.py.
-                        _oy_v = orange_info.get("near_y")
-                        if orange_info["seen"] and _oy_v is not None:
-                            _vp = float(getattr(C, "LINE_VS_OBSTACLE_VETO_PX", 22))
-                            for _ox_o, _oy_o, _oc_o in bev_obstacles:
-                                if abs(_oy_o - _oy_v) <= _vp:
-                                    print(f"[LINEA] VETO naranja near_y={_oy_v:.0f} "
-                                          f"sobre {_oc_o}@y={_oy_o:.0f} "
-                                          f"(dif {abs(_oy_o - _oy_v):.0f}<={_vp:.0f}) "
-                                          f"-> se ignora la linea este frame", flush=True)
-                                    # Neutraliza la "linea" para TODOS los
-                                    # consumidores de este frame (clasificacion,
-                                    # turn_dir, corner_soon). El estado interno
-                                    # del tracker no se toca -> se re-evalua solo.
-                                    orange_info = {"seen": False, "near_y": None, "line": None}
-                                    line_info["Orange"] = orange_info
-                                    break
-
                         if orange_info["seen"] and not en_recuperacion_giro:
                             # ── Rescate de cono EXTERIOR pegado a la boca de la
                             # esquina: si la pista va a girar y el cono de la

@@ -724,23 +724,6 @@ LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
                           # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
 
-# ── Anti "línea" que en realidad es un CONO ─────────────────────────────────
-# Un rojo/verde CERCA proyecta en BEV un blob que cae en el rango naranja
-# (rojo H~0-5 roza naranja H~7-18) y el warp del BEV lo ensancha -> cruza
-# LINE_MIN_RUN_PX y se "ve" como línea de esquina MAL PUESTA (near_y encima
-# del cono), reclasificando a `beyond` un obstáculo que estás esquivando
-# (run 2026-09-09 giro 11: esquive abortado a media recta). Dos guardas:
-#  1) EXTENSIÓN: la naranja en la banda cercana debe abarcar >= _SPAN_PX de
-#     ancho. Un cono abarca ~30-55px; una raya de esquina real abarca gran
-#     parte del BEV (400 de ancho) y su extensión SOBREVIVE a que un cono la
-#     ocluya en el medio (span = xmax-xmin, un hueco no lo achica).
-#  2) VETO por obstáculo: si near_y de la naranja cae a <= _VETO_PX de un
-#     obstáculo en memoria, esa "línea" ES el cono -> no se usa para
-#     clasificar mine/beyond ese frame (ver runtime_nuevo.py).
-LINE_MIN_SPAN_PX         = 55   # px BEV; si tu línea real es corta y se pierde, BÁJALO
-LINE_SPAN_BAND_PX        = 12   # +-filas alrededor de near_y donde se mide la extensión
-LINE_VS_OBSTACLE_VETO_PX = 22   # near_y a <= esto de un obstáculo => "línea" = ese cono
-
 # Ajuste de recta CON PENDIENTE (no solo Y) una vez que near_y ya es estable
 # — ver corner_lines._fit_line_near()/OrangeLineTracker. Necesario porque la
 # línea puede verse inclinada/diagonal en el BEV, no necesariamente horizontal;
