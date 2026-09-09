@@ -107,22 +107,31 @@ def _parse_estado(ack: str) -> str | None:
     return val if val in ("G", "R", "S", "I") else None
 
 
-def _park_pink_ratio(frame_bgr) -> float:
-    """Fracción de píxeles rosa/magenta (pared del cajón) en el frame, ignorando
-    la banda superior (C.PARK_PINK_ROI_TOP, fondo del venue). Ver `case INICIO`
-    en PurePursuit.ino y el bloque INICIO de config.py."""
+def _park_pink_mask(frame_bgr):
+    """(ratio, mask_full, y0). mask_full es del tamaño del frame (todo 0 por
+    encima de la fila y0). ratio = fracción rosa DENTRO del ROI (y0..abajo).
+    Ignora la banda superior C.PARK_PINK_ROI_TOP (fondo del venue). Ver
+    `case INICIO` en PurePursuit.ino y el bloque INICIO de config.py."""
     if frame_bgr is None or frame_bgr.size == 0:
-        return 0.0
-    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
-    y0  = int(hsv.shape[0] * getattr(C, "PARK_PINK_ROI_TOP", 0.12))
-    roi = hsv[y0:, :]
-    mask = None
+        return 0.0, None, 0
+    hsv     = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    h, w    = hsv.shape[:2]
+    y0      = int(h * getattr(C, "PARK_PINK_ROI_TOP", 0.12))
+    roi     = hsv[y0:, :]
+    m = None
     for lo, hi in C.PARK_PINK_HSV:
-        cur  = cv2.inRange(roi, lo, hi)
-        mask = cur if mask is None else (mask | cur)
-    if mask is None or mask.size == 0:
-        return 0.0
-    return float(np.count_nonzero(mask)) / float(mask.size)
+        cur = cv2.inRange(roi, lo, hi)
+        m   = cur if m is None else (m | cur)
+    if m is None or m.size == 0:
+        return 0.0, None, y0
+    ratio = float(np.count_nonzero(m)) / float(m.size)
+    full  = np.zeros((h, w), np.uint8)
+    full[y0:, :] = m
+    return ratio, full, y0
+
+
+def _park_pink_ratio(frame_bgr) -> float:
+    return _park_pink_mask(frame_bgr)[0]
 
 def _parse_direccion(ack: str) -> str | None:
     """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
@@ -523,6 +532,30 @@ class PPRuntime:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 2)
             y += 22
 
+    def _draw_park_pink(self, frame, ratio, mask, decided):
+        """Dibuja en el frame de cámara el rosa detectado (tinte + bbox) y el
+        veredicto de INICIO — como los bbox de rojo/verde, para confirmar de un
+        vistazo si el carro se ve DENTRO del estacionamiento antes de arrancar."""
+        thr = float(getattr(C, "PARK_PINK_RATIO_MIN", 0.45))
+        ok  = ratio >= thr
+        col = (200, 0, 200)                      # magenta BGR
+        if mask is not None and int(np.count_nonzero(mask)) > 0:
+            tint = frame.copy()
+            tint[mask > 0] = col
+            cv2.addWeighted(tint, 0.30, frame, 0.70, 0, frame)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            big = max(cnts, key=cv2.contourArea) if cnts else None
+            if big is not None and cv2.contourArea(big) > 400:
+                x, y, w, h = cv2.boundingRect(big)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), col, 2)
+                cv2.putText(frame, "PINK", (x, max(14, y - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 2)
+        tag = f"PINK {ratio * 100:4.0f}% / thr {thr * 100:.0f}%  {'PARKING' if ok else '--'}"
+        if decided is not None:
+            tag += f"   -> INICIO:{'MANIOBRA' if decided else 'normal'}"
+        cv2.putText(frame, tag, (10, frame.shape[0] - 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
+
     # ── Loop principal ────────────────────────────────────────────────────────
 
     def run(self, on_ready=None, should_start=None, should_record=None):
@@ -669,25 +702,42 @@ class PPRuntime:
                 timing_ms["vis"] = (t_vis - now) * 1000.0
 
                 # ── INICIO: ¿arranco dentro del estacionamiento? ────────────
-                # DESARMADO: acumula el ratio de rosa del frame. Al ARMAR: se
-                # promedian las muestras y se decide UNA vez; el valor viaja en
-                # cada V2 como inicio= y el ESP32 lo consume en su 1er frame.
-                if not armed:
+                # DESARMADO: mide el rosa del frame, lo DIBUJA (tinte + bbox,
+                # como los conos rojo/verde) y acumula el ratio. Al ARMAR:
+                # promedia y decide UNA vez; el valor viaja en cada V2 como
+                # inicio= y el ESP32 lo consume en su 1er frame (PurePursuit.ino
+                # `case INICIO`).
+                if (not armed) or (self._inicio_estacionamiento is None):
                     try:
-                        self._pink_samples.append(_park_pink_ratio(processed_frame))
+                        _pr, _pmask, _ = _park_pink_mask(processed_frame)
+                    except Exception:
+                        _pr, _pmask = 0.0, None
+                    if not armed:
+                        self._pink_samples.append(_pr)
                         if len(self._pink_samples) > C.PARK_PINK_SAMPLES:
                             self._pink_samples.pop(0)
+                        if self.loop_count % 30 == 0 and self._pink_samples:
+                            _avg = float(np.mean(self._pink_samples))
+                            print(f"[INICIO] pink={_pr:.2f} avg={_avg:.2f} "
+                                  f"thr={C.PARK_PINK_RATIO_MIN:.2f} n={len(self._pink_samples)} "
+                                  f"-> {'PARKING' if _avg >= C.PARK_PINK_RATIO_MIN else 'normal'}",
+                                  flush=True)
+                    elif self._inicio_estacionamiento is None:
+                        if not self._pink_samples:
+                            self._pink_samples.append(_pr)
+                        _pa = float(np.mean(self._pink_samples)) if self._pink_samples else 0.0
+                        _forced = bool(getattr(C, "PARK_FORCE_INICIO", False))
+                        self._inicio_estacionamiento = _forced or bool(_pa >= C.PARK_PINK_RATIO_MIN)
+                        print(f"[INICIO] DECISION pink_ratio avg={_pa:.2f} "
+                              f"(umbral {C.PARK_PINK_RATIO_MIN:.2f}, n={len(self._pink_samples)})"
+                              f"{' [FORZADO]' if _forced else ''} -> "
+                              f"{'MANIOBRA DE SALIDA' if self._inicio_estacionamiento else 'arranque normal'}",
+                              flush=True)
+                    try:
+                        self._draw_park_pink(processed_frame, _pr, _pmask,
+                                             self._inicio_estacionamiento)
                     except Exception:
                         pass
-                elif self._inicio_estacionamiento is None:
-                    if not self._pink_samples:
-                        self._pink_samples.append(_park_pink_ratio(processed_frame))
-                    _pa = float(np.mean(self._pink_samples)) if self._pink_samples else 0.0
-                    self._inicio_estacionamiento = bool(_pa >= C.PARK_PINK_RATIO_MIN)
-                    print(f"[INICIO] pink_ratio avg={_pa:.2f} "
-                          f"(umbral {C.PARK_PINK_RATIO_MIN:.2f}, n={len(self._pink_samples)}) -> "
-                          f"{'MANIOBRA DE SALIDA' if self._inicio_estacionamiento else 'arranque normal'}",
-                          flush=True)
 
                 # ── Pipeline Pure Pursuit ────────────────────────────────────
                 steer_deg     = 0.0
