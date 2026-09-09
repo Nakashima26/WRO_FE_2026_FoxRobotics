@@ -388,9 +388,24 @@ class PPRuntime:
 
         if not path_clear:
             self._recup_clear_count = 0
+            # DIAG 2026-09-09 (solo-log, sin efecto): geometría de cada lata de
+            # color que retiene `rodeando`, para verificar la cláusula "ya cruzó
+            # al lado interno del esquive" antes de implementarla:
+            #   dx = ox - eje  (signo vs heading_err = de qué lado quedó)
+            #   swept = |herr|>=HEADING_DEG y dx*herr>0  (cruzó, enderezar se aleja)
+            _hd = C.RECUP_MEAS_HEADING_DEG
+            _cones = []
+            _swept = False
+            for (ox, oy, c) in bev_obstacles:
+                if c not in ("Red", "Green"):
+                    continue
+                dx = ox - C.ROBOT_BEV_X
+                sw = abs(heading_err) >= _hd and dx * heading_err > 0.0
+                _swept = _swept or sw
+                _cones.append(f"{c[0]}dx={dx:+.0f},ahead={ry - oy:.0f},sw={int(sw)}")
             self._last_recup_reason = (
                 f"rodeando herr={heading_err:+.0f} w={max_w_near:.2f} "
-                f"atol={ahead_tol:.0f}")
+                f"atol={ahead_tol:.0f} swept={int(_swept)} [{' '.join(_cones)}]")
             return False
         self._recup_clear_count += 1
 
