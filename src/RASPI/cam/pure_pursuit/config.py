@@ -461,7 +461,11 @@ RECUP_MEAS_ARM_FRAMES     = 3      # 2026-08-29: la esquiva debe estar en curso 
                                    # 1 frame y se pierde (tras giro, FOV rasante) ya no arma
                                    # -> no entra a RECUPERANDO "super rápido" con la lata aún
                                    # enfrente (orillas417/418, reporte del usuario).
-RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
+RECUP_MEAS_CLEAR_FRAMES   = 5      # frames seguidos "despejado" antes de poder disparar.
+                                   # 3 -> 5 (2026-09-08, pedido del usuario): +~125ms @16fps
+                                   # para pasar el cono con más holgura antes de enderezar.
+                                   # Sube a 6 para +~185ms. Es el knob de "cuánto más dura
+                                   # RECUPERANDO en mandarse" sin meter un delay directo.
 RECUP_MEAS_CLEAR_FRAMES_CORNER = 1  # ...PERO si la línea naranja ya está encima
                                    # (near_y >= RECUP_SUPPRESS_NEAR_ORANGE_Y): disparar en
                                    # cuanto el path despeja 1 frame. El debounce de 3 dejaba
