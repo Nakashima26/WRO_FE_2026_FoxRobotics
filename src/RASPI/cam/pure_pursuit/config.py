@@ -698,27 +698,6 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
-# ─── INICIO — salida del estacionamiento (solo ronda de obstáculos) ───────────
-# Si al arrancar (durante el warmup) el frame es MAYORITARIAMENTE rosa/magenta
-# (la pared del cajón), la Pi manda inicio=1 en el V2 y el ESP32 hace la
-# maniobra de salida (case INICIO) antes de SIGUIENDO. Si el ratio queda por
-# debajo del umbral -> arranque normal, sin maniobra.
-# El rango HSV es de ARRANQUE — calibrar con:
-#   python -m pure_pursuit.pick_color --image <frame_dentro_del_cajon>.jpg
-# arrastrando sobre el muro (zonas claras y oscuras). El tono de la pared
-# magenta cae ~H 148-174; S/V bien abiertos para aguantar sombra y reflejo.
-# La decisión se toma UNA sola vez (al armar) sobre el frame crudo, ignorando
-# la banda superior (fondo del venue).
-PARK_PINK_HSV       = [(np.array([148, 60, 45]), np.array([174, 255, 255]))]
-PARK_PINK_RATIO_MIN = 0.45   # fracción del ROI que debe ser rosa para disparar INICIO
-PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
-PARK_PINK_SAMPLES   = 15     # muestras de warmup a promediar para la decisión
-PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra del
-                             # ESP32 sin depender de que el rosa pase el umbral)
-PARK_STANDDOWN_MAX_S = 12.0  # red de seguridad: si el ACK se atora y nunca llega
-                             # "S", la Pi reanuda el pipeline igual (la maniobra
-                             # INICIO del ESP32 dura ~5 s, ~9 s en el peor caso)
-
 LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
