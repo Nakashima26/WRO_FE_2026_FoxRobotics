@@ -100,9 +100,31 @@ def _parse_estado(ack: str) -> str | None:
     if idx < 0:
         return None
     val = ack[idx + 4: idx + 5]
-    if val == "C":          # CRUCERO (ESP): la Pi lo trata igual que SIGUIENDO
-        return "S"
+    if val in ("C", "I"):   # CRUCERO / INICIO (ESP): la Pi los trata igual que SIGUIENDO
+        return "S"          # (durante INICIO el ESP maneja solo; la Pi no hace nada especial)
     return val if val in ("G", "R", "S") else None
+
+
+def _park_pink(frame_bgr):
+    """(ratio, mask). ratio = fracción de píxeles magenta (pared del cajón) en el
+    ROI, ignorando la banda superior C.PARK_PINK_ROI_TOP (fondo del venue). mask
+    es del tamaño del frame (0 por encima del ROI), para dibujar el HUD. Ver
+    `case INICIO` en PurePursuit.ino y el bloque INICIO de config.py."""
+    if frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
+        return 0.0, None
+    hsv  = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    h, w = hsv.shape[:2]
+    y0   = int(h * getattr(C, "PARK_PINK_ROI_TOP", 0.12))
+    m = None
+    for lo, hi in C.PARK_PINK_HSV:
+        cur = cv2.inRange(hsv[y0:, :], lo, hi)
+        m   = cur if m is None else (m | cur)
+    if m is None:
+        return 0.0, None
+    ratio = float(np.count_nonzero(m)) / float(m.size)
+    full  = np.zeros((h, w), np.uint8)
+    full[y0:, :] = m
+    return ratio, full
 
 def _parse_direccion(ack: str) -> str | None:
     """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
@@ -170,6 +192,12 @@ class PPRuntime:
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
 
+        # ── INICIO — salida del estacionamiento ───────────────────────────────
+        # Se mide el rosa mientras está DESARMADO y se decide UNA vez al armar.
+        # None = aún no decidido -> inicio=0. La Pi NO hace nada más.
+        self._inicio_estacionamiento: bool | None = None
+        self._pink_samples: list[float] = []
+
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
 
@@ -206,7 +234,8 @@ class PPRuntime:
         mem_out = max(n_mem_obs, 1) if turn_block else n_mem_obs
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(has_obstacle)},mem={mem_out},pp=1,"
-                f"pasado={int(pasado)},intr={int(interior)}")
+                f"pasado={int(pasado)},intr={int(interior)},"
+                f"inicio={int(bool(self._inicio_estacionamiento))}")
 
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
 
@@ -495,6 +524,29 @@ class PPRuntime:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 2)
             y += 22
 
+    def _draw_park_pink(self, frame, ratio, mask):
+        """HUD del rosa: tinte + bbox del magenta detectado + veredicto, como los
+        bbox de rojo/verde. SOLO se llama DESPUÉS del pipeline (nunca sobre el
+        frame que va al BEV) -> no puede afectar la visión."""
+        thr = float(getattr(C, "PARK_PINK_RATIO_MIN", 0.45))
+        col = (200, 0, 200)                       # magenta BGR
+        if mask is not None and int(np.count_nonzero(mask)) > 0:
+            tint = frame.copy()
+            tint[mask > 0] = col
+            cv2.addWeighted(tint, 0.30, frame, 0.70, 0, frame)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            big = max(cnts, key=cv2.contourArea) if cnts else None
+            if big is not None and cv2.contourArea(big) > 400:
+                x, y, w, h = cv2.boundingRect(big)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), col, 2)
+                cv2.putText(frame, "PINK", (x, max(14, y - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 2)
+        cv2.putText(frame,
+                    f"PINK {ratio * 100:4.0f}% / thr {thr * 100:.0f}%  "
+                    f"{'-> INICIO' if ratio >= thr else '--'}",
+                    (10, frame.shape[0] - 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
+
     # ── Loop principal ────────────────────────────────────────────────────────
 
     def run(self, on_ready=None, should_start=None, should_record=None):
@@ -601,6 +653,26 @@ class PPRuntime:
                 processed_frame, positions = self.vision.process_frame(frame)
                 t_vis = time.perf_counter()
                 timing_ms["vis"] = (t_vis - now) * 1000.0
+
+                # ── INICIO: mide el rosa mientras está DESARMADO; al ARMAR
+                # decide UNA vez si el carro arranca dentro del estacionamiento.
+                # La Pi NO hace nada más: sigue el pipeline normal y el ESP32
+                # ignora `obs` mientras dura su maniobra (PurePursuit.ino
+                # `case INICIO`). El HUD se dibuja después, ver abajo.
+                if not armed:
+                    self._pink_samples.append(_park_pink(processed_frame)[0])
+                    if len(self._pink_samples) > C.PARK_PINK_SAMPLES:
+                        self._pink_samples.pop(0)
+                elif self._inicio_estacionamiento is None:
+                    if not self._pink_samples:
+                        self._pink_samples.append(_park_pink(processed_frame)[0])
+                    _avg    = float(np.mean(self._pink_samples))
+                    _forced = bool(getattr(C, "PARK_FORCE_INICIO", False))
+                    self._inicio_estacionamiento = _forced or (_avg >= C.PARK_PINK_RATIO_MIN)
+                    print(f"[INICIO] rosa avg={_avg:.2f} umbral={C.PARK_PINK_RATIO_MIN:.2f} "
+                          f"n={len(self._pink_samples)}{' FORZADO' if _forced else ''} -> "
+                          f"{'MANIOBRA DE SALIDA (inicio=1)' if self._inicio_estacionamiento else 'arranque normal'}",
+                          flush=True)
 
                 # ── Pipeline Pure Pursuit ────────────────────────────────────
                 steer_deg     = 0.0
@@ -1208,6 +1280,17 @@ class PPRuntime:
                             pp_active, len(path_points), positions,
                             serial_msg, fps, len(bev_obstacles),
                             self.memory.last_prune_reason, timing_ms, bev_timing)
+
+                # HUD del rosa — DESPUÉS de todo el pipeline (el BEV ya se
+                # calculó arriba con el frame limpio), así que dibujar acá no
+                # puede tocar la visión. Solo mientras está DESARMADO (que es
+                # cuando se coloca el carro y se mira si "ve" el estacionamiento).
+                if not armed:
+                    try:
+                        _pr_h, _pm_h = _park_pink(processed_frame)
+                        self._draw_park_pink(processed_frame, _pr_h, _pm_h)
+                    except Exception:
+                        pass
 
                 if bev_frame is not None:
                     bev_debug = draw_bev_debug(
