@@ -365,8 +365,22 @@ class PPRuntime:
             ahead_tol = 0.0                         # latiguazo extremo: lata al eje o detrás
         else:
             ahead_tol = _tol0 * (_hhi - _a) / (_hhi - _hlo)
+        # Una lata que YA cruzó al lado INTERNO del esquive (dx=ox-eje con el
+        # MISMO signo que heading_err) NO "estorba" aunque siga longitudinalmente
+        # adelante: al enderezar el morro se ALEJA de ella, no barre hacia ella
+        # (que es lo que ahead_tol protege). VERIFICADO en pista 2026-09-09
+        # (run 14:52, [RECUP] rodeando ... swept=): el rojo de giros 1/5/9 cruza
+        # el eje a herr~-27 y el blocking longitudinal lo retenía ~10 frames más
+        # -> disparaba a herr~-51 en vez de ~-33. El verde NUNCA cruza (dx queda
+        # +5..+15) -> intacto. Gate |herr|>=HEADING_DEG + deadband 8px (el rojo
+        # solo llega a dx~-24; el cruce de signo es la señal limpia, no la magnitud).
+        _hd = C.RECUP_MEAS_HEADING_DEG
+        _db = float(getattr(C, "RECUP_MEAS_SWEPT_DEADBAND_PX", 8.0))
         blocking = any(
             c in ("Red", "Green") and (ry - oy) > ahead_tol
+            and not (abs(heading_err) >= _hd
+                     and (ox - C.ROBOT_BEV_X) * heading_err > 0.0
+                     and abs(ox - C.ROBOT_BEV_X) >= _db)
             for (ox, oy, c) in bev_obstacles
         )
         # Bypass del ghost: si la lata que "estorba" no se ve FRESCA (la cámara
