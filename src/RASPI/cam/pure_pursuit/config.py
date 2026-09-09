@@ -709,7 +709,7 @@ LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin 
 # "casi todo el frame es de este tono", no una detección fina. Calibrar fino con:
 #   python -m pure_pursuit.pick_color --image <frame_dentro_del_cajon>.jpg
 PARK_PINK_HSV       = [(np.array([135, 45, 40]), np.array([175, 255, 255]))]
-PARK_PINK_RATIO_MIN = 0.45   # fracción del ROI que debe ser magenta
+PARK_PINK_RATIO_MIN = 0.35   # fracción del ROI que debe ser magenta
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
 PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
