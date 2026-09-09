@@ -525,25 +525,16 @@ class PPRuntime:
             y += 22
 
     def _draw_park_pink(self, frame, ratio, mask):
-        """HUD del rosa: tinte + bbox del magenta detectado + veredicto, como los
-        bbox de rojo/verde. SOLO se llama DESPUÉS del pipeline (nunca sobre el
-        frame que va al BEV) -> no puede afectar la visión."""
-        thr = float(getattr(C, "PARK_PINK_RATIO_MIN", 0.45))
+        """HUD del rosa: un cuadrado sobre el magenta detectado + el ratio.
+        SOLO se llama DESPUÉS del pipeline (nunca sobre el frame que va al BEV)."""
         col = (200, 0, 200)                       # magenta BGR
-        if mask is not None and int(np.count_nonzero(mask)) > 0:
-            tint = frame.copy()
-            tint[mask > 0] = col
-            cv2.addWeighted(tint, 0.30, frame, 0.70, 0, frame)
-            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            big = max(cnts, key=cv2.contourArea) if cnts else None
-            if big is not None and cv2.contourArea(big) > 400:
-                x, y, w, h = cv2.boundingRect(big)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), col, 2)
-                cv2.putText(frame, "PINK", (x, max(14, y - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 2)
-        cv2.putText(frame,
-                    f"PINK {ratio * 100:4.0f}% / thr {thr * 100:.0f}%  "
-                    f"{'-> INICIO' if ratio >= thr else '--'}",
+        thr = float(getattr(C, "PARK_PINK_RATIO_MIN", 0.45))
+        if mask is not None:
+            ys, xs = np.where(mask > 0)
+            if xs.size > 200:
+                cv2.rectangle(frame, (int(xs.min()), int(ys.min())),
+                              (int(xs.max()), int(ys.max())), col, 2)
+        cv2.putText(frame, f"PINK {ratio * 100:.0f}% / thr {thr * 100:.0f}%",
                     (10, frame.shape[0] - 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
 
