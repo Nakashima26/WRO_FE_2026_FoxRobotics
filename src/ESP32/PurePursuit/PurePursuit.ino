@@ -364,6 +364,22 @@ int  lateralOpenStreak  = 0;   // frames consecutivos actuales con el lateral vi
 int  lateralDropCount   = 0;
 bool giroSucioArmado    = false;
 
+// ── Latch de dirección de APROXIMACIÓN ────────────────────────────────────────
+// En la esquina con un obstáculo cercano al costado, el cono de sonido del
+// lateral se lockea en ESE obstáculo (~75cm) en cuanto dF baja de ~50 ->
+// paredAbierta se apaga justo cuando haría falta y la maniobra sale por el
+// timeout (cruceroLargo), ya metida en la pared (esquinas C: turnos 3/7/11).
+// PERO antes de eso (dF ~70->50) el lateral SÍ da la apertura real, sólida,
+// 5-7 frames. Aquí se latchea el primer lado que abre de forma SOSTENIDA
+// durante lateralWatchActivo. Sirve para: (a) habilitar el disparo de enLaPared
+// por el frontal aunque el lateral ya no lea abierto, y (b) darle la dirección
+// correcta a decidirManiobra en la 1ª esquina (primerGiro aún no latcheado).
+// 0 = nada aún | 1 = abrió IZQUIERDA | 2 = abrió DERECHA.
+int  direccionAproxLatch     = 0;
+int  aproxOpenStreakIzq      = 0;
+int  aproxOpenStreakDer      = 0;
+const int APROX_DIR_LATCH_FRAMES = 3;  // frames seguidos de un lado abierto para latchear
+
 const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
 const float headingSettleDeg = 6.0;  // |errorGyro| por debajo de esto = "alineado"
 
@@ -557,7 +573,13 @@ void decidirManiobra(long distL, long distR) {
   if (primerGiro) {
     maniobraGirarDer = !direccionIzquierda;                 // ya latcheada
   } else {
-    if      (derAbierta && !izqAbierta) maniobraGirarDer = true;
+    // 1ª esquina: la dirección sale de qué lado abrió. Prioridad al latch de la
+    // APROXIMACIÓN (leído cuando el lateral aún daba el hueco real, antes de que
+    // el cono de sonido se lockeara en un obstáculo cercano). Si no hay latch,
+    // se usa la lectura viva; y por último el fallback histórico.
+    if      (direccionAproxLatch == 1) maniobraGirarDer = false;  // abrió IZQUIERDA
+    else if (direccionAproxLatch == 2) maniobraGirarDer = true;   // abrió DERECHA
+    else if (derAbierta && !izqAbierta) maniobraGirarDer = true;
     else if (izqAbierta && !derAbierta) maniobraGirarDer = false;
     else                               maniobraGirarDer = (distR > distL);  // fallback (no debería pasar)
     primerGiro = true;                                      // latcheado para el resto de la carrera
@@ -850,6 +872,7 @@ void parsePiMessage(String line) {
     //   dF    : ultrasónico frontal filtrado (cm)  — 0 si rondaObstaculos=false
     //   drop  : lateralDropCount (CRUCERO: caídas del lateral vigilado, ver LATERAL_WATCH_CM)
     //   sucio : giroSucioArmado (1 = esquina "sucia" armada, el giro va a disparar sin paredAbierta)
+    //   alat  : direccionAproxLatch (0 nada, 1 abrió IZQ, 2 abrió DER — hueco leído en la aproximación)
     Serial2.print(",fase="); Serial2.print(maniobraFase);
     Serial2.print(",rev=");  Serial2.print(maniobraReversa ? 1 : 0);
     Serial2.print(",gd=");   Serial2.print(maniobraGirarDer ? 1 : 0);
@@ -859,6 +882,7 @@ void parsePiMessage(String line) {
     Serial2.print(",cerca="); Serial2.print(cruceroCerca ? 1 : 0);  // CRUCERO: 1 = gyro+wall (sin visión)
     Serial2.print(",drop=");  Serial2.print(lateralDropCount);
     Serial2.print(",sucio="); Serial2.print(giroSucioArmado ? 1 : 0);
+    Serial2.print(",alat=");  Serial2.print(direccionAproxLatch);
     // ── DEBUG heading/control (2026-09-07: "heading es mi pata de palo") ──
     //   ao   : anguloObjetivo — el TARGET de heading que persigue el gyro PID
     //   eg   : errorGyro (anguloObjetivo - anguloGyro, capado ±20 en controlPID)
@@ -1389,6 +1413,9 @@ void loop() {
               lateralOpenStreak  = 0;
               lateralDropCount   = 0;
               giroSucioArmado    = false;
+              direccionAproxLatch = 0;
+              aproxOpenStreakIzq  = 0;
+              aproxOpenStreakDer  = 0;
               estado          = CRUCERO;
               Serial.println("-> CRUCERO");
             }
@@ -1460,6 +1487,9 @@ void loop() {
           lateralOpenStreak  = 0;
           lateralDropCount   = 0;
           giroSucioArmado    = false;
+          direccionAproxLatch = 0;
+          aproxOpenStreakIzq  = 0;
+          aproxOpenStreakDer  = 0;
           estado         = CRUCERO;
         } else {
           estado = SIGUIENDO;
@@ -1560,6 +1590,9 @@ void loop() {
         lateralOpenStreak  = 0;
         lateralDropCount   = 0;
         giroSucioArmado    = false;
+        direccionAproxLatch = 0;
+        aproxOpenStreakIzq  = 0;
+        aproxOpenStreakDer  = 0;
         break;
       }
 
@@ -1576,6 +1609,26 @@ void loop() {
         lateralOpenStreak  = 0;
       }
       if (lateralWatchActivo) {
+        // ── Latch de dirección de aproximación ── el PRIMER lado que sostenga
+        // apertura APROX_DIR_LATCH_FRAMES frames seguidos. Se lee aquí (dF ~70->50)
+        // donde el lateral aún da el hueco real, antes de que el cono de sonido
+        // se lockee en un obstáculo cercano de la esquina. No se re-evalúa.
+        if (direccionAproxLatch == 0) {
+          aproxOpenStreakIzq = (distL > umbralPared) ? aproxOpenStreakIzq + 1 : 0;
+          aproxOpenStreakDer = (distR > umbralPared) ? aproxOpenStreakDer + 1 : 0;
+          if (primerGiro) {
+            // Dirección ya conocida (misma en toda la pista): basta con confirmar
+            // que ESTA es una esquina (cualquier lado sostuvo apertura).
+            if (aproxOpenStreakIzq >= APROX_DIR_LATCH_FRAMES
+                || aproxOpenStreakDer >= APROX_DIR_LATCH_FRAMES)
+              direccionAproxLatch = direccionIzquierda ? 1 : 2;
+          } else {
+            // 1ª esquina: la dirección SÍ sale de qué lado abrió.
+            if      (aproxOpenStreakIzq >= APROX_DIR_LATCH_FRAMES) direccionAproxLatch = 1;
+            else if (aproxOpenStreakDer >= APROX_DIR_LATCH_FRAMES) direccionAproxLatch = 2;
+          }
+        }
+
         bool ladoVigilado = primerGiro
             ? (direccionIzquierda ? (distL > umbralPared) : (distR > umbralPared))
             : paredAbierta;
@@ -1627,10 +1680,17 @@ void loop() {
         // el frontal (run 2026-09-07: 6+ MANIOBRA falsas encadenadas, cada una a
         // dF~25 con un rojo/verde enfrente). El _saleLata de arriba ya la mandó
         // a SIGUIENDO a esquivar; cruceroLargo sigue como red anti-atasco.
+        // _laAprox: en la aproximación (dF ~70->50) SÍ vimos el hueco de la
+        // esquina abrirse de forma sostenida (APROX_DIR_LATCH_FRAMES) -> es una
+        // esquina real aunque AHORA el lateral esté tapado por un obstáculo
+        // cercano. Habilita el disparo por el frontal sin exigir paredAbierta en
+        // este frame. Sigue exigiendo distF <= _umbralFront y !_hayLataMia.
+        bool _laAprox = (direccionAproxLatch != 0);
         enLaPared         = (distF > 0 && distF <= _umbralFront
-                             && (paredAbierta || giroSucioArmado)
+                             && (paredAbierta || giroSucioArmado || _laAprox)
                              && !_hayLataMia);
-        debounceNecesario = paredAbierta ? CRUCERO_PARED_DEBOUNCE : CRUCERO_FRONT_DEBOUNCE;
+        debounceNecesario = (paredAbierta || _laAprox) ? CRUCERO_PARED_DEBOUNCE
+                                                       : CRUCERO_FRONT_DEBOUNCE;
       }
       bool cruceroLargo = (millis() - cruceroEntryMs) > CRUCERO_TIMEOUT_MS;  // red de seguridad
       // gapOk: dos MANIOBRA reales nunca caen < MANIOBRA_MIN_GAP_MS (la maniobra
@@ -1648,7 +1708,10 @@ void loop() {
         lateralOpenStreak  = 0;
         lateralDropCount   = 0;
         giroSucioArmado    = false;
-        decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada
+        decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada (usa direccionAproxLatch)
+        direccionAproxLatch = 0;         // consumido; la próxima esquina lo re-latchea
+        aproxOpenStreakIzq  = 0;
+        aproxOpenStreakDer  = 0;
         maniobraFase  = -1;              // MANIOBRA hará el phase-init
         piPurePursuit = false;
         estado        = MANIOBRA;
