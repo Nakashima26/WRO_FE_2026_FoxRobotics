@@ -713,6 +713,8 @@ PARK_PINK_HSV       = [(np.array([148, 60, 45]), np.array([174, 255, 255]))]
 PARK_PINK_RATIO_MIN = 0.45   # fracción del ROI que debe ser rosa para disparar INICIO
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # muestras de warmup a promediar para la decisión
+PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra del
+                             # ESP32 sin depender de que el rosa pase el umbral)
 PARK_STANDDOWN_MAX_S = 12.0  # red de seguridad: si el ACK se atora y nunca llega
                              # "S", la Pi reanuda el pipeline igual (la maniobra
                              # INICIO del ESP32 dura ~5 s, ~9 s en el peor caso)
