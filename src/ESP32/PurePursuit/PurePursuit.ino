@@ -123,6 +123,13 @@ bool  piInteriorPass = false; // intr=1: el obstáculo actual se pasa por el mis
                                // sabe la dirección de giro, por visión, y el color
                                // del obstáculo) — el giro mismo resuelve el paso,
                                // no hace falta seguir bloqueando detectarEsquina().
+bool  piInicioEstacionamiento = false; // inicio=1: al arrancar, la Pi vio rosa
+                               // MAYORITARIO en el frame -> el carro está dentro
+                               // del estacionamiento y toca la maniobra INICIO
+                               // antes de SIGUIENDO. Debe venir ya en el 1er V2.
+                               // "Sticky": una vez visto en 1 se queda en 1 (la
+                               // Pi puede dejar de mandarlo tras el arranque); el
+                               // one-shot de loop() lo consume una sola vez.
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -179,7 +186,11 @@ bool marchaIniciada = false;
 // ángulo (CRUCERO) hasta ~50cm de la pared y luego hace una maniobra por tramos
 // (MANIOBRA): pivote hacia adelante o EN REVERSA según qué tan pegado va a la
 // pared exterior del giro. Con rondaObstaculos=false nada de esto se usa.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO };
+// INICIO: solo ronda de obstáculos y solo si la Pi vio rosa mayoritario en el
+// frame al arrancar (inicio=1) -> el carro parte dentro del estacionamiento y
+// hace una "S" pre-programada para salir antes de entregar el volante a
+// SIGUIENDO. Si inicio=0 nunca se entra a este estado (arranque normal).
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO };
 Estado estado = SIGUIENDO;
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
@@ -235,6 +246,15 @@ const unsigned long CRUCERO_YIELD_LATA_MS = 1500; // ventana tras ENTRAR a CRUCE
                                                   // lata (no esquina) y devuelve a SIGUIENDO
                                                   // para esquivarla. Fuera de esta ventana
                                                   // manda el "commit" de orillas696.
+const int CRUCERO_YIELD_ANG_DEG = 30;  // |anguloGyro| máx. para esa salida (antes usaba
+                                       // CRUCERO_STRAIGHTEN_DEG=15). orillas824 g5: el
+                                       // centrado del propio CRUCERO (WALL_BLEND, despegándose
+                                       // de la pared interior) llevó el chasis a -15.01° justo
+                                       // cuando llegó el rojo `mia` (0.45 s tras entrar) ->
+                                       // no soltó y lo ignoró ~1 s. En 78 CRUCEROs de
+                                       // orillas821-824 el chasis pasó de 15° en la ventana
+                                       // solo 4 veces; con 30 solo cambian 2 casos, ambos el
+                                       // rojo de la misma recta. 15 sigue para enderezar.
 
 // ── SETTLE de fin de MANIOBRA (runs 716/718/719) ─────────────────────────────
 // El pivote (sobre todo REVERSA + backoff) entrega con velocidad angular: al
@@ -416,6 +436,43 @@ int timeStart = 0;
 const int COOLDOWN_GIRO_OBSTACULOS = 3000;
 const int COOLDOWN_GIRO_ABIERTA    = 1000;
 const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_GIRO_ABIERTA;
+
+// ── INICIO — maniobra de salida del estacionamiento (ronda de obstáculos) ─────
+// Solo corre si la Pi manda inicio=1 (rosa mayoritario al arrancar). El carro
+// hace una "S" pre-programada: saca la nariz hacia el interior hasta ~60°,
+// avanza un tramo recto, contravuelve hasta volver a ~0° (alineado con la
+// recta), y retrocede un colchón por si hay un obstáculo pegado a la salida del
+// cajón. Al terminar entra a SIGUIENDO. Ver `case INICIO`.
+// El estacionamiento SIEMPRE está sobre la pared exterior, así que el lateral
+// más corto (la pared) fija a la vez el lado de salida Y la dirección de giro de
+// toda la pista (se latchea como hace GIRANDO en la 1ª esquina).
+// TODOS estos números son de ARRANQUE — hay que tunearlos en el tapete.
+const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra
+const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
+const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
+const int  INICIO_ANG_OUT_DEG          = 60;   // fase 1: ángulo de salida (nariz al interior)
+const int  INICIO_OVERSHOOT_DEG        = 8;    // corta el servo antes; la inercia completa (0 = sin corte)
+const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
+                                                     //  ángulo — patina / topa la pared del cajón —
+                                                     //  pasa a la fase 2 igual; la contravuelta y la
+                                                     //  reversa terminan de cuadrar lo que haya)
+const unsigned long INICIO_MID_MS      = 1;  // fase 2: tramo recto entre los dos giros
+const int  INICIO_ENDEREZA_MARGEN_DEG  = 8;    // fase 3: sale de la contravuelta con este margen a 0
+const unsigned long INICIO_CONTRA_TIMEOUT_MS = 4000; // red de seguridad de la fase 3
+const int  INICIO_REV_PWM             = 100;  // fase 5: PWM de la reversa
+const unsigned long INICIO_REV_MS      = 2250; // fase 5: duración de la reversa (colchón de seguridad)
+const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
+                                              // (si el cajón deja lectura ambigua, no se arriesga el
+                                              //  latch global: la 1ª esquina real decide como siempre)
+
+// Estado interno de INICIO
+bool inicioEvaluado = false;   // one-shot: ¿ya se decidió si entrar a INICIO?
+int  inicioFase     = -1;      // -1 init | 1 swing | 2 recto | 3 contra | 4 coast | 5 reversa | 6 settle
+bool inicioGirarDer = false;   // lado de salida del cajón (servo full hacia ahí en la fase 1)
+unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
+float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample de la fase 6
+unsigned long inicioSettleSampMs  = 0;
+int           inicioSettleQuieto  = 0;
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
@@ -659,6 +716,31 @@ void iniciarSettleManiobra() {
   maniobraSettleQuieto  = 0;
 }
 
+// Cierre de INICIO: endereza, deja el puente en adelante, resetea integrales y
+// entrega el volante a SIGUIENDO. NO zera anguloGyro (la fase 6 ya esperó a que
+// el carro dejara de rotar, la lectura es fiable): anguloGyro se puso en 0 al
+// INIT con el carro paralelo a la pared exterior = alineado con la recta, así
+// que apuntar a anguloObjetivo=0 es correcto y si la contravuelta quedó corta el
+// gyro PID de SIGUIENDO termina de cuadrar. NO toca turnsCompleted: salir del
+// cajón NO es una de las 12 vueltas.
+void finalizarInicio() {
+  motorAdelante();
+  escribirServo(centroServo);
+  setMotor(0);
+  velocidadMotor = 180;
+  integralWall = 0; prevErrorWall = 0;
+  integralGyro = 0; prevErrorGyro = 0;
+  anguloObjetivo = 0;
+  lastTurnTime   = millis();   // cooldown: sin giro-falso en la zona de salida
+  timeStart      = millis();   // el grace de arranque cuenta desde acá
+  inicioFase     = -1;
+  estado         = SIGUIENDO;
+  Serial.print("INICIO completado -> SIGUIENDO  ang=");
+  Serial.print(anguloGyro, 1);
+  Serial.print(" dirPista=");
+  Serial.println(!primerGiro ? "?" : (direccionIzquierda ? "IZQ" : "DER"));
+}
+
 // ── Heading-hold en REVERSA (fase 4 de la MANIOBRA) ──────────────────────────
 // Retroceder con el servo fijo al centro NO sale recto: la asimetría mecánica
 // + el yaw residual del pivote giran el chasis -7±2° "hacia adentro" cada
@@ -842,6 +924,18 @@ void parsePiMessage(String line) {
       piInteriorPass = false;
     }
 
+    // inicio — la Pi vio rosa MAYORITARIO en el frame al arrancar (está en el
+    // estacionamiento) -> el ESP32 hace la maniobra de salida (case INICIO)
+    // antes de SIGUIENDO. Debe venir ya en el PRIMER V2. Ausente en V1 -> se
+    // ignora. SOLO se setea a true (sticky): la Pi solo tiene que afirmarlo una
+    // vez; el one-shot de loop() lo consume una sola vez.
+    idx = line.indexOf("inicio=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 7, end) : line.substring(idx + 7);
+      if (s.toInt() != 0) piInicioEstacionamiento = true;
+    }
+
     piReady           = true;
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
@@ -853,7 +947,10 @@ void parsePiMessage(String line) {
     // MANIOBRA -> "G" (la Pi hace su manejo de giro: borra memoria, resetea
     // line_tracker). CRUCERO -> "C" (la Pi lo trata igual que "S"; solo sirve
     // para verlo en el journalctl). RECUPERANDO -> "R". SIGUIENDO -> "S".
-    Serial2.print((estado == GIRANDO || estado == MANIOBRA) ? "G"
+    // INICIO -> "I" (la Pi debe quedarse en stand-down: V2 neutro, sin memoria
+    // de obstáculos ni centerline, hasta ver "S").
+    Serial2.print(estado == INICIO ? "I"
+                  : (estado == GIRANDO || estado == MANIOBRA) ? "G"
                   : (estado == RECUPERANDO ? "R"
                      : (estado == CRUCERO ? "C" : "S")));
     // Dirección de giro de la pista: '?' hasta el 1er GIRANDO, luego L/R
@@ -1307,6 +1404,19 @@ void loop() {
     timeStart      = millis();
   }
 
+  // One-shot (ya pasados los gates de boot): si es ronda de obstáculos y la Pi
+  // vio rosa mayoritario al arrancar (inicio=1 en el V2), el carro NO arranca en
+  // SIGUIENDO sino que hace la maniobra de salida del estacionamiento. Se evalúa
+  // una sola vez; inicio=0 / ronda abierta -> no cambia nada.
+  if (!inicioEvaluado) {
+    inicioEvaluado = true;
+    if (rondaObstaculos && piInicioEstacionamiento) {
+      estado     = INICIO;
+      inicioFase = -1;
+      Serial.println("-> INICIO (rosa mayoritario: salir del estacionamiento)");
+    }
+  }
+
   mpu.update();
   actualizarGyro();
 
@@ -1326,6 +1436,177 @@ void loop() {
   long distF = (long)distF_filtrada;
 
   switch (estado) {
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INICIO — solo ronda de obstáculos, solo si la Pi vio rosa mayoritario al
+    // arrancar (piInicioEstacionamiento). Maniobra pre-programada en "S" para
+    // salir del estacionamiento y entregar el carro a SIGUIENDO alineado con la
+    // recta (heading ~0) y con la dirección de giro de la pista ya latcheada.
+    //
+    // Fases (mismos coast obligatorios que MANIOBRA — invertir el puente H con el
+    // motor girando frió un TB6612, 2026-09-01):
+    //   -1 INIT   : lee dL/dR (mediana de 3, frescas) y latchea el lado de
+    //               salida; si la lectura es decisiva, latchea también la
+    //               dirección de giro de TODA la pista (el cajón siempre está en
+    //               la pared exterior). anguloGyro := 0 = referencia de la recta.
+    //    1 SWING  : servo full hacia el lado de salida, avanza (rampa de PWM)
+    //               hasta |anguloGyro| >= INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG.
+    //    2 RECTO  : servo centro, avanza de frente INICIO_MID_MS.
+    //    3 CONTRA : servo full al lado CONTRARIO, avanza hasta |anguloGyro| <=
+    //               INICIO_ENDEREZA_MARGEN_DEG (la inercia lo lleva a ~0).
+    //    4 COAST  : motorCoast + servo centro, MANIOBRA_FRENO_MS (antes de reversa).
+    //    5 REVERSA: motorReversa + aplicarReversaHold(0) (recto, lazo cerrado)
+    //               durante INICIO_REV_MS — colchón por si hay un obstáculo
+    //               pegado a la salida del cajón.
+    //    6 SETTLE : motorCoast, espera a que deje de rotar, luego finalizarInicio().
+    // ═══════════════════════════════════════════════════════════════════════════
+    case INICIO: {
+      // ── Fase -1: INIT (una vez) ─────────────────────────────────────────────
+      if (inicioFase < 0) {
+        // Lecturas frescas (mediana de 3): un solo eco perdido devuelve 200 y
+        // podría voltear la dirección latcheada para toda la carrera.
+        long l1 = leerDistancia(TRIG_L, ECHO_L);
+        long l2 = leerDistancia(TRIG_L, ECHO_L);
+        long l3 = leerDistancia(TRIG_L, ECHO_L);
+        long r1 = leerDistancia(TRIG_R, ECHO_R);
+        long r2 = leerDistancia(TRIG_R, ECHO_R);
+        long r3 = leerDistancia(TRIG_R, ECHO_R);
+        long dL0 = max(min(l1, l2), min(max(l1, l2), l3));   // mediana de 3
+        long dR0 = max(min(r1, r2), min(max(r1, r2), r3));
+
+        // El cajón SIEMPRE está sobre la pared exterior. El lateral más corto es
+        // esa pared: si es dL, la pared está a la izquierda -> el carro sale
+        // girando a la DERECHA (y la pista entera gira a la derecha).
+        long dc = dL0 - dR0;                 // <0 => pared a la izq => salir/girar DERECHA
+        inicioGirarDer = (dc < 0);
+
+        // Latch de dirección de PISTA para toda la carrera (igual que GIRANDO en
+        // la 1ª esquina) — SOLO si la lectura del cajón fue decisiva.
+        if (abs(dc) >= INICIO_DIR_MIN_GAP_CM) {
+          direccionIzquierda = (dL0 > dR0);
+          primerGiro         = true;
+        }
+
+        anguloGyro     = 0;                  // referencia de la recta / de la maniobra
+        anguloObjetivo = 0;
+        integralGyro   = 0; prevErrorGyro = 0;
+        integralWall   = 0; prevErrorWall = 0;
+        inicioFaseMs   = millis();
+        inicioFase     = 1;
+        motorAdelante();
+        Serial.print("INICIO fase 1 SWING salida=");
+        Serial.print(inicioGirarDer ? "DER" : "IZQ");
+        Serial.print(" dL="); Serial.print(dL0);
+        Serial.print(" dR="); Serial.print(dR0);
+        Serial.print(" dirPista=");
+        Serial.println(!primerGiro ? "?(ambiguo)" : (direccionIzquierda ? "IZQ" : "DER"));
+        break;
+      }
+
+      float deltaIni = fabs(anguloGyro);
+
+      // ── Fase 1: SWING — saca la nariz hacia el interior ────────────────────
+      if (inicioFase == 1) {
+        unsigned long tS = millis() - inicioFaseMs;
+        int vel = (tS < INICIO_RAMP_MS)
+                  ? (int)map((long)tS, 0, (long)INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM)
+                  : INICIO_PWM;
+        motorAdelante();
+        escribirServo(inicioGirarDer ? 20 : 150);   // full hacia el lado de salida
+        setMotor(vel);
+        bool swingListo   = (deltaIni >= (float)(INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG));
+        bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
+        if (swingListo || swingTimeout) {
+          escribirServo(centroServo);
+          inicioFase   = 2;
+          inicioFaseMs = millis();
+          if (swingTimeout) Serial.println("INICIO fase 1: timeout de swing");
+        }
+        break;
+      }
+
+      // ── Fase 2: RECTO — avanza de frente un tramo corto ────────────────────
+      if (inicioFase == 2) {
+        motorAdelante();
+        escribirServo(centroServo);
+        setMotor(INICIO_PWM);
+        if (millis() - inicioFaseMs >= INICIO_MID_MS) {
+          inicioFase   = 3;
+          inicioFaseMs = millis();
+        }
+        break;
+      }
+
+      // ── Fase 3: CONTRA — contravuelta para re-alinear con la recta ─────────
+      if (inicioFase == 3) {
+        motorAdelante();
+        escribirServo(inicioGirarDer ? 150 : 20);   // full al lado CONTRARIO
+        setMotor(INICIO_PWM);
+        bool alineado = (deltaIni <= (float)INICIO_ENDEREZA_MARGEN_DEG);
+        bool timeout  = (millis() - inicioFaseMs >= INICIO_CONTRA_TIMEOUT_MS);
+        if (alineado || timeout) {
+          escribirServo(centroServo);
+          motorCoast();
+          inicioFase   = 4;
+          inicioFaseMs = millis();
+          if (timeout) Serial.println("INICIO fase 3: timeout de contravuelta");
+        }
+        break;
+      }
+
+      // ── Fase 4: COAST antes de invertir a reversa (protege el TB6612) ──────
+      if (inicioFase == 4) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - inicioFaseMs >= MANIOBRA_FRENO_MS) {
+          motorReversa();
+          integralRev   = 0; prevErrorRev = 0;
+          lastRevHoldMs = millis();
+          inicioFase    = 5;
+          inicioFaseMs  = millis();
+        }
+        break;
+      }
+
+      // ── Fase 5: REVERSA con heading-hold (retrocede RECTO) ─────────────────
+      if (inicioFase == 5) {
+        motorReversa();
+        aplicarReversaHold(0.0f);   // mantiene anguloGyro en 0 mientras retrocede
+        setMotor(INICIO_REV_PWM);
+        if (millis() - inicioFaseMs >= INICIO_REV_MS) {
+          motorCoast();
+          escribirServo(centroServo);
+          inicioFase          = 6;
+          inicioFaseMs        = millis();
+          inicioSettleAngPrev = anguloGyro;
+          inicioSettleSampMs  = millis();
+          inicioSettleQuieto  = 0;
+        }
+        break;
+      }
+
+      // ── Fase 6: SETTLE — espera a que deje de rotar y cierra ───────────────
+      if (inicioFase == 6) {
+        motorCoast();
+        escribirServo(centroServo);
+        unsigned long nowMs = millis();
+        if (nowMs - inicioSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
+          float dtS  = (nowMs - inicioSettleSampMs) / 1000.0f;
+          float rate = fabs(anguloGyro - inicioSettleAngPrev) / (dtS > 0.001f ? dtS : 0.001f);
+          inicioSettleAngPrev = anguloGyro;
+          inicioSettleSampMs  = nowMs;
+          if (rate < MANIOBRA_SETTLE_RATE_DPS) inicioSettleQuieto++;
+          else                                 inicioSettleQuieto = 0;
+        }
+        if (inicioSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N
+            || nowMs - inicioFaseMs >= MANIOBRA_SETTLE_TIMEOUT_MS) {
+          finalizarInicio();
+        }
+        break;
+      }
+
+      break;
+    }
 
     case SIGUIENDO: {
       velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : 180;
@@ -1582,7 +1863,7 @@ void loop() {
       // ángulo dejan el commit de orillas696 (carro ya aproximando, chueco) intacto.
       bool _saleLata  = _hayLataMia && _paredAdelanteCru
                         && (millis() - cruceroEntryMs) < CRUCERO_YIELD_LATA_MS
-                        && fabs(anguloGyro) < CRUCERO_STRAIGHTEN_DEG;
+                        && fabs(anguloGyro) < CRUCERO_YIELD_ANG_DEG;
       if (_saleClaro || _saleLata) {
         estado = SIGUIENDO;             // apareció obstáculo mío -> a esquivarlo
         contadorFront      = 0;
@@ -1647,15 +1928,32 @@ void loop() {
         }
       }
 
-      // Preview de la decisión para elegir el UMBRAL frontal: REVERSE necesita
-      // estar cerca de la pared (30), FORWARD necesita espacio para el arco (60).
+      // Preview de la decisión para elegir el UMBRAL frontal: REVERSE dispara ya
+      // pegado a la pared (FRONT_TURN_REV_CM), FORWARD necesita espacio para el
+      // arco (FRONT_TURN_FWD_CM, ancho). `_de` = distancia a la pared EXTERIOR
+      // del giro (la que SÍ existe), igual que la calcula decidirManiobra().
       bool _revPrev;
       {
-        bool _da = (distR > umbralPared), _ia = (distL > umbralPared);
         long _de;
-        if      (_da && !_ia) _de = distL;
-        else if (_ia && !_da) _de = distR;
-        else                  _de = ((distR > distL) ? distL : distR);
+        if (primerGiro) {
+          // Dirección ya latcheada -> la pared exterior es la del lado CONTRARIO
+          // al giro (giro izq -> exterior = derecha/distR; giro der -> distL).
+          // Su lectura DIRECTA, nunca un min(dL,dR): si el carro llega aplastado
+          // contra la pared INTERIOR tras esquivar un cono (dL/dR interior corto)
+          // el min tomaba esa interior -> preview FORWARD -> ventana frontal
+          // ancha -> MANIOBRA ~35 cm antes de la pared (run 2026-09-09, vuelta 5).
+          _de = direccionIzquierda ? distR : distL;
+        } else if (direccionAproxLatch == 1) {
+          _de = distR;   // abrió IZQ -> giro a la izquierda -> exterior = derecha
+        } else if (direccionAproxLatch == 2) {
+          _de = distL;   // abrió DER -> giro a la derecha -> exterior = izquierda
+        } else {
+          // 1ª esquina, dirección aún desconocida -> heurística por qué lado abre.
+          bool _da = (distR > umbralPared), _ia = (distL > umbralPared);
+          if      (_da && !_ia) _de = distL;
+          else if (_ia && !_da) _de = distR;
+          else                  _de = ((distR > distL) ? distL : distR);
+        }
         _revPrev = (_de >= HUG_CM);
       }
       int _umbralFront = _revPrev ? FRONT_TURN_REV_CM : FRONT_TURN_FWD_CM;
@@ -1686,8 +1984,17 @@ void loop() {
         // cercano. Habilita el disparo por el frontal sin exigir paredAbierta en
         // este frame. Sigue exigiendo distF <= _umbralFront y !_hayLataMia.
         bool _laAprox = (direccionAproxLatch != 0);
+        // PEGADO A LA PARED DE FRENTE: gira aunque el lateral NUNCA confirme la
+        // apertura de la esquina. Pasa cuando el carro llega aplastado contra la
+        // pared INTERIOR tras esquivar (el lateral interior no se despega ->
+        // paredAbierta/_laAprox/giroSucioArmado nunca se arman) -> antes el carro
+        // se metía de frente hasta la pared y solo lo sacaba cruceroLargo 7 s
+        // después, ya incrustado (run 2026-09-09 giro 2, dF=2). Mismo criterio
+        // que la rama del cajón: frontal <= REV_CM, debounce CRUCERO_FRONT.
+        // !_hayLataMia sigue: si es una lata, _saleLata ya la mandó a esquivar.
+        bool _muyCerca = (distF > 0 && distF <= FRONT_TURN_REV_CM);
         enLaPared         = (distF > 0 && distF <= _umbralFront
-                             && (paredAbierta || giroSucioArmado || _laAprox)
+                             && (paredAbierta || giroSucioArmado || _laAprox || _muyCerca)
                              && !_hayLataMia);
         debounceNecesario = (paredAbierta || _laAprox) ? CRUCERO_PARED_DEBOUNCE
                                                        : CRUCERO_FRONT_DEBOUNCE;
@@ -1952,6 +2259,7 @@ void loop() {
   else if (estado == CRUCERO)     Serial.print("CRUCERO");
   else if (estado == MANIOBRA)    Serial.print("MANIOBRA");
   else if (estado == TERMINANDO)  Serial.print("TERMINANDO");
+  else if (estado == INICIO)      Serial.print("INICIO");
   else                             Serial.print("SIGUIENDO");
   Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
   Serial.print(" | L:");        Serial.print(distL);
