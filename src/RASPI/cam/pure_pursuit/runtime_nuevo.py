@@ -48,6 +48,7 @@ from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
 from .mid_turn import MidTurnObstacleDetector
+from .bev_recorder import BevRecorder
 from . import config as C
 
 
@@ -205,6 +206,7 @@ class PPRuntime:
         self.loop_count    = 0
         self.frame_grabber = None
         self.video_writer  = None
+        self.bev_recorder  = None   # BEV limpio cada frame (REC_BEV_CLEAN), ver bev_recorder.py
         self.record_count  = 0
         self.cam_frame_count = 0
         self.output_file   = (resolve_output_path(cfg.record_output)
@@ -466,10 +468,20 @@ class PPRuntime:
             return self.frame_grabber.read()
         return self.vision.cap.read()
 
-    def _maybe_record(self, frame: np.ndarray, fps: float):
+    def _maybe_record(self, frame: np.ndarray, fps: float,
+                      bev: np.ndarray | None = None):
         if not self.cfg.record_orillas:
             return
         self.record_count += 1
+        # BEV limpio de CADA frame (no 1 de cada record_every_n): el .avi del HUD
+        # no permite re-probar la detección de la naranja offline.
+        if bev is not None and getattr(C, "REC_BEV_CLEAN", False):
+            if self.bev_recorder is None:
+                _bp = self.output_file.with_name(self.output_file.stem + "_bev.bin")
+                self.bev_recorder = BevRecorder(
+                    str(_bp), quality=int(getattr(C, "REC_BEV_JPEG_QUALITY", 95)))
+                print(f"[REC] BEV limpio en {_bp} (n={self.record_count})", flush=True)
+            self.bev_recorder.write(self.record_count, bev)
         if self.record_count % max(1, self.cfg.record_every_n) != 0:
             return
         if self.video_writer is None:
@@ -1357,7 +1369,7 @@ class PPRuntime:
                 # NO se graba -> el archivo no acumula el rato de "esperando
                 # botón". El _write_cam_frame (vista VNC) sí corre siempre.
                 if should_record is None or should_record():
-                    self._maybe_record(combined, fps)
+                    self._maybe_record(combined, fps, bev=bev_frame)
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
 
                 t_prev_end = time.perf_counter()
@@ -1369,6 +1381,8 @@ class PPRuntime:
             self.vision.cap.release()
             if self.video_writer is not None:
                 self.video_writer.stop()
+            if self.bev_recorder is not None:
+                self.bev_recorder.stop()
             cv2.destroyAllWindows()
             self.serial_link.close()
 
