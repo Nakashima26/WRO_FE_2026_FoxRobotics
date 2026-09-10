@@ -832,7 +832,11 @@ class PPRuntime:
                         # cuenta como mi recta — mismo comportamiento de siempre).
                         bev_obstacles_beyond = []
                         orange_info = line_info["Orange"]
-                        if orange_info["seen"] and not en_recuperacion_giro:
+                        # has_provisional: la cinta ya está en ESTE frame pero la
+                        # estable aún no se confirma -> classify() solo puede decir
+                        # "beyond" (ver OrangeLineTracker.classify).
+                        if ((orange_info["seen"] or self.line_tracker.has_provisional())
+                                and not en_recuperacion_giro):
                             # ── Rescate de cono EXTERIOR pegado a la boca de la
                             # esquina: si la pista va a girar y el cono de la
                             # boca se pasa por el lado CONTRARIO al giro, hay
@@ -882,6 +886,7 @@ class PPRuntime:
                                         ox, oy, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                                     ),
                                     rescue_fn=_rescue_fn,
+                                    allow_pending=not orange_info.get("dead_reckoned", False),
                                 )
                             )
 
@@ -1292,7 +1297,8 @@ class PPRuntime:
                     log_line += f" | RX: {serial_ack}"
                 print(log_line, flush=True)
 
-                print(f"[LINEA] Orange={line_info['Orange']}", flush=True)
+                print(f"[LINEA] Orange={ {k: v for k, v in line_info['Orange'].items() if not k.startswith('_')} }",
+                      flush=True)
                 _ln = line_info["Orange"].get("line")
                 _vy = None if _ln is None else round(float(_ln[1]))
                 print(f"[DIR] fija={self.turn_dir_tracker.direction} "
