@@ -662,6 +662,16 @@ OBS_MEM_PASSED_FRONT_STEER_MAX_DEG = 12.0
 # NO entra a la centerline hasta pasarlo. Un cono a <= esto px del lock cuenta
 # como el mismo. Evita el zigzag de dos lados de paso opuestos (orillas488).
 LOCK_MATCH_RADIUS_PX = 70.0
+# 2026-09-10: el LOCK sigue al cono fijado por posición, pero cambia a otro que
+# esté >= LOCK_SWITCH_CLOSER_PX más cerca (en y BEV), VISIBLE este frame (una
+# detección a <= LOCK_SWITCH_VIS_PX) y todavía enfrente (y <= LOCK_SWITCH_MAX_Y).
+# orillas828 vueltas 1-2: LOCK en un verde lejano (y=124-150) mientras el rojo
+# reaparecía a y=280-284 -> rojo sin esquivar. 60 >> los 12px de orillas488 (el
+# caso de vaivén que el LOCK evita). MAX_Y=320 deja fuera un cono que ya va al
+# lado del carro (esos se ven a y~330-345 y solo estimados, no visibles).
+LOCK_SWITCH_CLOSER_PX = 60.0
+LOCK_SWITCH_VIS_PX    = 25.0
+LOCK_SWITCH_MAX_Y     = 320.0
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2
