@@ -725,6 +725,11 @@ LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin 
 # Con S>=140 en una banda de +-LINE_BAND_CHECK_PX la separación es total:
 # núcleo 14-221 px en los frames de los 4 giros del run, 0-3 px en los frames
 # de la falla (donde la banda ANCHA sí tenía 46-272 px y no filtraba nada).
+# 2026-09-10: OJO, esa medición salió del panel BEV del HUD, que tiene la ruta y
+# los círculos dibujados encima; con el BEV limpio (orillas831/832) lo "pálido"
+# resultó ser la cinta LEJANA y el falso de 820 una clasificación contra una
+# horizontal. El núcleo sigue como vía rápida; la cinta pálida entra por
+# LINE_ACCEPT_STRIPE (abajo).
 # Tope de S en 255 (no 200 como la banda ancha): parte del núcleo real vive
 # arriba de 200 y recortarlo bajaba la cuenta a la mitad en las lecturas más
 # débiles (f096/f097: 14 -> 22/27 px al abrir el tope).
@@ -738,6 +743,35 @@ LINE_CORE_MIN_PX = 8     # px de núcleo mínimos para aceptar el near_y. Medido
                          # a colarse una línea fantasma; bajarlo si una cinta
                          # desgastada/en sombra deja de verse (mirar `core=` en
                          # el log [LINEA] justo antes de un giro).
+
+# ── Naranja LEJANA (2026-09-10, medido en el BEV limpio de orillas831/832) ──
+# La cinta de la esquina que viene se ve desde ~50 cm como una franja delgada
+# (2-6 px) y PÁLIDA (S 85-130 -> 0 px de núcleo) que la lente curva en el BEV.
+# Con solo la guarda de núcleo se aceptaba ~25 frames antes del giro y el verde
+# de la recta siguiente, pegado a esa cinta, se esquivaba (giros 4/8/12).
+# Pixeles naranjas pegados a un cono o a la pared magenta NO cuentan como línea
+# (el borde de la cuña de un rojo sobre el crema sale naranja pálido). Mismos
+# rangos que vision.py (Red/Green) + magenta del estacionamiento.
+LINE_CONE_HSV = [(np.array([0, 150, 40]),   np.array([5, 255, 160])),
+                 (np.array([177, 150, 40]), np.array([179, 255, 160])),
+                 (np.array([35, 60, 40]),   np.array([75, 255, 200])),
+                 (np.array([140, 50, 40]),  np.array([176, 255, 255]))]
+LINE_CONE_MASK_KERNEL = 9       # dilatación (px) de esos colores antes de borrar
+LINE_ACCEPT_STRIPE    = True    # aceptar sin núcleo si la componente es cinta:
+LINE_STRIPE_MIN_LEN   = 40.0    #   largo (4*sigma del eje principal) >= esto
+LINE_STRIPE_MAX_THICK = 7.0     #   y grosor (area/largo) <= esto. Medido: cinta
+                                #   lejana largo 45-150 / grosor 2-6.
+# Clasificación contra la CURVA de la cinta (corner_lines._fit_curve), no contra
+# una recta en +-45 px de near_y ni una horizontal.
+LINE_CURVE_MIN_PX        = 25    # px mínimos para ajustar la curva
+LINE_CURVE_QUAD_MIN_SPAN = 60.0  # con menos largo, recta (sin término cuadrático)
+LINE_CURVE_FRAG_PX       = 10.0  # pedazos de la misma cinta partida por un cono
+LINE_CLASSIFY_CONE_CENTER = True # clasificar el CENTRO del cono, no su pie
+LINE_PROVISIONAL         = True  # lectura cruda de cinta -> puede decir "beyond"
+                                 # antes de que la estable se confirme
+LINE_PENDING_BEYOND      = True  # cono nuevo del otro lado: no va como `mia`
+                                 # mientras vota su primer veredicto
+LINE_HORIZ_FALLBACK_MIN_Y = 285.0  # sin curva ni recta: horizontal solo en la boca
 
 # Diagnóstico (NO cambia el manejo): graba el BEV limpio de CADA frame en
 # videos_orillas/orillasNNN_bev.bin (ver bev_recorder.py), para re-probar la

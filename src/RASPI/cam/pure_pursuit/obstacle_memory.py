@@ -30,7 +30,7 @@ from . import config as C
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
                  "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "codet_peers", "was_target")
+                 "_last_bey", "codet_peers", "was_target")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -84,6 +84,7 @@ class _Obs:
         self.beyond: bool | None = None
         self._cls_vote: bool | None = None    # cambio pendiente (True = a "más allá")
         self._cls_votes: int = 0              # frames seguidos apoyando ese cambio
+        self._last_bey: bool = False          # la última opinión de la línea fue "más allá"
         # ids de otros _Obs que fueron CO-DETECTADOS por la cámara junto a éste
         # (2+ bboxes del mismo color el mismo frame -> conos físicos distintos).
         # _dedupe nunca fusiona un par que aparece aquí, aunque queden cerca al
@@ -784,7 +785,7 @@ class ObstacleMemory:
             best.was_target = True
 
     def classify_and_split(
-        self, classify_fn, rescue_fn=None
+        self, classify_fn, rescue_fn=None, allow_pending: bool = True
     ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
         """
         Separa los obstáculos en memoria entre "mi recta" y "más allá" de la
@@ -815,6 +816,9 @@ class ObstacleMemory:
         ya se usaba en runtime_nuevo.py) — si no, no llamar y tratar todo
         como "mío", igual que siempre.
 
+        allow_pending: False cuando la línea es la ESTIMADA (dead-reckon): esa
+        solo puede diferir veredictos ya votados, no esconder un cono NUEVO.
+
         Retorna (mine, beyond, mine_conf) — mine/beyond son listas de
         (x, y, color); mine_conf alineado 1:1 con mine.
         """
@@ -823,7 +827,9 @@ class ObstacleMemory:
         mine_conf: list[float] = []
         for o in self._obs:
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
+            prev_bey = o._last_bey
             if result is not None:
+                o._last_bey = (result is False)
                 want_beyond = (result is False)
                 # `o.beyond is not None`: sin veredicto todavía, un "mía" NO es
                 # "confirma lo vigente" -- tiene que votar y FIJAR beyond=False.
@@ -860,7 +866,18 @@ class ObstacleMemory:
                         o._cls_vote = None
                         o._cls_votes = 0
             # result is None -> la línea no opina este frame; no se toca el conteo.
-            if o.beyond is True:
+            # PENDIENTE: sin veredicto todavía y la línea lo pone del otro lado ESTE
+            # frame -> no se manda como `mia` mientras vota (FIRST frames). Antes
+            # esos frames iba como `mia` "por seguridad" y bastaba 1 frame de
+            # prio=1 para que CRUCERO cediera y el carro fuera por el verde de la
+            # recta siguiente (orillas824 antes del giro 6, 830/831 giros 4/8/12).
+            # Y si venía "más allá", un solo "mía" no lo suelta: hacen falta 2
+            # seguidos (el pie del verde de esquina cae justo en el extremo de la
+            # cinta y parpadea de lado; con 1 frame de prio=1 CRUCERO ya cede).
+            pending_beyond = (o.beyond is None and allow_pending
+                              and getattr(C, "LINE_PENDING_BEYOND", True)
+                              and (result is False or (result is True and prev_bey)))
+            if o.beyond is True or pending_beyond:
                 if rescue_fn is not None and rescue_fn(o.x, o.y, o.color):
                     # Cono exterior de esquina: se trata como "mío" (esquiva +
                     # bloqueo de giro) aunque geométricamente esté "más allá".
