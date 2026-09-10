@@ -30,7 +30,7 @@ from . import config as C
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
                  "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "codet_peers")
+                 "codet_peers", "was_target")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -89,6 +89,13 @@ class _Obs:
         # _dedupe nunca fusiona un par que aparece aquí, aunque queden cerca al
         # dead-reckonear uno tras salir del FOV (ver OBS_MEM_SPLIT_CODETECTED).
         self.codet_peers: set[int] = set()
+        # True si en ALGÚN frame esta lata fue el objetivo real de la esquiva:
+        # la que el LOCK fijó como primaria, o la única en mi recta (lo que de
+        # verdad entró a detect_centerline). Lo marca runtime vía mark_target().
+        # _prune() solo acepta el PASADO por giro ("esquiva") de una lata que
+        # fue objetivo: una que el LOCK dejó fuera nunca se esquivó, y el yaw
+        # acumulado desde que la vio es el de OTRA esquiva (orillas822 vuelta 2).
+        self.was_target: bool = False
 
 
 class ObstacleMemory:
@@ -315,6 +322,8 @@ class ObstacleMemory:
                                         or id(o) in k.codet_peers):
                         continue   # conos co-detectados: mantener separados
                     # o es un duplicado de k (k ya tiene >= confianza) → descartar o
+                    # (la marca de objetivo sobrevive a la fusión: es la misma lata)
+                    k.was_target = k.was_target or o.was_target
                     merged_into_existing = True
                     break
             if not merged_into_existing:
@@ -536,6 +545,14 @@ class ObstacleMemory:
                 yawed = (abs((self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0)
                          if have_h else 0.0)
                 dodged = yawed >= pass_yaw and o.beyond is not True
+                # El yaw acumulado solo prueba que ESTA lata se rodeó si fue el
+                # objetivo de la esquiva. Una que el LOCK dejó fuera (orillas822
+                # vuelta 2: verde secundario x0=147 mientras se esquivaba el
+                # rojo) se lleva el yaw del rojo -> "PASADO ... yaw=39 esquiva"
+                # con el rojo aún 80px enfrente -> RECUPERANDO -> choque.
+                if dodged and not o.was_target and getattr(
+                        C, "OBS_MEM_PASS_REQUIRE_TARGET", True):
+                    dodged = False
                 if was_ahead and (centered or dodged):
                     _via = ("lateral" if (centered and steering_away)
                             else "frente" if centered else "esquiva")
@@ -549,7 +566,8 @@ class ObstacleMemory:
                     self.last_prune_reason = (
                         f"DESCARTE_DE_LADO x0={o.x0:.0f} "
                         f"|dx0|={abs(o.x0 - self.rx):.0f}>{pass_halfw:.0f} "
-                        f"yaw={yawed:.0f}<{pass_yaw:.0f} beyond={o.beyond}"
+                        f"yaw={yawed:.0f}<{pass_yaw:.0f} beyond={o.beyond} "
+                        f"obj={int(o.was_target)}"
                     )
                 else:
                     self.last_prune_reason = f"DESCARTE_NO_ADELANTE y={o.y:.0f} ymin={o.y_min:.0f}"
@@ -748,6 +766,23 @@ class ObstacleMemory:
 
         return [(o.x, o.y, o.color) for o in self._obs]
 
+    def mark_target(self, x: float, y: float, color: str,
+                    radius_px: float = 6.0) -> None:
+        """Marca como objetivo de esquiva (o.was_target) la lata en memoria que
+        corresponde a (x, y, color) -- runtime la llama con la que el LOCK fijó
+        como primaria, o con la única de mi recta. Las tuplas de bev_obstacles
+        son copias exactas de (o.x, o.y), así que el match es prácticamente
+        exacto; el radio solo cubre redondeos."""
+        best, bd = None, radius_px * radius_px
+        for o in self._obs:
+            if o.color != color:
+                continue
+            d = (o.x - x) ** 2 + (o.y - y) ** 2
+            if d <= bd:
+                best, bd = o, d
+        if best is not None:
+            best.was_target = True
+
     def classify_and_split(
         self, classify_fn, rescue_fn=None
     ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
@@ -790,7 +825,16 @@ class ObstacleMemory:
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             if result is not None:
                 want_beyond = (result is False)
-                if want_beyond == (o.beyond is True):
+                # `o.beyond is not None`: sin veredicto todavía, un "mía" NO es
+                # "confirma lo vigente" -- tiene que votar y FIJAR beyond=False.
+                # Antes (want_beyond == (o.beyond is True)) un None+"mía" caía
+                # aquí, se limpiaba el conteo y la lata se quedaba en None para
+                # siempre -> el primer "más allá" solo necesitaba FIRST (4)
+                # frames en vez de TO_BEYOND (12). orillas822 vuelta 3: el rojo
+                # que se estaba esquivando pasó a beyond en 4 frames cuando la
+                # naranja estimada (DR) lo rebasó -> despejado -> RECUPERANDO
+                # encima del rojo.
+                if o.beyond is not None and want_beyond == o.beyond:
                     # La línea confirma el veredicto vigente -> no hay cambio
                     # pendiente, se limpia cualquier conteo a medias.
                     o._cls_vote = None

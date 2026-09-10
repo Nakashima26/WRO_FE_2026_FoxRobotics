@@ -638,6 +638,15 @@ OBS_MEM_PASSED_X_HALFWIDTH = 50.0
 # 30 > RECUP_MEAS_HEADING_DEG(25): "giro grande" inequívoco, no una esquiva
 # suave que PP endereza solo.
 OBS_MEM_PASSED_YAW_DEG = 30.0
+# 2026-09-10: ...y la suposición de arriba ("un cono del siguiente segmento NO
+# acumula ese giro y además clasifica beyond") falló en orillas822 vuelta 2: un
+# verde secundario apareció a ~yaw -22 en plena esquiva del ROJO, acumuló 39° del
+# giro del rojo, y sin naranja a la vista nunca se clasificó beyond (el LOCK lo
+# saca de la esquiva pero no marca el objeto) -> "PASADO y=358 x0=147 yaw=39
+# esquiva" con el rojo todavía 80px enfrente -> RECUPERANDO -> choque.
+# True = la vía por giro solo cuenta para una lata que fue OBJETIVO de la esquiva
+# en algún frame (primaria del LOCK o única en mi recta, _Obs.was_target).
+OBS_MEM_PASS_REQUIRE_TARGET = True
 # 2026-09-04: "centrado" (x0 dentro de PASSED_X_HALFWIDTH) por sí solo NO basta
 # -- un obstáculo puede aparecer centrado a distancia y aun así requerir una
 # esquiva fuerte en curso cuando el carro ya está cerca (steer grande). Ese caso
