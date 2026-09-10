@@ -65,14 +65,39 @@ def _row_max_runs(mask: np.ndarray) -> np.ndarray:
     return _run_lengths(mask).max(axis=1)
 
 
+def _band_slice(h: int, near_y: float, half_px: float) -> tuple[int, int]:
+    return (max(0, int(near_y - half_px)), min(h, int(near_y + half_px) + 1))
+
+
 def _band_px_count(mask: np.ndarray, near_y: float, half_px: float) -> int:
     """Pixeles de la máscara dentro de +-half_px de near_y (toda la fila)."""
-    h = mask.shape[0]
-    y0 = max(0, int(near_y - half_px))
-    y1 = min(h, int(near_y + half_px) + 1)
+    y0, y1 = _band_slice(mask.shape[0], near_y, half_px)
     if y1 <= y0:
         return 0
     return int(np.count_nonzero(mask[y0:y1, :]))
+
+
+def _core_px_count(bev_hsv: np.ndarray, near_y: float, half_px: float) -> int:
+    """
+    Pixeles de naranja SATURADO (LINE_CORE_HSV) en la banda de near_y.
+
+    La banda naranja "ancha" (LINE_ORANGE_HSV, S>=85) no distingue la cinta de
+    competencia de una marca café/tostada sobre el tapete claro: medido en
+    orillas820, los trazos del piso salen H 11-15 / S 86-112 / V 152-168 y la
+    cinta real H 10-16 / S 140-198. Con S>=140 la separación es total:
+      - frames con línea real cruzando (giros 1-4): core 14..221 px
+      - frames de la esquiva abortada (116-120): core 0,0,0,0,3 px
+    y la banda ANCHA no servía de filtro ahí (tenía 46-272 px de "masa").
+    Solo se evalúa la banda (~40 filas), sin morfología: es una cuenta, no una
+    detección, así que no hace falta cerrar huecos.
+    """
+    y0, y1 = _band_slice(bev_hsv.shape[0], near_y, half_px)
+    if y1 <= y0:
+        return 0
+    n = 0
+    for lo, hi in C.LINE_CORE_HSV:
+        n += int(np.count_nonzero(cv2.inRange(bev_hsv[y0:y1], lo, hi)))
+    return n
 
 
 def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
@@ -226,16 +251,31 @@ def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict
     # otro (más lejos) antes de darse por no vista.
     half = float(getattr(C, "LINE_BAND_CHECK_PX", 20.0))
     need = int(getattr(C, "LINE_BAND_MIN_PX", 25))
-    near_y, src, band = None, None, 0
+    need_core = int(getattr(C, "LINE_CORE_MIN_PX", 10))
+    near_y, src, band, core = None, None, 0, 0
+    rej = None
     for cand, tag in sorted(
             [(v, t) for v, t in ((near_row, "fila"), (near_col, "col")) if v is not None],
             reverse=True):
         n = _band_px_count(mask, cand, half)
-        if n >= need:
-            near_y, src, band = cand, tag, n
-            break
-    return {"Orange": {"seen": near_y is not None, "near_y": near_y,
-                       "src": src, "band": band}}
+        # ...y de esa masa, algo tiene que ser naranja DE VERDAD (saturado).
+        # Sin esto, una marca café del tapete pasa la guarda de masa (tenía
+        # 46-272 px anchos) y se reporta como línea a 20 cm del carro.
+        c = _core_px_count(hsv, cand, half) if n >= need else 0
+        if n < need or c < need_core:
+            # Se guarda el candidato rechazado MÁS CERCANO para el log: si algún
+            # día se deja de ver una línea REAL, aquí se ve por cuánto falló
+            # (band/core contra LINE_BAND_MIN_PX / LINE_CORE_MIN_PX).
+            if rej is None:
+                rej = (round(float(cand)), tag, n, c)
+            continue
+        near_y, src, band, core = cand, tag, n, c
+        break
+    out = {"seen": near_y is not None, "near_y": near_y,
+           "src": src, "band": band, "core": core}
+    if near_y is None and rej is not None:
+        out["rej"] = rej
+    return {"Orange": out}
 
 
 class OrangeLineTracker:
@@ -389,7 +429,11 @@ class OrangeLineTracker:
         self._dr_ny = None
         self._dr_frames = 0
         self._dr_latched = False
-        self._out = self.stable
+        # Sin línea: si la lectura cruda tenía un candidato rechazado, pasarlo al
+        # log (ver `rej` en detect_lines) -- es la única forma de notar que se
+        # está descartando una línea real por poco.
+        self._out = (dict(self.stable, rej=raw["rej"]) if "rej" in raw
+                     else self.stable)
         return self._out
 
     def _apply_candidate(self, cand: dict, bev_hsv: np.ndarray, w: int) -> None:
@@ -428,6 +472,7 @@ class OrangeLineTracker:
             # naranjas hay en su banda. `src=col` + `band` bajo = sospechar ruido.
             "src": cand.get("src"),
             "band": cand.get("band"),
+            "core": cand.get("core"),
         }
 
     def _smooth_line(self, fitted, w: int):

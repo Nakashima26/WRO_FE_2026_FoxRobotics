@@ -698,6 +698,28 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
+# NÚCLEO saturado de la cinta naranja — ver corner_lines._core_px_count().
+# LINE_ORANGE_HSV (S>=85) no distingue la cinta de una marca café/tostada sobre
+# el tapete claro. Medido en orillas820 (~22:46:51, esquiva de verde abortada):
+#   trazos del piso  H 11-15  S  86-112  V 152-168   <- lo que disparó la falsa
+#   cinta real       H 10-16  S 140-198  V 152-200
+# Con S>=140 en una banda de +-LINE_BAND_CHECK_PX la separación es total:
+# núcleo 14-221 px en los frames de los 4 giros del run, 0-3 px en los frames
+# de la falla (donde la banda ANCHA sí tenía 46-272 px y no filtraba nada).
+# Tope de S en 255 (no 200 como la banda ancha): parte del núcleo real vive
+# arriba de 200 y recortarlo bajaba la cuenta a la mitad en las lecturas más
+# débiles (f096/f097: 14 -> 22/27 px al abrir el tope).
+LINE_CORE_HSV    = [(np.array([7, 140, 140]), np.array([18, 255, 255]))]
+LINE_CORE_MIN_PX = 8     # px de núcleo mínimos para aceptar el near_y. Medido en
+                         # los 396 frames de orillas820: los grupos de línea REAL
+                         # dan núcleo 9-221 px (los tres frames más flojos: 9, 9,
+                         # 12) y los tres grupos de línea FALSA (f35-41, f59-67,
+                         # f114-120, uno después de cada giro) dan 0-5 px. 8 cae
+                         # justo en ese hueco. Subirlo si vuelve
+                         # a colarse una línea fantasma; bajarlo si una cinta
+                         # desgastada/en sombra deja de verse (mirar `core=` en
+                         # el log [LINEA] justo antes de un giro).
+
 # ─── INICIO — salida del estacionamiento (solo ronda de obstáculos) ──────────
 # Al APRETAR EL BOTÓN (una sola vez) la Pi mide qué fracción del frame es
 # magenta/rosa. Si >= PARK_PINK_RATIO_MIN -> manda inicio=1 en cada V2 y el
