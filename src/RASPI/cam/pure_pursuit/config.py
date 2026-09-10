@@ -724,6 +724,18 @@ LINE_MIN_RUN_PX   = 6   # ancho mínimo de corrida CONTIGUA en una fila para
                           # cono de la recta siguiente como `mia` -> RECUPERANDO se
                           # retrasa y el chasis sobre-gira (+46° medido). 6 sigue muy
                           # por encima del ruido disperso (MASK_CLOSE + contigüidad).
+LINE_MIN_COL_RUN_PX = 8   # 2026-09-09: idem pero para el escaneo por COLUMNA
+                          # (_find_near_line_col). En el giro CCW la naranja se ve
+                          # casi vertical -> ninguna FILA junta LINE_MIN_RUN_PX pero
+                          # sí hay columnas con corrida vertical larga. De esas
+                          # columnas se toma el Y más cercano y detect_lines() se
+                          # queda con el mayor (más cerca) entre fila y columna ->
+                          # near_y deja de quedarse ~40-60px corto (o en None) en la
+                          # boca de la esquina cuando la pista gira a la izquierda.
+                          # 8 > 6 porque una columna de ruido vertical es más común
+                          # que una fila (bordes de cono, reflejo de cinta); afinar
+                          # con el log [LINEA] en el tapete (near_y debe llegar a
+                          # ~285 antes de la esquina, no clavarse en ~240).
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
                           # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
 
@@ -774,10 +786,15 @@ LINE_DIR_MIN_NEAR_Y    = 285.0   # solo mirar la pendiente con la línea a <=~19
 LINE_DIR_SLOPE_DEADBAND = 20.0   # |vy| por debajo de esto = no opina
 
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
-LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
+LINE_MASK_CLOSE_KERNEL    = (5, 7)  # cierre morfológico (ancho, alto) sobre la máscara
                                     # naranja antes del run-length: puentea huecos de
                                     # 1-3 px por oclusión parcial / sombra para que un
                                     # segmento real no se parta en dos.
+                                    # 2026-09-09: alto 3 -> 7. En el giro CCW la línea
+                                    # se ve casi vertical y cada fila cercana al robot
+                                    # deja huecos verticales -> un cierre alto rellena
+                                    # esos huecos y más filas llegan a LINE_MIN_RUN_PX
+                                    # (menos frames ciegos en la boca de la esquina).
 LINE_TRACK_PERSIST_FRAMES = 4    # (2026-08-28: 3->6 al doblar fps ~7->~14) frames seguidos que una lectura nueva debe repetirse
                                  # (mismo 'seen', near_y dentro de tolerancia) antes de
                                  # aceptarla como estado estable.

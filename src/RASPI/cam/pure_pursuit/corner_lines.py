@@ -69,6 +69,30 @@ def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
     return float(qualifying.max())
 
 
+def _find_near_line_col(mask: np.ndarray, min_run_px: int) -> float | None:
+    """
+    Y (más cercana al robot) de la línea cuando se ve CASI VERTICAL — el caso
+    del giro CCW: la naranja cruza el BEV a ~55-70° y en las filas cercanas al
+    robot sólo deja 1-4 px contiguos -> _find_near_line_row() falla ahí y engancha
+    una fila MÁS LEJOS (near_y ~40-60px corto), o no engancha nada (frames ciegos
+    en la boca de la esquina).
+
+    En vertical el patrón se invierte: hay COLUMNAS con una corrida vertical
+    larga. Se transpone la máscara, se reusa el mismo run-length vectorizado por
+    "fila" (= columna real), y de las columnas que cruzan min_run_px se toma el
+    Y máximo (más cercano) de sus pixeles encendidos. Complementa, no reemplaza,
+    al escaneo por fila: detect_lines() se queda con el más cercano de los dos.
+    """
+    col_runs = _row_max_runs(mask.T)                    # corrida vertical máx por columna
+    cols = np.where(col_runs >= min_run_px)[0]
+    if cols.size == 0:
+        return None
+    ys = np.nonzero(mask[:, cols].any(axis=1))[0]
+    if ys.size == 0:
+        return None
+    return float(ys.max())
+
+
 def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
                     min_points: int) -> tuple[float, float, float, float] | None:
     """
@@ -147,7 +171,10 @@ def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict
     """
     hsv = bev_hsv if bev_hsv is not None else cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
     mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
-    near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
+    near_row = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
+    near_col = _find_near_line_col(mask, int(getattr(C, "LINE_MIN_COL_RUN_PX", 10)))
+    cands = [v for v in (near_row, near_col) if v is not None]
+    near_y = max(cands) if cands else None
     return {"Orange": {"seen": near_y is not None, "near_y": near_y}}
 
 
