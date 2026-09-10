@@ -739,6 +739,15 @@ LINE_CORE_MIN_PX = 8     # px de núcleo mínimos para aceptar el near_y. Medido
                          # desgastada/en sombra deja de verse (mirar `core=` en
                          # el log [LINEA] justo antes de un giro).
 
+# Diagnóstico (NO cambia el manejo): graba el BEV limpio de CADA frame en
+# videos_orillas/orillasNNN_bev.bin (ver bev_recorder.py), para re-probar la
+# detección de la naranja offline frame por frame. El .avi del HUD no sirve para
+# eso: tiene dibujados la ruta, los círculos y la propia línea encima de la cinta,
+# y solo 1 de cada 6 frames. ~30 KB por frame (~75-100 MB por corrida):
+# apagarlo cuando ya no haga falta.
+REC_BEV_CLEAN        = True
+REC_BEV_JPEG_QUALITY = 95
+
 # ─── INICIO — salida del estacionamiento (solo ronda de obstáculos) ──────────
 # Al APRETAR EL BOTÓN (una sola vez) la Pi mide qué fracción del frame es
 # magenta/rosa. Si >= PARK_PINK_RATIO_MIN -> manda inicio=1 en cada V2 y el
