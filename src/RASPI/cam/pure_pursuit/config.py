@@ -736,6 +736,27 @@ LINE_MIN_COL_RUN_PX = 8   # 2026-09-09: idem pero para el escaneo por COLUMNA
                           # que una fila (bordes de cono, reflejo de cinta); afinar
                           # con el log [LINEA] en el tapete (near_y debe llegar a
                           # ~285 antes de la esquina, no clavarse en ~240).
+LINE_MIN_COL_GROUP = 3    # 2026-09-09 (pt2): columnas CONTIGUAS que deben calificar
+                          # en _find_near_line_col() para que la lectura cuente.
+                          # Una línea real casi vertical es una franja de ~10px de
+                          # ancho en BEV (20mm de cinta / MM_PER_PX=2) -> deja varias
+                          # columnas seguidas con corrida vertical larga. Una columna
+                          # SUELTA no: es borde de cono, reflejo, o dos specks que el
+                          # cierre morfológico (5,7) unió en una "corrida" de 8px
+                          # (medido en orillas818: n=1 y n=2 columnas reportando
+                          # near_y=245/248 sin línea en el piso). 1 = desactivado.
+LINE_BAND_CHECK_PX = 20   # +-px alrededor del near_y candidato donde se cuenta masa
+LINE_BAND_MIN_PX   = 25   # px naranjas mínimos en esa banda para ACEPTAR el near_y.
+                          # 2026-09-09 (pt2): guarda de masa — donde la lectura dice
+                          # que cruza la línea tiene que haber línea. Una franja real
+                          # deja 80-110px en +-25 incluso pasando bajo la nariz del
+                          # carro (medido en orillas818 frames 108/109/121: 110/88/112);
+                          # el ruido que disparó la línea falsa dejaba <15. Se prueba
+                          # primero el candidato más cercano y, si no tiene masa, el
+                          # otro; si ninguno la tiene -> 'no visto' (comportamiento de
+                          # antes de que existiera el escaneo por columna).
+                          # Subir si siguen apareciendo líneas fantasma; bajar si una
+                          # línea real lejana/desgastada deja de verse.
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
                           # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
 

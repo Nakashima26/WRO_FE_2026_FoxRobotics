@@ -36,24 +36,43 @@ def _line_mask(bev_hsv: np.ndarray, ranges) -> np.ndarray:
     return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
 
 
-def _row_max_runs(mask: np.ndarray) -> np.ndarray:
+def _run_lengths(mask: np.ndarray) -> np.ndarray:
     """
-    Longitud de la corrida contigua de pixeles>0 más larga, UNA POR FILA,
+    Longitud de la corrida contigua de pixeles>0 que TERMINA en cada posición,
     para toda la máscara de una sola vez (sin loop de Python fila por fila).
 
     Truco estándar de "run-length vectorizado": running = cumsum de 1's que
     se resetea a 0 en cada 0; reset_at = el último valor de running antes de
     cada reset, propagado hacia adelante con maximum.accumulate; la longitud
-    de la corrida en curso en cada posición es running - reset_at, y el
-    máximo por fila es el resultado que antes se calculaba con
-    np.where/np.diff/np.split fila por fila (caro en Python puro sobre
-    hasta 400 filas, justo el caso más común: línea no visible).
+    de la corrida en curso en cada posición es running - reset_at. Antes se
+    calculaba con np.where/np.diff/np.split fila por fila (caro en Python puro
+    sobre hasta 400 filas, justo el caso más común: línea no visible).
+
+    El valor en (i, j) es el largo de la corrida que ACABA en j, así que
+    `>= min_run` marca exactamente los FINALES de corrida que califican — eso
+    es lo que necesita _find_near_line_col() para saber DÓNDE está la corrida,
+    no solo que existe en esa columna.
     """
     a = (mask > 0).astype(np.int32)
     running = a.cumsum(axis=1)
     reset_at = np.where(a == 0, running, 0)
     reset_at = np.maximum.accumulate(reset_at, axis=1)
-    return (running - reset_at).max(axis=1)
+    return running - reset_at
+
+
+def _row_max_runs(mask: np.ndarray) -> np.ndarray:
+    """Longitud de la corrida contigua más larga, UNA POR FILA."""
+    return _run_lengths(mask).max(axis=1)
+
+
+def _band_px_count(mask: np.ndarray, near_y: float, half_px: float) -> int:
+    """Pixeles de la máscara dentro de +-half_px de near_y (toda la fila)."""
+    h = mask.shape[0]
+    y0 = max(0, int(near_y - half_px))
+    y1 = min(h, int(near_y + half_px) + 1)
+    if y1 <= y0:
+        return 0
+    return int(np.count_nonzero(mask[y0:y1, :]))
 
 
 def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
@@ -69,7 +88,8 @@ def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
     return float(qualifying.max())
 
 
-def _find_near_line_col(mask: np.ndarray, min_run_px: int) -> float | None:
+def _find_near_line_col(mask: np.ndarray, min_run_px: int,
+                         min_group_cols: int = 1) -> float | None:
     """
     Y (más cercana al robot) de la línea cuando se ve CASI VERTICAL — el caso
     del giro CCW: la naranja cruza el BEV a ~55-70° y en las filas cercanas al
@@ -78,19 +98,38 @@ def _find_near_line_col(mask: np.ndarray, min_run_px: int) -> float | None:
     en la boca de la esquina).
 
     En vertical el patrón se invierte: hay COLUMNAS con una corrida vertical
-    larga. Se transpone la máscara, se reusa el mismo run-length vectorizado por
-    "fila" (= columna real), y de las columnas que cruzan min_run_px se toma el
-    Y máximo (más cercano) de sus pixeles encendidos. Complementa, no reemplaza,
-    al escaneo por fila: detect_lines() se queda con el más cercano de los dos.
+    larga. Se transpone la máscara y se reusa el mismo run-length vectorizado por
+    "fila" (= columna real). Complementa, no reemplaza, al escaneo por fila:
+    detect_lines() se queda con el más cercano de los dos.
+
+    Se devuelve el Y del EXTREMO INFERIOR (más cercano al robot) de una corrida
+    que califica — NO el pixel encendido más bajo de esas columnas.
+    2026-09-09: eso último era el bug que ponía la línea naranja donde no hay
+    línea. Con `ys = mask[:, cols].any(...).max()`, un speck aislado a y=293
+    que compartiera COLUMNA con la corrida real (que estaba a y=120-171, 170px
+    más lejos) reportaba near_y=293 — línea "pegada al carro" a partir de ruido
+    a media pista, con los conos de la recta cayendo del otro lado -> `beyond`
+    -> esquiva abandonada (medido en orillas818 ~22:00:27).
+
+    min_group_cols: una línea real casi vertical es una franja de ~10px de ancho
+    (20mm / MM_PER_PX) -> deja VARIAS columnas contiguas con corrida larga. Una
+    columna suelta (borde de cono, reflejo, dos specks que el cierre morfológico
+    unió) no. Solo cuentan los grupos de >= min_group_cols columnas contiguas.
     """
-    col_runs = _row_max_runs(mask.T)                    # corrida vertical máx por columna
-    cols = np.where(col_runs >= min_run_px)[0]
+    ends = _run_lengths(mask.T) >= min_run_px      # (col, fila): fin de corrida válida
+    cols = np.flatnonzero(ends.any(axis=1))
     if cols.size == 0:
         return None
-    ys = np.nonzero(mask[:, cols].any(axis=1))[0]
-    if ys.size == 0:
+    if min_group_cols > 1:
+        groups = np.split(cols, np.flatnonzero(np.diff(cols) > 1) + 1)
+        keep = [g for g in groups if g.size >= min_group_cols]
+        if not keep:
+            return None
+        cols = np.concatenate(keep)
+    rows = np.flatnonzero(ends[cols].any(axis=0))
+    if rows.size == 0:
         return None
-    return float(ys.max())
+    return float(rows.max())
 
 
 def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
@@ -172,10 +211,31 @@ def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict
     hsv = bev_hsv if bev_hsv is not None else cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
     mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
     near_row = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
-    near_col = _find_near_line_col(mask, int(getattr(C, "LINE_MIN_COL_RUN_PX", 10)))
-    cands = [v for v in (near_row, near_col) if v is not None]
-    near_y = max(cands) if cands else None
-    return {"Orange": {"seen": near_y is not None, "near_y": near_y}}
+    near_col = _find_near_line_col(
+        mask, int(getattr(C, "LINE_MIN_COL_RUN_PX", 10)),
+        int(getattr(C, "LINE_MIN_COL_GROUP", 1)))
+
+    # GUARDA DE MASA: donde near_y dice que cruza la línea tiene que HABER
+    # línea. Una franja real (20mm de cinta = ~10px de alto en BEV, y cruza
+    # buena parte del ancho) deja decenas/cientos de px en una banda de
+    # +-LINE_BAND_CHECK_PX; un speck de ruido deja <15. Sin esta guarda, la
+    # lectura se aceptaba con el vecindario vacío -- justo la firma de la
+    # línea falsa de orillas818 (near_y=248->291 y `line: None` 14 frames
+    # seguidos, o sea _fit_line_near ni juntaba 35px ahí).
+    # Se prueba el candidato MÁS CERCANO primero; si no tiene masa se cae al
+    # otro (más lejos) antes de darse por no vista.
+    half = float(getattr(C, "LINE_BAND_CHECK_PX", 20.0))
+    need = int(getattr(C, "LINE_BAND_MIN_PX", 25))
+    near_y, src, band = None, None, 0
+    for cand, tag in sorted(
+            [(v, t) for v, t in ((near_row, "fila"), (near_col, "col")) if v is not None],
+            reverse=True):
+        n = _band_px_count(mask, cand, half)
+        if n >= need:
+            near_y, src, band = cand, tag, n
+            break
+    return {"Orange": {"seen": near_y is not None, "near_y": near_y,
+                       "src": src, "band": band}}
 
 
 class OrangeLineTracker:
@@ -323,7 +383,7 @@ class OrangeLineTracker:
                 self._dr_ny += ds_px          # sin latch: marcha unos frames
             self._dr_frames += 1              # latcheada: SIT, solo cuenta
             self._out = {"seen": True, "near_y": self._dr_ny,
-                         "line": None, "dead_reckoned": True}
+                         "line": None, "dead_reckoned": True, "src": "dr"}
             return self._out
 
         self._dr_ny = None
@@ -364,6 +424,10 @@ class OrangeLineTracker:
             "seen": True,
             "near_y": new_ny,
             "line": self._smooth_line(fitted, w),
+            # diag (log [LINEA]): de qué escaneo salió la lectura y cuántos px
+            # naranjas hay en su banda. `src=col` + `band` bajo = sospechar ruido.
+            "src": cand.get("src"),
+            "band": cand.get("band"),
         }
 
     def _smooth_line(self, fitted, w: int):
