@@ -905,6 +905,35 @@ class PPRuntime:
                                 _li = max(range(len(bev_obstacles)),
                                           key=lambda k: (_cam_h(*bev_obstacles[k][:2]),
                                                          bev_obstacles[k][1]))
+                            else:
+                                # CAMBIO a un cono MUCHO más cercano y VISIBLE ahora
+                                # mismo. Seguir por posición evita el vaivén entre dos
+                                # conos parecidos (orillas488: 12px de diferencia), pero
+                                # dejaba fuera un cono que reaparece encima del carro
+                                # mientras el fijado es uno lejano: orillas828 vueltas
+                                # 1 y 2 -- tras RECUPERANDO se fijó un verde a y=124-150
+                                # y un frame después reapareció el rojo a y=280-284 (19cm,
+                                # 10cm a la derecha); el LOCK siguió con el verde 5-9
+                                # frames y el rojo no se esquivó.
+                                #  - "mucho más cerca": >= LOCK_SWITCH_CLOSER_PX en y.
+                                #  - visible: una detección de ESTE frame a <= VIS_PX (no
+                                #    un cono estimado por la memoria que ya va al lado).
+                                #  - todavía enfrente: y <= LOCK_SWITCH_MAX_Y.
+                                _sw_dy  = getattr(C, "LOCK_SWITCH_CLOSER_PX", 60.0)
+                                _sw_vis = getattr(C, "LOCK_SWITCH_VIS_PX", 25.0) ** 2
+                                _sw_ym  = getattr(C, "LOCK_SWITCH_MAX_Y", C.ROBOT_BEV_Y - 60.0)
+                                _ly = bev_obstacles[_li][1]
+                                _sw = [k for k, (_ox, _oy, _c) in enumerate(bev_obstacles)
+                                       if k != _li and _oy - _ly >= _sw_dy and _oy <= _sw_ym
+                                       and any((nx - _ox) ** 2 + (ny - _oy) ** 2 <= _sw_vis
+                                               for nx, ny, _nc in new_obstacles)]
+                                if _sw:
+                                    _old = bev_obstacles[_li]
+                                    _li = max(_sw, key=lambda k: bev_obstacles[k][1])
+                                    print(f"[LOCK] CAMBIO a {bev_obstacles[_li][2]}@"
+                                          f"({bev_obstacles[_li][0]:.0f},{bev_obstacles[_li][1]:.0f}): "
+                                          f"{bev_obstacles[_li][1] - _old[1]:.0f}px más cerca que "
+                                          f"{_old[2]}@({_old[0]:.0f},{_old[1]:.0f})", flush=True)
                             _lock = bev_obstacles[_li]
                             self._lock_xy = (_lock[0], _lock[1])
                             # Solo la primaria cuenta como "esquivada" para el
