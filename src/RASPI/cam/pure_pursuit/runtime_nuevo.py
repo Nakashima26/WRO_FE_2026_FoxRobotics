@@ -907,6 +907,9 @@ class PPRuntime:
                                                          bev_obstacles[k][1]))
                             _lock = bev_obstacles[_li]
                             self._lock_xy = (_lock[0], _lock[1])
+                            # Solo la primaria cuenta como "esquivada" para el
+                            # PASADO por giro de _prune (ver _Obs.was_target).
+                            self.memory.mark_target(*_lock)
                             _dropped = [o for j, o in enumerate(bev_obstacles) if j != _li]
                             bev_obstacles_beyond.extend(_dropped)
                             _lkc = obstacle_conf[_li] if _li < len(obstacle_conf) else 1.0
@@ -916,6 +919,7 @@ class PPRuntime:
                                   flush=True)
                         elif len(bev_obstacles) == 1:
                             self._lock_xy = (bev_obstacles[0][0], bev_obstacles[0][1])
+                            self.memory.mark_target(*bev_obstacles[0])
                         else:
                             self._lock_xy = None
 
