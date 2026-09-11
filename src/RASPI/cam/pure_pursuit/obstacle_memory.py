@@ -825,10 +825,18 @@ class ObstacleMemory:
         mine: list[tuple[float, float, str]] = []
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
+        pend_ok = allow_pending and getattr(C, "LINE_PENDING_BEYOND", True)
         for o in self._obs:
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             prev_bey = o._last_bey
-            if result is not None:
+            # Un cono PENDIENTE beyond que ya no se ve (conf < REFRESH = posición de
+            # dead-reckon) no se suelta a `mia`: su posición estimada cruza el extremo
+            # de una línea sostenida y "cambia de lado" sin que nada real cambie
+            # (orillas834 giro 9: verde de la recta siguiente, 3 frames sin verlo ->
+            # `mia` -> CRUCERO cedió). Solo una detección fresca puede soltarlo.
+            hold = (pend_ok and o.beyond is None and prev_bey and result is True
+                    and o.conf < getattr(C, "OBS_MEM_REFRESH", 1.0) - 1e-6)
+            if result is not None and not hold:
                 o._last_bey = (result is False)
                 want_beyond = (result is False)
                 # `o.beyond is not None`: sin veredicto todavía, un "mía" NO es
@@ -874,8 +882,7 @@ class ObstacleMemory:
             # Y si venía "más allá", un solo "mía" no lo suelta: hacen falta 2
             # seguidos (el pie del verde de esquina cae justo en el extremo de la
             # cinta y parpadea de lado; con 1 frame de prio=1 CRUCERO ya cede).
-            pending_beyond = (o.beyond is None and allow_pending
-                              and getattr(C, "LINE_PENDING_BEYOND", True)
+            pending_beyond = (o.beyond is None and pend_ok
                               and (result is False or (result is True and prev_bey)))
             if o.beyond is True or pending_beyond:
                 if rescue_fn is not None and rescue_fn(o.x, o.y, o.color):

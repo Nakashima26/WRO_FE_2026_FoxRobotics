@@ -153,6 +153,27 @@ OBS_INFLATE_R        = OBS_PHYSICAL_R_PX + OBS_SAFETY_R_PX             # ≈ 35 
 
 OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 
+# ─── Detección de conos LEJANOS (umbral de área por distancia) ────────────────
+# vision.py pide 1000 px de área a todo blob -> un cono solo pasaba a ~20-26 cm.
+# orillas845 vueltas 2-3 (recta 2, verde y luego rojo): el rojo se veía desde la
+# salida de la esquina (300-700 px a ~45 cm) pero entraba a memoria a 21 cm, con
+# el carro pegado a la pared interior tras el verde -> cruce de carril con pivote
+# de 70° -> RECUPERANDO lo barrió (rozado v2, sacado del área v3). Con este
+# umbral el blob chico cuenta si su pie proyecta LEJOS en el BEV y su área
+# alcanza la esperada para esa distancia (~1/d²). Los >= 1000 px no cambian.
+# Área mínima = REF_AREA * (REF_MM / d)^2, con piso FLOOR, para MIN < d <= MAX.
+# SOLO SLALOM (ver PPRuntime._far_area_min): hace falta un cono del color
+# contrario en memoria y que éste quede del lado que obliga a cruzar el carril;
+# sin eso, abrir el umbral metía conos de la recta siguiente vistos por la
+# esquina sin naranja leída (validado offline en 843-845). False = viejo.
+VISION_FAR_AREA_ENABLED     = True
+VISION_FAR_AREA_REF_AREA    = 700.0   # px a REF_MM (~70% del cono real a esa distancia)
+VISION_FAR_AREA_REF_MM      = 260.0
+VISION_FAR_AREA_MIN_DIST_MM = 250.0   # más cerca que esto: umbral fijo de 1000 px
+VISION_FAR_AREA_MAX_DIST_MM = 420.0   # más lejos: proyección rasante poco fiable + conos de la recta siguiente
+VISION_FAR_AREA_FLOOR       = 250.0   # nunca aceptar blobs de menos de esto
+VISION_FAR_MIN_SOLIDITY     = 0.45    # los chicos deben ser compactos (lata ~0.7-0.9)
+
 # Clamp del punto de paso de obstáculo (_pass_side_cx): el path pasa como
 # máximo a OBS_INFLATE_R + esto del centro del cono. Evita que el trazador
 # agarre el sliver de piso pegado a la pared (elige por ancho) y curle el

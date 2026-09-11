@@ -150,6 +150,12 @@ class PPRuntime:
         # Visión
         self.vision     = Vision(cfg.cam_index)
         self.bev        = BEVTransformer(cfg.calib_path)
+        # Conos LEJANOS: umbral de área por distancia (ver VISION_FAR_AREA_* en
+        # config). Sin calibración BEV no hay distancia -> umbral fijo de siempre.
+        if getattr(C, "VISION_FAR_AREA_ENABLED", False) and self.bev.is_calibrated:
+            self.vision.area_min_fn        = self._far_area_min
+            self.vision.area_floor         = float(C.VISION_FAR_AREA_FLOOR)
+            self.vision.small_min_solidity = float(C.VISION_FAR_MIN_SOLIDITY)
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
@@ -454,6 +460,38 @@ class PPRuntime:
                 f"despejado herr={heading_err:+.0f} clr={self._recup_clear_count}")
         return False
 
+    # ── Umbral de área por distancia (vision.area_min_fn) ────────────────────
+
+    def _far_area_min(self, x: float, y: float, w: float, h: float,
+                      color: str = "Red") -> float:
+        """Área mínima para que un blob CHICO (< 1000 px) cuente como cono: la
+        esperada para la distancia a la que proyecta su pie en el BEV (~1/d²).
+        inf = no cuenta (igual que antes). Solo se abre para el SLALOM:
+          - pie entre VISION_FAR_AREA_MIN_DIST_MM y _MAX_DIST_MM,
+          - en memoria hay un cono de MI recta del color contrario, más cerca,
+          - y éste queda del lado que obliga a cruzar el carril (rojo a la
+            derecha de ese verde / verde a la izquierda de ese rojo).
+        Sin esas condiciones un cono lejano suele ser de la recta siguiente,
+        visto por la esquina con la naranja todavía sin leer (orillas845 ~fr
+        91-97: verde a 38-51 cm, `seen: False`) -> entraría como "mío"."""
+        r = self.bev.cam_to_bev(x + w * 0.5, y + h)
+        if r is None or not self.bev.bev_in_bounds(r[0], r[1]):
+            return float("inf")
+        bx, by = r
+        d_mm = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX
+        if not (C.VISION_FAR_AREA_MIN_DIST_MM < d_mm <= C.VISION_FAR_AREA_MAX_DIST_MM):
+            return float("inf")
+        other = "Green" if color == "Red" else "Red"
+        cruza = any(
+            o.color == other and o.beyond is not True and o.y > by
+            and ((bx > o.x) if color == "Red" else (bx < o.x))
+            for o in self.memory._obs
+        )
+        if not cruza:
+            return float("inf")
+        return max(float(C.VISION_FAR_AREA_FLOOR),
+                   C.VISION_FAR_AREA_REF_AREA * (C.VISION_FAR_AREA_REF_MM / d_mm) ** 2)
+
     # ── Captura ───────────────────────────────────────────────────────────────
 
     def _start_capture(self):
@@ -748,12 +786,23 @@ class PPRuntime:
                         # al BEV. Para el verde que "no se ve tras el giro":
                         # distinguir "no detectado" (cam=0) de "detectado pero no
                         # proyecta" (cam>0, bev=0 -> far_objects).
-                        _camR = len(positions.get("Red", []))
-                        _camG = len(positions.get("Green", []))
+                        # Sin los conos LEJANOS (vision.last_small): _camR/_camG
+                        # alimentan fresh_color del trigger medido, y un cono
+                        # lejano visible no debe cambiar cuándo se recupera del
+                        # cono que se está esquivando.
+                        _camR = len(positions.get("Red", [])) - sum(
+                            1 for s in self.vision.last_small if s[0] == "Red")
+                        _camG = len(positions.get("Green", [])) - sum(
+                            1 for s in self.vision.last_small if s[0] == "Green")
                         if _camR or _camG or new_obstacles or far_objects:
                             print(f"[DET] camR={_camR} camG={_camG} "
                                   f"bev={[(round(a),round(b),c[0]) for a,b,c in new_obstacles]} "
                                   f"far={[(round(fx),c[0]) for fx,_w,_h,c in far_objects]}",
+                                  flush=True)
+                        # Conos LEJANOS aceptados por el umbral de área por
+                        # distancia (slalom, ver _far_area_min).
+                        if self.vision.last_small:
+                            print(f"[FAR] {[(c[0], x, y, w, h, a) for c, x, y, w, h, a in self.vision.last_small]}",
                                   flush=True)
 
                         # ── Memoria rodante: apagada durante el giro para evitar fantasmas ──
@@ -889,6 +938,12 @@ class PPRuntime:
                                     allow_pending=not orange_info.get("dead_reckoned", False),
                                 )
                             )
+                        # Beyond de VERDAD (clasificados por la naranja), antes de
+                        # que el LOCK agregue los conos de mi recta que dejó fuera:
+                        # es lo único que debe ver TurnDirectionTracker (un rojo
+                        # lejano a la derecha del verde que se esquiva NO dice
+                        # hacia dónde gira la pista).
+                        _beyond_dir = list(bev_obstacles_beyond)
 
                         # ── LOCK al obstáculo primario ── con >=2 conos la
                         # centerline no puede satisfacer dos lados de paso
@@ -977,7 +1032,7 @@ class PPRuntime:
                         # infiere DURANTE la corrida (armado): desarmado el
                         # pipeline corre pero el carro no se mueve.
                         turn_dir = self.turn_dir_tracker.update(
-                            bev_obstacles_beyond if armed else [],
+                            _beyond_dir if armed else [],
                             C.ROBOT_BEV_X,
                             line=(orange_info.get("line")
                                   if (armed and not en_recuperacion_giro) else None),
