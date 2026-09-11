@@ -18,7 +18,6 @@ Para correrlo:
 """
 
 import argparse
-import math
 import os
 import sys
 import time
@@ -139,20 +138,6 @@ def _parse_direccion(ack: str) -> str | None:
     return val if val in ("L", "R") else None
 
 
-def _parse_ack_num(ack: str, key: str) -> float | None:
-    """Campo numérico `,key=` del ACK:V2 (ao, tc, dL, dR, dF...). None si no está."""
-    if not ack:
-        return None
-    tag = "," + key + "="
-    idx = ack.find(tag)
-    if idx < 0:
-        return None
-    try:
-        return float(ack[idx + len(tag):].split(",")[0])
-    except ValueError:
-        return None
-
-
 class PPRuntime:
     """
     Runtime Pure Pursuit con memoria de obstáculos.
@@ -213,23 +198,6 @@ class PPRuntime:
         self._recup_noghost_streak: int = 0      # frames sin ver color fresco (con esquiva armada + herr grande)
         self._g_streak: int = 0                  # est=G consecutivos (debounce de giro)
         self._last_recup_reason: str = "-"       # para overlay / journalctl
-
-        # Campos del ACK del ESP32 (último valor recibido)
-        self._last_ao: float | None = None       # anguloObjetivo = rumbo de la recta para RECUPERANDO
-        self._last_tc: int | None = None         # giros completados (recta = tc % 4)
-        self._last_dL: float | None = None
-        self._last_dR: float | None = None
-        self._last_dF: float | None = None
-
-        # ── Slalom: cruce directo al 2o cono (ver SLALOM_* en config) ─────────
-        self._slalom: dict | None = None          # cruce en curso
-        self._slalom_hint: dict | None = None     # {c1, c2, side, src}: tras pasar c1 viene c2
-        self._slalom_hint_count: dict = {}        # (c1, c2) -> frames con pista en esta recta
-        self._slalom_map: dict[int, tuple[str, str]] = {}   # recta (tc % 4) -> (c1, c2) duro
-        self._slalom_wall_streak: int = 0
-        self._primary_color: str | None = None    # cono primario (LOCK) de este frame
-        self._last_primary_color: str | None = None   # último primario no-None (frames previos)
-        self._straight_pass: tuple | None = None  # (tc, color del 1er cono pasado, ya pasó el 2o)
 
         # ── INICIO — salida del estacionamiento ───────────────────────────────
         # Se mide el rosa mientras está DESARMADO y se decide UNA vez al armar.
@@ -363,17 +331,9 @@ class PPRuntime:
                 and self._last_heading is not None):
             self._heading_ref = self._last_heading
 
-        # Referencia del error de rumbo: `ao` del ESP32 (el rumbo al que endereza
-        # RECUPERANDO) si viene en el ACK; si no, el heading del frame de armado.
-        # Con la del armado, una esquiva que empezó antes de armar (1er cono tras
-        # un giro) medía solo el giro que faltaba (href +3..+34°) y nunca llegaba
-        # a HEADING_DEG (ver RECUP_MEAS_REF_AO).
-        _ref = (self._last_ao
-                if (getattr(C, "RECUP_MEAS_REF_AO", False) and self._last_ao is not None)
-                else self._heading_ref)
         heading_err = 0.0
-        if self._last_heading is not None and _ref is not None:
-            heading_err = (self._last_heading - _ref + 180.0) % 360.0 - 180.0
+        if self._last_heading is not None and self._heading_ref is not None:
+            heading_err = (self._last_heading - self._heading_ref + 180.0) % 360.0 - 180.0
 
         # DIAG (solo log, sin efecto): estado de armado del trigger cada frame que
         # corre — cubre el hueco de que el early-return de abajo no registra
@@ -382,7 +342,6 @@ class PPRuntime:
               f"can_arm={int(self._recup_can_arm)} armed={int(self._dodge_armed)} "
               f"herr={heading_err:+.1f} "
               f"href={'-' if self._heading_ref is None else round(self._heading_ref)} "
-              f"ref={'-' if _ref is None else round(_ref, 1)} "
               f"h={'-' if self._last_heading is None else round(self._last_heading)} "
               f"hascolor={int(has_color_obs)} clr={self._recup_clear_count} "
               f"csoon={int(bool(corner_soon))} fresh={int(fresh_color)} "
@@ -532,198 +491,6 @@ class PPRuntime:
             return float("inf")
         return max(float(C.VISION_FAR_AREA_FLOOR),
                    C.VISION_FAR_AREA_REF_AREA * (C.VISION_FAR_AREA_REF_MM / d_mm) ** 2)
-
-    # ── Slalom: cruce directo al 2o cono (ver SLALOM_* en config) ─────────────
-
-    def _straight_idx(self) -> int | None:
-        """Recta actual como tc % 4 (misma recta física en cada vuelta)."""
-        return None if self._last_tc is None else int(self._last_tc) % 4
-
-    def _slalom_tc_ok(self) -> bool:
-        """Rectas donde aplica el cruce: ni la de salida de la 1a vuelta (tc=0,
-        INICIO) ni la final (tc>=12, TERMINANDO)."""
-        return self._last_tc is not None and 1 <= self._last_tc < 12
-
-    def _slalom_reset_straight(self):
-        """Recta nueva (giro): la pista y el cruce no pasan de una recta a otra."""
-        self._slalom = None
-        self._slalom_hint = None
-        self._slalom_hint_count = {}
-        self._slalom_wall_streak = 0
-        self._straight_pass = None
-        self._last_primary_color = None
-
-    def _slalom_update_hint(self, primary, lock_dropped, far_bev, orange_seen: bool):
-        """¿Viene un 2o cono del color CONTRARIO al primario, más adelante y del
-        lado al que hay que cruzar para pasarlo (rojo a la derecha del verde,
-        verde a la izquierda del rojo)? Fuentes: blob lejano (far_bev), cono de mi
-        recta que el LOCK dejó fuera, o el mapa de vueltas anteriores. La
-        POSICIÓN del 2o cono no se usa para nada más (la profundidad BEV de un
-        cono lejano sale ~2x corta): solo que existe y de qué lado está."""
-        if not getattr(C, "SLALOM_CROSS_ENABLED", False) or self._slalom is not None:
-            return
-        # Recta de salida de la 1a vuelta (tc=0): INICIO maneja solo y el ESP32
-        # ignora `obs` -- nada de cruces ahí (en tc=4/8 la misma recta sí aplica).
-        # Tampoco en la recta final (tc>=12, TERMINANDO hacia el área de salida).
-        if not self._slalom_tc_ok():
-            return
-        # Regla WRO: 2 conos en una recta = columnas de esquina OPUESTAS (1 m).
-        # Solo después del PRIMER cono de la recta puede venir otro; tras el 2o
-        # lo que se vea adelante es de la recta siguiente.
-        if self._straight_pass is not None:
-            return
-        if primary is None or primary[2] not in ("Red", "Green"):
-            return
-        c1 = primary[2]
-        c2 = "Red" if c1 == "Green" else "Green"
-        side = 1 if c2 == "Red" else -1          # +1 = cruzar a la derecha
-        px, py = primary[0], primary[1]
-        margin = float(getattr(C, "SLALOM_SIDE_MARGIN_PX", 40.0))
-        key = (c1, c2)
-        # Cruce HACIA el lado del giro (CCW: izquierda): ahí también aparece, por
-        # la esquina, el 1er cono de la recta SIGUIENTE, y ni la profundidad BEV
-        # ni el área separan 1 m de 2 m (orillas846 recta 3: verde de la recta 4
-        # a (125,185), igual que el rojo real de la recta 2 a (270,180)). Ese
-        # lado solo se acepta del mapa (confirmado en una vuelta anterior).
-        # Sin dirección confirmada -> tampoco.
-        _td = getattr(C, "CORNER_TURN_DIR_OVERRIDE", None) or self.turn_dir_tracker.direction
-        _hacia_giro = _td is None or (side < 0) == (_td == "L")
-        seen = None
-        for (bx, by, c), src in ([] if _hacia_giro else
-                                 [(o, "lejano") for o in far_bev]
-                                 + [(o, "lock") for o in lock_dropped]):
-            if c != c2 or by >= py or (bx - px) * side < margin:
-                continue
-            if orange_seen and self.line_tracker.classify(
-                    bx, by, C.ROBOT_BEV_X, C.ROBOT_BEV_Y) is False:
-                continue                         # más allá de la naranja: recta siguiente
-            seen = (bx, by, src)
-            break
-        if seen is not None:
-            n = self._slalom_hint_count.get(key, 0) + 1
-            self._slalom_hint_count[key] = n
-            if (n >= int(getattr(C, "SLALOM_HINT_MIN_FRAMES", 3))
-                    and (self._slalom_hint is None or self._slalom_hint["c1"] != c1)):
-                self._slalom_hint = {"c1": c1, "c2": c2, "side": side, "src": seen[2]}
-                print(f"[SLALOM] pista {c1}->{c2} lado={'der' if side > 0 else 'izq'} "
-                      f"src={seen[2]} 1o=({px:.0f},{py:.0f}) 2o=({seen[0]:.0f},{seen[1]:.0f}) "
-                      f"n={n} recta={self._straight_idx()}", flush=True)
-            return
-        s = self._straight_idx()
-        if (self._slalom_hint is None and getattr(C, "SLALOM_LAP_MEMORY", False)
-                and s is not None and self._slalom_map.get(s) == key):
-            self._slalom_hint = {"c1": c1, "c2": c2, "side": side, "src": "mapa"}
-            print(f"[SLALOM] pista {c1}->{c2} lado={'der' if side > 0 else 'izq'} "
-                  f"src=mapa recta={s}", flush=True)
-
-    def _slalom_try_start(self, pas_event: bool, passed_color: str | None,
-                          bev_obstacles, new_obstacles, orange_near: bool) -> bool:
-        """En el pasado del 1er cono: si hay pista para él, arrancar el cruce en
-        vez de mandar RECUPERANDO. True = arrancó (el caller anula el pasado)."""
-        if (not getattr(C, "SLALOM_CROSS_ENABLED", False) or not pas_event
-                or self._slalom is not None or not self._slalom_tc_ok()
-                or self._straight_pass is not None):     # solo tras el 1er cono de la recta
-            return False
-        h = self._slalom_hint
-        if h is None or h["c1"] != passed_color or orange_near or self._last_heading is None:
-            return False
-        c2 = h["c2"]
-        # El 2o cono ya está a la vista en mi recta: la esquiva normal se encarga.
-        if (any(c == c2 for _x, _y, c in bev_obstacles)
-                and any(c == c2 for _x, _y, c in new_obstacles)):
-            return False
-        ref = self._last_ao if self._last_ao is not None else 0.0
-        target = ref - h["side"] * float(getattr(C, "SLALOM_CROSS_DEG", 30.0))
-        self._slalom = {"c1": h["c1"], "c2": c2, "side": h["side"], "src": h["src"],
-                        "ref": ref, "target": target, "frames": 0, "lat": 0.0}
-        self._slalom_hint = None
-        self._slalom_wall_streak = 0
-        # El trigger medido no debe mandar RECUPERANDO durante el cruce (herr
-        # contra ao ya vale ~CROSS_DEG); se re-arma solo con el peso del 2o cono.
-        self._dodge_armed = False
-        self._recup_can_arm = True
-        self._recup_clear_count = 0
-        self._heading_ref = None
-        print(f"[SLALOM] CRUCE inicio {h['c1']}->{c2} src={h['src']} "
-              f"h={self._last_heading:+.1f} ao={ref:+.1f} obj={target:+.1f} "
-              f"recta={self._straight_idx()}", flush=True)
-        return True
-
-    def _slalom_step(self, dt_s: float, bev_obstacles, new_obstacles,
-                     orange_near: bool):
-        """Un frame del cruce. Devuelve ("cruce", steer_deg) mientras sigue, o
-        ("fin", motivo, recuperar) al terminar; recuperar=True -> pasado=1."""
-        s = self._slalom
-        s["frames"] += 1
-        h = self._last_heading
-        if h is not None:
-            # Desplazamiento lateral estimado hacia el lado del cruce (+).
-            s["lat"] += (C.ROBOT_SPEED_MMS * max(0.0, dt_s)
-                         * math.sin(math.radians(s["side"] * (s["ref"] - h))))
-        d_side = self._last_dR if s["side"] > 0 else self._last_dL
-        wall = ((d_side is not None and 0 < d_side < C.SLALOM_WALL_STOP_CM)
-                or (self._last_dF is not None and 0 < self._last_dF < C.SLALOM_WALL_STOP_CM))
-        self._slalom_wall_streak = (self._slalom_wall_streak + 1
-                                    if wall and s["frames"] >= C.SLALOM_WALL_MIN_FRAMES else 0)
-        motivo = None
-        if (any(c == s["c2"] for _x, _y, c in bev_obstacles)
-                and any(c == s["c2"] for _x, _y, c in new_obstacles)):
-            motivo = "cono"
-        elif h is None:
-            motivo = "sin_heading"
-        elif orange_near:
-            motivo = "esquina"
-        elif self._slalom_wall_streak >= 2:
-            motivo = "pared"
-        elif s["lat"] >= C.SLALOM_MAX_LATERAL_MM:
-            motivo = "tope_lateral"
-        elif s["frames"] > C.SLALOM_MAX_FRAMES:
-            motivo = "tope_frames"
-        if motivo is not None:
-            self._slalom = None
-            print(f"[SLALOM] CRUCE fin={motivo} f={s['frames']} lat={s['lat']:.0f}mm "
-                  f"h={'-' if h is None else f'{h:+.1f}'} dL={self._last_dL} "
-                  f"dR={self._last_dR} dF={self._last_dF}", flush=True)
-            if motivo == "cono":
-                self._slalom_record(s["c1"], s["c2"], "cruce")
-            return ("fin", motivo, motivo != "cono")
-        steer = float(getattr(C, "SLALOM_KP", 2.0)) * (h - s["target"])   # + = derecha
-        steer = max(-C.MAX_STEER_DEG, min(C.MAX_STEER_DEG, steer))
-        print(f"[SLALOM] cruce f={s['frames']} h={h:+.1f} obj={s['target']:+.1f} "
-              f"steer={steer:+.1f} lat={s['lat']:.0f}mm dL={self._last_dL} "
-              f"dR={self._last_dR} dF={self._last_dF}", flush=True)
-        return ("cruce", steer)
-
-    def _slalom_record(self, c1: str, c2: str, why: str):
-        """Recordar que esta recta tiene el slalom c1->c2 (pista para las vueltas
-        siguientes, SLALOM_LAP_MEMORY)."""
-        s = self._straight_idx()
-        if s is None or not getattr(C, "SLALOM_LAP_MEMORY", False):
-            return
-        if self._slalom_map.get(s) != (c1, c2):
-            self._slalom_map[s] = (c1, c2)
-            print(f"[SLALOM] mapa recta={s} = {c1}->{c2} ({why})", flush=True)
-
-    def _slalom_on_pass(self, passed_color: str | None):
-        """Pasado real (RECUPERANDO) de un cono: si en esta misma recta ya se
-        pasó uno del color contrario y ESTE requirió un cruce duro (|ang-ao|
-        grande), la recta es un slalom -> recordarlo para la próxima vuelta."""
-        if passed_color not in ("Red", "Green"):
-            return
-        tc = self._last_tc
-        sp = self._straight_pass      # (tc, color del 1er cono pasado, ya hubo 2o)
-        if sp is None or sp[0] != tc:
-            self._straight_pass = (tc, passed_color, False)
-            return
-        # 1er pasado de un cono del color CONTRARIO al 1o en esta recta = el 2o
-        # cono (pasados repetidos del mismo cono no cuentan).
-        if sp[2] or sp[1] == passed_color:
-            return
-        self._straight_pass = (sp[0], sp[1], True)
-        if self._last_heading is not None:
-            herr = abs(((self._last_heading - (self._last_ao or 0.0)) + 180.0) % 360.0 - 180.0)
-            if herr >= float(getattr(C, "SLALOM_MAP_MIN_HERR", 45.0)):
-                self._slalom_record(sp[1], passed_color, f"herr={herr:.0f}")
 
     # ── Captura ───────────────────────────────────────────────────────────────
 
@@ -910,8 +677,6 @@ class PPRuntime:
                     self._pasado_hold = 0
                     self._pasado_from_measured = False
                     self._turn_delay_frames = 0
-                    self._slalom_reset_straight()
-                    self._slalom_map = {}
                     if on_ready is not None:
                         on_ready()
                     print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -942,14 +707,6 @@ class PPRuntime:
                 # ── Visión ──────────────────────────────────────────────────
                 frame = cv2.flip(frame, 1)
                 processed_frame, positions = self.vision.process_frame(frame)
-                # Conos LEJANOS (umbral de área por distancia): por defecto solo
-                # PISTA de slalom -- fuera de `positions` para que no entren a
-                # memoria / LOCK / blocking / fresh_color (VISION_FAR_AREA_AS_OBSTACLE).
-                far_small = list(self.vision.last_small)
-                if far_small and not getattr(C, "VISION_FAR_AREA_AS_OBSTACLE", False):
-                    _sk = {(c, x, y, w, h) for c, x, y, w, h, _a in far_small}
-                    positions = {col: [b for b in lst if (col, *b) not in _sk]
-                                 for col, lst in positions.items()}
                 t_vis = time.perf_counter()
                 timing_ms["vis"] = (t_vis - now) * 1000.0
 
@@ -989,12 +746,6 @@ class PPRuntime:
                 line_info     = {"Orange": {"seen": False, "near_y": None}}
                 bev_obstacles_beyond = []
                 interior      = False
-                far_bev       = []      # conos lejanos proyectados (pista de slalom)
-                lock_dropped  = []      # conos de mi recta que el LOCK dejó fuera
-                new_obstacles = []
-                mem_pass_event = False  # la memoria dio un PASADO este frame
-                slalom_block  = False   # cruce de slalom activo: la Pi manda el rumbo
-                self._primary_color = None
                 self._ext_corner_hold = False
                 bev_timing    = {"warp": 0.0, "proj": 0.0, "mem": 0.0, "line": 0.0, "dc": 0.0, "ctrl": 0.0}
 
@@ -1038,18 +789,11 @@ class PPRuntime:
                         # Sin los conos LEJANOS (vision.last_small): _camR/_camG
                         # alimentan fresh_color del trigger medido, y un cono
                         # lejano visible no debe cambiar cuándo se recupera del
-                        # cono que se está esquivando. (Si no entran como
-                        # obstáculo ya se sacaron de `positions` arriba.)
-                        _far_in_pos = getattr(C, "VISION_FAR_AREA_AS_OBSTACLE", False)
-                        _camR = len(positions.get("Red", [])) - (sum(
-                            1 for s in far_small if s[0] == "Red") if _far_in_pos else 0)
-                        _camG = len(positions.get("Green", [])) - (sum(
-                            1 for s in far_small if s[0] == "Green") if _far_in_pos else 0)
-                        if not _far_in_pos:
-                            for _c, _x, _y, _w, _h, _a in far_small:
-                                _r = map_obstacle_to_bev(self.bev, _x, _y, _w, _h)
-                                if _r is not None:
-                                    far_bev.append((_r[0], _r[1], _c))
+                        # cono que se está esquivando.
+                        _camR = len(positions.get("Red", [])) - sum(
+                            1 for s in self.vision.last_small if s[0] == "Red")
+                        _camG = len(positions.get("Green", [])) - sum(
+                            1 for s in self.vision.last_small if s[0] == "Green")
                         if _camR or _camG or new_obstacles or far_objects:
                             print(f"[DET] camR={_camR} camG={_camG} "
                                   f"bev={[(round(a),round(b),c[0]) for a,b,c in new_obstacles]} "
@@ -1094,7 +838,6 @@ class PPRuntime:
                             # de ÁNGULO. El pulso pasado=1 se finaliza más abajo
                             # (tras detect_centerline), ya OR-eado con el medido.
                             if self.memory.last_passed:
-                                mem_pass_event = True
                                 self._pasado_hold = max(self._pasado_hold,
                                                         C.PASADO_HOLD_FRAMES)
                         _t3 = time.perf_counter()
@@ -1269,7 +1012,6 @@ class PPRuntime:
                             # PASADO por giro de _prune (ver _Obs.was_target).
                             self.memory.mark_target(*_lock)
                             _dropped = [o for j, o in enumerate(bev_obstacles) if j != _li]
-                            lock_dropped = list(_dropped)
                             bev_obstacles_beyond.extend(_dropped)
                             _lkc = obstacle_conf[_li] if _li < len(obstacle_conf) else 1.0
                             bev_obstacles, obstacle_conf = [_lock], [_lkc]
@@ -1281,13 +1023,6 @@ class PPRuntime:
                             self.memory.mark_target(*bev_obstacles[0])
                         else:
                             self._lock_xy = None
-
-                        # ── Slalom: primario de este frame + pista del 2o cono ──
-                        self._primary_color = bev_obstacles[0][2] if bev_obstacles else None
-                        if armed and not self._is_turning:
-                            self._slalom_update_hint(
-                                bev_obstacles[0] if bev_obstacles else None,
-                                lock_dropped, far_bev, bool(orange_info.get("seen")))
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
@@ -1353,12 +1088,8 @@ class PPRuntime:
                         # dispara y measured firaba a herr=+89 en pleno giro
                         # (orillas417). Con esto el trigger se apaga al PRIMER
                         # est=G, sin esperar la confirmación de 2 frames.
-                        # RECUP_MEAS_IN_TURN_RECOVERY: también en los frames que
-                        # siguen al giro -- ahí se esquiva el 1er cono de la recta
-                        # (verde de la recta 2) y sin esto nunca lo manejaba.
                         if (armed and not self._is_turning and self._prev_estado != "G"
-                                and (not en_recuperacion_giro
-                                     or getattr(C, "RECUP_MEAS_IN_TURN_RECOVERY", False))):
+                                and not en_recuperacion_giro):
                             _oy_cs = orange_info.get("near_y")
                             _corner_soon_meas = (
                                 orange_info.get("seen") and _oy_cs is not None
@@ -1392,22 +1123,6 @@ class PPRuntime:
                                         getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 285.0)):
                                     self._turn_delay_frames = getattr(
                                         C, "RECUP_CORNER_TURN_DELAY_FRAMES", 8)
-
-                        # ── Slalom: en el pasado del 1er cono, ¿cruce directo al
-                        # 2o en vez de RECUPERANDO? (ver SLALOM_* en config) ──
-                        _ny_sl = orange_info.get("near_y")
-                        _orange_near_sl = bool(
-                            orange_info.get("seen") and _ny_sl is not None
-                            and _ny_sl >= getattr(C, "SLALOM_ORANGE_STOP_Y", 285.0))
-                        if (armed and (mem_pass_event or measured_pass)
-                                and self._slalom is None):
-                            _passed_c = self._last_primary_color or self._primary_color
-                            if self._slalom_try_start(True, _passed_c, bev_obstacles,
-                                                      new_obstacles, _orange_near_sl):
-                                self._pasado_hold = 0
-                                self._pasado_from_measured = False
-                                self._turn_delay_frames = 0
-                            self._slalom_on_pass(_passed_c)
 
                         if len(path_points) >= C.MIN_PATH_PTS:
                             # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
@@ -1478,23 +1193,6 @@ class PPRuntime:
 
                         if pp_active:
                             obs_norm = self.controller.normalize(steer_deg)
-
-                        # ── Slalom: cruce en curso -> la Pi manda el rumbo (gyro)
-                        # con prio=1; termina al detectar el 2o cono (sigue la
-                        # esquiva normal) o por tope/pared/esquina (RECUPERANDO).
-                        if self._slalom is not None:
-                            _res = self._slalom_step(dt_s, bev_obstacles, new_obstacles,
-                                                     _orange_near_sl)
-                            if _res[0] == "cruce":
-                                steer_deg = _res[1]
-                                self.controller._prev_steer_deg = steer_deg
-                                obs_norm = self.controller.normalize(steer_deg)
-                                pp_active = True
-                                slalom_block = True
-                            elif _res[2]:
-                                self._pasado_hold = max(self._pasado_hold,
-                                                        C.PASADO_HOLD_FRAMES)
-                                self._pasado_from_measured = True
                         bev_timing["ctrl"] = (time.perf_counter() - _t5) * 1000.0
 
                     except Exception as e:
@@ -1524,11 +1222,6 @@ class PPRuntime:
                 # (reporte del usuario). Solo se suprime el pasado ESPURIO
                 # (memory.last_passed / BEHIND_PAD head-on, sin esquiva de
                 # ángulo), que era el caso de orillas420/421.
-                # Cruce de slalom en curso: la Pi manda el rumbo; ningún pasado
-                # (p.ej. un fantasma de memoria que se poda) lo interrumpe.
-                if slalom_block:
-                    self._pasado_hold = 0
-                    self._pasado_from_measured = False
                 _oy = line_info["Orange"].get("near_y")
                 _corner_soon = (line_info["Orange"].get("seen")
                                 and _oy is not None
@@ -1579,9 +1272,6 @@ class PPRuntime:
                     self._turn_delay_frames -= 1
                     _turn_hold = True
                 _turn_block = (self._ext_corner_block > 0) or _turn_hold
-                # Durante el cruce de slalom prio=1: el ESP32 sigue el obs de la
-                # Pi (modo PP) y no entra a CRUCERO ni evalúa la esquina.
-                _turn_block = _turn_block or slalom_block
 
                 serial_msg = self._build_serial_message(
                     obs_norm, state, len(bev_obstacles), pasado, interior,
@@ -1596,20 +1286,6 @@ class PPRuntime:
                 heading = _parse_heading(serial_ack)
                 if heading is not None:
                     self._last_heading = heading
-                _v = _parse_ack_num(serial_ack, "ao")
-                if _v is not None:
-                    self._last_ao = _v
-                _v = _parse_ack_num(serial_ack, "tc")
-                if _v is not None:
-                    self._last_tc = int(_v)
-                for _k in ("dL", "dR", "dF"):
-                    _v = _parse_ack_num(serial_ack, _k)
-                    if _v is not None:
-                        setattr(self, "_last_" + _k, _v)
-                # Último primario no-None (el cono que se está esquivando): en el
-                # frame en que la memoria lo poda ya no está en bev_obstacles.
-                if self._primary_color is not None:
-                    self._last_primary_color = self._primary_color
 
                 # Dirección de giro AUTORITATIVA del ESP32 (dir= en el ACK, L/R
                 # desde su 1er GIRANDO). Cubre esquinas 2-12; corrige cualquier
@@ -1634,9 +1310,6 @@ class PPRuntime:
                         self._recup_can_arm = True
                         self._recup_clear_count = 0
                         self._heading_ref = None
-                        if self._slalom is not None:
-                            print("[SLALOM] CRUCE fin=giro (est=G)", flush=True)
-                            self._slalom = None
                     else:
                         self._g_streak = 0
                     g_confirmed = self._g_streak >= C.TURN_EST_G_CONFIRM_FRAMES
@@ -1653,7 +1326,6 @@ class PPRuntime:
                         self._recup_can_arm = True
                         self._recup_clear_count = 0
                         self._heading_ref = None
-                        self._slalom_reset_straight()
                         print(f"[MEM] Giro detectado (est=G x{self._g_streak}) — "
                               f"memoria de obstáculos desactivada.", flush=True)
                     elif estado_now != "G" and self._is_turning:
@@ -1707,8 +1379,7 @@ class PPRuntime:
                 # y n_obstáculos. Para ver si el carro ARQUEA (steer moderado, la
                 # y del cono avanza en [MEMDBG]) o PIVOTEA (steer al tope, y clavada).
                 print(f"[PPDIAG] steer={steer_deg:+.1f}deg obs={obs_norm:+.3f} "
-                      f"lka={lookahead_eff:.0f} nobs={len(bev_obstacles)} "
-                      f"slalom={int(slalom_block)}", flush=True)
+                      f"lka={lookahead_eff:.0f} nobs={len(bev_obstacles)}", flush=True)
                 # FASE 1 mid-turn: estado por frame SOLO mientras dura el giro.
                 if self._is_turning:
                     print(f"[MTURN] {self.mid_turn.status_str()}", flush=True)

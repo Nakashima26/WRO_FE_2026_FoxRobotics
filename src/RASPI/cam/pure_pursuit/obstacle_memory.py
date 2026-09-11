@@ -554,17 +554,6 @@ class ObstacleMemory:
                 if dodged and not o.was_target and getattr(
                         C, "OBS_MEM_PASS_REQUIRE_TARGET", True):
                     dodged = False
-                # Lata OBJETIVO que se rodeó con menos de PASSED_YAW pero con el
-                # steer aún alto (no cuenta como "frente"): con este giro hacia
-                # SU lado de paso ya se esquivó -> PASADO, no DESCARTE (ver
-                # OBS_MEM_PASSED_YAW_TARGET_DEG). + = izquierda (verde).
-                _yaw_t = getattr(C, "OBS_MEM_PASSED_YAW_TARGET_DEG", 0.0)
-                if (not dodged and _yaw_t > 0.0 and have_h and o.was_target
-                        and o.beyond is not True):
-                    _dth = (self._prev_heading - o.heading0 + 180.0) % 360.0 - 180.0
-                    _toward = _dth > 0.0 if o.color == "Green" else _dth < 0.0
-                    if _toward and abs(_dth) >= _yaw_t:
-                        dodged = True
                 if was_ahead and (centered or dodged):
                     _via = ("lateral" if (centered and steering_away)
                             else "frente" if centered else "esquiva")
