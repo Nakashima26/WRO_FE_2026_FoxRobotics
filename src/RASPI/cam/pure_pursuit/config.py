@@ -166,13 +166,51 @@ OBS_BIAS_SHIFT = 28    # desplazamiento lateral para sesgo de color WRO (px)
 # contrario en memoria y que éste quede del lado que obliga a cruzar el carril;
 # sin eso, abrir el umbral metía conos de la recta siguiente vistos por la
 # esquina sin naranja leída (validado offline en 843-845). False = viejo.
+# 2026-09-11 (orillas846): como OBSTÁCULO no sirvió -- el LOCK lo manda a
+# `beyond` mientras el verde es el primario, se olvida fuera de cámara, y su
+# dead-reckoning va 2-4x adelantado (la profundidad BEV de un cono lejano sale
+# ~2x corta vs el sónar). Ahora por defecto es solo una PISTA para el cruce de
+# slalom (ver SLALOM_*): no entra a memoria, LOCK, `blocking` ni fresh_color.
 VISION_FAR_AREA_ENABLED     = True
+VISION_FAR_AREA_AS_OBSTACLE = False   # True = comportamiento de a79d70e (entra a memoria)
 VISION_FAR_AREA_REF_AREA    = 700.0   # px a REF_MM (~70% del cono real a esa distancia)
 VISION_FAR_AREA_REF_MM      = 260.0
 VISION_FAR_AREA_MIN_DIST_MM = 250.0   # más cerca que esto: umbral fijo de 1000 px
 VISION_FAR_AREA_MAX_DIST_MM = 420.0   # más lejos: proyección rasante poco fiable + conos de la recta siguiente
 VISION_FAR_AREA_FLOOR       = 250.0   # nunca aceptar blobs de menos de esto
 VISION_FAR_MIN_SOLIDITY     = 0.45    # los chicos deben ser compactos (lata ~0.7-0.9)
+
+# ─── Slalom en la misma recta: cruce directo al 2o cono (2026-09-11) ─────────
+# Recta 2: verde a 40 cm de la pared INTERIOR y rojo 1 m después a 40 cm de la
+# EXTERIOR. Pasar el verde por dentro deja el carro junto a la pared interior (es
+# obligatorio); hoy RECUPERANDO lo endereza a 0° y sigue derecho hasta ver el rojo
+# a ~40 cm reales -> ~50 cm de cruce en ~40 cm -> 58-74° -> el RECUPERANDO del rojo
+# lo barre (orillas845). Con esto: si ya se sabe que el 2o cono es del color
+# contrario y queda del lado de cruce, en el pasado del 1er cono NO se manda
+# RECUPERANDO; la Pi toma el rumbo (gyro) y cruza a ao ∓ CROSS_DEG hacia el lado de
+# paso del 2o (rojo -> derecha, verde -> izquierda), con prio=1 para que el ESP32
+# siga a la Pi. En cuanto la cámara detecta el 2o cono de verdad (mi recta), sigue
+# la esquiva normal. Si no aparece: tope lateral/frames/pared/esquina -> RECUPERANDO.
+# Pista de que viene el 2o cono: blob lejano (VISION_FAR_AREA_*), un cono de mi
+# recta que el LOCK dejó fuera, o lo aprendido en una vuelta anterior en esa recta.
+# Log: [SLALOM]. False = comportamiento anterior.
+SLALOM_CROSS_ENABLED   = True
+SLALOM_CROSS_DEG       = 30.0   # rumbo del cruce respecto a ao (gyro). Más = cruza antes, pero
+                                # la cámara apunta más lejos del 2o cono (lo puede sacar del FOV)
+SLALOM_KP              = 2.0    # grados de steer por grado de error de rumbo (~KpGyro del ESP32)
+SLALOM_SIDE_MARGIN_PX  = 40.0   # px BEV que el 2o cono debe quedar del lado de cruce respecto
+                                # al 1o. orillas846: recta 2 +46..+70, recta 4 +9..+30
+SLALOM_HINT_MIN_FRAMES = 3      # frames (en esta recta) con la pista antes de fiarse de ella
+SLALOM_MAX_FRAMES      = 45     # tope de duración del cruce (~2.7 s)
+SLALOM_MAX_LATERAL_MM  = 450.0  # tope del desplazamiento lateral estimado (gyro + ROBOT_SPEED)
+SLALOM_WALL_STOP_CM    = 20     # sónar del lado del cruce (o dF) < esto 2 frames -> RECUPERANDO
+SLALOM_WALL_MIN_FRAMES = 6      # ...solo desde este frame del cruce: antes el 1er cono va junto
+                                # al carro y el sónar lateral lo lee (845 dR=8-11 cm)
+SLALOM_ORANGE_STOP_Y   = 285.0  # naranja a near_y >= esto = esquina encima -> RECUPERANDO
+SLALOM_LAP_MEMORY      = True   # recordar por recta (tc % 4) un slalom de cruce duro y usarlo
+                                # como pista en las vueltas siguientes
+SLALOM_MAP_MIN_HERR    = 45.0   # |ang - ao| al pasar el 2o cono para contarlo "duro" (y
+                                # recordarlo). Rectas 1-2: 54-69°; recta 4: ~30°
 
 # Clamp del punto de paso de obstáculo (_pass_side_cx): el path pasa como
 # máximo a OBS_INFLATE_R + esto del centro del cono. Evita que el trazador
@@ -509,6 +547,18 @@ RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro m
 # achica con el yaw -> RECUPERANDO nunca disparaba y el ESP llegaba a la
 # esquina ladeado 50° (orillas490).
 RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
+# 2026-09-11: el trigger medido NO corría durante los TURN_RECOVERY_FRAMES (20)
+# que siguen a cada giro, y al armarse sembraba heading_ref con el heading de ESE
+# frame (ya a media esquiva: href +3..+34°). El 1er cono de la recta se esquiva
+# justo en esa ventana -> en las 15 pasadas de la recta 2 (834, 843-846) el
+# RECUPERANDO del verde nunca vino de aquí, solo de la poda de memoria (o de nada).
+#   IN_TURN_RECOVERY: correr también en esa ventana (el giro en sí sigue fuera por
+#     `_is_turning` y `_prev_estado != "G"`).
+#   REF_AO: medir herr contra `ao` del ACK (anguloObjetivo del ESP32 = el rumbo al
+#     que endereza RECUPERANDO), no contra el heading del frame de armado.
+# False en ambos = comportamiento anterior.
+RECUP_MEAS_IN_TURN_RECOVERY = True
+RECUP_MEAS_REF_AO           = True
 
 # _merge/_dedupe de la memoria rodante: cuando la CÁMARA ve 2+ conos del mismo
 # color en el mismo frame, son conos FÍSICOS distintos -- no dejar que la
@@ -668,6 +718,15 @@ OBS_MEM_PASSED_YAW_DEG = 30.0
 # True = la vía por giro solo cuenta para una lata que fue OBJETIVO de la esquiva
 # en algún frame (primaria del LOCK o única en mi recta, _Obs.was_target).
 OBS_MEM_PASS_REQUIRE_TARGET = True
+# 2026-09-11: hueco entre las dos vías de arriba. Un verde centrado (x0 192-198)
+# que SÍ se esquivó (objetivo, yaw 23-28° hacia su lado de paso) pero con el steer
+# todavía > FRONT_STEER_MAX por el slew no contaba ni como "frente" ni como
+# "esquiva" -> DESCARTE_DE_LADO -> sin pasado ni RECUPERANDO. 8 casos en 834 y
+# 843-846; el carro seguía a +20..+30° y la siguiente esquiva giraba a -31..-45°
+# o entraba el pánico de pared (846 fr 676). Para una lata OBJETIVO basta este
+# giro, con SIGNO: hacia la izquierda para el verde, hacia la derecha para el
+# rojo. 0 = desactivado.
+OBS_MEM_PASSED_YAW_TARGET_DEG = 18.0
 # 2026-09-04: "centrado" (x0 dentro de PASSED_X_HALFWIDTH) por sí solo NO basta
 # -- un obstáculo puede aparecer centrado a distancia y aun así requerir una
 # esquiva fuerte en curso cuando el carro ya está cerca (steer grande). Ese caso
