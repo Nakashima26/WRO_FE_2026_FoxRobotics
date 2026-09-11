@@ -62,6 +62,20 @@ class Vision:
 
         self.kernel = np.ones((3, 3), np.uint8)
 
+        # Umbral de área POR DISTANCIA (opcional, lo instala runtime_nuevo con la
+        # calibración BEV). Un cono lejano es un blob chico: a ~45 cm mide
+        # 300-700 px y el umbral fijo MIN_AREA lo tiraba hasta que quedaba a
+        # ~20 cm (orillas845 vueltas 2-3: el rojo tras el verde entraba a memoria
+        # a 21 cm -> cruce de carril a 70°). area_min_fn(x, y, w, h, color) ->
+        # área mínima para un blob MENOR a MIN_AREA (inf = no cuenta); los >=
+        # MIN_AREA pasan igual que siempre. None = sin cambio.
+        self.area_min_fn = None
+        self.area_floor = self.MIN_AREA       # piso absoluto para blobs chicos
+        self.small_min_solidity = 0.45        # los chicos deben ser compactos
+        self.last_small = []                  # blobs chicos aceptados en el último frame (diag)
+
+    MIN_AREA = 1000
+
     def process_color(self, frame, mask, color_name):
         """Encuentra contornos y devuelve posiciones.
 
@@ -71,7 +85,8 @@ class Vision:
         Ademas descarta bounding boxes con aspect ratio extremo (muy
         anchos/planos), típico de una línea diagonal o casi horizontal.
         """
-        if np.count_nonzero(mask) < 500:
+        floor = self.MIN_AREA if self.area_min_fn is None else min(self.MIN_AREA, self.area_floor)
+        if np.count_nonzero(mask) < min(500, floor):
             return []
 
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
@@ -83,7 +98,7 @@ class Vision:
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area <= 1000:
+            if area <= floor:
                 continue
 
             x, y, w, h = cv2.boundingRect(cnt)
@@ -94,6 +109,15 @@ class Vision:
             if solidity < MIN_SOLIDITY or aspect > MAX_ASPECT:
                 continue
 
+            # Blob chico: solo cuenta si es compacto y está lo bastante LEJOS
+            # para que su tamaño sea el de un cono (ver area_min_fn).
+            if area <= self.MIN_AREA:
+                if self.area_min_fn is None or solidity < self.small_min_solidity:
+                    continue
+                if area <= self.area_min_fn(x, y, w, h, color_name):
+                    continue
+                self.last_small.append((color_name, x, y, w, h, int(area)))
+
             objects.append((x, y, w, h))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
             cv2.putText(frame, color_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
@@ -103,6 +127,7 @@ class Vision:
     def process_frame(self, frame):
         """Detecta colores optimizado con NumPy."""
         frame = cv2.flip(frame, 1)
+        self.last_small = []
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         masks = {color: np.bitwise_or.reduce([cv2.inRange(hsv, lower, upper) for lower, upper in ranges])
