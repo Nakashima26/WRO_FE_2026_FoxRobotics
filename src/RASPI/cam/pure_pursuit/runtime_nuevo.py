@@ -243,6 +243,7 @@ class PPRuntime:
         self._park_dist_cm: int = 0
         self._park_frames_seen: int = 0
         self._park_lost_frames: int = 0
+        self._park_max_y_seen: int = 0
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -630,6 +631,7 @@ class PPRuntime:
                 y_max = int(ys.max())
                 self._park_frames_seen += 1
                 self._park_lost_frames = 0
+                self._park_max_y_seen = max(self._park_max_y_seen, y_max)
                 self._park_dist_cm = max(0, int((frame_bgr.shape[0] - y_max) * 0.4))
                 if self._park_state == 0:
                     self._park_state = 1
@@ -637,16 +639,25 @@ class PPRuntime:
 
                 # Si el borde inferior del bloque magenta está abajo en el FOV (al lado del chasis)
                 # O si el ratio creció mucho (cajón ocupando gran parte de la cámara)
-                if y_max >= 390 or ratio >= 0.15:
+                if y_max >= 420 or ratio >= 0.20:
                     self._park_state = 2
-                    print(f"[PARK] Cajon alcanzado (y_max={y_max}, ratio={ratio*100:.1f}%) -> PARK=2!", flush=True)
+                    print(f"[PARK] Cajon alcanzado de frente (y_max={y_max}, ratio={ratio*100:.1f}%) -> PARK=2!", flush=True)
         else:
             if self._park_state == 1:
                 self._park_lost_frames += 1
-                # Si lo vimos claramente y ahora quedó fuera de vista (el carro lo rebasó)
-                if self._park_frames_seen >= 3 and self._park_lost_frames >= 2:
+                # Solo declaramos que el carro lo rebasó si antes estuvo REALMENTE CERCA
+                # (max_y >= 370 px, junto al parachoques frontal) y ahora se perdió por rebase lateral.
+                if self._park_frames_seen >= 4 and self._park_max_y_seen >= 370 and self._park_lost_frames >= 3:
                     self._park_state = 2
-                    print(f"[PARK] Cajon rebasado (seen={self._park_frames_seen}, lost={self._park_lost_frames}) -> PARK=2!", flush=True)
+                    print(f"[PARK] Cajon rebasado por el lado (seen={self._park_frames_seen}, max_y={self._park_max_y_seen}, lost={self._park_lost_frames}) -> PARK=2!", flush=True)
+                elif self._park_lost_frames > 25:
+                    # Se perdió estando lejos (ej. tapado temporalmente por un cono o maniobra):
+                    # resetear para re-detectar cuando vuelva a verse más adelante.
+                    print(f"[PARK] Cajon perdido a lo lejos (max_y={self._park_max_y_seen}), reseteando busqueda...", flush=True)
+                    self._park_state = 0
+                    self._park_frames_seen = 0
+                    self._park_lost_frames = 0
+                    self._park_max_y_seen = 0
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
