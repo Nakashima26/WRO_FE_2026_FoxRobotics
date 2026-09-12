@@ -207,7 +207,10 @@ bool marchaIniciada = false;
 // magenta de la recta de salida. La búsqueda del cajón NO es un estado aparte:
 // es SIGUIENDO con la bandera parkBuscando (así conserva esquiva de conos y
 // RECUPERANDO), solo que sin detectar esquinas y con la salida a ESTACIONANDO.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO };
+// ESTACIONANDO_PUNTA: alternativa a ESTACIONANDO (PARK_DE_PUNTA). Tras el giro 12
+// sigue la pared exterior SIN visión y, al bajar el ultrasónico exterior por el
+// 1er poste magenta, gira 90° y mete la trompa al lote (parcial). Ver su bloque.
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
 Estado estado = SIGUIENDO;
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
@@ -550,6 +553,95 @@ bool          parkParedEsIzquierda  = false;
 bool          cajonParedEsIzquierda = false; // detectada y latcheada en INICIO al arrancar la carrera
 bool          cajonParedDetectada    = false;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ESTACIONANDO_PUNTA — Estacionamiento DE PUNTA (parcial) tras el giro 12
+// ═══════════════════════════════════════════════════════════════════════════════
+// Primer escalón antes del paralelo: basta con que PARTE del carro quede dentro
+// del lote (regla 1.8.3 "partly or not parallel" = 7 pts; tocar un poste = 0).
+// Tras el giro 12 el carro NO maneja con visión: sigue la pared EXTERIOR (donde
+// siempre está el lote). Los postes magenta salen 20 cm de la pared, así que al
+// llegar al primero el ultrasónico exterior BAJA ~20 cm de golpe vaya a la
+// distancia que vaya (30->10, 45->25). Por eso la bajada se mide RELATIVA a una
+// línea base (EMA de las lecturas de pared), nunca contra un valor absoluto.
+//
+// Wall follower en CASCADA: error de pared -> rumbo objetivo (capado) -> gyro PD.
+// Un sesgo del gyro de X° solo corre el carril X/KPOS cm; no hace que derive,
+// porque la pared siempre corrige la posición. La Pi solo sirve de filtro: la
+// bajada se acepta si ya vio rosa (park>=1).
+//   Fase 0 SEGUIR : wall follower + vigila la bajada
+//   Fase 1 FRENO  : coast + servo recto (el carro se detiene)
+//   Fase 2 AJUSTE : opcional, recto adelante (+ms) o en reversa (-ms): mueve el
+//                   punto donde cae la trompa según tu radio de giro
+//   Fase 3 PREP   : coast + servo a tope hacia la pared (espera a que llegue)
+//   Fase 4 ARCO   : avanza con servo a tope hasta PARK_PUNTA_ARCO_DEG, o dF tope
+//   Fase 5 ENTRA  : recto (gyro hold) hacia la pared hasta dF tope o timeout
+//   Fase 6 FIN    : motor apagado, carrera terminada
+//   Fase 10 MANO  : (solo PARK_PUNTA_TEST_MANO) servo a tope, motor apagado
+//
+// Prueba a mano (PARK_PUNTA_TEST_MANO=true): arranca directo aquí con el motor
+// SIEMPRE apagado. Empuja el carro por el carril hasta que imprima "BAJADA";
+// el servo se va a tope hacia la pared y ahí empujas el carro por el arco para
+// ver dónde cae la trompa. Si cae antes del lote -> PARK_PUNTA_AJUSTE_MS > 0;
+// si cae sobre el poste lejano -> PARK_PUNTA_AJUSTE_MS < 0.
+const bool          PARK_DE_PUNTA              = true;   // true = tras el giro 12 estaciona DE PUNTA; false = búsqueda + paralelo (arriba)
+const bool          PARK_PUNTA_TEST_MANO       = false;  // true = prueba A MANO (motor apagado). Usa PARK_TEST_PARED_IZQ
+                                                         // (con PARK_TEST_RECTA_COMPLETA=true arranca aquí CON motor)
+// Wall follower
+const int           PARK_PUNTA_PWM             = 95;     // PWM de la recta final
+const float         PARK_PUNTA_PARED_CM        = 30.0f;  // distancia a mantener de la pared exterior (lectura del sonar)
+const float         PARK_PUNTA_KPOS            = 0.8f;   // grados de rumbo objetivo por cm de error de pared
+const float         PARK_PUNTA_ANG_MAX_DEG     = 15.0f;  // tope del rumbo objetivo
+const float         PARK_PUNTA_KP_ANG          = 2.0f;   // servo por grado de error de rumbo
+const float         PARK_PUNTA_KD_RATE         = 0.3f;   // servo por deg/s de gyroRate (amortigua)
+const int           PARK_PUNTA_SERVO_MAX       = 30;     // tope |servo - centro| con servo "recto"
+// Detección de la bajada (poste magenta)
+const int           PARK_PUNTA_CAIDA_CM        = 10;     // bajada vs la base que cuenta como poste (el poste da ~20)
+const int           PARK_PUNTA_CAIDA_N         = 2;      // lecturas seguidas para confirmar
+const int           PARK_PUNTA_REBASE_N        = 25;     // bajada que dura esto NO es un poste: el carro se acercó -> nueva base
+const int           PARK_PUNTA_BASE_N          = 8;      // lecturas de pared antes de armar la detección
+const float         PARK_PUNTA_BASE_ALPHA      = 0.2f;   // EMA de la base (sigue derivas lentas, no la bajada)
+const int           PARK_PUNTA_PARED_MAX_CM    = 80;     // lecturas > esto = sin pared (no entran a la base)
+const unsigned long PARK_PUNTA_ARMADO_MS       = 500;    // no detecta antes de esto (deja asentar el giro 12)
+const float         PARK_PUNTA_ARMADO_ANG_DEG  = 20.0f;  // ni con el chasis más chueco que esto
+const bool          PARK_PUNTA_REQUIERE_PI     = true;   // solo acepta la bajada si la Pi ya vio rosa (park>=1)
+// Red de seguridad si nunca hay bajada
+const unsigned long PARK_PUNTA_TIMEOUT_MS      = 8000;   // sin bajada en este tiempo -> se detiene donde está
+const int           PARK_PUNTA_FRENTE_CM       = 20;     // algo de frente en la fase 0 -> se detiene
+// Maniobra
+const unsigned long PARK_PUNTA_FRENO_MS        = 350;    // coast tras la bajada (el carro se detiene)
+const long          PARK_PUNTA_AJUSTE_MS       = 0;      // + avanza recto / - retrocede recto antes del arco (0 = nada)
+const int           PARK_PUNTA_AJUSTE_PWM      = 90;
+const unsigned long PARK_PUNTA_SERVO_MS        = 200;    // espera a que el servo llegue a tope antes de avanzar
+const int           PARK_PUNTA_ARCO_PWM        = 95;
+const int           PARK_PUNTA_ARCO_PWM_MIN    = 80;     // arranque de la rampa (evita stall)
+const unsigned long PARK_PUNTA_RAMP_MS         = 120;
+const int           PARK_PUNTA_ARCO_DEG        = 90;     // giro total buscado
+const int           PARK_PUNTA_OVERSHOOT_DEG   = 8;      // corta antes; la inercia completa
+const unsigned long PARK_PUNTA_ARCO_TIMEOUT_MS = 4000;
+const unsigned long PARK_PUNTA_ENTRA_MS        = 800;    // tras el arco, recto hacia la pared máx. esto (0 = no entra más)
+const int           PARK_PUNTA_ENTRA_PWM       = 85;
+const int           PARK_PUNTA_DF_STOP_CM      = 8;      // frontal <= esto -> para (arco o entrada)
+const int           PARK_PUNTA_DF_N            = 2;      // lecturas seguidas
+
+// Estado interno de ESTACIONANDO_PUNTA
+int           puntaFase         = -1;
+unsigned long puntaFaseMs       = 0;
+unsigned long puntaEntryMs      = 0;
+bool          puntaParedIzq     = false;
+float         puntaBase         = 0.0f;  // línea base del sonar exterior (cm)
+int           puntaBaseN        = 0;
+int           puntaCaidaCnt     = 0;
+int           puntaInvalidasCnt = 0;
+int           puntaFrenteCnt    = 0;
+int           puntaDfCnt        = 0;
+bool          puntaRosaVisto    = false;
+float         puntaErrPared     = 0.0f;  // último error de pared válido (congelado durante la bajada)
+float         puntaRumboRef     = 0.0f;  // heading de la recta al detectar (fase 2)
+float         puntaRumboArco0   = 0.0f;  // heading al empezar el arco
+long          puntaExtRaw       = 0;     // diag: última lectura cruda del sonar exterior
+long          puntaCaidaLectura = 0;     // diag: lectura que confirmó la bajada
+unsigned long puntaLogMs        = 0;
+
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
 int contadorForzado    = 0;   // debounce de giroForzado (giro 1, ver FRONT_FORCE_GIRO_CM)
@@ -763,6 +855,63 @@ void iniciarEstacionando() {
   Serial.println("==================================================");
 }
 
+void iniciarEstacionandoPunta() {
+  estado            = ESTACIONANDO_PUNTA;
+  parkBuscando      = false;
+  puntaFase         = 0;
+  puntaFaseMs       = millis();
+  puntaEntryMs      = millis();
+  puntaBase         = 0.0f;
+  puntaBaseN        = 0;
+  puntaCaidaCnt     = 0;
+  puntaInvalidasCnt = 0;
+  puntaFrenteCnt    = 0;
+  puntaDfCnt        = 0;
+  puntaRosaVisto    = false;
+  puntaErrPared     = 0.0f;
+  // El lote SIEMPRE está en la pared EXTERIOR de la recta de salida (misma
+  // lógica que iniciarEstacionando).
+  if (PARK_PUNTA_TEST_MANO || PARK_TEST_RECTA_COMPLETA) {
+    puntaParedIzq = PARK_TEST_PARED_IZQ;
+  } else if (cajonParedDetectada) {
+    puntaParedIzq = cajonParedEsIzquierda;
+  } else {
+    puntaParedIzq = !direccionIzquierda;
+  }
+  motorAdelante();
+  escribirServo(centroServo);
+  Serial.println("==================================================");
+  Serial.print("-> ESTACIONANDO DE PUNTA: sigo pared ");
+  Serial.print(puntaParedIzq ? "IZQUIERDA" : "DERECHA");
+  Serial.print(" a "); Serial.print(PARK_PUNTA_PARED_CM, 0); Serial.print(" cm");
+  Serial.println(PARK_PUNTA_TEST_MANO ? " (PRUEBA A MANO, motor apagado)" : "");
+  Serial.println("==================================================");
+}
+
+// Servo "recto" hacia un heading (gyro PD) para ESTACIONANDO_PUNTA. Convención
+// del proyecto: servo > centro = izquierda; anguloGyro/gyroRate > 0 = CCW (izq).
+void servoRumboPunta(float rumboRef) {
+  float out = PARK_PUNTA_KP_ANG * (rumboRef - anguloGyro) - PARK_PUNTA_KD_RATE * gyroRate;
+  out = constrain(out, (float)-PARK_PUNTA_SERVO_MAX, (float)PARK_PUNTA_SERVO_MAX);
+  escribirServo(constrain(centroServo + (int)out, 20, 150));
+}
+
+void finalizarPunta(const char *motivo) {
+  motorCoast();
+  setMotor(0);
+  escribirServo(centroServo);
+  puntaFase    = 6;
+  raceFinished = true;
+  Serial.println("==================================================");
+  Serial.print  ("  ESTACIONANDO DE PUNTA terminado: ");
+  Serial.println(motivo);
+  Serial.print  ("  ang="); Serial.print(anguloGyro, 1);
+  Serial.print  (" girado="); Serial.print(anguloGyro - puntaRumboArco0, 1);
+  Serial.print  (" base="); Serial.print(puntaBase, 1);
+  Serial.print  (" caida="); Serial.println(puntaCaidaLectura);
+  Serial.println("==================================================");
+}
+
 // Arranca el regreso al área de salida. Se llama al completar la última vuelta
 // EN LUGAR de frenar en seco (raceFinished=true): el carro sigue manejando como
 // en SIGUIENDO durante TERMINANDO_MS y después frena (ver terminando()).
@@ -802,7 +951,9 @@ void finalizarManiobra() {
   estado           = SIGUIENDO;
   turnsCompleted++;
   if (turnsCompleted >= TURNS_PER_RACE) {
-    if (rondaObstaculos && PARK_ENABLED) {
+    if (rondaObstaculos && PARK_ENABLED && PARK_DE_PUNTA) {
+      iniciarEstacionandoPunta();
+    } else if (rondaObstaculos && PARK_ENABLED) {
       iniciarParkBuscando();
     } else {
       iniciarTerminando();
@@ -1082,7 +1233,7 @@ void parsePiMessage(String line) {
                   : (estado == GIRANDO || estado == MANIOBRA) ? "G"
                   : (estado == RECUPERANDO ? "R"
                      : (estado == CRUCERO ? "C"
-                        : (estado == ESTACIONANDO ? "E"
+                        : ((estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA) ? "E"
                            : (estado == TERMINANDO ? "T" : "S")))));
     // Dirección de giro de la pista: '?' hasta el 1er GIRANDO, luego L/R
     // (direccionIzquierda se fija ahí con distL>distR). La Pi la usa para el
@@ -1121,6 +1272,12 @@ void parsePiMessage(String line) {
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
     Serial2.print(",pb=");   Serial2.print(parkBuscando ? 1 : 0);
+    //   pnf/pnx/pnb : ESTACIONANDO_PUNTA — fase, sonar exterior crudo, línea base
+    if (estado == ESTACIONANDO_PUNTA) {
+      Serial2.print(",pnf="); Serial2.print(puntaFase);
+      Serial2.print(",pnx="); Serial2.print(puntaExtRaw);
+      Serial2.print(",pnb="); Serial2.print((long)puntaBase);
+    }
     //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
     //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
     Serial2.print(",rr=");   Serial2.print(rerefCount);
@@ -1555,7 +1712,10 @@ void loop() {
   // una sola vez; inicio=0 / ronda abierta -> no cambia nada.
   if (!inicioEvaluado) {
     inicioEvaluado = true;
-    if (PARK_TEST_DIRECTO) {
+    if (PARK_DE_PUNTA && (PARK_PUNTA_TEST_MANO || PARK_TEST_RECTA_COMPLETA)) {
+      turnsCompleted = TURNS_PER_RACE;   // tc=12 -> la Pi busca el rosa
+      iniciarEstacionandoPunta();
+    } else if (PARK_TEST_DIRECTO) {
       iniciarEstacionando();
     } else if (PARK_TEST_RECTA_COMPLETA) {
       turnsCompleted = TURNS_PER_RACE;
@@ -2582,6 +2742,225 @@ void loop() {
 
       break;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ESTACIONANDO_PUNTA — ver el bloque de constantes PARK_PUNTA_*
+    // ═══════════════════════════════════════════════════════════════════════════
+    case ESTACIONANDO_PUNTA: {
+      long  extRaw     = puntaParedIzq ? distL_raw : distR_raw;
+      float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared"
+      int   servoTope  = puntaParedIzq ? 150 : 20;       // servo a tope hacia la pared
+      puntaExtRaw = extRaw;
+      if (piPark >= 1) puntaRosaVisto = true;
+
+      // ── Fase 0: SEGUIR pared exterior + vigilar la bajada ──────────────────
+      if (puntaFase == 0) {
+        unsigned long tEn = millis() - puntaEntryMs;
+        bool lecturaValida = (extRaw > 2 && extRaw <= PARK_PUNTA_PARED_MAX_CM);
+        bool baseLista     = (puntaBaseN >= PARK_PUNTA_BASE_N);
+
+        // Bajada candidata = lectura válida muy por debajo de la base. Mientras
+        // lo sea NO actualiza la base ni el error de pared (el poste no es la pared).
+        if (lecturaValida && baseLista
+            && extRaw <= (long)(puntaBase - PARK_PUNTA_CAIDA_CM)) {
+          puntaCaidaCnt++;
+          if (puntaCaidaCnt > PARK_PUNTA_REBASE_N) {
+            // Duró demasiado para un poste de 2 cm: el carro se acercó de verdad.
+            Serial.print("PUNTA: re-base "); Serial.print(puntaBase, 1);
+            Serial.print(" -> "); Serial.println(extRaw);
+            puntaBase     = (float)extRaw;
+            puntaCaidaCnt = 0;
+          }
+        } else {
+          puntaCaidaCnt = 0;
+          if (lecturaValida) {
+            puntaBase = (puntaBaseN == 0)
+                        ? (float)extRaw
+                        : puntaBase + PARK_PUNTA_BASE_ALPHA * ((float)extRaw - puntaBase);
+            if (puntaBaseN < 1000) puntaBaseN++;
+          }
+        }
+
+        if (lecturaValida && puntaCaidaCnt == 0) {
+          puntaErrPared     = (float)extRaw - PARK_PUNTA_PARED_CM;   // >0 = lejos de la pared
+          puntaInvalidasCnt = 0;
+        } else if (!lecturaValida && ++puntaInvalidasCnt > 10) {
+          puntaErrPared = 0.0f;   // sin pared un rato: solo sostiene el rumbo
+        }
+
+        bool armada = baseLista
+                      && (tEn >= PARK_PUNTA_ARMADO_MS)
+                      && (fabs(anguloGyro) < PARK_PUNTA_ARMADO_ANG_DEG)
+                      && (puntaRosaVisto || !PARK_PUNTA_REQUIERE_PI || PARK_PUNTA_TEST_MANO);
+
+        if (puntaCaidaCnt == PARK_PUNTA_CAIDA_N && !armada) {
+          Serial.print("PUNTA: bajada IGNORADA (no armada: base=");
+          Serial.print(baseLista ? 1 : 0);
+          Serial.print(" rosa="); Serial.print(puntaRosaVisto ? 1 : 0);
+          Serial.print(" ang="); Serial.print(anguloGyro, 1);
+          Serial.println(")");
+        }
+
+        if (puntaCaidaCnt >= PARK_PUNTA_CAIDA_N && armada) {
+          puntaCaidaLectura = extRaw;
+          puntaRumboRef     = anguloGyro;
+          Serial.print("PUNTA: BAJADA base="); Serial.print(puntaBase, 1);
+          Serial.print(" lectura="); Serial.print(extRaw);
+          Serial.print(" ang="); Serial.print(anguloGyro, 1);
+          Serial.print(" rosa="); Serial.println(puntaRosaVisto ? 1 : 0);
+          if (PARK_PUNTA_TEST_MANO) {
+            puntaRumboArco0 = anguloGyro;
+            puntaFase       = 10;
+            Serial.println("PUNTA MANO: servo a tope -> empuja el carro por el arco");
+          } else {
+            motorCoast();
+            escribirServo(centroServo);
+            puntaFase = 1;
+          }
+          puntaFaseMs = millis();
+          break;
+        }
+
+        if (PARK_PUNTA_TEST_MANO) {
+          motorCoast();
+          setMotor(0);
+          escribirServo(centroServo);
+        } else {
+          // Red de seguridad: algo muy cerca de frente o se acabó el tiempo.
+          puntaFrenteCnt = (distF_med > 0 && distF_med <= PARK_PUNTA_FRENTE_CM) ? puntaFrenteCnt + 1 : 0;
+          if (puntaFrenteCnt >= 3)            { finalizarPunta("FRENTE cerca sin bajada"); break; }
+          if (tEn >= PARK_PUNTA_TIMEOUT_MS)   { finalizarPunta("TIMEOUT sin bajada");      break; }
+
+          // Cascada: error de pared (congelado en la bajada) -> rumbo objetivo -> gyro PD.
+          float rumboObj = haciaPared * constrain(PARK_PUNTA_KPOS * puntaErrPared,
+                                                  -PARK_PUNTA_ANG_MAX_DEG, PARK_PUNTA_ANG_MAX_DEG);
+          motorAdelante();
+          servoRumboPunta(rumboObj);
+          setMotor(PARK_PUNTA_PWM);
+        }
+
+        Serial.print(" | PUNTA f=0 ext="); Serial.print(extRaw);
+        Serial.print(" base=");  Serial.print(puntaBase, 1);
+        Serial.print(" caida="); Serial.print(puntaCaidaCnt);
+        Serial.print(" rosa=");  Serial.print(puntaRosaVisto ? 1 : 0);
+        Serial.print(" arm=");   Serial.print(armada ? 1 : 0);
+        break;
+      }
+
+      // ── Fase 1: FRENO — coast, el carro se detiene ─────────────────────────
+      if (puntaFase == 1) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - puntaFaseMs >= PARK_PUNTA_FRENO_MS) {
+          puntaFaseMs = millis();
+          if (PARK_PUNTA_AJUSTE_MS > 0) {
+            motorAdelante();
+            puntaFase = 2;
+          } else if (PARK_PUNTA_AJUSTE_MS < 0) {
+            motorReversa();
+            integralRev   = 0; prevErrorRev = 0;
+            lastRevHoldMs = millis();
+            puntaFase     = 2;
+          } else {
+            puntaFase = 3;
+          }
+        }
+        break;
+      }
+
+      // ── Fase 2: AJUSTE — recto adelante (+) o en reversa (-) ────────────────
+      if (puntaFase == 2) {
+        if (PARK_PUNTA_AJUSTE_MS > 0) {
+          motorAdelante();
+          servoRumboPunta(puntaRumboRef);
+        } else {
+          motorReversa();
+          aplicarReversaHold(puntaRumboRef);
+        }
+        setMotor(PARK_PUNTA_AJUSTE_PWM);
+        if (millis() - puntaFaseMs >= (unsigned long)labs(PARK_PUNTA_AJUSTE_MS)) {
+          motorCoast();
+          puntaFase   = 3;
+          puntaFaseMs = millis();
+        }
+        break;
+      }
+
+      // ── Fase 3: PREP — coast + servo a tope hacia la pared ─────────────────
+      if (puntaFase == 3) {
+        motorCoast();
+        escribirServo(servoTope);
+        // Tras la reversa también cuenta como coast antes de volver a adelante.
+        unsigned long espera = (PARK_PUNTA_AJUSTE_MS < 0)
+                               ? max(PARK_PUNTA_SERVO_MS, MANIOBRA_FRENO_MS)
+                               : PARK_PUNTA_SERVO_MS;
+        if (millis() - puntaFaseMs >= espera) {
+          motorAdelante();
+          puntaRumboArco0 = anguloGyro;
+          puntaDfCnt      = 0;
+          puntaFase       = 4;
+          puntaFaseMs     = millis();
+          Serial.print("PUNTA fase 4: ARCO desde ang="); Serial.println(anguloGyro, 1);
+        }
+        break;
+      }
+
+      // ── Fase 4: ARCO — servo a tope hasta el ángulo o dF tope ───────────────
+      if (puntaFase == 4) {
+        unsigned long tA = millis() - puntaFaseMs;
+        int vel = (tA < PARK_PUNTA_RAMP_MS)
+                  ? (int)map((long)tA, 0, (long)PARK_PUNTA_RAMP_MS, PARK_PUNTA_ARCO_PWM_MIN, PARK_PUNTA_ARCO_PWM)
+                  : PARK_PUNTA_ARCO_PWM;
+        motorAdelante();
+        escribirServo(servoTope);
+        setMotor(vel);
+
+        float girado = (anguloGyro - puntaRumboArco0) * haciaPared;   // >0 = hacia la pared
+        puntaDfCnt = (distF_med > 0 && distF_med <= PARK_PUNTA_DF_STOP_CM) ? puntaDfCnt + 1 : 0;
+
+        if (puntaDfCnt >= PARK_PUNTA_DF_N)      { finalizarPunta("ARCO: dF tope");  break; }
+        if (tA >= PARK_PUNTA_ARCO_TIMEOUT_MS)   { finalizarPunta("ARCO: timeout");  break; }
+        if (girado >= (float)(PARK_PUNTA_ARCO_DEG - PARK_PUNTA_OVERSHOOT_DEG)) {
+          if (PARK_PUNTA_ENTRA_MS == 0) { finalizarPunta("ARCO: angulo"); break; }
+          puntaFase   = 5;
+          puntaFaseMs = millis();
+          Serial.print("PUNTA fase 5: ENTRA girado="); Serial.println(girado, 1);
+          break;
+        }
+        Serial.print(" | PUNTA f=4 girado="); Serial.print(girado, 1);
+        Serial.print(" dF="); Serial.print(distF_med);
+        break;
+      }
+
+      // ── Fase 5: ENTRA — recto hacia la pared hasta dF tope o timeout ───────
+      if (puntaFase == 5) {
+        motorAdelante();
+        servoRumboPunta(puntaRumboArco0 + haciaPared * (float)PARK_PUNTA_ARCO_DEG);
+        setMotor(PARK_PUNTA_ENTRA_PWM);
+        puntaDfCnt = (distF_med > 0 && distF_med <= PARK_PUNTA_DF_STOP_CM) ? puntaDfCnt + 1 : 0;
+        if (puntaDfCnt >= PARK_PUNTA_DF_N)                 { finalizarPunta("ENTRA: dF tope"); break; }
+        if (millis() - puntaFaseMs >= PARK_PUNTA_ENTRA_MS) { finalizarPunta("ENTRA: tiempo");  break; }
+        Serial.print(" | PUNTA f=5 dF="); Serial.print(distF_med);
+        break;
+      }
+
+      // ── Fase 10: PRUEBA A MANO — servo a tope, motor apagado ────────────────
+      if (puntaFase == 10) {
+        motorCoast();
+        setMotor(0);
+        escribirServo(servoTope);
+        if (millis() - puntaLogMs >= 200) {
+          puntaLogMs = millis();
+          Serial.print("PUNTA MANO girado=");
+          Serial.print((anguloGyro - puntaRumboArco0) * haciaPared, 1);
+          Serial.print(" dF="); Serial.print(distF_med);
+          Serial.print(" ext="); Serial.println(extRaw);
+        }
+        break;
+      }
+
+      break;
+    }
   }
 
   // ── Log periódico ─────────────────────────────────────────────────────────
@@ -2592,6 +2971,7 @@ void loop() {
   else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
   else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
   else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
+  else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
   else if (estado == INICIO)       Serial.print("INICIO");
   else                              Serial.print("SIGUIENDO");
   Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
