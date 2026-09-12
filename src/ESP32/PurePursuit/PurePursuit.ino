@@ -130,6 +130,12 @@ bool  piInicioEstacionamiento = false; // inicio=1: al arrancar, la Pi vio rosa
                                // "Sticky": una vez visto en 1 se queda en 1 (la
                                // Pi puede dejar de mandarlo tras el arranque); el
                                // one-shot de loop() lo consume una sola vez.
+int   piPark       = 0;       // park=N: etapa del cajón vista por la Pi en la recta
+                               // final (0 nada | 1 magenta ADELANTE | 2 magenta ya
+                               // salió del campo de visión = lo estamos pasando /
+                               // pasamos). Solo tiene sentido con parkBuscando.
+int   piParkDistCm = 0;       // pd=N: distancia (cm, BEV) al bloque magenta más
+                               // cercano que sigue adelante. 0 = desconocida.
 bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
@@ -190,7 +196,12 @@ bool marchaIniciada = false;
 // frame al arrancar (inicio=1) -> el carro parte dentro del estacionamiento y
 // hace una "S" pre-programada para salir antes de entregar el volante a
 // SIGUIENDO. Si inicio=0 nunca se entra a este estado (arranque normal).
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO };
+// ESTACIONANDO: solo ronda de obstáculos, tras el giro 12 (PARK_ENABLED). Es el
+// ESPEJO de INICIO: estacionamiento paralelo EN REVERSA dentro del cajón
+// magenta de la recta de salida. La búsqueda del cajón NO es un estado aparte:
+// es SIGUIENDO con la bandera parkBuscando (así conserva esquiva de conos y
+// RECUPERANDO), solo que sin detectar esquinas y con la salida a ESTACIONANDO.
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO };
 Estado estado = SIGUIENDO;
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
@@ -474,6 +485,39 @@ float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample d
 unsigned long inicioSettleSampMs  = 0;
 int           inicioSettleQuieto  = 0;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ESTACIONANDO — Estacionamiento en paralelo en reversa (Obstacle Challenge)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tras el giro 12 el auto entra a la recta inicial en busca del cajón delimitado
+// por los dos postes magenta (200x20x100 mm). La maniobra es el ESPEJO de INICIO:
+//   Fase 0: FRENO_PREV  (motorCoast, reposo de corriente, gyro referencia = 0)
+//   Fase 1: REV_SWING   (reversa con servo a la pared exterior, cola al cajón)
+//   Fase 2: REV_CONTRA  (reversa con contravuelta para re-alinear paralelo a 0°)
+//   Fase 3: CENTRADO    (avance corto recto con heading-hold entre postes)
+//   Fase 4: FIN         (freno total, servo al centro, carrera terminada)
+
+const bool          PARK_ENABLED             = true;  // true = busca y estaciona tras la vuelta 12
+const bool          PARK_TEST_DIRECTO        = false; // true = arranca de inmediato en ESTACIONANDO (para calibrar en banco)
+const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 6000;  // tiempo máx. en recta final buscando el cajón (ms)
+const unsigned long PARK_APPROACH_MS         = 1400;  // avance tras la esquina 12 para rebasar el cajón (ms)
+const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
+const int           PARK_ANG_IN_DEG          = 32;    // ángulo de entrada en reversa (deg)
+const int           PARK_OVERSHOOT_DEG       = 4;     // corte anticipado para absorber inercia (deg)
+const unsigned long PARK_REV1_TIMEOUT_MS     = 3000;  // timeout fase 1 metida (ms)
+const int           PARK_REV_PWM             = 95;    // PWM de marcha atrás
+const int           PARK_ENDEREZA_MARGEN_DEG = 3;     // margen para considerar alineado (|ang| <= 3 deg)
+const unsigned long PARK_REV2_TIMEOUT_MS     = 3500;  // timeout fase 2 contravuelta (ms)
+const unsigned long PARK_PAUSE_MS            = 200;   // pausa coast entre marchas (protege TB6612)
+const unsigned long PARK_CENTER_MS           = 250;   // avance suave para centrado entre postes (ms, 0 = omitir)
+const int           PARK_CENTER_PWM          = 85;    // PWM suave de centrado
+
+// Estado interno de ESTACIONANDO
+bool          parkBuscando         = false;
+unsigned long parkBuscandoEntryMs  = 0;
+int           parkFase             = -1;
+unsigned long parkFaseMs           = 0;
+bool          parkParedEsIzquierda = false;
+
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
 int contadorForzado    = 0;   // debounce de giroForzado (giro 1, ver FRONT_FORCE_GIRO_CM)
@@ -657,6 +701,30 @@ void decidirManiobra(long distL, long distR) {
   maniobraDecidida = true;
 }
 
+void iniciarParkBuscando() {
+  parkBuscando        = true;
+  parkBuscandoEntryMs = millis();
+  estado              = SIGUIENDO;
+  Serial.println("-> Recta final: BUSCANDO ESTACIONAMIENTO MAGENTA");
+}
+
+void iniciarEstacionando() {
+  estado               = ESTACIONANDO;
+  parkBuscando         = false;
+  parkFase             = 0;
+  parkFaseMs           = millis();
+  // El cajón SIEMPRE está en la pared EXTERIOR de la recta inicial:
+  // Si la pista gira a la derecha (CW), la pared exterior es la IZQUIERDA.
+  // Si la pista gira a la izquierda (CCW), la pared exterior es la DERECHA.
+  parkParedEsIzquierda = !direccionIzquierda;
+  motorCoast();
+  escribirServo(centroServo);
+  Serial.println("==================================================");
+  Serial.print("-> INICIANDO ESTACIONAMIENTO! Pared exterior: ");
+  Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+  Serial.println("==================================================");
+}
+
 // Arranca el regreso al área de salida. Se llama al completar la última vuelta
 // EN LUGAR de frenar en seco (raceFinished=true): el carro sigue manejando como
 // en SIGUIENDO durante TERMINANDO_MS y después frena (ver terminando()).
@@ -695,7 +763,13 @@ void finalizarManiobra() {
   maniobraFase     = -1;
   estado           = SIGUIENDO;
   turnsCompleted++;
-  if (turnsCompleted >= TURNS_PER_RACE) iniciarTerminando();
+  if (turnsCompleted >= TURNS_PER_RACE) {
+    if (rondaObstaculos && PARK_ENABLED) {
+      iniciarParkBuscando();
+    } else {
+      iniciarTerminando();
+    }
+  }
   Serial.print("MANIOBRA completada ");
   Serial.print(turnsCompleted);
   Serial.print("/");
@@ -936,6 +1010,21 @@ void parsePiMessage(String line) {
       if (s.toInt() != 0) piInicioEstacionamiento = true;
     }
 
+    // park — etapa del cajón vista por la Pi en la recta final
+    idx = line.indexOf("park=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
+      piPark = s.toInt();
+    }
+    // pd — distancia estimada (cm, BEV) al bloque magenta más cercano
+    idx = line.indexOf("pd=");
+    if (idx >= 0) {
+      int end = line.indexOf(',', idx);
+      String s = (end >= 0) ? line.substring(idx + 3, end) : line.substring(idx + 3);
+      piParkDistCm = s.toInt();
+    }
+
     piReady           = true;
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
@@ -947,12 +1036,15 @@ void parsePiMessage(String line) {
     // MANIOBRA -> "G" (la Pi hace su manejo de giro: borra memoria, resetea
     // line_tracker). CRUCERO -> "C" (la Pi lo trata igual que "S"; solo sirve
     // para verlo en el journalctl). RECUPERANDO -> "R". SIGUIENDO -> "S".
-    // INICIO -> "I" (la Pi debe quedarse en stand-down: V2 neutro, sin memoria
-    // de obstáculos ni centerline, hasta ver "S").
+    // INICIO -> "I" (la Pi debe quedarse en stand-down).
+    // ESTACIONANDO -> "E" (la Pi queda en stand-down mientras el ESP ejecuta la reversa).
+    // TERMINANDO -> "T".
     Serial2.print(estado == INICIO ? "I"
                   : (estado == GIRANDO || estado == MANIOBRA) ? "G"
                   : (estado == RECUPERANDO ? "R"
-                     : (estado == CRUCERO ? "C" : "S")));
+                     : (estado == CRUCERO ? "C"
+                        : (estado == ESTACIONANDO ? "E"
+                           : (estado == TERMINANDO ? "T" : "S")))));
     // Dirección de giro de la pista: '?' hasta el 1er GIRANDO, luego L/R
     // (direccionIzquierda se fija ahí con distL>distR). La Pi la usa para el
     // manejo de conos exteriores de esquina — fiable de la esquina 2 en
@@ -1410,7 +1502,9 @@ void loop() {
   // una sola vez; inicio=0 / ronda abierta -> no cambia nada.
   if (!inicioEvaluado) {
     inicioEvaluado = true;
-    if (rondaObstaculos && piInicioEstacionamiento) {
+    if (PARK_TEST_DIRECTO) {
+      iniciarEstacionando();
+    } else if (rondaObstaculos && piInicioEstacionamiento) {
       estado     = INICIO;
       inicioFase = -1;
       Serial.println("-> INICIO (rosa mayoritario: salir del estacionamiento)");
@@ -1611,6 +1705,7 @@ void loop() {
 
     case SIGUIENDO: {
       velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : 180;
+      if (parkBuscando) velocidadMotor = PARK_APPROACH_PWM;
 
       // Ronda cerrada: si la pared de ENFRENTE ya está cerca, baja la velocidad
       // en la aproximación para que detectarEsquina() alcance a confirmar qué
@@ -1679,11 +1774,16 @@ void loop() {
           && millis() - timeStart > 500)
       {
         if (rondaObstaculos) {
-          // Ronda de obstáculos: NO giro continuo. Si la recta ya está limpia
-          // (sin obstáculo mío) y nos acercamos a la esquina -> CRUCERO (control
-          // por ángulo hasta la pared). El obstáculo "beyond" de la recta
-          // siguiente no cuenta: la Pi ya lo excluye de prio/mem.
-          if (!piPriority && piMemoryFrames <= 0
+          if (parkBuscando) {
+            // Buscando el cajón de estacionamiento tras el giro 12:
+            // NO se entra a CRUCERO ni a MANIOBRA de esquina.
+            bool timeoutPark = (millis() - parkBuscandoEntryMs >= PARK_BUSCANDO_TIMEOUT_MS);
+            bool distPark    = (millis() - parkBuscandoEntryMs >= PARK_APPROACH_MS);
+            bool piParkReady = (piPark == 2);
+            if (distPark || piParkReady || timeoutPark) {
+              iniciarEstacionando();
+            }
+          } else if (!piPriority && piMemoryFrames <= 0
               && (millis() - ultimoObstaculoMs > POST_DODGE_CRUCERO_GRACE_MS)
               && distF > 0 && distF < FRONT_CRUCERO_CM) {
             contadorFront++;
@@ -2251,17 +2351,130 @@ void loop() {
       terminando(distL, distR);
       break;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ESTACIONANDO — Estacionamiento en paralelo en reversa (Obstacle Challenge)
+    // ═══════════════════════════════════════════════════════════════════════════
+    case ESTACIONANDO: {
+      // ── Fase 0: FRENO PREVIO ────────────────────────────────────────────────
+      // Coast y servo centro antes de invertir a reversa (protege el TB6612).
+      // Fija la referencia recta de gyro (anguloGyro = 0).
+      if (parkFase == 0) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= PARK_PAUSE_MS) {
+          anguloGyro     = 0.0f;
+          anguloObjetivo = 0.0f;
+          integralRev    = 0;
+          prevErrorRev   = 0;
+          motorReversa();
+          parkFase       = 1;
+          parkFaseMs     = millis();
+          Serial.print("ESTACIONANDO fase 1: REV SWING hacia ");
+          Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+        }
+        break;
+      }
+
+      float deltaPark = fabs(anguloGyro);
+
+      // ── Fase 1: REV SWING — mete la cola hacia el cajón en la pared exterior ──
+      if (parkFase == 1) {
+        motorReversa();
+        // Si pared exterior está a la izquierda: servo a la izquierda (145)
+        // para que la cola vaya a la izquierda. Si a la derecha: servo 25.
+        escribirServo(parkParedEsIzquierda ? 145 : 25);
+        setMotor(PARK_REV_PWM);
+
+        bool swingListo   = (deltaPark >= (float)(PARK_ANG_IN_DEG - PARK_OVERSHOOT_DEG));
+        bool swingTimeout = (millis() - parkFaseMs >= PARK_REV1_TIMEOUT_MS);
+
+        if (swingListo || swingTimeout) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkFase   = 2;
+          parkFaseMs = millis();
+          Serial.print("ESTACIONANDO fase 2: REV CONTRA (ang=");
+          Serial.print(anguloGyro, 1);
+          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+        }
+        break;
+      }
+
+      // ── Fase 2: REV CONTRA — contravuelta para alinear chasis paralelo a la pared ──
+      if (parkFase == 2) {
+        motorReversa();
+        // Lado contrario para meter la trompa y re-alinear con la pared exterior
+        escribirServo(parkParedEsIzquierda ? 25 : 145);
+        setMotor(PARK_REV_PWM);
+
+        bool alineado = (deltaPark <= (float)PARK_ENDEREZA_MARGEN_DEG);
+        bool timeout  = (millis() - parkFaseMs >= PARK_REV2_TIMEOUT_MS);
+
+        if (alineado || timeout) {
+          motorCoast();
+          escribirServo(centroServo);
+          if (PARK_CENTER_MS > 0) {
+            parkFase   = 3;
+            parkFaseMs = millis();
+            motorAdelante();
+            Serial.print("ESTACIONANDO fase 3: Centrado recto (ang=");
+            Serial.print(anguloGyro, 1);
+            Serial.println(")");
+          } else {
+            parkFase   = 4;
+            parkFaseMs = millis();
+          }
+        }
+        break;
+      }
+
+      // ── Fase 3: CENTRADO CORTO — avance recto con heading hold para no rozar postes ──
+      if (parkFase == 3) {
+        motorAdelante();
+        errorGyro = 0.0f - anguloGyro;
+        float outGyro = KpGyro * errorGyro;
+        escribirServo(constrain(centroServo + (int)outGyro, 65, 95));
+        setMotor(PARK_CENTER_PWM);
+
+        if (millis() - parkFaseMs >= PARK_CENTER_MS) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkFase   = 4;
+          parkFaseMs = millis();
+        }
+        break;
+      }
+
+      // ── Fase 4: FIN — coche completamente estacionado y apagado ─────────────
+      if (parkFase == 4) {
+        setMotor(0);
+        escribirServo(centroServo);
+        raceFinished = true;
+        Serial.println("==================================================");
+        Serial.println("  ESTACIONAMIENTO PARALELO COMPLETADO CON EXITO!  ");
+        Serial.print  ("  Heading final vs pared: ");
+        Serial.print(anguloGyro, 2);
+        Serial.println(" deg (paralelo <= 2 cm)");
+        Serial.println("  RACE FINISHED -> STOP                           ");
+        Serial.println("==================================================");
+        break;
+      }
+
+      break;
+    }
   }
 
   // ── Log periódico ─────────────────────────────────────────────────────────
   Serial.print(" | Estado:");
-  if      (estado == GIRANDO)     Serial.print("GIRANDO");
-  else if (estado == RECUPERANDO) Serial.print("RECUPERANDO");
-  else if (estado == CRUCERO)     Serial.print("CRUCERO");
-  else if (estado == MANIOBRA)    Serial.print("MANIOBRA");
-  else if (estado == TERMINANDO)  Serial.print("TERMINANDO");
-  else if (estado == INICIO)      Serial.print("INICIO");
-  else                             Serial.print("SIGUIENDO");
+  if      (estado == GIRANDO)      Serial.print("GIRANDO");
+  else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
+  else if (estado == CRUCERO)      Serial.print("CRUCERO");
+  else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
+  else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
+  else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
+  else if (estado == INICIO)       Serial.print("INICIO");
+  else                              Serial.print("SIGUIENDO");
   Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
   Serial.print(" | L:");        Serial.print(distL);
   Serial.print(" | R:");        Serial.print(distR);

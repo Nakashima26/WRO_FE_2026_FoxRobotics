@@ -101,8 +101,8 @@ def _parse_estado(ack: str) -> str | None:
     if idx < 0:
         return None
     val = ack[idx + 4: idx + 5]
-    if val in ("C", "I"):   # CRUCERO / INICIO (ESP): la Pi los trata igual que SIGUIENDO
-        return "S"          # (durante INICIO el ESP maneja solo; la Pi no hace nada especial)
+    if val in ("C", "I", "E", "T"):   # CRUCERO / INICIO / ESTACIONANDO / TERMINANDO (ESP): la Pi los trata igual que SIGUIENDO
+        return "S"          # (durante INICIO/ESTACIONANDO el ESP maneja solo; la Pi no hace nada especial)
     return val if val in ("G", "R", "S") else None
 
 
