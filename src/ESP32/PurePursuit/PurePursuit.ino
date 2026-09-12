@@ -520,8 +520,7 @@ const bool          PARK_ENABLED             = true;  // true = busca y estacion
 const bool          PARK_TEST_DIRECTO        = false; // true = inicia INMEDIATO en reversa (pon el carro AL LADO del cajón)
 const bool          PARK_TEST_RECTA_COMPLETA = false; // true = inicia en recta final (pon el carro AL INICIO de la recta)
 const bool          PARK_TEST_PARED_IZQ      = true;  // en tests: true = cajón en pared IZQ (como en tus fotos), false = DER
-const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 6000;  // tiempo máx. en recta final buscando el cajón (ms)
-const unsigned long PARK_APPROACH_MS         = 1400;  // avance tras la esquina 12 para rebasar el cajón (ms)
+const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 6500;  // tiempo máx. en recta final buscando el cajón (ms)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
 const int           PARK_ANG_IN_DEG          = 26;    // ángulo de entrada en reversa (deg) — reducido de 32 para no irse muy atrás
 const int           PARK_OVERSHOOT_DEG       = 3;     // corte anticipado para absorber inercia (deg)
@@ -747,10 +746,12 @@ void iniciarEstacionando() {
   parkFase             = 0;
   parkFaseMs           = millis();
   // El cajón SIEMPRE está en la pared EXTERIOR de la recta inicial:
-  // Si la pista gira a la derecha (CW), la pared exterior es la IZQUIERDA.
-  // Si la pista gira a la izquierda (CCW), la pared exterior es la DERECHA.
+  // Si arrancó en el cajón (INICIO), recordamos exactamente cuál pared fue.
+  // Si es prueba directa, usamos PARK_TEST_PARED_IZQ.
   if (PARK_TEST_DIRECTO || PARK_TEST_RECTA_COMPLETA) {
     parkParedEsIzquierda = PARK_TEST_PARED_IZQ;
+  } else if (cajonParedDetectada) {
+    parkParedEsIzquierda = cajonParedEsIzquierda;
   } else {
     parkParedEsIzquierda = !direccionIzquierda;
   }
@@ -1556,9 +1557,6 @@ void loop() {
     inicioEvaluado = true;
     if (PARK_TEST_DIRECTO) {
       iniciarEstacionando();
-    } else if (PARK_TEST_RECTA_COMPLETA) {
-      turnsCompleted = TURNS_PER_RACE;
-      iniciarParkBuscando();
     } else if (PARK_TEST_RECTA_COMPLETA) {
       turnsCompleted = TURNS_PER_RACE;
       iniciarParkBuscando();
