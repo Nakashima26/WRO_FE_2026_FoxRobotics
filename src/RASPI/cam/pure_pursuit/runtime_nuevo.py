@@ -139,6 +139,32 @@ def _park_pink(frame_bgr):
     full[y0:, :] = m
     return ratio, full
 
+def _park_pink_bev(bev_hsv):
+    """Postes magenta del cajón detectados en el plano BEV (obstacle-memory space).
+
+    Devuelve una lista de (x, y, w, h) en px BEV, una por poste rosa detectado.
+    A diferencia de `_park_pink` (que mide un RATIO sobre el frame de cámara para
+    INICIO / _check_parking_search), esto ubica el cajón ESPACIALMENTE en el mismo
+    marco donde vive la memoria de obstáculos, para dibujarlo y monitorearlo
+    durante la recta final. Solo monitoreo: NO entra a la centerline ni al PID."""
+    if bev_hsv is None or getattr(bev_hsv, "size", 0) == 0:
+        return []
+    m = None
+    for lo, hi in C.PARK_PINK_HSV:
+        cur = cv2.inRange(bev_hsv, lo, hi)
+        m = cur if m is None else (m | cur)
+    if m is None:
+        return []
+    cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_area = float(getattr(C, "PARK_BEV_MIN_AREA_PX", 40.0))
+    boxes = []
+    for c in cnts:
+        if cv2.contourArea(c) < min_area:
+            continue
+        boxes.append(cv2.boundingRect(c))
+    return boxes
+
+
 def _parse_direccion(ack: str) -> str | None:
     """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
     if not ack:
@@ -244,6 +270,9 @@ class PPRuntime:
         self._park_frames_seen: int = 0
         self._park_lost_frames: int = 0
         self._park_max_y_seen: int = 0
+        # Postes magenta del cajón ubicados en el plano BEV (obstacle-memory
+        # space) este frame — solo para dibujar/monitorear, ver _park_pink_bev.
+        self._park_bev_boxes: list = []
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -820,6 +849,15 @@ class PPRuntime:
                         _t1 = time.perf_counter()
                         bev_timing["warp"] = (_t1 - _t0) * 1000.0
 
+                        # ── Cajón magenta en el plano BEV (obstacle-memory) ──
+                        # Solo en la recta final: ubica los postes rosa en el
+                        # mismo marco donde vive la memoria de obstáculos para
+                        # dibujarlos y monitorear la aproximación al cajón.
+                        if self._park_buscando or self._tc >= 12:
+                            self._park_bev_boxes = _park_pink_bev(bev_hsv)
+                        else:
+                            self._park_bev_boxes = []
+
                         # Proyectar obstáculos detectados al plano BEV, y
                         # separar los que NO proyectaron (candidatos a hint lejano)
                         new_obstacles = []
@@ -1074,6 +1112,29 @@ class PPRuntime:
                         else:
                             self._lock_xy = None
 
+                        # ── RECTA FINAL DEL CAJÓN: NO se esquiva NINGÚN cono ──
+                        # Por reglamento oficial de WRO, el carril adyacente al
+                        # cajón (el de la pared exterior) SIEMPRE está libre. Se
+                        # limpian TODOS los obstáculos: la centerline va derecho,
+                        # el LOCK se suelta, la memoria de color se olvida y el
+                        # mensaje sale con prio=0/mem=0. El ESP32 (parkBuscando)
+                        # hace wall-follow a la pared exterior sin bandazos. Sin
+                        # esto, un cono al entrar a la recta mandaba prio=1 y el
+                        # ESP32 le entregaba el volante a la Pi -> bandazo que
+                        # cruzaba la pista y arruinaba la búsqueda del cajón
+                        # (run 17:14:27-32).
+                        if (self._park_buscando or self._tc >= 12) and armed:
+                            if bev_obstacles or bev_obstacles_beyond:
+                                print(f"[PARK] Recta final: ignorando "
+                                      f"{len(bev_obstacles)}+{len(bev_obstacles_beyond)} "
+                                      f"cono(s) (carril del cajon libre por reglamento WRO)",
+                                      flush=True)
+                            bev_obstacles = []
+                            bev_obstacles_beyond = []
+                            obstacle_conf = []
+                            self._lock_xy = None
+                            self.memory.forget_color_obstacles()
+
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
                         # toda la carrera. PRIMARIA: posición lateral de un
@@ -1139,7 +1200,8 @@ class PPRuntime:
                         # (orillas417). Con esto el trigger se apaga al PRIMER
                         # est=G, sin esperar la confirmación de 2 frames.
                         if (armed and not self._is_turning and self._prev_estado != "G"
-                                and not en_recuperacion_giro):
+                                and not en_recuperacion_giro
+                                and not (self._park_buscando or self._tc >= 12)):
                             _oy_cs = orange_info.get("near_y")
                             _corner_soon_meas = (
                                 orange_info.get("seen") and _oy_cs is not None
@@ -1291,6 +1353,17 @@ class PPRuntime:
                     if self._pasado_hold == 0:
                         self._pasado_from_measured = False
 
+                # Recta final del cajón: sin esquiva -> sin RECUPERANDO. Cancela
+                # cualquier pulso `pasado`/`interior` residual para que el ESP32
+                # se quede en wall-follow recto hacia el cajón (redundante con el
+                # vaciado de bev_obstacles de arriba, pero cubre pulsos ya armados
+                # antes de entrar a la recta).
+                if self._park_buscando or self._tc >= 12:
+                    pasado = False
+                    interior = False
+                    self._pasado_hold = 0
+                    self._pasado_from_measured = False
+
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
@@ -1322,6 +1395,10 @@ class PPRuntime:
                     self._turn_delay_frames -= 1
                     _turn_hold = True
                 _turn_block = (self._ext_corner_block > 0) or _turn_hold
+                # Recta final: nunca forzar prio por bloqueo de giro (no hay más
+                # esquinas; el único objetivo es llegar recto al cajón).
+                if self._park_buscando or self._tc >= 12:
+                    _turn_block = False
 
                 serial_msg = self._build_serial_message(
                     obs_norm, state, len(bev_obstacles), pasado, interior,
@@ -1472,6 +1549,8 @@ class PPRuntime:
                         bev_obstacles, steer_deg, pp_active,
                         line_info=line_info,
                         bev_obstacles_beyond=bev_obstacles_beyond,
+                        park_boxes=self._park_bev_boxes,
+                        park_state=self._park_state,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))

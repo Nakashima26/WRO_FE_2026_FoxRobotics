@@ -797,6 +797,10 @@ PARK_PINK_RATIO_MIN = 0.28   # fracción del ROI que debe ser magenta
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
 PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
+# Área mínima (px BEV) de un blob magenta para contarlo como poste del cajón en
+# el plano BEV (obstacle-memory space). Solo monitoreo/dibujo -> ver
+# _park_pink_bev() en runtime_nuevo.py y draw_bev_debug() en centerline.py.
+PARK_BEV_MIN_AREA_PX = 40.0
 
 LINE_MIN_RUN_PX   = 6   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)

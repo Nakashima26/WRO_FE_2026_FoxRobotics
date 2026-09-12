@@ -723,6 +723,8 @@ def draw_bev_debug(
     pp_active: bool = False,
     line_info: dict | None = None,
     bev_obstacles_beyond: list[tuple[float, float, str]] | None = None,
+    park_boxes: list[tuple[int, int, int, int]] | None = None,
+    park_state: int = 0,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -778,6 +780,18 @@ def draw_bev_debug(
                 txt = f"{color}: no visto"
             cv2.putText(out, txt, (6, y_txt), cv2.FONT_HERSHEY_SIMPLEX, 0.42, col_bgr, 1)
             y_txt += 18
+
+    # Cajón de estacionamiento — postes magenta ubicados en el plano BEV
+    # (obstacle-memory space). Solo monitoreo de la recta final: NO entran a
+    # detect_centerline() ni al PID (ver _park_pink_bev en runtime_nuevo).
+    if park_boxes:
+        col_pk = (200, 0, 200)   # magenta BGR
+        for (px, py, pw, ph) in park_boxes:
+            cv2.rectangle(out, (int(px), int(py)),
+                          (int(px + pw), int(py + ph)), col_pk, 2)
+        cv2.putText(out, f"CAJON postes={len(park_boxes)} pstate={park_state}",
+                    (6, out.shape[0] - 32),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, col_pk, 2)
 
     # Obstáculos más allá de la naranja — atenuados, NO entran a detect_centerline()
     if bev_obstacles_beyond:
