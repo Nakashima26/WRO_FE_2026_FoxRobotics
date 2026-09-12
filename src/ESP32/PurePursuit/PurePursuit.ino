@@ -526,18 +526,20 @@ const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproxim
 // ── Búsqueda del cajón en la recta final por ULTRASÓNICO LATERAL ─────────────
 // Las 2 paredes rosas del cajón SOBRESALEN ~20 cm hacia el centro desde la pared
 // exterior. Si el carro sigue la pared exterior a PARK_WALL_FOLLOW_CM, al pasar
-// frente a cada pared rosa el lateral de ese lado CAE de golpe (~24 -> ~4 cm) y
+// frente a cada pared rosa el lateral de ese lado CAE de golpe (~24 -> ~4-14 cm) y
 // vuelve a subir en el hueco. La firma "pared1 -> hueco -> pared2 -> pasó" dispara
 // la reversa. Esto reemplaza el disparo por visión (frágil) — la Pi/magenta queda
 // solo de monitoreo/HUD. Ver actualizarBusquedaCajon().
 const int           PARK_WALL_FOLLOW_CM      = 24;   // cm: distancia objetivo a la pared exterior en la recta final
-const float         PARK_WALL_FOLLOW_GAIN    = 0.9f; // grados de servo por cm de error de pared
-const float         PARK_WALL_FOLLOW_MAX_DEG = 22.0f;// tope de la corrección lateral (deg)
-const int           PARK_WALL_DETECT_CM      = 12;   // cm: lateral < esto = viendo una PARED del cajón (cae a ~4)
-const int           PARK_WALL_CLEAR_CM       = 16;   // cm: lateral >= esto = pared normal / hueco (histéresis)
-const int           PARK_WALL_DEB_FRAMES     = 3;    // frames seguidos bajo umbral para confirmar pared (filtra glitches)
+const float         PARK_WALL_FOLLOW_GAIN    = 1.0f; // grados de bias angular por cm de error de pared (control en cascada)
+const float         PARK_WALL_FOLLOW_MAX_DEG = 15.0f;// tope del bias angular hacia la pared (deg)
+const int           PARK_WALL_DETECT_CM      = 18;   // cm: lateral < esto = viendo una PARED del cajón (cae a ~4-14 cm)
+const int           PARK_WALL_CLEAR_CM       = 21;   // cm: lateral >= esto = pared normal / hueco (histéresis)
+const int           PARK_WALL_DEB_FRAMES     = 1;    // frames seguidos bajo umbral para confirmar pared (poste 2 cm pasa rápido!)
 const int           PARK_GAP_DEB_FRAMES      = 2;    // frames seguidos despejado para confirmar hueco / que ya la pasó
+const unsigned long PARK_HUECO_TIMEOUT_MS    = 700;  // ms: tiempo máx en el hueco antes de darlo por rebasado si se pierde el poste 2
 const unsigned long PARK_PASS_EXTRA_MS       = 200;  // avance extra (~2 cm) tras pasar la 2ª pared antes de la reversa
+const int           PARK_FRONT_LIMIT_CM      = 18;   // cm: freno/disparo de seguridad si dF <= esto en recta final (evita choque)
 const int           PARK_ANG_IN_DEG          = 26;    // ángulo de entrada en reversa (deg) — reducido de 32 para no irse muy atrás
 const int           PARK_OVERSHOOT_DEG       = 3;     // corte anticipado para absorber inercia (deg)
 const unsigned long PARK_REV1_TIMEOUT_MS     = 3000;  // timeout fase 1 metida (ms)
@@ -570,6 +572,7 @@ unsigned long parkFaseMs            = 0;
 int           parkSearchFase        = 0;
 int           parkWallDeb           = 0;      // debounce de "viendo pared"
 int           parkGapDeb            = 0;      // debounce de "despejado"
+unsigned long parkHuecoEntryMs      = 0;      // t0 de entrada al hueco del cajón
 unsigned long parkPassExtraMs       = 0;      // t0 del avance extra tras la pared 2
 bool          parkCajonListo        = false;  // true = firma completa, listo para reversa
 bool          parkParedEsIzquierda  = false;
@@ -770,21 +773,22 @@ void iniciarParkBuscando() {
   integralGyro   = 0; prevErrorGyro = 0;
   integralWall   = 0; prevErrorWall = 0;
   // Reset de la máquina de búsqueda del cajón por ultrasónico.
-  parkSearchFase = 0;
-  parkWallDeb    = 0;
-  parkGapDeb     = 0;
-  parkPassExtraMs = 0;
-  parkCajonListo = false;
+  parkSearchFase   = 0;
+  parkWallDeb      = 0;
+  parkGapDeb       = 0;
+  parkHuecoEntryMs = 0;
+  parkPassExtraMs  = 0;
+  parkCajonListo   = false;
   Serial.println("-> Recta final: BUSCANDO CAJON (ultrasonico lateral @ 24cm)");
 }
 
 // ── Búsqueda del cajón en la recta final por ULTRASÓNICO LATERAL ─────────────
 // Sigue la firma de distancia del lado EXTERIOR (donde está el cajón) mientras
-// el carro avanza derecho: pared normal (~24) -> PARED ROSA 1 (~4) -> HUECO (~24)
-// -> PARED ROSA 2 (~4) -> pasó. Al pasar la 2ª pared avanza PARK_PASS_EXTRA_MS
-// (~2 cm) y marca parkCajonListo. NO cuenta mientras el carro esquiva un cono o
-// va chueco (ahí la caída del lateral es por la geometría del giro, no por una
-// pared). Ver PARK_WALL_* en el bloque de constantes.
+// el carro avanza derecho: pared normal (~24) -> PARED ROSA 1 (~4-14) -> HUECO (~24)
+// -> PARED ROSA 2 (~4-14) -> pasó. Al pasar la 2ª pared avanza PARK_PASS_EXTRA_MS
+// (~2 cm) y marca parkCajonListo.
+// Se permite detectar aunque esté recuperando/terminando esquiva para no perder
+// postes que pasan mientras el carro rebasa conos cerca del cajón.
 void actualizarBusquedaCajon(long distL, long distR) {
   if (!parkBuscando || parkCajonListo) return;
 
@@ -800,10 +804,9 @@ void actualizarBusquedaCajon(long distL, long distR) {
     return;
   }
 
-  // Congelar la firma si el carro esquiva un cono o no va recto.
-  bool esquivando = piPriority || piMemoryFrames > 0;
-  bool derecho    = fabs(anguloGyro - anguloObjetivo) < 12.0f;
-  if (esquivando || !derecho || distWall <= 0) return;
+  // Filtrar solo si el carro va excesivamente chueco respecto a la recta (>25°) o lectura inválida
+  bool muyChueco = fabs(anguloGyro - anguloObjetivo) > 25.0f;
+  if (muyChueco || distWall <= 0) return;
 
   bool esPared   = (distWall <  PARK_WALL_DETECT_CM);
   bool despejado = (distWall >= PARK_WALL_CLEAR_CM);
@@ -816,20 +819,30 @@ void actualizarBusquedaCajon(long distL, long distR) {
         Serial.print("[PARKSCAN] Pared 1 del cajon (dW="); Serial.print(distWall); Serial.println(")");
       }
       break;
+
     case 1:  // sobre la pared 1, espera el hueco
       parkGapDeb = despejado ? parkGapDeb + 1 : 0;
       if (parkGapDeb >= PARK_GAP_DEB_FRAMES) {
-        parkSearchFase = 2; parkWallDeb = 0;
+        parkSearchFase   = 2;
+        parkWallDeb      = 0;
+        parkHuecoEntryMs = millis();
         Serial.println("[PARKSCAN] Hueco del cajon");
       }
       break;
+
     case 2:  // en el hueco, buscando la pared 2
       parkWallDeb = esPared ? parkWallDeb + 1 : 0;
       if (parkWallDeb >= PARK_WALL_DEB_FRAMES) {
         parkSearchFase = 3; parkGapDeb = 0;
         Serial.print("[PARKSCAN] Pared 2 del cajon (dW="); Serial.print(distWall); Serial.println(")");
+      } else if (millis() - parkHuecoEntryMs >= PARK_HUECO_TIMEOUT_MS) {
+        // Fallback: si el haz ultrasónico no pescó el poste 2 pero ya recorrió los 33 cm del hueco
+        parkSearchFase  = 4;
+        parkPassExtraMs = millis();
+        Serial.println("[PARKSCAN] Cajon recorrido por tiempo en hueco -> avance extra");
       }
       break;
+
     case 3:  // sobre la pared 2, espera pasarla
       parkGapDeb = despejado ? parkGapDeb + 1 : 0;
       if (parkGapDeb >= PARK_GAP_DEB_FRAMES) {
@@ -1222,6 +1235,7 @@ void parsePiMessage(String line) {
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
     Serial2.print(",pb=");   Serial2.print(parkBuscando ? 1 : 0);
+    Serial2.print(",psf=");  Serial2.print(parkSearchFase);
     //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
     //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
     Serial2.print(",rr=");   Serial2.print(rerefCount);
@@ -1330,7 +1344,7 @@ void controlPID(long distL, long distR) {
   // ── Wall panic (ver consts) — se suma al final en cualquier branch de servo.
   // Convención "centroServo + X": X positivo = izquierda.
   float wallPanic = 0.0;
-  if (rondaObstaculos) {
+  if (rondaObstaculos && !parkBuscando) {
     contadorPanicL = (distL > 0 && distL < WALL_PANIC_CM) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
     contadorPanicR = (distR > 0 && distR < WALL_PANIC_CM) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
     // No dejes que wallPanic pelee contra un esquive ACTIVO de la Pi: el lateral
@@ -1386,8 +1400,29 @@ void controlPID(long distL, long distR) {
     // visión solo maneja el rumbo para esquivar (piPriority/memoria) -> branch
     // piPurePursuit de abajo. En SIGUIENDO se suma un centrado lateral por visión
     // capado (visCorr, más abajo) que NO toca el rumbo.
+    float targetAng = anguloObjetivo;
+
+    // ── Recta final de estacionamiento (parkBuscando) ──────────────────────
+    // Control en CASCADA sobre targetAng: modula el ángulo de referencia hacia la
+    // pared exterior para seguirla a PARK_WALL_FOLLOW_CM. El gyro PID persigue
+    // targetAng de forma suave y sin pelear con correcciones directas de servo.
+    // Congela el bias cuando distWall < PARK_WALL_CLEAR_CM (al pasar frente al
+    // poste rosa): el rumbo se mantiene paralelo a la recta exterior.
+    if (parkBuscando) {
+      bool cajonEsIzq = cajonParedDetectada ? cajonParedEsIzquierda : !direccionIzquierda;
+      long distWall   = cajonEsIzq ? distL : distR;
+      if (distWall >= PARK_WALL_CLEAR_CM && distWall <= umbralPared) {
+        float errWall = (float)distWall - PARK_WALL_FOLLOW_CM; // >0 si está lejos de la pared
+        float biasAng = constrain(errWall * PARK_WALL_FOLLOW_GAIN,
+                                  -PARK_WALL_FOLLOW_MAX_DEG, PARK_WALL_FOLLOW_MAX_DEG);
+        // Exterior a la IZQ (cajonEsIzq): lejos (errWall>0) -> apuntar a la IZQ (+deg)
+        // Exterior a la DER (!cajonEsIzq): lejos (errWall>0) -> apuntar a la DER (-deg)
+        targetAng += cajonEsIzq ? +biasAng : -biasAng;
+      }
+    }
+
     // Recalcular error SIN el cap de ±20 usado en controlPID general.
-    float errorGyroRecup = anguloObjetivo - anguloGyro;
+    float errorGyroRecup = targetAng - anguloGyro;
     errorGyroRecup = constrain(errorGyroRecup, -60, 60);   // más margen real
 
     float outputRecup = KpGyro * errorGyroRecup + KdGyro * ((errorGyroRecup - prevErrorGyro) / dt);
@@ -1399,7 +1434,7 @@ void controlPID(long distL, long distR) {
     // paredes existen; en cuanto una se abre (esquina) errorWall = distL - distR
     // se dispararía y clavaría el servo -> ahí, pura gyro.
     float wallCorr = 0.0;
-    if (estado != RECUPERANDO && distL <= umbralPared && distR <= umbralPared) {
+    if (!parkBuscando && estado != RECUPERANDO && distL <= umbralPared && distR <= umbralPared) {
       wallCorr = constrain(outputWall * CRUCERO_WALL_BLEND, -25.0f, 25.0f);
       // El heading de referencia post-MANIOBRA está viciado (no gira exacto 90°).
       // Mientras las paredes centran, re-referencia anguloObjetivo hacia el heading
@@ -1428,7 +1463,7 @@ void controlPID(long distL, long distR) {
     // pared tras una esquiva (orillas690, giro 6). En CRUCERO NO: ahí el centerline
     // ya curva hacia la esquina. Capado (±15) para que centre pero no maneje el rumbo.
     float visCorr = 0.0;
-    if (estado == SIGUIENDO && piAlive && piPurePursuit) {
+    if (!parkBuscando && estado == SIGUIENDO && piAlive && piPurePursuit) {
       visCorr = constrain(-(obsBiasNorm * ppSteerGain) * 0.5f, -15.0f, 15.0f);
     }
 
@@ -1437,7 +1472,7 @@ void controlPID(long distL, long distR) {
     // X>0 = izquierda. Exterior a la IZQ (giro der): si dL > target (lejos),
     // steer izq (+) para acercarse.
     float extWallCorr = 0.0f;
-    if (rondaObstaculos && primerGiro && wallCorr == 0.0f) {
+    if (!parkBuscando && rondaObstaculos && primerGiro && wallCorr == 0.0f) {
       long distExt = direccionIzquierda ? distR : distL;
       long distIntW = direccionIzquierda ? distL : distR;
       bool intAbierta = (distIntW <= 0 || distIntW > umbralPared);
@@ -1445,26 +1480,6 @@ void controlPID(long distL, long distR) {
         float err  = (float)distExt - EXT_WALL_TARGET_CM;   // >0 = lejos del exterior
         float corr = constrain(err * EXT_WALL_GAIN, -EXT_WALL_MAX_DEG, EXT_WALL_MAX_DEG);
         extWallCorr = direccionIzquierda ? -corr : +corr;
-      }
-    }
-
-    // ── Recta final de estacionamiento (parkBuscando) ──────────────────────
-    // En vez de centrar, SIGUE la pared EXTERIOR (la del cajón) a
-    // PARK_WALL_FOLLOW_CM. Congela la corrección cuando el lateral ve una pared
-    // rosa del cajón (cae por debajo de PARK_WALL_CLEAR_CM): ahí NO se debe virar
-    // hacia el centro; el gyro mantiene el rumbo recto y el carro pasa a un lado.
-    if (parkBuscando && estado == SIGUIENDO) {
-      wallCorr    = 0.0f;   // sin centrado entre paredes
-      visCorr     = 0.0f;   // sin centrado por visión
-      extWallCorr = 0.0f;   // sin el EXT_WALL de 50 cm de las rectas normales
-      bool cajonEsIzq = cajonParedDetectada ? cajonParedEsIzquierda : !direccionIzquierda;
-      long distWall   = cajonEsIzq ? distL : distR;
-      if (distWall >= PARK_WALL_CLEAR_CM && distWall <= umbralPared) {
-        float err  = (float)distWall - PARK_WALL_FOLLOW_CM;   // >0 = lejos de la pared exterior
-        float corr = constrain(err * PARK_WALL_FOLLOW_GAIN,
-                               -PARK_WALL_FOLLOW_MAX_DEG, PARK_WALL_FOLLOW_MAX_DEG);
-        // Exterior a la IZQ (cajonEsIzq): lejos (err>0) -> steer IZQ (+) para acercarse.
-        wallCorr = cajonEsIzq ? +corr : -corr;
       }
     }
 
@@ -1966,8 +1981,11 @@ void loop() {
             // Disparo de SEGURIDAD: timeout si nunca se ve la firma. La visión/magenta
             // de la Pi ya NO dispara (queda solo de monitoreo/HUD).
             bool timeoutPark = (millis() - parkBuscandoEntryMs >= PARK_BUSCANDO_TIMEOUT_MS);
-            if (parkCajonListo || timeoutPark) {
-              if (timeoutPark && !parkCajonListo) {
+            bool frentePared = (distF > 0 && distF <= PARK_FRONT_LIMIT_CM);
+            if (parkCajonListo || timeoutPark || frentePared) {
+              if (frentePared && !parkCajonListo) {
+                Serial.println("-> PARK BUSCANDO: Disparo por PARED FRONTAL (seguridad dF)");
+              } else if (timeoutPark && !parkCajonListo) {
                 Serial.println("-> PARK BUSCANDO: Disparo por TIMEOUT (no se detecto la firma del cajon)");
               } else {
                 Serial.println("-> PARK BUSCANDO: Disparo por ULTRASONICO (cajon rebasado)");
@@ -2031,12 +2049,22 @@ void loop() {
       controlPID(distL, distR);   // toma el branch RECUPERANDO de controlPID()
 
       // Prioridad absoluta durante la recta final: si ya se detectó la firma
-      // completa del cajón (parkCajonListo), estacionar de inmediato aunque
-      // estemos a media esquiva. Nunca dejar que una esquiva desemboque en otra
-      // vuelta cuando el objetivo es estacionar.
-      if (parkBuscando && parkCajonListo) {
-        iniciarEstacionando();
-        break;
+      // completa del cajón (parkCajonListo), pared frontal (seguridad), o
+      // timeout, estacionar de inmediato aunque estemos a media esquiva.
+      if (parkBuscando) {
+        bool timeoutPark = (millis() - parkBuscandoEntryMs >= PARK_BUSCANDO_TIMEOUT_MS);
+        bool frentePared = (distF > 0 && distF <= PARK_FRONT_LIMIT_CM);
+        if (parkCajonListo || timeoutPark || frentePared) {
+          if (frentePared && !parkCajonListo) {
+            Serial.println("-> PARK BUSCANDO (RECUP): Disparo por PARED FRONTAL");
+          } else if (timeoutPark && !parkCajonListo) {
+            Serial.println("-> PARK BUSCANDO (RECUP): Disparo por TIMEOUT");
+          } else {
+            Serial.println("-> PARK BUSCANDO (RECUP): Disparo por ULTRASONICO");
+          }
+          iniciarEstacionando();
+          break;
+        }
       }
 
       bool wallOk    = abs(errorWall) < wallSettleCm;
