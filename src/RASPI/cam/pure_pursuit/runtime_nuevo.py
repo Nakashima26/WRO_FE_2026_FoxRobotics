@@ -149,6 +149,30 @@ def _parse_direccion(ack: str) -> str | None:
     val = ack[idx + 4: idx + 5]
     return val if val in ("L", "R") else None
 
+def _parse_tc(ack: str) -> int | None:
+    """tc= del ACK:V2 del ESP32: giros completados (0..12)."""
+    if not ack:
+        return None
+    idx = ack.find("tc=")
+    if idx < 0:
+        return None
+    try:
+        return int(ack[idx + 3:].split(",")[0])
+    except (ValueError, IndexError):
+        return None
+
+def _parse_pb(ack: str) -> bool | None:
+    """pb= del ACK:V2 del ESP32: 1 si parkBuscando es True."""
+    if not ack:
+        return None
+    idx = ack.find("pb=")
+    if idx < 0:
+        return None
+    try:
+        return ack[idx + 3: idx + 4] == "1"
+    except (ValueError, IndexError):
+        return None
+
 
 class PPRuntime:
     """
@@ -212,6 +236,14 @@ class PPRuntime:
         self._inicio_estacionamiento: bool | None = None
         self._pink_samples: list[float] = []
 
+        # ── ESTACIONAMIENTO — búsqueda del cajón en la recta final ────────────
+        self._tc: int = 0
+        self._park_buscando: bool = False
+        self._park_state: int = 0         # 0=no busca, 1=viendo cajon, 2=cajon alineado (iniciar reversa)
+        self._park_dist_cm: int = 0
+        self._park_frames_seen: int = 0
+        self._park_lost_frames: int = 0
+
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
 
@@ -250,7 +282,8 @@ class PPRuntime:
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(has_obstacle)},mem={mem_out},pp=1,"
                 f"pasado={int(pasado)},intr={int(interior)},"
-                f"inicio={int(bool(self._inicio_estacionamiento))}")
+                f"inicio={int(bool(self._inicio_estacionamiento))},"
+                f"park={self._park_state},pd={self._park_dist_cm}")
 
     # ── Trigger de RECUPERANDO por ESTADO MEDIDO ──────────────────────────────
 
@@ -574,9 +607,46 @@ class PPRuntime:
             if xs.size > 200:
                 cv2.rectangle(frame, (int(xs.min()), int(ys.min())),
                               (int(xs.max()), int(ys.max())), col, 2)
-        cv2.putText(frame, f"PINK {ratio * 100:.0f}% / thr {thr * 100:.0f}%",
+        txt = (f"PARK state={self._park_state} pink={ratio * 100:.1f}%"
+               if (self._park_buscando or self._tc >= 12)
+               else f"PINK {ratio * 100:.0f}% / thr {thr * 100:.0f}%")
+        cv2.putText(frame, txt,
                     (10, frame.shape[0] - 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
+
+    def _check_parking_search(self, frame_bgr, armed: bool):
+        """Búsqueda activa del cajón magenta en la recta final tras giro 12."""
+        if not armed:
+            return
+        if not (self._park_buscando or self._tc >= 12):
+            return
+        if self._park_state == 2:
+            return  # ya disparó la orden de estacionamiento
+
+        ratio, mask = _park_pink(frame_bgr)
+        if mask is not None and ratio >= 0.005:
+            ys, xs = np.where(mask > 0)
+            if xs.size > 150:
+                y_max = int(ys.max())
+                self._park_frames_seen += 1
+                self._park_lost_frames = 0
+                self._park_dist_cm = max(0, int((frame_bgr.shape[0] - y_max) * 0.4))
+                if self._park_state == 0:
+                    self._park_state = 1
+                    print(f"[PARK] Cajon detectado en recta! ratio={ratio*100:.1f}% y_max={y_max} frames={self._park_frames_seen}", flush=True)
+
+                # Si el borde inferior del bloque magenta está abajo en el FOV (al lado del chasis)
+                # O si el ratio creció mucho (cajón ocupando gran parte de la cámara)
+                if y_max >= 390 or ratio >= 0.15:
+                    self._park_state = 2
+                    print(f"[PARK] Cajon alcanzado (y_max={y_max}, ratio={ratio*100:.1f}%) -> PARK=2!", flush=True)
+        else:
+            if self._park_state == 1:
+                self._park_lost_frames += 1
+                # Si lo vimos claramente y ahora quedó fuera de vista (el carro lo rebasó)
+                if self._park_frames_seen >= 3 and self._park_lost_frames >= 2:
+                    self._park_state = 2
+                    print(f"[PARK] Cajon rebasado (seen={self._park_frames_seen}, lost={self._park_lost_frames}) -> PARK=2!", flush=True)
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
@@ -704,6 +774,9 @@ class PPRuntime:
                           f"n={len(self._pink_samples)}{' FORZADO' if _forced else ''} -> "
                           f"{'MANIOBRA DE SALIDA (inicio=1)' if self._inicio_estacionamiento else 'arranque normal'}",
                           flush=True)
+
+                # ── Búsqueda activa de cajón en recta final (después del giro 12) ──
+                self._check_parking_search(processed_frame, armed)
 
                 # ── Pipeline Pure Pursuit ────────────────────────────────────
                 steer_deg     = 0.0
@@ -1264,6 +1337,14 @@ class PPRuntime:
                 if _inicio_now is not None:
                     self._esp_inicio = _inicio_now
 
+                _tc_now = _parse_tc(serial_ack)
+                if _tc_now is not None:
+                    self._tc = _tc_now
+
+                _pb_now = _parse_pb(serial_ack)
+                if _pb_now is not None:
+                    self._park_buscando = _pb_now
+
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
                     # Debounce: un est=G ESPURIO (ACK con ruido, "est=G fantasma
@@ -1365,9 +1446,9 @@ class PPRuntime:
 
                 # HUD del rosa — DESPUÉS de todo el pipeline (el BEV ya se
                 # calculó arriba con el frame limpio), así que dibujar acá no
-                # puede tocar la visión. Solo mientras está DESARMADO (que es
-                # cuando se coloca el carro y se mira si "ve" el estacionamiento).
-                if not armed:
+                # puede tocar la visión. Muestra el HUD cuando está DESARMADO
+                # o cuando está buscando el cajón en la recta final.
+                if not armed or self._park_buscando or self._tc >= 12:
                     try:
                         _pr_h, _pm_h = _park_pink(processed_frame)
                         self._draw_park_pink(processed_frame, _pr_h, _pm_h)

@@ -520,24 +520,35 @@ const bool          PARK_ENABLED             = true;  // true = busca y estacion
 const bool          PARK_TEST_DIRECTO        = false; // true = inicia INMEDIATO en reversa (pon el carro AL LADO del cajón)
 const bool          PARK_TEST_RECTA_COMPLETA = false; // true = inicia en recta final (pon el carro AL INICIO de la recta)
 const bool          PARK_TEST_PARED_IZQ      = true;  // en tests: true = cajón en pared IZQ (como en tus fotos), false = DER
-const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 6000;  // tiempo máx. en recta final buscando el cajón (ms)
-const unsigned long PARK_APPROACH_MS         = 1400;  // avance tras la esquina 12 para rebasar el cajón (ms)
+const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 6500;  // tiempo máx. en recta final buscando el cajón (ms)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
-const int           PARK_ANG_IN_DEG          = 32;    // ángulo de entrada en reversa (deg)
-const int           PARK_OVERSHOOT_DEG       = 4;     // corte anticipado para absorber inercia (deg)
+const int           PARK_ANG_IN_DEG          = 26;    // ángulo de entrada en reversa (deg) — reducido de 32 para no irse muy atrás
+const int           PARK_OVERSHOOT_DEG       = 3;     // corte anticipado para absorber inercia (deg)
 const unsigned long PARK_REV1_TIMEOUT_MS     = 3000;  // timeout fase 1 metida (ms)
-const int           PARK_REV_PWM             = 95;    // PWM de marcha atrás
+const int           PARK_REV_PWM             = 85;    // PWM de marcha atrás — suave para control preciso
 const int           PARK_ENDEREZA_MARGEN_DEG = 3;     // margen para considerar alineado (|ang| <= 3 deg)
 const unsigned long PARK_REV2_TIMEOUT_MS     = 3500;  // timeout fase 2 contravuelta (ms)
-const unsigned long PARK_CENTER_MS           = 250;   // avance suave para centrado entre postes (ms, 0 = omitir)
-const int           PARK_CENTER_PWM          = 85;    // PWM suave de centrado
+const unsigned long PARK_CENTER_MS           = 400;   // avance suave para centrado entre postes (ms)
+const int           PARK_CENTER_PWM          = 75;    // PWM suave de centrado adelante
+
+// ── Límites ultrasónicos de estacionamiento ────────────────────────────────────
+// Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm.
+// El sensor frontal (distF) apunta al poste magenta delantero:
+// - Si distF >= 8 cm frente al poste delantero, ya retrocedimos 8 cm y quedan solo ~3 cm atrás:
+//   "¡YA ESTAMOS MUY ATRÁS!" -> Corte inmediato de reversa para no chocar el poste trasero.
+const int           PARK_REV_MAX_DF_CM        = 8;    // cm: distancia máxima permitida a la barrera frontal en reversa
+const int           PARK_REV_VALID_DF_MAX_CM  = 18;   // cm: rango para validar que distF ve la barrera y no pista vacía
+const int           PARK_WALL_TARGET_CM       = 6;    // cm: distancia lateral a la pared para considerarse pegado
+const int           PARK_CENTER_TARGET_DF_CM  = 5;    // cm: objetivo de centrado adelante (5 cm al frente, ~6 cm atrás)
 
 // Estado interno de ESTACIONANDO
-bool          parkBuscando         = false;
-unsigned long parkBuscandoEntryMs  = 0;
-int           parkFase             = -1;
-unsigned long parkFaseMs           = 0;
-bool          parkParedEsIzquierda = false;
+bool          parkBuscando          = false;
+unsigned long parkBuscandoEntryMs   = 0;
+int           parkFase              = -1;
+unsigned long parkFaseMs            = 0;
+bool          parkParedEsIzquierda  = false;
+bool          cajonParedEsIzquierda = false; // detectada y latcheada en INICIO al arrancar la carrera
+bool          cajonParedDetectada    = false;
 
 // ── Detección de esquinas ─────────────────────────────────────────────────────
 int contadorEsquina    = 0;
@@ -735,10 +746,12 @@ void iniciarEstacionando() {
   parkFase             = 0;
   parkFaseMs           = millis();
   // El cajón SIEMPRE está en la pared EXTERIOR de la recta inicial:
-  // Si la pista gira a la derecha (CW), la pared exterior es la IZQUIERDA.
-  // Si la pista gira a la izquierda (CCW), la pared exterior es la DERECHA.
+  // Si arrancó en el cajón (INICIO), recordamos exactamente cuál pared fue.
+  // Si es prueba directa, usamos PARK_TEST_PARED_IZQ.
   if (PARK_TEST_DIRECTO || PARK_TEST_RECTA_COMPLETA) {
     parkParedEsIzquierda = PARK_TEST_PARED_IZQ;
+  } else if (cajonParedDetectada) {
+    parkParedEsIzquierda = cajonParedEsIzquierda;
   } else {
     parkParedEsIzquierda = !direccionIzquierda;
   }
@@ -1107,6 +1120,7 @@ void parsePiMessage(String line) {
     Serial2.print(",eg=");   Serial2.print(errorGyro, 1);
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
+    Serial2.print(",pb=");   Serial2.print(parkBuscando ? 1 : 0);
     //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
     //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
     Serial2.print(",rr=");   Serial2.print(rerefCount);
@@ -1619,8 +1633,10 @@ void loop() {
         // Latch de dirección de PISTA para toda la carrera (igual que GIRANDO en
         // la 1ª esquina) — SOLO si la lectura del cajón fue decisiva.
         if (abs(dc) >= INICIO_DIR_MIN_GAP_CM) {
-          direccionIzquierda = (dL0 > dR0);
-          primerGiro         = true;
+          cajonParedEsIzquierda = (dL0 < dR0);
+          cajonParedDetectada   = true;
+          direccionIzquierda    = (dL0 > dR0);
+          primerGiro            = true;
         }
 
         anguloGyro     = 0;                  // referencia de la recta / de la maniobra
@@ -1634,6 +1650,8 @@ void loop() {
         Serial.print(inicioGirarDer ? "DER" : "IZQ");
         Serial.print(" dL="); Serial.print(dL0);
         Serial.print(" dR="); Serial.print(dR0);
+        Serial.print(" cajonPared=");
+        Serial.print(cajonParedEsIzquierda ? "IZQ" : "DER");
         Serial.print(" dirPista=");
         Serial.println(!primerGiro ? "?(ambiguo)" : (direccionIzquierda ? "IZQ" : "DER"));
         break;
@@ -1819,10 +1837,16 @@ void loop() {
           if (parkBuscando) {
             // Buscando el cajón de estacionamiento tras el giro 12:
             // NO se entra a CRUCERO ni a MANIOBRA de esquina.
+            // Se activa cuando la Pi confirma que el cajón quedó a nuestro lado (piPark == 2)
+            // o por timeout de seguridad si la Pi no vio el magenta.
             bool timeoutPark = (millis() - parkBuscandoEntryMs >= PARK_BUSCANDO_TIMEOUT_MS);
-            bool distPark    = (millis() - parkBuscandoEntryMs >= PARK_APPROACH_MS);
             bool piParkReady = (piPark == 2);
-            if (distPark || piParkReady || timeoutPark) {
+            if (piParkReady || timeoutPark) {
+              if (timeoutPark && !piParkReady) {
+                Serial.println("-> PARK BUSCANDO: Disparo por TIMEOUT (Pi no vio cajon)");
+              } else {
+                Serial.println("-> PARK BUSCANDO: Disparo por Pi (cajon alineado)");
+              }
               iniciarEstacionando();
             }
           } else if (!piPriority && piMemoryFrames <= 0
@@ -2420,6 +2444,7 @@ void loop() {
       }
 
       float deltaPark = fabs(anguloGyro);
+      long  distWall  = parkParedEsIzquierda ? distL : distR;
 
       // ── Fase 1: REV SWING — mete la cola hacia el cajón en la pared exterior ──
       if (parkFase == 1) {
@@ -2431,14 +2456,20 @@ void loop() {
 
         bool swingListo   = (deltaPark >= (float)(PARK_ANG_IN_DEG - PARK_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - parkFaseMs >= PARK_REV1_TIMEOUT_MS);
+        // Protección ultrasónica: si lee la pared/poste frontal a >= 8 cm y <= 18 cm,
+        // ya recorrió todo el fondo disponible del cajón (chasis 22cm + 8cm = 30cm vs 33cm).
+        bool distF_tope   = (distF >= PARK_REV_MAX_DF_CM && distF <= PARK_REV_VALID_DF_MAX_CM);
 
-        if (swingListo || swingTimeout) {
+        if (swingListo || swingTimeout || distF_tope) {
           motorCoast();
           escribirServo(centroServo);
           parkFase   = 2;
           parkFaseMs = millis();
           Serial.print("ESTACIONANDO fase 2: REV CONTRA (ang=");
           Serial.print(anguloGyro, 1);
+          Serial.print(" dF="); Serial.print(distF);
+          Serial.print(" dW="); Serial.print(distWall);
+          if (distF_tope) Serial.print(" TOPE_DF");
           Serial.println(swingTimeout ? " TIMEOUT)" : ")");
         }
         break;
@@ -2451,18 +2482,25 @@ void loop() {
         escribirServo(parkParedEsIzquierda ? 25 : 145);
         setMotor(PARK_REV_PWM);
 
-        bool alineado = (deltaPark <= (float)PARK_ENDEREZA_MARGEN_DEG);
-        bool timeout  = (millis() - parkFaseMs >= PARK_REV2_TIMEOUT_MS);
+        bool distF_tope  = (distF >= PARK_REV_MAX_DF_CM && distF <= PARK_REV_VALID_DF_MAX_CM);
+        bool pared_cerca = (distWall > 0 && distWall <= PARK_WALL_TARGET_CM && deltaPark <= 8.0f);
+        bool alineado    = (deltaPark <= (float)PARK_ENDEREZA_MARGEN_DEG);
+        bool timeout     = (millis() - parkFaseMs >= PARK_REV2_TIMEOUT_MS);
 
-        if (alineado || timeout) {
+        if (alineado || distF_tope || pared_cerca || timeout) {
           motorCoast();
           escribirServo(centroServo);
           if (PARK_CENTER_MS > 0) {
             // Pasa por el FRENO antes de invertir de reversa a adelante
             parkFase   = 3;
             parkFaseMs = millis();
-            Serial.print("ESTACIONANDO fase 3: Freno (reversa -> adelante, ang=");
+            Serial.print("ESTACIONANDO fase 3: Freno (ang=");
             Serial.print(anguloGyro, 1);
+            Serial.print(" dF="); Serial.print(distF);
+            Serial.print(" dW="); Serial.print(distWall);
+            if (distF_tope)  Serial.print(" TOPE_DF");
+            if (pared_cerca) Serial.print(" PARED_CERCA");
+            if (alineado)    Serial.print(" ALINEADO");
             Serial.println(timeout ? " TIMEOUT)" : ")");
           } else {
             parkFase   = 5;
@@ -2495,11 +2533,20 @@ void loop() {
         escribirServo(constrain(centroServo + (int)outGyro, 65, 95));
         setMotor(PARK_CENTER_PWM);
 
-        if (millis() - parkFaseMs >= PARK_CENTER_MS) {
+        bool dfTargetAlcanzado = (distF > 0 && distF <= PARK_CENTER_TARGET_DF_CM);
+        bool timeoutCenter     = (millis() - parkFaseMs >= PARK_CENTER_MS);
+
+        if (dfTargetAlcanzado || timeoutCenter) {
           motorCoast();
           escribirServo(centroServo);
           parkFase   = 5;
           parkFaseMs = millis();
+          Serial.print("ESTACIONANDO fase 5: COMPLETADO (ang=");
+          Serial.print(anguloGyro, 1);
+          Serial.print(" dF="); Serial.print(distF);
+          Serial.print(" dW="); Serial.print(distWall);
+          if (dfTargetAlcanzado) Serial.print(" TARGET_DF");
+          Serial.println(timeoutCenter ? " TIMEOUT_CENTER)" : ")");
         }
         break;
       }
