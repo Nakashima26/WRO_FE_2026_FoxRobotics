@@ -106,6 +106,18 @@ def _parse_estado(ack: str) -> str | None:
     return val if val in ("G", "R", "S") else None
 
 
+def _parse_inicio(ack: str) -> bool | None:
+    """True si el ACK trae est=I (ESP en INICIO), False con cualquier otro est=,
+    None si no trae est=. _parse_estado() colapsa I -> S; esto conserva el dato
+    crudo solo para apagar el dead-reckon de la naranja (ver line_tracker.update)."""
+    if not ack:
+        return None
+    idx = ack.find("est=")
+    if idx < 0:
+        return None
+    return ack[idx + 4: idx + 5] == "I"
+
+
 def _park_pink(frame_bgr):
     """(ratio, mask). ratio = fracción de píxeles magenta (pared del cajón) en el
     ROI, ignorando la banda superior C.PARK_PINK_ROI_TOP (fondo del venue). mask
@@ -163,6 +175,7 @@ class PPRuntime:
         self._lock_xy: tuple[float, float] | None = None  # cono primario fijado (>=2 conos)
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
+        self._esp_inicio: bool = False   # último est= del ACK fue I (ver _parse_inicio)
         self._is_turning: bool = False
         self._turn_start_t: float | None = None
         self._turn_recovery_frames: int = 0
@@ -810,9 +823,17 @@ class PPRuntime:
                         # latcheaba toda la recta nueva). Ver hold_cooldown().
                         if self._is_turning:
                             self.line_tracker.hold_cooldown()
+                        # INICIO: sin dead-reckon de la naranja. El DR marcha la
+                        # línea hacia el carro a ROBOT_SPEED_MMS, pero en INICIO el
+                        # carro pivotea y luego va en REVERSA -> orillas863: la
+                        # línea estimada rebasó al rojo de la recta (268->362 px
+                        # mientras el cono se alejaba), lo fijó `beyond` y la cinta
+                        # provisional soltó la esquiva ya en SIGUIENDO. Las lecturas
+                        # REALES de la línea siguen clasificando igual.
                         line_info = {"Orange": self.line_tracker.update(
                             bev_frame, bev_hsv=bev_hsv, ds_px=_dr_ds_px,
-                            in_turn_cooldown=(self._turn_recovery_frames > 0))}
+                            in_turn_cooldown=(self._turn_recovery_frames > 0
+                                              or self._esp_inicio))}
 
                         # ── Cooldown post-giro: justo al salir de un giro,
                         # OrangeLineTracker se reseteó y apenas está re-
@@ -1238,6 +1259,10 @@ class PPRuntime:
                 _esp_dir = _parse_direccion(serial_ack)
                 if _esp_dir is not None:
                     self.turn_dir_tracker.set_esp_direction(_esp_dir)
+
+                _inicio_now = _parse_inicio(serial_ack)
+                if _inicio_now is not None:
+                    self._esp_inicio = _inicio_now
 
                 estado_now = _parse_estado(serial_ack)
                 if estado_now is not None:
