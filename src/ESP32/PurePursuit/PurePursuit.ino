@@ -1902,6 +1902,15 @@ void loop() {
       velocidadMotor = 180;
       controlPID(distL, distR);   // toma el branch RECUPERANDO de controlPID()
 
+      // Prioridad absoluta durante la recta final: si la Pi ya confirmó que el
+      // cajón quedó a nuestro lado (piPark==2), estacionar de inmediato aunque
+      // estemos a media esquiva. Nunca dejar que una esquiva desemboque en otra
+      // vuelta cuando el objetivo es estacionar.
+      if (parkBuscando && piPark == 2) {
+        iniciarEstacionando();
+        break;
+      }
+
       bool wallOk    = abs(errorWall) < wallSettleCm;
       bool headingOk = abs(errorGyro) < headingSettleDeg;
       // El dwell arranca cuando el heading YA se alcanzó (no desde que entró a
@@ -1928,7 +1937,10 @@ void loop() {
         // carro commiteaba a CRUCERO->MANIOBRA y giraba contra la pared
         // (recta 3, run 2026-09-07).
         bool paredAdelante = (distF > 0 && distF < FRONT_CRUCERO_CM);
-        if (rondaObstaculos && !piPriority && paredAdelante) {
+        // parkBuscando: en la recta final NUNCA se entra a CRUCERO (que
+        // compromete otra esquina/vuelta). Se vuelve a SIGUIENDO, donde el
+        // chequeo de piPark==2 dispara el estacionamiento.
+        if (rondaObstaculos && !piPriority && paredAdelante && !parkBuscando) {
           cruceroEntryMs = millis();
           cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
           lateralWatchActivo = false;
