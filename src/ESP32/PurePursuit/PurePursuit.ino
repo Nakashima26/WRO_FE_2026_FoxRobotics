@@ -104,6 +104,12 @@ unsigned long lastGyroTime = 0;
 // ── Giroscopio ────────────────────────────────────────────────────────────────
 float anguloGyro    = 0;
 float anguloObjetivo = 0;
+// Velocidad de giro filtrada (°/s, mismo signo que anguloGyro). La usa el gate
+// del re-referenciado de CRUCERO para no adoptar como "recto" un chasis que
+// TODAVÍA está rotando. Ver REREF_RATE_MAX_DEG_S.
+float gyroRate      = 0;
+unsigned long lastDodgeMs = 0;   // último loop con esquiva activa (prio/mem/RECUPERANDO)
+unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado SÍ corrió
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 180;
@@ -322,6 +328,19 @@ const float MANIOBRA_BIAS_AFUERA_DEG = 5.0f;
 // residual handoff, ±5 YA es la referencia real; el tope deja ~3° de fuga para
 // correcciones chicas y CORTA el runaway.
 const float MANIOBRA_AO_CLAMP_DEG = 8.0f;
+// ── Gate del re-referenciado de CRUCERO (2026-09-12) ─────────────────────────
+// Medido sobre orillas853-856 (4 runs CCW, 37 rectas): el re-referenciado de
+// abajo movía `anguloObjetivo` de −7.4 a +0.7 MIENTRAS `anguloGyro` subía de
+// −1.9 a +15 (≈21 °/s) — o sea, adoptaba como "derecho" el latigazo de la
+// esquiva y el carro entraba a la esquina apuntando +11..+15° hacia ADENTRO.
+// Δ(heading) medio por recta: recta 0 −1.6°, recta 1 −2.3°, recta 2 +7.3°,
+// recta 3 +19.2° — siempre hacia adentro en las rectas con esquivas.
+// Ahora, además de chasis casi recto, exige yaw QUIETO y distancia temporal a la
+// última esquiva. Si el gate bloquea siempre, `anguloObjetivo` se queda en el ±5
+// que dejó finalizarManiobra(), que apunta hacia AFUERA = el lado seguro (el
+// error de salida de maniobra medido es de solo −2.5° ± 0.9, el PID lo cubre).
+const float         REREF_RATE_MAX_DEG_S = 6.0f;   // |gyroRate| máx. para ratificar
+const unsigned long REREF_QUIET_MS       = 600;    // ms desde la última esquiva
 // Tope de maniobraInclinacionEntrada: el wall-panic al llegar a la esquina
 // spikea anguloGyro +6-10° en 2-3 frames y fase-0 lo captura como inclinación
 // real -> envenena maniobraIdealRot/residual -> acumulación -> muere ~vuelta 8
@@ -896,6 +915,7 @@ void actualizarGyro() {
   float gz = mpu.getGyroZ() / gyroScale;
   if (abs(gz) < 1.0) gz = 0;
   anguloGyro += gz * dt;
+  gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
 }
 
 bool detectarEsquina(long distL, long distR, long distF) {
@@ -1087,6 +1107,9 @@ void parsePiMessage(String line) {
     Serial2.print(",eg=");   Serial2.print(errorGyro, 1);
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
+    //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
+    //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
+    Serial2.print(",rr=");   Serial2.print(rerefCount);
     Serial2.println();
     return;
   }
@@ -1126,6 +1149,9 @@ void controlPID(long distL, long distR) {
   float dt = (now - lastPIDTime) / 1000.0;
   lastPIDTime = now;
   if (dt < 0.01) dt = 0.01;
+
+  // Marca de esquiva activa: la usa el gate del re-referenciado de CRUCERO.
+  if (piPriority || piMemoryFrames > 0 || estado == RECUPERANDO) lastDodgeMs = now;
 
   // ── Siempre calculamos wall y gyro (se usan en fallback y logs) ───────────
   bool wallHold = (!rondaObstaculos && primerGiro);
@@ -1268,9 +1294,16 @@ void controlPID(long distL, long distR) {
       // anguloObjetivo persiguiera un yaw que se iba de mano -> el carro terminaba
       // a −30° y clasificaba el rojo del final de la recta como "beyond" -> lo
       // ignoraba (orillas684). En SIGUIENDO anguloObjetivo ES la recta y queda fijo.
-      if (estado == CRUCERO && fabs(anguloGyro) < 12.0f) {
+      // 2026-09-12: NO ratificar un chasis que todavía está girando (ver
+      // REREF_RATE_MAX_DEG_S). El gate viejo era solo |anguloGyro| < 12, y el
+      // latigazo de la esquiva pasa por esa ventana rotando a ~20 °/s.
+      bool _yawQuieto      = fabs(gyroRate) < REREF_RATE_MAX_DEG_S;
+      bool _lejosDeEsquiva = (now - lastDodgeMs) >= REREF_QUIET_MS;
+      if (estado == CRUCERO && fabs(anguloGyro) < 12.0f
+          && _yawQuieto && _lejosDeEsquiva) {
         anguloObjetivo += (anguloGyro - anguloObjetivo) * 0.05f;
         anguloObjetivo  = constrain(anguloObjetivo, -MANIOBRA_AO_CLAMP_DEG, MANIOBRA_AO_CLAMP_DEG);
+        rerefCount++;
       }
     }
 

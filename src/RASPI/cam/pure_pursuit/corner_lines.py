@@ -600,7 +600,9 @@ class OrangeLineTracker:
             # sin estar en la boca de la esquina; latchearla sostendría "beyond"
             # hasta el giro sobre conos de MI recta.
             pale = "franja" in str(self.stable.get("src") or "")
-            if ny is not None and ny >= dr_min_y and not pale:
+            # in_turn_cooldown (post-giro / INICIO): tampoco ancla -- la lectura
+            # (o la sostenida por hold) es de la maniobra, no de ir avanzando.
+            if ny is not None and ny >= dr_min_y and not pale and not in_turn_cooldown:
                 # línea real y CERCA: re-ancla el DR. Si llegó a la "boca"
                 # (>= LATCH_Y) queda latcheada -> al perderse NO expira: todo lo
                 # que se vea después es siguiente segmento hasta el giro.
