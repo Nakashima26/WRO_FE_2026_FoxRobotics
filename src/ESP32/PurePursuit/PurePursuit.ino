@@ -490,11 +490,12 @@ int           inicioSettleQuieto  = 0;
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tras el giro 12 el auto entra a la recta inicial en busca del cajón delimitado
 // por los dos postes magenta (200x20x100 mm). La maniobra es el ESPEJO de INICIO:
-//   Fase 0: FRENO_PREV  (motorCoast, reposo de corriente, gyro referencia = 0)
+//   Fase 0: FRENO_PREV  (motorCoast durante MANIOBRA_FRENO_MS antes de reversa)
 //   Fase 1: REV_SWING   (reversa con servo a la pared exterior, cola al cajón)
 //   Fase 2: REV_CONTRA  (reversa con contravuelta para re-alinear paralelo a 0°)
-//   Fase 3: CENTRADO    (avance corto recto con heading-hold entre postes)
-//   Fase 4: FIN         (freno total, servo al centro, carrera terminada)
+//   Fase 3: FRENO_MID   (motorCoast durante MANIOBRA_FRENO_MS antes de adelante)
+//   Fase 4: CENTRADO    (avance corto recto con heading-hold entre postes)
+//   Fase 5: FIN         (freno total, servo al centro, carrera terminada)
 
 const bool          PARK_ENABLED             = true;  // true = busca y estaciona tras la vuelta 12
 const bool          PARK_TEST_DIRECTO        = false; // true = arranca de inmediato en ESTACIONANDO (para calibrar en banco)
@@ -507,7 +508,6 @@ const unsigned long PARK_REV1_TIMEOUT_MS     = 3000;  // timeout fase 1 metida (
 const int           PARK_REV_PWM             = 95;    // PWM de marcha atrás
 const int           PARK_ENDEREZA_MARGEN_DEG = 3;     // margen para considerar alineado (|ang| <= 3 deg)
 const unsigned long PARK_REV2_TIMEOUT_MS     = 3500;  // timeout fase 2 contravuelta (ms)
-const unsigned long PARK_PAUSE_MS            = 200;   // pausa coast entre marchas (protege TB6612)
 const unsigned long PARK_CENTER_MS           = 250;   // avance suave para centrado entre postes (ms, 0 = omitir)
 const int           PARK_CENTER_PWM          = 85;    // PWM suave de centrado
 
@@ -2352,17 +2352,18 @@ void loop() {
       break;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════
     // ESTACIONANDO — Estacionamiento en paralelo en reversa (Obstacle Challenge)
     // ═══════════════════════════════════════════════════════════════════════════
     case ESTACIONANDO: {
-      // ── Fase 0: FRENO PREVIO ────────────────────────────────────────────────
+      // ── Fase 0: FRENO PREVIO (adelante -> reversa) ──────────────────────────
       // Coast y servo centro antes de invertir a reversa (protege el TB6612).
+      // Usa el delay de freno del proyecto: MANIOBRA_FRENO_MS (300 ms).
       // Fija la referencia recta de gyro (anguloGyro = 0).
       if (parkFase == 0) {
         motorCoast();
         escribirServo(centroServo);
-        if (millis() - parkFaseMs >= PARK_PAUSE_MS) {
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           anguloGyro     = 0.0f;
           anguloObjetivo = 0.0f;
           integralRev    = 0;
@@ -2415,22 +2416,37 @@ void loop() {
           motorCoast();
           escribirServo(centroServo);
           if (PARK_CENTER_MS > 0) {
+            // Pasa por el FRENO antes de invertir de reversa a adelante
             parkFase   = 3;
             parkFaseMs = millis();
-            motorAdelante();
-            Serial.print("ESTACIONANDO fase 3: Centrado recto (ang=");
+            Serial.print("ESTACIONANDO fase 3: Freno (reversa -> adelante, ang=");
             Serial.print(anguloGyro, 1);
-            Serial.println(")");
+            Serial.println(timeout ? " TIMEOUT)" : ")");
           } else {
-            parkFase   = 4;
+            parkFase   = 5;
             parkFaseMs = millis();
           }
         }
         break;
       }
 
-      // ── Fase 3: CENTRADO CORTO — avance recto con heading hold para no rozar postes ──
+      // ── Fase 3: FRENO INTERMEDIO (reversa -> adelante) ──────────────────────
+      // Coast y servo centro antes de invertir a adelante (protege el TB6612).
+      // Espera el delay de freno del proyecto: MANIOBRA_FRENO_MS (300 ms).
       if (parkFase == 3) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          motorAdelante();
+          parkFase   = 4;
+          parkFaseMs = millis();
+          Serial.println("ESTACIONANDO fase 4: Centrado recto adelante");
+        }
+        break;
+      }
+
+      // ── Fase 4: CENTRADO CORTO — avance recto con heading hold para no rozar postes ──
+      if (parkFase == 4) {
         motorAdelante();
         errorGyro = 0.0f - anguloGyro;
         float outGyro = KpGyro * errorGyro;
@@ -2440,14 +2456,14 @@ void loop() {
         if (millis() - parkFaseMs >= PARK_CENTER_MS) {
           motorCoast();
           escribirServo(centroServo);
-          parkFase   = 4;
+          parkFase   = 5;
           parkFaseMs = millis();
         }
         break;
       }
 
-      // ── Fase 4: FIN — coche completamente estacionado y apagado ─────────────
-      if (parkFase == 4) {
+      // ── Fase 5: FIN — coche completamente estacionado y apagado ─────────────
+      if (parkFase == 5) {
         setMotor(0);
         escribirServo(centroServo);
         raceFinished = true;
