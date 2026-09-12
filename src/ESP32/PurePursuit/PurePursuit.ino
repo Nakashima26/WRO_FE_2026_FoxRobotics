@@ -2525,12 +2525,14 @@ void loop() {
         break;
       }
 
-      // ── Fase 4: CENTRADO CORTO — avance recto con heading hold para no rozar postes ──
+      // ── Fase 4: CENTRADO CORTO — avance adelante para terminar de emparejar y centrar ──
       if (parkFase == 4) {
         motorAdelante();
         errorGyro = 0.0f - anguloGyro;
-        float outGyro = KpGyro * errorGyro;
-        escribirServo(constrain(centroServo + (int)outGyro, 65, 95));
+        // Corrección de dirección con buena autoridad (±40° de servo) para
+        // terminar de emparejar el chasis a 0° mientras avanza hacia adelante.
+        float outGyro = 2.0f * errorGyro;
+        escribirServo(constrain(centroServo + (int)outGyro, 40, 120));
         setMotor(PARK_CENTER_PWM);
 
         bool dfTargetAlcanzado = (distF > 0 && distF <= PARK_CENTER_TARGET_DF_CM);
