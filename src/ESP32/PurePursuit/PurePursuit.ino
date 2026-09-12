@@ -460,7 +460,7 @@ const unsigned long INICIO_MID_MS      = 1;  // fase 2: tramo recto entre los do
 const int  INICIO_ENDEREZA_MARGEN_DEG  = 8;    // fase 3: sale de la contravuelta con este margen a 0
 const unsigned long INICIO_CONTRA_TIMEOUT_MS = 4000; // red de seguridad de la fase 3
 const int  INICIO_REV_PWM             = 100;  // fase 5: PWM de la reversa
-const unsigned long INICIO_REV_MS      = 2250; // fase 5: duración de la reversa (colchón de seguridad)
+const unsigned long INICIO_REV_MS      = 1800; // fase 5: duración de la reversa (colchón de seguridad)
 const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
                                               // (si el cajón deja lectura ambigua, no se arriesga el
                                               //  latch global: la 1ª esquina real decide como siempre)
@@ -1513,6 +1513,7 @@ void loop() {
                   : INICIO_PWM;
         motorAdelante();
         escribirServo(inicioGirarDer ? 20 : 150);   // full hacia el lado de salida
+        delay(20);
         setMotor(vel);
         bool swingListo   = (deltaIni >= (float)(INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
