@@ -80,6 +80,28 @@ FLOOR_UPPER = np.array([35, 80, 255])
 FLOOR_LOWER_BLUE = np.array([95, 50, 10])
 FLOOR_UPPER_BLUE = np.array([150, 255, 220])
 
+# ─── Corrección de color por el piso (otra iluminación) — ver color_corr.py ───
+# Escala B,G,R de cada frame para que el piso de la franja de abajo quede del
+# color que tenía en el cuarto de pruebas -> los rangos HSV de todo el proyecto
+# siguen sirviendo con otra luz (orillas900: cinta naranja H 9->4, caía en rojo).
+# Con la luz de siempre las ganancias salen ~1.00 (no cambia nada). Si en el
+# cuarto de pruebas el log [COLOR] muestra ganancias lejos de 1, copia aquí el
+# piso_BGR que imprime.
+COLOR_CORR_ENABLED        = True
+COLOR_CORR_FLOOR_REF_BGR  = (175.0, 198.0, 213.0)  # piso del cuarto de pruebas (medido en orillas854)
+COLOR_CORR_EVERY_N        = 5      # re-mide el piso cada N frames (la tabla se aplica en TODOS)
+COLOR_CORR_ALPHA          = 0.3    # EMA de la ganancia por medida (suave, no parpadea)
+COLOR_CORR_ROI_TOP        = 0.70   # franja de medida: el 30% de abajo del frame (piso frente al carro)
+COLOR_CORR_FLOOR_S_MAX    = 90     # px de piso: poco saturados...
+COLOR_CORR_FLOOR_V_MIN    = 60     # ...y no oscuros (fuera paredes negras / sombras duras)
+COLOR_CORR_MIN_FLOOR_FRAC = 0.5    # si menos de esto de la franja es piso (cono enfrente) -> no re-mide
+COLOR_CORR_GAIN_MIN       = 0.6    # topes de ganancia por canal
+COLOR_CORR_GAIN_MAX       = 1.8
+COLOR_CORR_BRILLO_MAX     = 1.2    # el tono se corrige completo; el brillo sube máx. esto (más ->
+                                   # conos rojos reales pasan el tope V<=160 del rango Red)
+COLOR_CORR_SKIP_DELTA     = 0.02   # ganancias a menos de esto de 1.00 -> no aplica la tabla (0 ms)
+COLOR_CORR_LOG_EVERY_S    = 2.0    # log [COLOR] en journalctl (0 = apagado)
+
 FLOOR_LOWER_BLUE_WIDE = np.array([90, 15, 60])   # baja el mínimo de S y sube V
 FLOOR_UPPER_BLUE_WIDE = np.array([150, 255, 230])
 

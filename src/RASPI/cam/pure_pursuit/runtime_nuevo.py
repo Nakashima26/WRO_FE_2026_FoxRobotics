@@ -49,6 +49,7 @@ from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
 from .mid_turn import MidTurnObstacleDetector
 from .bev_recorder import BevRecorder
+from .color_corr import FloorColorCorrector
 from . import config as C
 
 
@@ -193,6 +194,8 @@ class PPRuntime:
         self.turn_dir_tracker = TurnDirectionTracker()
         # FASE 1 mid-turn: solo observa/registra (ver mid_turn.py). No actúa.
         self.mid_turn   = MidTurnObstacleDetector()
+        # Corrección de color por el piso (otra iluminación), ver color_corr.py
+        self.color_corr = FloorColorCorrector()
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -761,6 +764,10 @@ class PPRuntime:
                 timing_ms["cap"] = (now - t_prev_end) * 1000.0
 
                 # ── Visión ──────────────────────────────────────────────────
+                # Corrección de color por el piso ANTES de todo lo que usa
+                # rangos HSV (conos, BEV/naranja/piso, rosa). Con la luz del
+                # cuarto de pruebas las ganancias son ~1 y no cambia nada.
+                frame = self.color_corr.process(frame)
                 frame = cv2.flip(frame, 1)
                 processed_frame, positions = self.vision.process_frame(frame)
                 t_vis = time.perf_counter()
