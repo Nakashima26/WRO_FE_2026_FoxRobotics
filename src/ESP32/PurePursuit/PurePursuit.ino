@@ -567,10 +567,11 @@ const int           PARK_FRENTE_CM            = 18;     // obstáculo frontal < 
 // Escaneo para paralelo (subfases en Fase 0)
 // A PWM 95 ≈ 64 cm/s: hueco 33 cm ≈ 515 ms. El trailing edge del poste 1 NO debe
 // contar como poste 2 (bug: reversa frente a la 1ª pared).
-// Valores del build que SÍ entró (~8:21): fusión P2 + pass 650 + centrado F/R simple.
+// Poste 2 SOLO por caída de sónar (o timeout). park=2 de la Pi en test llega
+// desde el inicio de la recta y disparaba la S dentro del hueco.
 const unsigned long PARK_HUECO_MIN_MS         = 350;    // ms mínimos en hueco antes de aceptar poste 2
 const unsigned long PARK_HUECO_TIMEOUT_MS     = 1400;   // ms: failsafe si el sónar no ve la 2ª pared
-const unsigned long PARK_PASS_EXTRA_MS        = 650;    // ms: avance extra tras rebasar poste 2 (build que SÍ metió)
+const unsigned long PARK_PASS_EXTRA_MS        = 650;    // ms: avance extra tras rebasar poste 2
 
 // Maniobra PARALELA (Fases 1 a 6)
 const unsigned long PARK_FRENO_PREV_MS        = 350;    // coast tras rebasar poste 2 (carro se detiene por completo)
@@ -2735,7 +2736,6 @@ void loop() {
           // como "bajada" los primeros ~200-300 ms. No aceptar nada antes de MIN.
           bool huecoMaduro   = (tHueco >= PARK_HUECO_MIN_MS);
           bool timeoutHueco  = (tHueco >= PARK_HUECO_TIMEOUT_MS);
-          bool piConfirma    = (huecoMaduro && piPark >= 2);
           bool poste2Detect  = false;
 
           if (bajada) {
@@ -2745,17 +2745,17 @@ void loop() {
             parkCaidaCnt = 0;
           }
 
-          // Build ~8:21 que SÍ metió: sónar | cámara (solo si el hueco ya maduró) | timeout
-          if (poste2Detect || piConfirma || timeoutHueco) {
+          // Log 00:55:13: piPark=2 ya venía de la recta → “P2” con dR=25 (hueco)
+          // y la S arrancó ANTES de rebasar la 2ª pared. Cámara solo diagnostica.
+          if (poste2Detect || timeoutHueco) {
             parkScanSubFase = 3;
             parkGapCnt      = 0;
             parkCaidaCnt    = 0;
             Serial.print("PARK: POSTE 2 ALCANZADO (");
-            if      (poste2Detect) Serial.print("sonar caida");
-            else if (piConfirma)   Serial.print("camara piPark>=2");
-            else                   Serial.print("timeout hueco");
+            Serial.print(poste2Detect ? "sonar caida" : "timeout hueco");
             Serial.print(" tHueco="); Serial.print(tHueco);
-            Serial.println("ms)");
+            Serial.print("ms pi="); Serial.print(piPark);
+            Serial.println(")");
           }
         }
         // ── Subfase 3: Sobre Poste 2, esperando despeje ──
