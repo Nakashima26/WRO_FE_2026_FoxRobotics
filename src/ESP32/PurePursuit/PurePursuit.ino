@@ -544,6 +544,12 @@ const float         PARK_KD_RATE              = 0.15f;  // amortiguamiento por v
 const int           PARK_SERVO_MAX            = 35;     // carrera máx. del servo en la recta (deg respecto al centro)
 const int           PARK_PWM                  = 95;     // PWM en recta de seguimiento y escaneo
 
+// Cascada parkBuscando en controlPID (rectas pre-ESTACIONANDO)
+const int           PARK_WALL_FOLLOW_CM       = 24;     // cm: distancia objetivo a la pared exterior
+const float         PARK_WALL_FOLLOW_GAIN     = 1.0f;   // deg de bias angular por cm de error de pared
+const float         PARK_WALL_FOLLOW_MAX_DEG  = 15.0f;  // tope del bias angular hacia la pared (deg)
+const int           PARK_WALL_CLEAR_CM        = 21;     // cm: lateral >= esto = pared normal / hueco (histéresis)
+
 // Detección por caída relativa sobre línea base EMA (Fase 0)
 const float         PARK_BASE_ALPHA           = 0.2f;   // factor de actualización de la línea base EMA
 const int           PARK_BASE_N               = 8;      // lecturas mínimas para validar la línea base
