@@ -532,15 +532,15 @@ const bool          PARK_ENABLED              = true;   // true = activa estacio
 const bool          PARK_MODO_PARALELO        = true;   // true = paralelo 10 pts; false = de punta 7 pts (fallback ParkinHalf)
 const bool          PARK_TEST_MANO            = false;  // true = motor 0, servo activo; prueba a mano viendo telemetría
 const bool          PARK_TEST_DIRECTO         = false;  // true = inicia INMEDIATO en reversa (pon el carro junto al cajón)
-const bool          PARK_TEST_RECTA_COMPLETA  = false;  // true = inicia en recta final (pon el carro al inicio de la recta)
-const bool          PARK_TEST_PARED_IZQ       = true;   // en tests: true = cajón pared IZQ, false = DER
+const bool          PARK_TEST_RECTA_COMPLETA  = true;   // true = inicia en recta final (pon el carro al inicio de la recta)
+const bool          PARK_TEST_PARED_IZQ       = false;  // en tests: true = cajón pared IZQ, false = DER
 
 // Wall follower en cascada (Fase 0)
 const float         PARK_PARED_CM             = 28.0f;  // carril objetivo respecto a la pared exterior (cm)
-const float         PARK_KPOS                 = 0.8f;   // deg por cm de error de posición
-const float         PARK_ANG_MAX_DEG          = 12.0f;  // tope de corrección angular hacia la pared (deg)
+const float         PARK_KPOS                 = 0.5f;   // deg por cm de error de posición (bajado de 0.8: el escaneo oscilaba y pegaba en la pared)
+const float         PARK_ANG_MAX_DEG          = 7.0f;   // tope de corrección angular hacia la pared (bajado de 12: limita el bandazo hacia la pared)
 const float         PARK_KP_ANG               = 2.2f;   // ganancia P del servo hacia el rumbo objetivo
-const float         PARK_KD_RATE              = 0.15f;  // amortiguamiento por velocidad angular (deg/s)
+const float         PARK_KD_RATE              = 0.30f;  // amortiguamiento por velocidad angular (subido de 0.15: menos oscilación de rumbo)
 const int           PARK_SERVO_MAX            = 35;     // carrera máx. del servo en la recta (deg respecto al centro)
 const int           PARK_PWM                  = 95;     // PWM en recta de seguimiento y escaneo
 
@@ -565,8 +565,11 @@ const unsigned long PARK_TIMEOUT_MS           = 10000;  // tiempo máx buscando 
 const int           PARK_FRENTE_CM            = 18;     // obstáculo frontal < esto en fase 0 -> para de inmediato
 
 // Escaneo para paralelo (subfases en Fase 0)
-const unsigned long PARK_HUECO_TIMEOUT_MS     = 650;    // ms: tiempo máx en hueco de 33cm antes de dar por alcanzado poste 2
-const unsigned long PARK_PASS_EXTRA_MS        = 280;    // ms: avance extra tras rebasar poste 2 para colocar eje trasero adelante
+// A PWM 95 ≈ 64 cm/s: hueco 33 cm ≈ 515 ms. El trailing edge del poste 1 NO debe
+// contar como poste 2 (bug: reversa frente a la 1ª pared).
+const unsigned long PARK_HUECO_MIN_MS         = 500;    // ms mínimos en hueco antes de aceptar poste 2 (cajón agrandado)
+const unsigned long PARK_HUECO_TIMEOUT_MS     = 1800;   // ms: failsafe si el sónar no ve la 2ª pared
+const unsigned long PARK_PASS_EXTRA_MS        = 1100;   // ms: avance EXTRA tras rebasar poste 2 (~40 cm a ~37cm/s)
 
 // Maniobra PARALELA (Fases 1 a 6)
 const unsigned long PARK_FRENO_PREV_MS        = 350;    // coast tras rebasar poste 2 (carro se detiene por completo)
@@ -581,9 +584,33 @@ const int           PARK_WALL_TARGET_CM       = 6;      // distancia lateral a l
 const int           PARK_REV_MAX_DF_CM        = 8;      // distancia frontal máxima permitida en reversa antes de cortar (cm)
 const int           PARK_REV_VALID_DF_MAX_CM  = 18;     // rango de validez de sensor frontal viendo poste
 const unsigned long PARK_FRENO_MID2_MS        = 250;    // coast intermedio antes de centrado adelante (ms)
-const unsigned long PARK_CENTER_MS            = 350;    // tiempo de avance recto suave adelante para centrado simétrico en hueco (ms)
-const int           PARK_CENTER_PWM           = 75;     // PWM suave para centrado adelante
-const int           PARK_CENTER_TARGET_DF_CM  = 5;      // objetivo frontal en centrado adelante (cm)
+const unsigned long PARK_CENTER_MS            = 350;    // (legacy) tiempo de avance recto suave; ya no se usa en fase 6
+const int           PARK_CENTER_PWM           = 75;     // PWM suave para centrado (adelante/reversa)
+const int           PARK_CENTER_TARGET_DF_CM  = 5;      // (legacy) objetivo frontal
+
+// Centrado fino de lazo cerrado (Fase 6): histéresis sobre dF (sónar frontal).
+// Chasis 22 cm en cajón de 33 cm -> 11 cm de holgura total. Dejar ~4-5 cm al
+// frente deja ~6-7 cm atrás (sin sensor trasero; la reversa es segura por
+// geometría porque solo reversa cuando el frente está muy cerca).
+const int           PARK_CENTER_REV_CM        = 3;      // dF <= esto -> reversa (pegado al frente)
+const int           PARK_CENTER_ADV_CM        = 8;      // dF >= esto -> avanza (lejos del frente)
+const int           PARK_CENTER_LO_CM         = 4;      // reversa hasta dF >= esto
+const int           PARK_CENTER_HI_CM         = 5;      // avanza  hasta dF <= esto
+const int           PARK_CENTER_HOLD_N        = 4;      // frames estables en banda + paralelo + lateral ~4cm
+const int           PARK_CENTER_DF_MAX_CM     = 18;     // dF mayor = no ve la pared frontal del cajón
+const unsigned long PARK_CENTER_MAX_MS        = 15000;  // failsafe: sawtooth necesita varios ciclos F/R para meterse
+const int           PARK_LAT_TARGET_CM        = 4;      // objetivo sónar lateral del cajón (cm)
+const int           PARK_LAT_OK_LO_CM         = 3;      // banda lateral OK: >= esto
+const int           PARK_LAT_OK_HI_CM         = 5;      // banda lateral OK: <= esto (~4 cm)
+const int           PARK_DENTRO_LAT_CM        = 8;      // lateral <= esto = ya entrando al cajón (ancho 20, carro 15)
+const int           PARK_RETRY_MAX            = 0;      // 0 = NUNCA re-swing (los reintentos empujaban contra la pared 1)
+const int           PARK_LAT_CHOQUE_CM        = 2;      // lateral <= esto en swing/contra = PARA (emergencia)
+const unsigned long PARK_WIGGLE_MS            = 550;    // ms tramo FWD (shuffle)
+const unsigned long PARK_WIGGLE_REV_MS        = 800;    // ms tramo REV (más largo: es el que mete)
+const unsigned long PARK_WIGGLE_MIN_MS        = 300;    // ms mínimos antes de FLIP por yaw
+const int           PARK_WIGGLE_LOCK_DEG      = 42;     // deg desde centro (cerca de tope útil)
+const float         PARK_WIGGLE_MAX_YAW_DEG   = 28.0f;  // yaw alto → flip tras MIN_MS
+const int           PARK_LAT_AFUERA_CM        = 22;     // lateral > esto en fase 6 = ya SALIÓ del cajón (no FWD away)
 
 // Maniobra DE PUNTA (fallback si PARK_MODO_PARALELO == false, probado en ParkinHalf)
 const unsigned long PARK_PUNTA_FRENO_MS        = 350;
@@ -619,6 +646,10 @@ long          parkExtRaw            = 0;      // diag: lectura cruda del sonar e
 long          parkCaidaLectura      = 0;      // diag: lectura que confirmó la caída
 unsigned long parkHuecoEntryMs      = 0;      // t0 de entrada al hueco de 33cm
 unsigned long parkPassExtraMs       = 0;      // t0 del avance extra tras rebasar poste 2
+int           parkCenterMode        = 0;      // fase 6: 0=evaluando, 1=avanzando, 2=reversando
+int           parkCenterOkCnt       = 0;      // fase 6: frames estables en banda objetivo
+int           parkRetryN            = 0;      // reintentos de swing si no entra al cajón
+unsigned long parkWiggleMs          = 0;      // t0 del tramo actual de vaivén (fase 6)
 unsigned long parkLogMs             = 0;
 bool          parkParedEsIzquierda  = false;
 bool          cajonParedEsIzquierda = false;  // detectada y latcheada en INICIO
@@ -860,6 +891,10 @@ void iniciarEstacionando() {
   parkCaidaLectura     = 0;
   parkHuecoEntryMs     = 0;
   parkPassExtraMs      = 0;
+  parkCenterMode       = 0;
+  parkCenterOkCnt      = 0;
+  parkRetryN           = 0;
+  parkWiggleMs         = 0;
 
   // El cajón SIEMPRE está en la pared EXTERIOR de la recta inicial:
   // Si arrancó en el cajón (INICIO), recordamos exactamente cuál pared fue.
@@ -2586,7 +2621,14 @@ void loop() {
     // ESTACIONANDO — Estacionamiento en paralelo en reversa (Obstacle Challenge)
     // ═══════════════════════════════════════════════════════════════════════════
     case ESTACIONANDO: {
-      long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
+      // Sónar lateral del cajón con MEDIANA DE 3 (anti-glitch): el HC-SR04 lateral
+      // tiraba picos de 55-106 cm por multipath/eco perdido que el código crudo
+      // tomaba como "poste" o "hueco" y colapsaba el escaneo. La mediana los mata
+      // (un pico de 1 frame no sobrevive) preservando los flancos reales de pared.
+      static long parkExtBuf[3] = {200, 200, 200};
+      static int  parkExtIdx    = 0;
+      long  extInst         = parkParedEsIzquierda ? distL_raw : distR_raw;
+      long  extRaw          = mediana3(extInst, parkExtBuf, parkExtIdx);
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
       int   servoHaciaPared = parkParedEsIzquierda ? 150 : 20;      // tope hacia la pared exterior
       int   servoDesdePared = parkParedEsIzquierda ? 20 : 150;      // contravuelta hacia el interior
@@ -2670,6 +2712,7 @@ void loop() {
             // Modo Paralelo: avanza a subfase 1 (espera hueco tras poste 1)
             parkScanSubFase = 1;
             parkGapCnt      = 0;
+            parkCaidaCnt    = 0;  // no arrastrar la caída del poste 1
           }
         }
         // ── Subfase 1: Sobre Poste 1, esperando hueco ──
@@ -2689,25 +2732,31 @@ void loop() {
         }
         // ── Subfase 2: En Hueco de 33 cm, buscando Poste 2 ──
         else if (parkScanSubFase == 2) {
-          bool timeoutHueco = (millis() - parkHuecoEntryMs >= PARK_HUECO_TIMEOUT_MS);
-          bool piConfirma   = (piPark >= 2);
-          bool poste2Detect = false;
+          unsigned long tHueco = millis() - parkHuecoEntryMs;
+          // Gate anti-falso: el trailing edge del poste 1 todavía puede verse
+          // como "bajada" los primeros ~200-300 ms. No aceptar nada antes de MIN.
+          bool huecoMaduro   = (tHueco >= PARK_HUECO_MIN_MS);
+          bool timeoutHueco  = (tHueco >= PARK_HUECO_TIMEOUT_MS);
+          bool poste2Detect  = false;
 
           if (bajada) {
             parkCaidaCnt++;
-            if (parkCaidaCnt >= 1) poste2Detect = true;
+            if (huecoMaduro && parkCaidaCnt >= PARK_CAIDA_N) poste2Detect = true;
           } else {
             parkCaidaCnt = 0;
           }
 
-          if (poste2Detect || timeoutHueco || piConfirma) {
+          // Poste 2 SOLO por caída de sónar o timeout largo.
+          // piPark>=2 NO dispara: con el cajón a la vista (o agrandado) la Pi manda
+          // park=2 demasiado pronto y la reversa arranca SIN rebasar la 2ª pared.
+          if (poste2Detect || timeoutHueco) {
             parkScanSubFase = 3;
             parkGapCnt      = 0;
+            parkCaidaCnt    = 0;
             Serial.print("PARK: POSTE 2 ALCANZADO (");
-            if (poste2Detect) Serial.print("sonar caida");
-            else if (timeoutHueco) Serial.print("timeout hueco 33cm");
-            else Serial.print("piPark>=2");
-            Serial.println(")");
+            Serial.print(poste2Detect ? "sonar caida" : "timeout hueco");
+            Serial.print(" tHueco="); Serial.print(tHueco);
+            Serial.println("ms)");
           }
         }
         // ── Subfase 3: Sobre Poste 2, esperando despeje ──
@@ -2801,20 +2850,27 @@ void loop() {
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
 
-        float girado      = (anguloGyro - parkRumboRef) * haciaPared;  // >0 rotando cola hacia la pared
-        bool swingListo   = (girado >= (float)(PARK_ANG_IN_DEG - PARK_OVERSHOOT_DEG));
+        // Magnitud del giro (robusto al signo/lado): el ParkinHalf que funcionaba
+        // usaba fabs(). Con la versión con signo, en pared DERECHA el gyro subía
+        // y "swingListo" nunca se cumplía -> corría al timeout y sobre-giraba.
+        float swingMag    = fabs(anguloGyro - parkRumboRef);
+        bool swingListo   = (swingMag >= (float)(PARK_ANG_IN_DEG - PARK_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
         bool dfTope       = (distF_filtrada > 0 && distF_filtrada <= PARK_REV_MAX_DF_CM);
+        long extNow       = parkParedEsIzquierda ? distL_filtrada : distR_filtrada;
+        bool latChoque    = (extNow > 0 && extNow <= PARK_LAT_CHOQUE_CM);
 
-        if (swingListo || swingTimeout || dfTope) {
+        if (swingListo || swingTimeout || dfTope || latChoque) {
           motorCoast();
           escribirServo(centroServo);
           parkFase   = 3;
           parkFaseMs = millis();
-          Serial.print("PARK fase 3: FRENO MID 1 (girado=");
-          Serial.print(girado, 1);
+          Serial.print("PARK fase 3: FRENO MID 1 (swing=");
+          Serial.print(swingMag, 1);
           Serial.print(" dF="); Serial.print(distF_filtrada);
-          if (dfTope) Serial.print(" TOPE_DF");
+          Serial.print(" ext="); Serial.print(extNow);
+          if (dfTope)    Serial.print(" TOPE_DF");
+          if (latChoque) Serial.print(" LAT_CHOQUE");
           Serial.println(swingTimeout ? " TIMEOUT)" : ")");
         }
         break;
@@ -2860,12 +2916,15 @@ void loop() {
           long  extDist    = parkParedEsIzquierda ? distL_filtrada : distR_filtrada;
           bool alineado    = (difHeading <= PARK_ENDEREZA_TOL_DEG);
           bool paredCerca  = (extDist > 0 && extDist <= PARK_WALL_TARGET_CM && difHeading <= 8.0f);
+          bool latChoque   = (extDist > 0 && extDist <= PARK_LAT_CHOQUE_CM);  // pegado aunque siga chueco
           bool dfTope      = (distF_filtrada > 0 && distF_filtrada <= PARK_REV_MAX_DF_CM);
           bool timeout     = (millis() - parkFaseMs >= PARK_CONTRA_TIMEOUT_MS);
 
-          if (alineado || paredCerca || dfTope || timeout) {
+          if (alineado || paredCerca || latChoque || dfTope || timeout) {
             motorCoast();
             escribirServo(centroServo);
+            // NUNCA re-swing: el 2º intento empujaba contra la pared 1 (dR→3).
+            // Si quedó afuera, el vaivén de fase 6 corrige con F/R suave.
             if (PARK_CENTER_MS > 0) {
               parkFase   = 5;
               parkFaseMs = millis();
@@ -2874,10 +2933,11 @@ void loop() {
               Serial.print(" ext="); Serial.print(extDist);
               if (alineado)   Serial.print(" ALINEADO");
               if (paredCerca) Serial.print(" PARED_CERCA");
+              if (latChoque)  Serial.print(" LAT_CHOQUE");
               if (dfTope)     Serial.print(" TOPE_DF");
               Serial.println(timeout ? " TIMEOUT)" : ")");
             } else {
-              finalizarPark(alineado ? "Paralelo ALINEADO" : (paredCerca ? "Paralelo PARED_CERCA" : "Paralelo TIMEOUT/DF"));
+              finalizarPark(alineado ? "Paralelo ALINEADO" : (paredCerca || latChoque ? "Paralelo LAT" : "Paralelo TIMEOUT/DF"));
             }
           }
         } else {
@@ -2912,10 +2972,12 @@ void loop() {
           motorCoast();
           escribirServo(centroServo);
           if (millis() - parkFaseMs >= PARK_FRENO_MID2_MS) {
-            motorAdelante();
-            parkFase   = 6;
-            parkFaseMs = millis();
-            Serial.println("PARK fase 6: CENTRADO ADELANTE");
+            parkCenterMode  = 2;   // empieza REV (hacia cajón)
+            parkCenterOkCnt = 0;
+            parkWiggleMs    = millis();
+            parkFase        = 6;
+            parkFaseMs      = millis();
+            Serial.println("PARK fase 6: SHUFFLE v8 (pasa P2 + no FWD si afuera)");
           }
         } else {
           // De Punta: ENTRA
@@ -2929,18 +2991,163 @@ void loop() {
         break;
       }
 
-      // ── Fase 6: CENTRADO ADELANTE (Paralelo) ───────────────────────────────
+      // ── Fase 6: SHUFFLE paralelo (traslación lateral Ackermann) ────────────
+      // Geometría clásica para ACERCARSE a la pared del cajón sin cancelarse:
+      //   REVERSA + llantas HACIA el cajón  → mete la cola
+      //   ADELANTE + llantas HACIA AFUERA → el eje trasero también se acerca
+      // (v6 usaba el MISMO ángulo en F y R → la reversa anulaba el avance lateral:
+      //  "corrige enfrente, atrás derecho, mismo punto").
+      // Objetivo: lat 3-5 cm + dF 4-5 + paralelo.
       if (parkFase == 6) {
-        motorAdelante();
-        servoRumboPark(parkRumboRef);  // Mantiene rumbo perfectamente paralelo a la pared
-        setMotor(PARK_CENTER_PWM);
+        long  df         = (long)distF_filtrada;
+        long  extNow     = parkParedEsIzquierda ? distL_filtrada : distR_filtrada;
+        bool  dfValido   = (df > 0 && df <= PARK_CENTER_DF_MAX_CM);
+        float difHeading = fabs(anguloGyro - parkRumboRef);
+        bool  paralelo   = (difHeading <= PARK_ENDEREZA_TOL_DEG);
+        bool  enBandaF   = (dfValido && df >= PARK_CENTER_LO_CM && df <= PARK_CENTER_HI_CM);
+        bool  latOk      = (extNow > 0 && extNow >= PARK_LAT_OK_LO_CM && extNow <= PARK_LAT_OK_HI_CM);
+        bool  latLejos   = (extNow <= 0 || extNow > PARK_LAT_OK_HI_CM);
+        bool  latChoqueF = (extNow > 0 && extNow < PARK_LAT_OK_LO_CM);
+        unsigned long segMs = millis() - parkWiggleMs;
 
-        bool dfTarget      = (distF_filtrada > 0 && distF_filtrada <= PARK_CENTER_TARGET_DF_CM);
-        bool timeoutCenter = (millis() - parkFaseMs >= PARK_CENTER_MS);
-
-        if (dfTarget || timeoutCenter) {
-          finalizarPark("Centrado paralelo OK - 10 PUNTOS WRO");
+        if (millis() - parkFaseMs >= PARK_CENTER_MAX_MS) {
+          finalizarPark((enBandaF && latOk) ? "Centrado TIMEOUT OK" : "Centrado TIMEOUT lejos");
+          break;
         }
+
+        if (enBandaF && latOk && paralelo) {
+          parkCenterOkCnt++;
+          motorCoast();
+          setMotor(0);
+          servoRumboPark(parkRumboRef);
+          if (parkCenterOkCnt >= PARK_CENTER_HOLD_N) {
+            finalizarPark("Centrado OK dF=4-5 lat~4cm paralelo");
+          }
+          break;
+        }
+        parkCenterOkCnt = 0;
+
+        int lock = PARK_WIGGLE_LOCK_DEG;
+        // + = izquierda. Hacia cajón IZQ => +lock; hacia DER => -lock.
+        int servoToward = constrain(centroServo + (parkParedEsIzquierda ? lock : -lock), 20, 150);
+        int servoAway   = constrain(centroServo + (parkParedEsIzquierda ? -lock : lock), 20, 150);
+
+        // ── Traslación lateral mientras no esté a ~4 cm ───────────────────────
+        if (latLejos && !latChoqueF) {
+          unsigned long lim = (parkCenterMode == 2) ? PARK_WIGGLE_REV_MS : PARK_WIGGLE_MS;
+          bool tooCloseF = (dfValido && df <= PARK_CENTER_LO_CM);
+          bool afuera    = (extNow > PARK_LAT_AFUERA_CM);  // salió del cajón
+          bool yawMalo   = (difHeading > 40.0f);
+          bool flipT     = (segMs >= lim);
+          bool flipYaw   = (difHeading > PARK_WIGGLE_MAX_YAW_DEG && segMs >= PARK_WIGGLE_MIN_MS);
+
+          // Si ya salió o está muy chueco: SOLO REV hacia el cajón (nunca FWD away —
+          // eso lo hacía ciclar por fuera a 90°).
+          if (afuera || yawMalo) {
+            if (yawMalo && afuera && segMs >= 2000) {
+              finalizarPark("SHUFFLE abort: afuera y chueco");
+              break;
+            }
+            parkCenterMode = 2;
+            motorReversa();
+            escribirServo(servoToward);
+            setMotor(PARK_CENTER_PWM);
+            Serial.print(" | PARK f=6 RESCATE REV srv="); Serial.print(servoToward);
+            Serial.print(" ext="); Serial.print(extNow);
+            Serial.print(" dif="); Serial.println(difHeading, 1);
+            break;
+          }
+
+          if (tooCloseF && parkCenterMode == 1 && segMs >= PARK_WIGGLE_MIN_MS) {
+            motorCoast();
+            setMotor(0);
+            parkCenterMode = 2;
+            parkWiggleMs   = millis();
+            Serial.print(" | PARK f=6 SHUFFLE dF bajo ->REV ext="); Serial.println(extNow);
+            break;
+          }
+
+          if (flipT || flipYaw) {
+            motorCoast();
+            setMotor(0);
+            parkCenterMode = (parkCenterMode == 1) ? 2 : 1;
+            parkWiggleMs   = millis();
+            Serial.print(" | PARK f=6 SHUFFLE-FLIP ");
+            Serial.print(flipYaw ? "yaw" : "t");
+            Serial.print(" ->"); Serial.print(parkCenterMode == 2 ? "REV" : "FWD");
+            Serial.print(" ext="); Serial.println(extNow);
+            break;
+          }
+
+          if (parkCenterMode == 2) {
+            motorReversa();
+            escribirServo(servoToward);
+            setMotor(PARK_CENTER_PWM);
+          } else {
+            motorAdelante();
+            escribirServo(servoAway);
+            setMotor(PARK_CENTER_PWM);
+          }
+          Serial.print(" | PARK f=6 SHUFFLE ");
+          Serial.print(parkCenterMode == 2 ? "REV" : "FWD");
+          Serial.print(" srv="); Serial.print(parkCenterMode == 2 ? servoToward : servoAway);
+          Serial.print(" dF="); Serial.print(df);
+          Serial.print(" ext="); Serial.print(extNow);
+          Serial.print(" ->lat"); Serial.print(PARK_LAT_TARGET_CM);
+          break;
+        }
+
+        // ── Lateral OK: afina solo el frente ─────────────────────────────────
+        if (!dfValido) {
+          motorCoast();
+          setMotor(0);
+          servoRumboPark(parkRumboRef);
+          break;
+        }
+
+        int nextMode = parkCenterMode;
+        if (df <= PARK_CENTER_REV_CM || (parkCenterMode == 2 && df < PARK_CENTER_LO_CM)) {
+          nextMode = 2;
+        } else if (df >= PARK_CENTER_ADV_CM || (parkCenterMode == 1 && df > PARK_CENTER_HI_CM)) {
+          nextMode = 1;
+        } else if (df > PARK_CENTER_HI_CM) {
+          nextMode = 1;
+        } else if (df < PARK_CENTER_LO_CM) {
+          nextMode = 2;
+        } else {
+          nextMode = 0;
+        }
+
+        if (nextMode != parkCenterMode && parkCenterMode != 0 && nextMode != 0) {
+          motorCoast();
+          setMotor(0);
+          if (nextMode == 2) {
+            integralRev = 0; prevErrorRev = 0; lastRevHoldMs = millis();
+          }
+          parkCenterMode = nextMode;
+          break;
+        }
+        if (nextMode == 2 && parkCenterMode != 2) {
+          integralRev = 0; prevErrorRev = 0; lastRevHoldMs = millis();
+        }
+        parkCenterMode = nextMode;
+
+        if (parkCenterMode == 2) {
+          motorReversa();
+          aplicarReversaHold(parkRumboRef);
+          setMotor(PARK_CENTER_PWM);
+        } else if (parkCenterMode == 1) {
+          motorAdelante();
+          servoRumboPark(parkRumboRef);
+          setMotor(PARK_CENTER_PWM);
+        } else {
+          motorCoast();
+          setMotor(0);
+          servoRumboPark(parkRumboRef);
+        }
+        Serial.print(" | PARK f=6 dF="); Serial.print(df);
+        Serial.print(" ext="); Serial.print(extNow);
+        Serial.print(" mode="); Serial.print(parkCenterMode);
         break;
       }
 
