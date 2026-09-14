@@ -691,7 +691,15 @@ LOCK_MATCH_RADIUS_PX = 70.0
 # reaparecía a y=280-284 -> rojo sin esquivar. 60 >> los 12px de orillas488 (el
 # caso de vaivén que el LOCK evita). MAX_Y=320 deja fuera un cono que ya va al
 # lado del carro (esos se ven a y~330-345 y solo estimados, no visibles).
-LOCK_SWITCH_CLOSER_PX = 60.0
+# 2026-09-14: 60 -> 40. orillas932 v1: el verde de la recta siguiente se vio 1 frame
+# antes que el rojo (entraba por el borde de la imagen durante RECUPERANDO), el LOCK
+# quedó en el verde y el rojo apareció 52/49/48px más cerca -> nunca cambió -> choque.
+# 40 sigue >> 12px de 488. Se probó "re-elegir por bbox al llegar el 2do cono" en vez
+# de esto y en orillas936 eligió un verde FANTASMA de memoria (sin detección, tomaba
+# prestado el bbox del rojo) -> choque; esta regla exige VISIBLE, un fantasma no pasa.
+# Simulado en 928-936: solo cambia el frame del choque de 932 (+2 cambios verde->verde
+# al arrancar).
+LOCK_SWITCH_CLOSER_PX = 40.0
 LOCK_SWITCH_VIS_PX    = 25.0
 LOCK_SWITCH_MAX_Y     = 320.0
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
