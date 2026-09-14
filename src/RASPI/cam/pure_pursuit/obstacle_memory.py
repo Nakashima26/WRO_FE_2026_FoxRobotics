@@ -530,16 +530,29 @@ class ObstacleMemory:
             if o.y > behind_y:                       # ya quedó detrás del robot
                 on_axis = abs(o.x0 - self.rx) <= pass_halfw
                 # Esquiva de DESPLAZAMIENTO LATERAL: la lata iba centrada y el
-                # carro SÍ está virando -- pero hacia el lado CONTRARIO de la
-                # lata (la esquiva de lado, casi sin rotar, así que la vía (b)
-                # por yaw no la agarra). Sin esto una esquiva lateral de una lata
-                # MÍA cae en DESCARTE_DE_LADO -> nunca manda pasado -> el ESP
-                # endereza encima de la lata que sigue ahí (run 2026-09-07).
+                # carro SÍ está virando -- hacia su LADO DE PASO (la esquiva de
+                # lado, casi sin rotar, así que la vía (b) por yaw no la agarra).
+                # Sin esto una esquiva lateral de una lata MÍA cae en
+                # DESCARTE_DE_LADO -> nunca manda pasado -> el ESP endereza encima
+                # de la lata que sigue ahí (run 2026-09-07).
+                # El lado de paso lo fija el COLOR (rojo por la derecha = steer>0,
+                # verde por la izquierda = steer<0), NO el lado del eje donde quedó
+                # x0: con el signo de x0, un rojo 11px a la derecha del centro
+                # esquivado por la derecha contaba como "virando HACIA la lata" ->
+                # DESCARTE_DE_LADO sin RECUPERANDO -> el chasis siguió a -26° hacia
+                # la pared exterior (orillas928 vuelta 2 x0=211 yaw=22; orillas929
+                # vuelta 3 x0=218 yaw=26). Colores sin lado de paso: signo de x0.
                 # Excluye beyond (siguiente segmento) y exige steer > umbral.
+                if o.color == "Red":
+                    _hacia_lado_paso = steer_deg > 0.0
+                elif o.color == "Green":
+                    _hacia_lado_paso = steer_deg < 0.0
+                else:
+                    _hacia_lado_paso = (steer_deg > 0.0) != ((o.x0 - self.rx) > 0.0)
                 steering_away = (
                     steering_now
                     and o.beyond is not True
-                    and (steer_deg > 0.0) != ((o.x0 - self.rx) > 0.0)
+                    and _hacia_lado_paso
                 )
                 centered = on_axis and (not steering_now or steering_away)
                 have_h = o.heading0 is not None and self._prev_heading is not None
@@ -560,7 +573,7 @@ class ObstacleMemory:
                     self.last_prune_reason = (
                         f"PASADO y={o.y:.0f}>{behind_y} ymin={o.y_min:.0f} "
                         f"x0={o.x0:.0f} yaw={yawed:.0f} "
-                        f"{_via} conf={o.conf:.2f}"
+                        f"{_via} conf={o.conf:.2f} beyond={o.beyond}"
                     )
                     passed = True
                 elif was_ahead:
