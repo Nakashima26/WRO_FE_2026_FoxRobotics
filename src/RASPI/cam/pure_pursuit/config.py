@@ -1117,3 +1117,23 @@ SERIAL_PORT    = "/dev/ttyS0"
 BAUDRATE       = 115200
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
+
+# ── Chequeo de cámara antes de dar LISTO (2026-09-14) ──────────────────────────
+# orillas940: la cámara arrancó mandando frames NEGROS y a los 5 s del GO libcamera
+# dio "Camera frontend has timed out"; el runtime siguió procesando el último frame
+# (ThreadedFrameGrabber.read() lo repite para siempre) con el LED de LISTO encendido.
+# Ahora el LED NO se prende hasta ver CAM_CHECK_FRAMES frames NUEVOS con imagen real
+# en CAM_CHECK_TIMEOUT_S; si falla, se cierra y reabre la cámara y se reintenta
+# (indefinidamente, LED apagado). Mientras espera el botón (desarmado) se sigue
+# vigilando: sin frames nuevos por CAM_STALE_S o CAM_BLACK_FRAMES negros seguidos ->
+# LED apagado, se cancela un botón pendiente y se repite el chequeo. Ya ARMADO no se
+# toca nada (reabrir a media ronda queda pendiente).
+CAM_CHECK_ENABLED   = True
+CAM_CHECK_FRAMES    = 15     # frames nuevos con imagen real para aprobar
+CAM_CHECK_TIMEOUT_S = 3.0    # tiempo máximo por intento
+CAM_CHECK_P99_MIN   = 60     # percentil 99 de luminancia por debajo = frame negro
+CAM_STALE_S         = 1.0    # desarmado: sin frame nuevo por esto -> cámara caída
+CAM_BLACK_FRAMES    = 15     # desarmado: frames negros seguidos -> cámara caída
+CAM_REOPEN_WAIT_S   = 4.0    # espera tras soltar la cámara antes de reabrir (igual que stop + sleep 4 + start)
+CAM_REOPEN_JOIN_S   = 35.0   # espera a que el hilo salga de un cap.read() colgado (~30 s); si no, el
+                             # proceso sale con código 3 y systemd (Restart=always) lo relanza

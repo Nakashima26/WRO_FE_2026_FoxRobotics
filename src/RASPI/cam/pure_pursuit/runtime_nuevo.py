@@ -32,7 +32,7 @@ _CAM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _CAM_DIR not in sys.path:
     sys.path.insert(0, _CAM_DIR)
 
-from vision import Vision
+from vision import Vision, open_camera
 from wro_runtime import (
     ThreadedFrameGrabber,
     AsyncVideoWriter,
@@ -518,6 +518,77 @@ class PPRuntime:
             return self.frame_grabber.read()
         return self.vision.cap.read()
 
+    # ── Chequeo de cámara (ver CAM_CHECK_* en config) ─────────────────────────
+
+    @staticmethod
+    def _frame_negro(frame) -> bool:
+        gray = cv2.cvtColor(frame[::4, ::4], cv2.COLOR_BGR2GRAY)
+        return float(np.percentile(gray, 99)) < C.CAM_CHECK_P99_MIN
+
+    def _camera_check(self) -> tuple[bool, str]:
+        """Espera CAM_CHECK_FRAMES frames NUEVOS con imagen real."""
+        t0 = time.monotonic()
+        last_id, buenos, negros = -1, 0, 0
+        while time.monotonic() - t0 < C.CAM_CHECK_TIMEOUT_S:
+            if self.frame_grabber is not None:
+                fid, _age = self.frame_grabber.freshness()
+                if fid == 0 or fid == last_id:
+                    time.sleep(0.01)
+                    continue
+                last_id = fid
+            ret, frame = self._read_frame()
+            if not ret or frame is None:
+                time.sleep(0.01)
+                continue
+            if self._frame_negro(frame):
+                negros += 1
+            else:
+                buenos += 1
+                if buenos >= C.CAM_CHECK_FRAMES:
+                    return True, f"{buenos} frames buenos en {time.monotonic() - t0:.1f}s"
+        if buenos == 0 and negros == 0:
+            return False, f"sin frames nuevos en {C.CAM_CHECK_TIMEOUT_S:.0f}s"
+        return False, f"{buenos} buenos / {negros} negros en {C.CAM_CHECK_TIMEOUT_S:.0f}s"
+
+    def _reopen_camera(self):
+        if self.frame_grabber is not None:
+            self.frame_grabber.stopped = True
+            self.frame_grabber.thread.join(timeout=C.CAM_REOPEN_JOIN_S)
+            if self.frame_grabber.thread.is_alive():
+                # Soltar la cámara con otro hilo metido en cap.read() puede tumbar
+                # GStreamer; mejor salir y que systemd relance el servicio.
+                print("[CAM-CHECK] Hilo de captura colgado -> salgo (systemd reinicia).", flush=True)
+                os._exit(3)
+            self.frame_grabber = None
+        try:
+            self.vision.cap.release()
+        except Exception as e:
+            print(f"[CAM-CHECK] release falló: {e}", flush=True)
+        time.sleep(C.CAM_REOPEN_WAIT_S)
+        try:
+            self.vision.cap = open_camera(self.cfg.cam_index)
+            self.vision.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception as e:
+            print(f"[CAM-CHECK] No se pudo reabrir la cámara: {e}", flush=True)
+            return
+        self._start_capture()
+
+    def _camera_reopen_and_gate(self):
+        self._reopen_camera()
+        self._camera_gate()
+
+    def _camera_gate(self):
+        """Bloquea (LED apagado) hasta que la cámara entregue imagen real."""
+        intento = 0
+        while True:
+            intento += 1
+            ok, why = self._camera_check()
+            if ok:
+                print(f"[CAM-CHECK] OK ({why}).", flush=True)
+                return
+            print(f"[CAM-CHECK] FALLA intento {intento}: {why} -> reabro la cámara.", flush=True)
+            self._reopen_camera()
+
     def _maybe_record(self, frame: np.ndarray, fps: float,
                       bev: np.ndarray | None = None):
         if not self.cfg.record_orillas:
@@ -664,7 +735,8 @@ class PPRuntime:
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
-    def run(self, on_ready=None, should_start=None, should_record=None):
+    def run(self, on_ready=None, should_start=None, should_record=None,
+            on_camera_lost=None):
         # BLOQUEA hasta que el UART está listo (antes era no-op y el loop
         # arrancaba mandando V2 al vacío ~1.5 s -> el ESP32 rodaba en su
         # fallback wall-PID = "el carro avanza y no le entran datos").
@@ -672,16 +744,24 @@ class PPRuntime:
             print("[SERIAL] UART listo.", flush=True)
         self._start_capture()
 
-        # Warmup de cámara (esperar exposición automática estabilizada).
-        print(f"[INFO] Calentando cámara ({self.cfg.warmup_frames} frames)...", flush=True)
-        warmed = 0
-        while warmed < self.cfg.warmup_frames:
-            ret, _ = self._read_frame()
-            if ret:
-                warmed += 1
-            else:
-                time.sleep(0.01)
+        if C.CAM_CHECK_ENABLED:
+            # Antes de LISTO (el LED lo prende should_start(), que no se llama
+            # hasta el loop de abajo): la cámara tiene que dar imagen real.
+            print("[CAM-CHECK] Verificando que la cámara entregue imagen...", flush=True)
+            self._camera_gate()
+        else:
+            # Warmup de cámara (esperar exposición automática estabilizada).
+            print(f"[INFO] Calentando cámara ({self.cfg.warmup_frames} frames)...", flush=True)
+            warmed = 0
+            while warmed < self.cfg.warmup_frames:
+                ret, _ = self._read_frame()
+                if ret:
+                    warmed += 1
+                else:
+                    time.sleep(0.01)
         print("[INFO] Cámara estabilizada.", flush=True)
+        _cam_last_id  = -1
+        _cam_negros   = 0
 
         # ── ARRANQUE EN CALIENTE ──────────────────────────────────────────────
         # El loop de abajo corre YA (visión, detección, centerline, memoria,
@@ -708,6 +788,27 @@ class PPRuntime:
                 if not ret:
                     time.sleep(0.01)
                     continue
+
+                # ── Vigilancia de cámara mientras espera el botón ────────────
+                # Solo DESARMADO: sin frames nuevos o frames negros -> LED
+                # apagado, botón pendiente cancelado y se repite el chequeo.
+                if C.CAM_CHECK_ENABLED and not armed and self.frame_grabber is not None:
+                    _fid, _age = self.frame_grabber.freshness()
+                    _caida = None
+                    if _age > C.CAM_STALE_S:
+                        _caida = f"sin frames nuevos hace {_age:.1f}s"
+                    elif _fid != _cam_last_id:
+                        _cam_last_id = _fid
+                        _cam_negros = _cam_negros + 1 if self._frame_negro(frame) else 0
+                        if _cam_negros >= C.CAM_BLACK_FRAMES:
+                            _caida = f"{_cam_negros} frames negros seguidos"
+                    if _caida is not None:
+                        print(f"[CAM-CHECK] Cámara caída antes del GO: {_caida}.", flush=True)
+                        if on_camera_lost is not None:
+                            on_camera_lost()
+                        self._camera_reopen_and_gate()
+                        _cam_last_id, _cam_negros = -1, 0
+                        continue
 
                 self.loop_count += 1
                 if self.loop_count % self.cfg.process_every_n != 0:
@@ -1611,6 +1712,16 @@ def main():
         # start-delay), no durante el idle de "esperando botón".
         return _ss["btn_t"] is not None
 
+    def on_camera_lost():
+        # La cámara se cayó ANTES del GO: LED apagado (ya no está listo), se
+        # cancela un botón pendiente y should_start() vuelve a anunciar LISTO
+        # (y prender el LED) solo cuando el chequeo de cámara pase otra vez.
+        _ss["announced"] = False
+        _ss["btn_t"] = None
+        if _gpio is not None:
+            _gpio.output(27, _gpio.LOW)
+            print("[GPIO] LED apagado: cámara sin imagen.", flush=True)
+
     args = parse_args()
 
     threaded = True
@@ -1635,7 +1746,7 @@ def main():
     runtime = PPRuntime(cfg)   # abre la cámara AQUÍ, antes del botón
     try:
         runtime.run(on_ready=led_on, should_start=should_start,
-                    should_record=should_record)
+                    should_record=should_record, on_camera_lost=on_camera_lost)
     except KeyboardInterrupt:
         # SIGTERM (systemctl stop/restart) o Ctrl-C: run() ya corrió su
         # finally (cerró video/serial). Salir sin escupir traceback.
