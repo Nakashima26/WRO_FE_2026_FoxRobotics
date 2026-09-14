@@ -200,6 +200,7 @@ class PPRuntime:
         # Estado de la memoria rodante
         self._last_heading: float | None = None
         self._lock_xy: tuple[float, float] | None = None  # cono primario fijado (>=2 conos)
+        self._lock_de_uno: bool = False  # _lock_xy vino de un frame con UN solo cono (no fue una elección)
         self._last_update_t: float | None = None
         self._prev_estado: str | None = None
         self._esp_inicio: bool = False   # último est= del ACK fue I (ver _parse_inicio)
@@ -1024,12 +1025,29 @@ class PPRuntime:
                                 return bh
                             _lr2 = (getattr(C, "LOCK_MATCH_RADIUS_PX", 70.0)) ** 2
                             _li = None
+                            _refija = False
                             if self._lock_xy is not None:
                                 _bd = _lr2
                                 for _i, (_ox, _oy, _c) in enumerate(bev_obstacles):
                                     _d = (_ox - self._lock_xy[0]) ** 2 + (_oy - self._lock_xy[1]) ** 2
                                     if _d < _bd:
                                         _bd, _li = _d, _i
+                                # Lock heredado de un frame con UN solo cono (nunca
+                                # compitió) y el que acaba de aparecer queda MÁS CERCA
+                                # en y -> se re-elige por bbox en vez de seguir por
+                                # posición. orillas932 v1: durante RECUPERANDO el verde
+                                # de la recta siguiente se vio 1 frame antes que el rojo
+                                # (y=234); el lock quedó en el verde, el rojo apareció
+                                # 52px más cerca (< LOCK_SWITCH_CLOSER_PX=60) y salió de
+                                # la centerline hasta que el verde se podó -> choque.
+                                # Solo "más cerca": un cono nuevo más lejano no le quita
+                                # el lock al que ya va al lado (orillas931, rojo A a y=331
+                                # sin bbox mientras aparecía el rojo B a y=221).
+                                if (_li is not None and self._lock_de_uno
+                                        and any(_oy > bev_obstacles[_li][1]
+                                                for k, (_ox, _oy, _c) in enumerate(bev_obstacles)
+                                                if k != _li)):
+                                    _li, _refija = None, True
                             if _li is None:                       # re-fijar: bbox más grande, empate -> mayor y
                                 _li = max(range(len(bev_obstacles)),
                                           key=lambda k: (_cam_h(*bev_obstacles[k][:2]),
@@ -1064,7 +1082,12 @@ class PPRuntime:
                                           f"{bev_obstacles[_li][1] - _old[1]:.0f}px más cerca que "
                                           f"{_old[2]}@({_old[0]:.0f},{_old[1]:.0f})", flush=True)
                             _lock = bev_obstacles[_li]
+                            if _refija:
+                                print(f"[LOCK] RE-ELIGE (llegó 2do cono): "
+                                      + " ".join(f"{_o[2]}@({_o[0]:.0f},{_o[1]:.0f}) h={_cam_h(_o[0], _o[1]):.0f}"
+                                                 for _o in bev_obstacles), flush=True)
                             self._lock_xy = (_lock[0], _lock[1])
+                            self._lock_de_uno = False
                             # Solo la primaria cuenta como "esquivada" para el
                             # PASADO por giro de _prune (ver _Obs.was_target).
                             self.memory.mark_target(*_lock)
@@ -1077,9 +1100,11 @@ class PPRuntime:
                                   flush=True)
                         elif len(bev_obstacles) == 1:
                             self._lock_xy = (bev_obstacles[0][0], bev_obstacles[0][1])
+                            self._lock_de_uno = True
                             self.memory.mark_target(*bev_obstacles[0])
                         else:
                             self._lock_xy = None
+                            self._lock_de_uno = False
 
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
