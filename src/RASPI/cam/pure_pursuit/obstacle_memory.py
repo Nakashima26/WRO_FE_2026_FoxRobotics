@@ -30,7 +30,7 @@ from . import config as C
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
                  "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "_last_bey", "codet_peers", "was_target")
+                 "_last_bey", "codet_peers", "was_target", "age")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -97,6 +97,10 @@ class _Obs:
         # fue objetivo: una que el LOCK dejó fuera nunca se esquivó, y el yaw
         # acumulado desde que la vio es el de OTRA esquiva (orillas822 vuelta 2).
         self.was_target: bool = False
+        # Frames (update()) que lleva en memoria. Una naranja PROVISIONAL (sin
+        # confirmar) no puede mandar a `beyond` una lata con age >=
+        # LINE_PROVISIONAL_MAX_AGE (ver classify_and_split).
+        self.age: int = 0
 
 
 class ObstacleMemory:
@@ -122,6 +126,7 @@ class ObstacleMemory:
         # evento de una sola vez al empezar la carrera, no algo por-giro.
         self._elapsed_s: float = 0.0
         self.last_passed: bool = False   # ver _prune() / update()
+        self.last_prov_blocked: list = []   # (x, y, color, age) que la naranja provisional NO pudo mandar a beyond
         self.last_prune_reason: str = "-"   # último motivo de poda, para overlay en pantalla
         self.last_confidences: list[float] = []   # alineado 1:1 con la lista que
                                                     # devolvió el último update() —
@@ -325,6 +330,7 @@ class ObstacleMemory:
                     # o es un duplicado de k (k ya tiene >= confianza) → descartar o
                     # (la marca de objetivo sobrevive a la fusión: es la misma lata)
                     k.was_target = k.was_target or o.was_target
+                    k.age = max(k.age, o.age)
                     merged_into_existing = True
                     break
             if not merged_into_existing:
@@ -749,6 +755,8 @@ class ObstacleMemory:
         self._merge(new_obs)
         self._dedupe()
         self.last_passed = self._prune(steer_deg)
+        for o in self._obs:
+            o.age += 1
 
         # Alineado 1:1, mismo orden, con la lista que se retorna abajo --
         # quien la consuma (detect_centerline vía obstacle_conf=) puede
@@ -798,7 +806,8 @@ class ObstacleMemory:
             best.was_target = True
 
     def classify_and_split(
-        self, classify_fn, rescue_fn=None, allow_pending: bool = True
+        self, classify_fn, rescue_fn=None, allow_pending: bool = True,
+        provisional: bool = False
     ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
         """
         Separa los obstáculos en memoria entre "mi recta" y "más allá" de la
@@ -832,14 +841,28 @@ class ObstacleMemory:
         allow_pending: False cuando la línea es la ESTIMADA (dead-reckon): esa
         solo puede diferir veredictos ya votados, no esconder un cono NUEVO.
 
+        provisional: True cuando la naranja es solo la lectura CRUDA de este
+        frame (sin confirmar, ver OrangeLineTracker.has_provisional). Esa solo
+        puede mandar a `beyond` latas NUEVAS (age < LINE_PROVISIONAL_MAX_AGE):
+        las que entran a cuadro junto con la cinta. Una lata que ya se venía
+        viendo espera a la línea confirmada. orillas942 vuelta 2: un óvalo del
+        tapete + el borde del rojo armaron una cinta provisional falsa y el rojo
+        que se esquivaba desde hacía ~13 frames se fue a `beyond` -> roce.
+
         Retorna (mine, beyond, mine_conf) — mine/beyond son listas de
         (x, y, color); mine_conf alineado 1:1 con mine.
         """
         mine: list[tuple[float, float, str]] = []
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
+        self.last_prov_blocked = []
+        _prov_max_age = int(getattr(C, "LINE_PROVISIONAL_MAX_AGE", 0))
         for o in self._obs:
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
+            if (provisional and result is False and o.beyond is not True
+                    and _prov_max_age > 0 and o.age >= _prov_max_age):
+                self.last_prov_blocked.append((o.x, o.y, o.color, o.age))
+                result = None                # sin opinión: sigue como estaba
             prev_bey = o._last_bey
             if result is not None:
                 o._last_bey = (result is False)

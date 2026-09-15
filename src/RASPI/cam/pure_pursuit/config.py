@@ -799,6 +799,11 @@ LINE_CURVE_FRAG_PX       = 10.0  # pedazos de la misma cinta partida por un cono
 LINE_CLASSIFY_CONE_CENTER = True # clasificar el CENTRO del cono, no su pie
 LINE_PROVISIONAL         = True  # lectura cruda de cinta -> puede decir "beyond"
                                  # antes de que la estable se confirme
+LINE_PROVISIONAL_MAX_AGE = 8     # la provisional solo manda a beyond latas con menos de
+                                 # estos frames en memoria (~0.5 s); las que ya se venían
+                                 # viendo esperan a la naranja confirmada. orillas942 v2:
+                                 # óvalo del tapete + borde del rojo = cinta falsa, el rojo
+                                 # (13 frames) se fue a beyond. Correctas en 942: edad 0-3. 0 = apagado
 LINE_PENDING_BEYOND      = True  # cono nuevo del otro lado: no va como `mia`
                                  # mientras vota su primer veredicto
 LINE_HORIZ_FALLBACK_MIN_Y = 285.0  # sin curva ni recta: horizontal solo en la boca

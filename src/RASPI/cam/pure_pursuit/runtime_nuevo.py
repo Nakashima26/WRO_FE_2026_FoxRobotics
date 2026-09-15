@@ -1100,8 +1100,14 @@ class PPRuntime:
                                     ),
                                     rescue_fn=_rescue_fn,
                                     allow_pending=not orange_info.get("dead_reckoned", False),
+                                    provisional=not orange_info["seen"],
                                 )
                             )
+                            if self.memory.last_prov_blocked:
+                                print("[PROVBLOCK] naranja sin confirmar, lata vieja sigue mia: "
+                                      + " ".join(f"{c}({x:.0f},{y:.0f}) edad={a}"
+                                                 for x, y, c, a in self.memory.last_prov_blocked),
+                                      flush=True)
 
                         # ── LOCK al obstáculo primario ── con >=2 conos la
                         # centerline no puede satisfacer dos lados de paso
