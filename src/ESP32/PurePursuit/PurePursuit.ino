@@ -574,7 +574,9 @@ const int           PARK_PWM                  = 95;
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
-const int           PARK_CAIDA_MIN_CM         = 8;      // ignora picos 2-7 cm (glitch HC-SR04)
+// (PARK_CAIDA_MIN_CM=8 quitado 2026-09-15: descartaba el poste cuando el carro pasa
+//  pegado, orillas959 dio 7,5. La lectura se clasifica como ESTACIONANDO_PUNTA y usa
+//  PARK_PUNTA_SALTO_MAX_CM / _ALTO_REBASE_N / _CAIDA_HUECOS_N.)
 const int           PARK_CAIDA_N              = 2;
 const int           PARK_GAP_N                = 2;
 const int           PARK_REBASE_N             = 20;
@@ -614,6 +616,8 @@ int           parkScanSubFase       = 0;
 float         parkBase              = 0.0f;
 int           parkBaseN             = 0;
 int           parkCaidaCnt          = 0;
+int           parkCaidaHuecos       = 0;   // "sin eco" tolerados a media bajada
+int           parkAltasCnt          = 0;   // lecturas altas seguidas (eco perdido/rebote)
 int           parkGapCnt            = 0;
 int           parkInvalidasCnt      = 0;
 int           parkFrenteCnt         = 0;
@@ -1048,6 +1052,8 @@ void resetParkScan() {
   parkBase             = 0.0f;
   parkBaseN            = 0;
   parkCaidaCnt         = 0;
+  parkCaidaHuecos      = 0;
+  parkAltasCnt         = 0;
   parkGapCnt           = 0;
   parkInvalidasCnt     = 0;
   parkFrenteCnt        = 0;
@@ -1582,10 +1588,11 @@ void parsePiMessage(String line) {
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
     Serial2.print(",pb=");   Serial2.print(parkBuscando ? 1 : 0);
-    //   pnf/pnx/pnb : ESTACIONANDO_PUNTA — fase, sonar exterior crudo, línea base
+    //   pnf/pnx/pnb : ESTACIONANDO(_PUNTA) — fase, sonar exterior, línea base (pns = subfase del scan paralelo)
     if (estado == ESTACIONANDO) {
       Serial2.print(",pnf="); Serial2.print(parkFase);
       Serial2.print(",pns="); Serial2.print(parkScanSubFase);
+      Serial2.print(",pnx="); Serial2.print(parkExtRaw);   // sonar exterior (mediana 3) que ve la detección
       Serial2.print(",pnb="); Serial2.print((int)parkBase);
     }
     if (estado == ESTACIONANDO_PUNTA) {
@@ -3055,25 +3062,58 @@ void loop() {
       // ── Fase 0: SEGUIR pared exterior + ESCANEAR cajón ─────────────────────
       if (parkFase == 0) {
         unsigned long tEn = millis() - parkEntryMs;
-        bool lecturaValida = (extRaw > 2 && extRaw <= PARK_PARED_MAX_CM);
-        bool baseLista     = (parkBaseN >= PARK_BASE_N);
+        bool lecturaEnRango = (extRaw > 2 && extRaw <= PARK_PARED_MAX_CM);
+        bool baseLista      = (parkBaseN >= PARK_BASE_N);
 
-        // Bajada candidata: caída relativa respecto a la línea base EMA de la pared exterior
-        bool bajada    = (lecturaValida && baseLista && extRaw >= PARK_CAIDA_MIN_CM
+        // Clasificación de la lectura IGUAL que ESTACIONANDO_PUNTA fase 0 (la de
+        // ParkinHalf que agarra el 1er poste). orillas959: el carro iba a ~26 cm de
+        // la pared, el 1er poste dio 7 y 5 (< el viejo PARK_CAIDA_MIN_CM=8) -> no
+        // contó como bajada y además esas lecturas entraron a la base (26 -> 14);
+        // el 2o poste (12, 11) se tomó como POSTE 1 y buscó un poste 2 que ya había
+        // pasado hasta el TIMEOUT. extRaw ya es mediana de 3: un pico suelto no llega.
+        //
+        // Lectura muy por ENCIMA de la base: eco perdido o rebote, no la pared -> no
+        // mueve base ni error (PARK_PUNTA_SALTO_MAX_CM, orillas942).
+        bool lecturaAlta = baseLista && lecturaEnRango
+                           && extRaw > (long)(parkBase + PARK_PUNTA_SALTO_MAX_CM);
+        if (lecturaAlta) {
+          if (++parkAltasCnt >= PARK_PUNTA_ALTO_REBASE_N) {
+            // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
+            Serial.print("PARK: re-base alto "); Serial.print(parkBase, 1);
+            Serial.print(" -> "); Serial.println(extRaw);
+            parkBase     = (float)extRaw;
+            parkAltasCnt = 0;
+            lecturaAlta  = false;
+          }
+        } else if (lecturaEnRango) {
+          parkAltasCnt = 0;
+        }
+        bool lecturaValida = lecturaEnRango && !lecturaAlta;   // pared: base y error
+
+        // Bajada = muy por debajo de la base, INCLUYENDO 1-7 cm: pasando pegado al
+        // poste el HC-SR04 da su mínimo (orillas898: 2,3; orillas959: 7,5).
+        bool bajada    = (baseLista && extRaw >= 1
                           && extRaw <= (long)(parkBase - PARK_CAIDA_CM));
+        bool sinEco    = (extRaw > PARK_PARED_MAX_CM) || lecturaAlta;   // 200 = sin eco
         bool despejado = (lecturaValida && baseLista && extRaw >= (long)(parkBase - 6));
 
+        // Mientras hay bajada NO se toca la base (el poste no es la pared). Un "sin
+        // eco" a media bajada no la reinicia (hasta PARK_PUNTA_CAIDA_HUECOS_N).
         if (bajada) {
           parkCaidaCnt++;
+          parkCaidaHuecos = 0;
           if (parkCaidaCnt > PARK_REBASE_N) {
             // Duró demasiado para un poste de 2 cm: el carro se acercó a la pared
             Serial.print("PARK: re-base "); Serial.print(parkBase, 1);
             Serial.print(" -> "); Serial.println(extRaw);
-            parkBase     = (float)extRaw;
+            parkBase     = (float)max(extRaw, 3L);
             parkCaidaCnt = 0;
           }
+        } else if (sinEco && parkCaidaCnt > 0 && parkCaidaHuecos < PARK_PUNTA_CAIDA_HUECOS_N) {
+          parkCaidaHuecos++;
         } else {
-          parkCaidaCnt = 0;
+          parkCaidaCnt    = 0;
+          parkCaidaHuecos = 0;
           if (lecturaValida) {
             parkBase = (parkBaseN == 0)
                        ? (float)extRaw
@@ -3081,6 +3121,8 @@ void loop() {
             if (parkBaseN < 1000) parkBaseN++;
           }
         }
+        // Poste confirmado: PARK_CAIDA_N lecturas bajas (mismo criterio para los dos postes).
+        bool posteConfirmado = (parkCaidaCnt >= PARK_CAIDA_N);
 
         {
           unsigned long nowI = millis();
@@ -3116,7 +3158,7 @@ void loop() {
             Serial.println(")");
           }
 
-          if (bajada && armada && parkCaidaCnt >= PARK_CAIDA_N) {
+          if (bajada && armada && posteConfirmado) {
             parkCaidaLectura = extRaw;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
@@ -3166,14 +3208,10 @@ void loop() {
           // Gate anti-falso: el trailing edge del poste 1 todavía puede verse
           // como "bajada" los primeros ~200-300 ms. No aceptar nada antes de MIN.
           bool huecoMaduro   = (tHueco >= PARK_HUECO_MIN_MS);
-          bool poste2Detect  = false;
-
-          if (bajada) {
-            parkCaidaCnt++;
-            if (huecoMaduro && parkCaidaCnt >= PARK_CAIDA_N) poste2Detect = true;
-          } else {
-            parkCaidaCnt = 0;
-          }
+          // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
+          // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
+          // bajada la reiniciaba.
+          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado);
 
           // SOLO caída de sónar. La Pi manda park=2 al ver magenta lejos
           // (recta final, ~1 s tras entrar a ESTACIONANDO) y el timeout de
