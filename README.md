@@ -1160,6 +1160,7 @@ FoxRobotics/
 | Challenge | Link |
 |---|---|
 | Open Challenge — 3 laps autonomous | [YouTube](https://youtu.be/orP-BNSG-6s) |
+| Obstacle Challenge — 3 laps autonomous with obstacles | [YouTube](https://youtu.be/VI6V6hTf_HE) |
 
 > Full video index: [`video/video.md`](video/video.md)
 
