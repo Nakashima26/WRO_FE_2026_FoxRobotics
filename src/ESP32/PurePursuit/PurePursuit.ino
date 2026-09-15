@@ -360,6 +360,14 @@ const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pare
 // (distExt > FAR_CM) retrocede más tiempo, para separarse bien de la recta nueva.
 const int           MANIOBRA_BACKOFF_FAR_CM = 70;
 const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
+// MANIOBRA 13 (solo con PARK_PUNTA_VUELTA_13): tras el pivote la pared que queda
+// ATRÁS es la pared del lote. Aquí el retroceso ya no es por tiers: siempre corre
+// (también en 20-40 cm, donde normalmente no hay) y dura lo suficiente para TOCAR
+// esa pared en el peor caso (distExt > FAR_CM). En los casos cercanos llega antes
+// y se queda empujando -> la media vuelta sale siempre desde la pared, y
+// PARK_RETORNO_AVANCE_MS fija la distancia final al lote. Calibrar con el caso lejano.
+const unsigned long MANIOBRA_BACKOFF_13_MS  = 1350;  // = FAR_MS + 500
+const int           MANIOBRA_BACKOFF_13_VEL = 100;   // PWM (bájalo si empuja muy fuerte contra la pared)
 
 // Grace post-esquiva: SIGUIENDO NO entra a CRUCERO por este tiempo tras el
 // último frame CON obstáculo activo. La Pi manda `pasado=1` unos frames DESPUÉS
@@ -611,7 +619,7 @@ const bool          PARK_TEST_RETORNO          = false;  // true = arranca direc
 const int           PARK_RETORNO_PWM           = 95;
 const int           PARK_RETORNO_PWM_MIN       = 80;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
-const unsigned long PARK_RETORNO_AVANCE_MS     = 200;    // avance recto ANTES de la media vuelta: más = termina más lejos
+const unsigned long PARK_RETORNO_AVANCE_MS     = 300;    // avance recto ANTES de la media vuelta: más = termina más lejos
                                                          // de la pared del lote (0 = gira desde parado como antes)
 const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes de 90; la inercia completa
 const unsigned long PARK_RETORNO_TIMEOUT_MS    = 4000;
@@ -642,6 +650,12 @@ const int           PARK_PUNTA_REBASE_N        = 25;     // bajada que dura esto
 const int           PARK_PUNTA_BASE_N          = 8;      // lecturas de pared antes de armar la detección
 const float         PARK_PUNTA_BASE_ALPHA      = 0.2f;   // EMA de la base (sigue derivas lentas, no la bajada)
 const int           PARK_PUNTA_PARED_MAX_CM    = 80;     // lecturas > esto = sin pared (no entran a la base)
+const int           PARK_PUNTA_SALTO_MAX_CM    = 8;      // lectura > base + esto = eco perdido/rebote, NO la pared: no toca
+                                                         // base ni error. orillas942: antes del 1er poste dR dio 200/96/92/94
+                                                         // y ~60-70; esas <=80 subieron la base 28->41 y metieron el carro a
+                                                         // 15° hacia la pared -> la pared real a 23 pareció "bajada" y giró
+const int           PARK_PUNTA_ALTO_REBASE_N   = 15;     // tantas lecturas altas (en rango) sin ninguna normal = el carro SÍ se
+                                                         // alejó -> nueva base (los "sin eco" no cuentan ni reinician)
 const unsigned long PARK_PUNTA_ARMADO_MS       = 500;    // no detecta antes de esto (deja asentar el giro 12)
 const float         PARK_PUNTA_ARMADO_ANG_DEG  = 28.0f;  // ni con el chasis más chueco que esto (> ANG_MAX_CERCA:
                                                          // alejándose de la pared tiene que seguir armada)
@@ -650,7 +664,13 @@ const bool          PARK_PUNTA_REQUIERE_PI     = true;   // solo acepta la bajad
 const unsigned long PARK_PUNTA_TIMEOUT_MS      = 6000;   // sin bajada en este tiempo -> se detiene donde está.
                                                          // AJÚSTALO: tiene que parar ANTES de salir de la recta de
                                                          // salida (en el regreso, cruzar a la esquina 12 detiene la ronda)
-const int           PARK_PUNTA_FRENTE_CM       = 20;     // algo de frente en la fase 0 -> se detiene
+const int           PARK_PUNTA_FRENTE_CM       = 20;     // algo de frente en la fase 0 -> se detiene (inactivo con SOLO_EXTERIOR)
+const bool          PARK_PUNTA_SOLO_EXTERIOR   = true;   // buscando el cajón (fase 0): solo el sonar exterior (interior y
+                                                         // frontal apagados, sin crosstalk). Al detectar la bajada vuelven
+                                                         // los tres como antes. OJO: en la fase 0 ya no frena por
+                                                         // FRENTE_CM (usa el frontal), solo por TIMEOUT.
+const unsigned long PARK_PUNTA_PING_MIN_MS     = 30;     // fase 0 con un solo sonar: espacio mínimo entre disparos (un HC-SR04
+                                                         // disparado muy seguido oye el eco tardío de su pulso anterior)
 // Maniobra
 const unsigned long PARK_PUNTA_FRENO_MS        = 350;    // coast tras la bajada (el carro se detiene)
 const long          PARK_PUNTA_AJUSTE_MS       = 0;      // + avanza recto / - retrocede recto antes del arco (0 = nada)
@@ -677,6 +697,8 @@ int           puntaBaseN        = 0;
 int           puntaCaidaCnt     = 0;
 int           puntaCaidaHuecos  = 0;     // "sin eco" seguidos dentro de la bajada actual
 int           puntaInvalidasCnt = 0;
+int           puntaAltasCnt     = 0;     // lecturas altas (> base + SALTO_MAX) seguidas sin una normal
+long          puntaAltasTot     = 0;     // total de lecturas altas descartadas en la fase 0 (ACK pna=)
 int           puntaFrenteCnt    = 0;
 int           puntaDfCnt        = 0;
 bool          puntaRosaVisto    = false;
@@ -831,6 +853,13 @@ long mediana3(long nueva, long buf[3], int &idx) {
   return max(min(a, b), min(max(a, b), c));
 }
 
+// La MANIOBRA en curso es la 13 (la de la media vuelta para estacionar). Durante
+// ella turnsCompleted todavía vale 12: finalizarManiobra() lo incrementa al cerrar.
+bool esManiobra13() {
+  return rondaObstaculos && PARK_ENABLED && PARK_DE_PUNTA && PARK_PUNTA_VUELTA_13
+         && turnsCompleted == TURNS_PER_RACE;
+}
+
 // Decide dirección de giro (lado con hueco > umbralPared) y FORWARD vs REVERSE
 // (según la distancia a la pared EXTERIOR, la que SÍ existe — el "sin pared"
 // nunca se usa como número). La llama CRUCERO en el frame del trigger (para
@@ -913,6 +942,8 @@ void arrancarSeguirPunta() {
   puntaCaidaCnt     = 0;
   puntaCaidaHuecos  = 0;
   puntaInvalidasCnt = 0;
+  puntaAltasCnt     = 0;
+  puntaAltasTot     = 0;
   puntaFrenteCnt    = 0;
   puntaDfCnt        = 0;
   puntaErrPared     = 0.0f;
@@ -1351,6 +1382,7 @@ void parsePiMessage(String line) {
       Serial2.print(",pnf="); Serial2.print(puntaFase);
       Serial2.print(",pnx="); Serial2.print(puntaExtRaw);
       Serial2.print(",pnb="); Serial2.print((long)puntaBase);
+      Serial2.print(",pna="); Serial2.print(puntaAltasTot);   // lecturas altas descartadas (eco perdido/rebote)
     }
     //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
     //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
@@ -1804,11 +1836,28 @@ void loop() {
     }
   }
 
+  // ESTACIONANDO_PUNTA con PARK_PUNTA_SOLO_EXTERIOR: SOLO en la fase 0 (ya dio la
+  // vuelta, buscando el cajón) se dispara únicamente el sonar exterior, sin crosstalk
+  // del interior ni del frontal. Al detectar la bajada (fase >= 1) vuelven los tres
+  // como siempre. La media vuelta (20-23), la prueba a mano y el resto de la carrera
+  // no cambian. Un sonar apagado conserva su último valor filtrado.
+  bool puntaBuscando = PARK_PUNTA_SOLO_EXTERIOR && !PARK_PUNTA_TEST_MANO
+                       && estado == ESTACIONANDO_PUNTA && puntaFase == 0;
+  bool leerL = !puntaBuscando || puntaParedIzq;
+  bool leerR = !puntaBuscando || !puntaParedIzq;
+  bool leerF = !puntaBuscando;
+  if (puntaBuscando) {
+    static unsigned long ultPingPuntaMs = 0;
+    unsigned long desdePing = millis() - ultPingPuntaMs;
+    if (desdePing < PARK_PUNTA_PING_MIN_MS) delay(PARK_PUNTA_PING_MIN_MS - desdePing);
+    ultPingPuntaMs = millis();
+  }
+
   mpu.update();
   actualizarGyro();
 
-  long distL_raw = leerDistancia(TRIG_L, ECHO_L);
-  long distR_raw = leerDistancia(TRIG_R, ECHO_R);
+  long distL_raw = leerL ? leerDistancia(TRIG_L, ECHO_L) : (long)distL_filtrada;
+  long distR_raw = leerR ? leerDistancia(TRIG_R, ECHO_R) : (long)distR_filtrada;
   distL_filtrada = filtroEMA(distL_raw, distL_filtrada);
   distR_filtrada = filtroEMA(distR_raw, distR_filtrada);
 
@@ -1818,8 +1867,9 @@ void loop() {
   // Sensor frontal: en ronda de obstáculos alimenta CRUCERO/MANIOBRA; en ronda
   // cerrada sirve para frenar un poco al acercarse a la pared de enfrente
   // (FRONT_SLOWDOWN_CM). Mediana de 5 (rechaza picos) + un EMA suave encima.
-  long distF_med = medianaFront(leerDistancia(TRIG_F, ECHO_F));
-  distF_filtrada = filtroEMA(distF_med, distF_filtrada);
+  // Apagado = 200 ("nada enfrente") para la lógica; el filtrado conserva su valor.
+  long distF_med = leerF ? medianaFront(leerDistancia(TRIG_F, ECHO_F)) : 200;
+  if (leerF) distF_filtrada = filtroEMA(distF_med, distF_filtrada);
   long distF = (long)distF_filtrada;
 
   switch (estado) {
@@ -2568,11 +2618,12 @@ void loop() {
 
       // ── Fase 2: FRENAR tras el pivote ───────────────────────────────────
       //   REV pegado (sin holgura) -> cierra. Resto (holgura o FWD) -> fase 4.
+      //   MANIOBRA 13 -> fase 4 siempre (retrocede hasta la pared del lote).
       if (maniobraFase == 2) {
         motorCoast();
         escribirServo(centroServo);
         if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) {
-          if (maniobraRetroceso || !maniobraReversa) {
+          if (maniobraRetroceso || !maniobraReversa || esManiobra13()) {
             motorReversa();               // motor parado -> arranca en reversa
             maniobraFaseMs      = millis();
             maniobraFase4AngIni = anguloGyro;   // referencia (setpoint) del heading-hold de reversa
@@ -2580,6 +2631,10 @@ void loop() {
             prevErrorRev  = 0;
             lastRevHoldMs = millis();
             maniobraFase        = 4;
+            if (esManiobra13()) {
+              Serial.print("MANIOBRA 13: retroceso a la pared del lote distExt=");
+              Serial.println(maniobraDistExt);
+            }
           } else {
             iniciarSettleManiobra();      // esperar a que deje de rotar -> cierra
           }
@@ -2596,9 +2651,11 @@ void loop() {
       if (maniobraFase == 4) {
         motorReversa();
         aplicarReversaHold(maniobraFase4AngIni);   // lazo cerrado: reversa RECTA (antes: servo al centro)
-        setMotor(MANIOBRA_BACKOFF_VEL);
+        bool m13 = esManiobra13();
+        setMotor(m13 ? MANIOBRA_BACKOFF_13_VEL : MANIOBRA_BACKOFF_VEL);
         unsigned long backoffMs;
-        if      (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
+        if      (m13)                                          backoffMs = MANIOBRA_BACKOFF_13_MS;
+        else if (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
         else if (maniobraDistExt > MANIOBRA_BACKOFF_FAR_CM)    backoffMs = MANIOBRA_BACKOFF_FAR_MS;
         else                                                  backoffMs = MANIOBRA_BACKOFF_MS;
         if (millis() - maniobraFaseMs >= backoffMs) {
@@ -2833,14 +2890,32 @@ void loop() {
       // ── Fase 0: SEGUIR pared exterior + vigilar la bajada ──────────────────
       if (puntaFase == 0) {
         unsigned long tEn = millis() - puntaEntryMs;
-        bool lecturaValida = (extRaw > 2 && extRaw <= PARK_PUNTA_PARED_MAX_CM);   // pared: base y error
-        bool baseLista     = (puntaBaseN >= PARK_PUNTA_BASE_N);
+        bool lecturaEnRango = (extRaw > 2 && extRaw <= PARK_PUNTA_PARED_MAX_CM);
+        bool baseLista      = (puntaBaseN >= PARK_PUNTA_BASE_N);
+        // Lectura muy por ENCIMA de la base: eco perdido o rebote, no la pared -> se
+        // trata como "sin eco" (no mueve base ni error). Ver PARK_PUNTA_SALTO_MAX_CM.
+        bool lecturaAlta    = baseLista && lecturaEnRango
+                              && extRaw > (long)(puntaBase + PARK_PUNTA_SALTO_MAX_CM);
+        if (lecturaAlta) {
+          puntaAltasTot++;
+          if (++puntaAltasCnt >= PARK_PUNTA_ALTO_REBASE_N) {
+            // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
+            Serial.print("PUNTA: re-base alto "); Serial.print(puntaBase, 1);
+            Serial.print(" -> "); Serial.println(extRaw);
+            puntaBase     = (float)extRaw;
+            puntaAltasCnt = 0;
+            lecturaAlta   = false;
+          }
+        } else if (lecturaEnRango) {
+          puntaAltasCnt = 0;
+        }
+        bool lecturaValida  = lecturaEnRango && !lecturaAlta;   // pared: base y error
         // Bajada = lectura muy por debajo de la base. Incluye 1-2 cm: pasando pegado
         // al poste el HC-SR04 está en su mínimo y da 2-3 (orillas898: el 1er poste
         // dio 2,3 y el "2" contaba como inválido y reiniciaba la cuenta).
         bool lecturaBaja   = baseLista && extRaw >= 1
                              && extRaw <= (long)(puntaBase - PARK_PUNTA_CAIDA_CM);
-        bool sinEco        = (extRaw > PARK_PUNTA_PARED_MAX_CM);   // 200 = sin eco
+        bool sinEco        = (extRaw > PARK_PUNTA_PARED_MAX_CM) || lecturaAlta;   // 200 = sin eco
 
         // Mientras hay bajada NO actualiza la base ni el error de pared (el poste no
         // es la pared). Un "sin eco" a media bajada no la reinicia (hasta HUECOS_N).
@@ -2935,6 +3010,7 @@ void loop() {
         Serial.print(" | PUNTA f=0 ext="); Serial.print(extRaw);
         Serial.print(" base=");  Serial.print(puntaBase, 1);
         Serial.print(" caida="); Serial.print(puntaCaidaCnt);
+        Serial.print(" alta=");  Serial.print(lecturaAlta ? 1 : 0);
         Serial.print(" rosa=");  Serial.print(puntaRosaVisto ? 1 : 0);
         Serial.print(" arm=");   Serial.print(armada ? 1 : 0);
         break;
