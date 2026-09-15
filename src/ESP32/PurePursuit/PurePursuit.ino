@@ -591,7 +591,7 @@ const unsigned long PARK_HUECO_MIN_MS         = 0;      // 2026-09-15: 500 -> 0.
                                                         // (la máquina de estados ya ordena poste1/hueco/poste2)
 const unsigned long PARK_HUECO_TIMEOUT_MS     = 2500;
 const unsigned long PARK_PASS_EXTRA_MS        = 650;
-const unsigned long PARK_POSTE2_WAIT_MS       = 500;
+const unsigned long PARK_POSTE2_WAIT_MS       = 750;
 const float         PARK_ALIGN_CM             = 25.0f;
 const unsigned long PARK_SWING_TIMEOUT_MS     = 1000;
 const unsigned long PARK_REV_EXT_HOLD_MS      = 300;
