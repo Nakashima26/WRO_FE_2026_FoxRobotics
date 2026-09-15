@@ -541,6 +541,18 @@ OBS_MEM_REAPPEAR_REJECT   = True
 OBS_MEM_REAPPEAR_LAT_PX   = 40.0
 OBS_MEM_REAPPEAR_AHEAD_PX = 15.0
 
+# Rotación del mapa de memoria con el signo FÍSICO (+dθ) en _advance (2026-09-15).
+# El signo viejo (−dθ) predice la posición de un cono al frame siguiente PEOR que
+# no rotar (18 runs: error lateral mediana 8.6 px vs 2.0 px con +dθ, 4.0 sin rotar).
+# APAGADO a propósito: replay de 18 runs con True -> el PASADO sale ~1 frame antes
+# en ~130 esquivas, PERO aparecen pasado=1 NUEVOS a media esquiva de OTRO cono que
+# sigue enfrente (orillas931 x3, 936, 944 a +68° con el verde a 88 px): con el signo
+# correcto el cono se sigue a través del giro, conserva su heading0 viejo y hereda
+# yaw ajeno -> "PASADO esquiva", o su fantasma cruza behind_y antes -> RECUPERANDO
+# con el otro cono enfrente (mismo modo de falla que orillas822). El signo viejo lo
+# evitaba de rebote. No encender sin un candado que impida ese PASADO.
+OBS_MEM_MAP_ROT_FISICA = False
+
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6

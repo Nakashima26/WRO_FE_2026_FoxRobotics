@@ -168,24 +168,27 @@ class ObstacleMemory:
         Lleva cada obstáculo recordado del frame anterior al frame actual.
 
         El robot avanzó ds_px (hacia arriba/−Y) y giró dheading_deg.  En el marco
-        relativo al robot eso equivale a: la lata baja ds_px y el mundo rota −dθ
-        alrededor del robot.
+        relativo al robot eso equivale a: la lata baja ds_px y el mundo rota
+        alrededor del robot (físicamente +dθ en coordenadas BEV: ang negativo =
+        giro a la derecha -> la lata se corre a la izquierda).
 
         ds_anchor: avance px aplicado al ANCLA dead-reckoning (o.xr,o.yr) del
         trigger "geom" -- normalmente == ds_px, pero se escala aparte con
         OBS_MEM_GEOM_SPEED_SCALE para calibrar sin tocar el mapa que ve la
         centerline.
         """
-        # Rotación −dθ.  NOTA: si al doblar el mapa se desalinea hacia el lado
-        # equivocado, invierte el signo aquí (depende de la orientación del gyro).
-        phi = math.radians(-dheading_deg)
+        # Rotación del MAPA (o.x/o.y): −dθ "ajustado a ojo" (las detecciones
+        # frescas lo tapaban). Medido en 18 runs (928-956, 2003 pares de
+        # detecciones consecutivas): error lateral por frame mediana 8.6 px con
+        # −dθ, 2.0 px con +dθ, 4.0 px sin rotar. El físico (+dθ) existe detrás de
+        # OBS_MEM_MAP_ROT_FISICA pero va APAGADO: mete pasado=1 a media esquiva
+        # de otro cono (ver config).
+        _sgn = 1.0 if getattr(C, "OBS_MEM_MAP_ROT_FISICA", False) else -1.0
+        phi = math.radians(_sgn * dheading_deg)
         cos_p, sin_p = math.cos(phi), math.sin(phi)
 
-        # El ANCLA geom usa el signo de rotación OPUESTO: verificado contra la
-        # forma cerrada (rotar el punto -Δθ para expresarlo en el marco nuevo)
-        # da el signo +dheading. El mapa (o.x/o.y) se corrige con detecciones
-        # frescas así que su signo "ajustado a ojo" pasó desapercibido; el
-        # ancla es dead-reckoning puro y necesita el físicamente correcto.
+        # Ancla geom: siempre +dθ (forma cerrada: rotar el punto -Δθ para
+        # expresarlo en el marco nuevo da el signo +dheading).
         phi_a = math.radians(dheading_deg)
         cos_a, sin_a = math.cos(phi_a), math.sin(phi_a)
 
@@ -389,6 +392,18 @@ class ObstacleMemory:
                     if guard_codet and (id(k) in o.codet_peers
                                         or id(o) in k.codet_peers):
                         continue   # conos co-detectados: mantener separados
+                    # Misma regla que _merge (OBS_MEM_REAPPEAR_*): una lata que
+                    # la cámara NO vio este frame no se absorbe en una recién
+                    # vista que respecto a su última detección está muy de lado
+                    # Y más adelante. Sin esto el hueco MATCH_PX(75)..DEDUPE_PX(85)
+                    # se saltaba la regla: el cono pasado desaparecía sin PASADO
+                    # y el nuevo heredaba was_target/age (orillas949 12:13:12,
+                    # 78 px; con OBS_MEM_MAP_ROT_FISICA orillas954 cae ahí: 81 px).
+                    if (k.seen_last and not o.seen_last
+                            and self._reaparicion_imposible(o, k.x, k.y)):
+                        k.codet_peers.add(id(o))
+                        o.codet_peers.add(id(k))
+                        continue
                     # o es un duplicado de k (k ya tiene >= confianza) → descartar o
                     # (la marca de objetivo sobrevive a la fusión: es la misma lata)
                     k.was_target = k.was_target or o.was_target
