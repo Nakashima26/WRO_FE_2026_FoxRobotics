@@ -30,7 +30,8 @@ from . import config as C
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
                  "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "_last_bey", "codet_peers", "was_target")
+                 "_last_bey", "codet_peers", "was_target", "age",
+                 "xs", "ys", "hs", "seen_last")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -67,6 +68,13 @@ class _Obs:
         # no una x inferida frágil -> no le puede ganar la condición por
         # distancia en un latiguazo.
         self.heading0 = heading0
+        # Última posición DETECTADA (no estimada) y el heading del carro en ese
+        # momento, y si la cámara la vio en el update anterior. Los usa
+        # ObstacleMemory._reaparicion_imposible() (ver OBS_MEM_REAPPEAR_*).
+        self.xs = x
+        self.ys = y
+        self.hs = heading0
+        self.seen_last = True
         # y más chica (más adelante) que ha tenido esta lata según DETECCIONES
         # de cámara (no estima muerta). _prune() solo dispara "PASADO" si la
         # lata estuvo de verdad adelante en algún momento -- así una detección
@@ -97,6 +105,10 @@ class _Obs:
         # fue objetivo: una que el LOCK dejó fuera nunca se esquivó, y el yaw
         # acumulado desde que la vio es el de OTRA esquiva (orillas822 vuelta 2).
         self.was_target: bool = False
+        # Frames (update()) que lleva en memoria. Una naranja PROVISIONAL (sin
+        # confirmar) no puede mandar a `beyond` una lata con age >=
+        # LINE_PROVISIONAL_MAX_AGE (ver classify_and_split).
+        self.age: int = 0
 
 
 class ObstacleMemory:
@@ -122,6 +134,8 @@ class ObstacleMemory:
         # evento de una sola vez al empezar la carrera, no algo por-giro.
         self._elapsed_s: float = 0.0
         self.last_passed: bool = False   # ver _prune() / update()
+        self.last_prov_blocked: list = []   # (x, y, color, age) que la naranja provisional NO pudo mandar a beyond
+        self.last_reappear_rejects: list = []   # rechazos de _reaparicion_imposible() del último update (log)
         self.last_prune_reason: str = "-"   # último motivo de poda, para overlay en pantalla
         self.last_confidences: list[float] = []   # alineado 1:1 con la lista que
                                                     # devolvió el último update() —
@@ -154,24 +168,27 @@ class ObstacleMemory:
         Lleva cada obstáculo recordado del frame anterior al frame actual.
 
         El robot avanzó ds_px (hacia arriba/−Y) y giró dheading_deg.  En el marco
-        relativo al robot eso equivale a: la lata baja ds_px y el mundo rota −dθ
-        alrededor del robot.
+        relativo al robot eso equivale a: la lata baja ds_px y el mundo rota
+        alrededor del robot (físicamente +dθ en coordenadas BEV: ang negativo =
+        giro a la derecha -> la lata se corre a la izquierda).
 
         ds_anchor: avance px aplicado al ANCLA dead-reckoning (o.xr,o.yr) del
         trigger "geom" -- normalmente == ds_px, pero se escala aparte con
         OBS_MEM_GEOM_SPEED_SCALE para calibrar sin tocar el mapa que ve la
         centerline.
         """
-        # Rotación −dθ.  NOTA: si al doblar el mapa se desalinea hacia el lado
-        # equivocado, invierte el signo aquí (depende de la orientación del gyro).
-        phi = math.radians(-dheading_deg)
+        # Rotación del MAPA (o.x/o.y): −dθ "ajustado a ojo" (las detecciones
+        # frescas lo tapaban). Medido en 18 runs (928-956, 2003 pares de
+        # detecciones consecutivas): error lateral por frame mediana 8.6 px con
+        # −dθ, 2.0 px con +dθ, 4.0 px sin rotar. El físico (+dθ) existe detrás de
+        # OBS_MEM_MAP_ROT_FISICA pero va APAGADO: mete pasado=1 a media esquiva
+        # de otro cono (ver config).
+        _sgn = 1.0 if getattr(C, "OBS_MEM_MAP_ROT_FISICA", False) else -1.0
+        phi = math.radians(_sgn * dheading_deg)
         cos_p, sin_p = math.cos(phi), math.sin(phi)
 
-        # El ANCLA geom usa el signo de rotación OPUESTO: verificado contra la
-        # forma cerrada (rotar el punto -Δθ para expresarlo en el marco nuevo)
-        # da el signo +dheading. El mapa (o.x/o.y) se corrige con detecciones
-        # frescas así que su signo "ajustado a ojo" pasó desapercibido; el
-        # ancla es dead-reckoning puro y necesita el físicamente correcto.
+        # Ancla geom: siempre +dθ (forma cerrada: rotar el punto -Δθ para
+        # expresarlo en el marco nuevo da el signo +dheading).
         phi_a = math.radians(dheading_deg)
         cos_a, sin_a = math.cos(phi_a), math.sin(phi_a)
 
@@ -197,6 +214,8 @@ class ObstacleMemory:
     def _refresh_obs(self, o: "_Obs", nx: float, ny: float):
         """Re-visto: confiar en la posición fresca de la cámara."""
         o.x, o.y = nx, ny
+        o.xs, o.ys, o.hs = nx, ny, self._prev_heading
+        self._seen_ids.add(id(o))
         o.conf = C.OBS_MEM_REFRESH
         o.y_min = min(o.y_min, ny)   # detección, no estima
         # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
@@ -208,8 +227,43 @@ class ObstacleMemory:
             if ny >= getattr(C, "OBS_MEM_ANCHOR_MIN_Y", 200.0):
                 o.anchored = True
 
+    def _reaparicion_imposible(self, o: "_Obs", nx: float, ny: float) -> bool:
+        """True si la detección (nx, ny) NO puede ser la lata `o`.
+
+        Solo aplica a latas que la cámara NO vio en el update anterior (las que
+        se siguen frame a frame no se tocan). Se compara contra donde se DETECTÓ
+        por última vez, rotada con el giro real del carro desde entonces (signo
+        físico, el mismo del ancla geom de _advance). Mientras el carro avanza, una
+        lata que se deja de ver solo puede quedar igual o más atrás; aparecer a la
+        vez muy de lado Y más adelante es otra lata del mismo color.
+
+        orillas954: rojo de mi recta visto por última vez en (188,311); 2 frames
+        después el rojo de la recta SIGUIENTE en (250,287) -> +66 px de lado y 25 px
+        adelante -> se fusionaba (69 px < OBS_MEM_MATCH_PX) y heredaba el veredicto
+        "mía" -> esquiva fantasma a -68° -> choque. Replay de 16 runs (928-954): la
+        regla solo dispara ahí, en orillas933 (verde pegado al verde equivocado) y
+        una vez sin efecto en 932; el caso bueno más cercano va a 29 px de lado o
+        8 px adelante."""
+        if not getattr(C, "OBS_MEM_REAPPEAR_REJECT", True) or o.seen_last:
+            return False
+        h = self._prev_heading
+        dth = 0.0 if (h is None or o.hs is None) else ((h - o.hs + 180.0) % 360.0 - 180.0)
+        phi = math.radians(dth)
+        ux, uy = o.xs - self.rx, o.ys - self.ry
+        px = self.rx + ux * math.cos(phi) - uy * math.sin(phi)
+        py = self.ry + ux * math.sin(phi) + uy * math.cos(phi)
+        imposible = (abs(nx - px) > float(getattr(C, "OBS_MEM_REAPPEAR_LAT_PX", 40.0))
+                     and (ny - py) < -float(getattr(C, "OBS_MEM_REAPPEAR_AHEAD_PX", 15.0)))
+        if imposible:
+            self.last_reappear_rejects.append(
+                (o.color, round(o.xs), round(o.ys), round(nx), round(ny),
+                 round(nx - px), round(ny - py)))
+        return imposible
+
     def _merge(self, new_obs: list[tuple[float, float, str]]):
         match_r2 = C.OBS_MEM_MATCH_PX ** 2
+        self._seen_ids: set[int] = set()
+        self.last_reappear_rejects = []
         # Decaer todos primero; los que se re-vean recuperan confianza al fusionar.
         for o in self._obs:
             o.conf -= C.OBS_MEM_DECAY
@@ -237,7 +291,7 @@ class ObstacleMemory:
                     if o.color != color:
                         continue
                     d2 = (o.x - nx) ** 2 + (o.y - ny) ** 2
-                    if d2 <= match_r2:
+                    if d2 <= match_r2 and not self._reaparicion_imposible(o, nx, ny):
                         cand.append((d2, di, oi))
             cand.sort()
             det_pair: dict[int, int] = {}
@@ -266,15 +320,20 @@ class ObstacleMemory:
                         continue
                     _fresh[_a].codet_peers.add(id(_fresh[_b]))
                     _fresh[_b].codet_peers.add(id(_fresh[_a]))
+            self._marcar_vistos()
             return
 
         for nx, ny, color in new_obs:
             best = None
             best_d2 = match_r2
+            rechazados: list[_Obs] = []
             for o in self._obs:
                 if o.color != color:
                     continue
                 d2 = (o.x - nx) ** 2 + (o.y - ny) ** 2
+                if d2 <= match_r2 and self._reaparicion_imposible(o, nx, ny):
+                    rechazados.append(o)
+                    continue
                 if d2 <= best_d2:
                     best_d2 = d2
                     best = o
@@ -282,8 +341,19 @@ class ObstacleMemory:
                 self._refresh_obs(best, nx, ny)
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
-                    self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
-                                          heading0=self._prev_heading))
+                    nuevo = _Obs(nx, ny, color, C.OBS_MEM_REFRESH,
+                                 heading0=self._prev_heading)
+                    self._obs.append(nuevo)
+                    # Latas distintas: que _dedupe no las vuelva a juntar.
+                    for o in rechazados:
+                        nuevo.codet_peers.add(id(o))
+                        o.codet_peers.add(id(nuevo))
+        self._marcar_vistos()
+
+    def _marcar_vistos(self):
+        """seen_last = la cámara la vio (re-detectada o recién creada) en ESTE update."""
+        for o in self._obs:
+            o.seen_last = (id(o) in self._seen_ids) or (o.conf >= C.OBS_MEM_REFRESH - 1e-9)
 
     # ── Reduce duplicados fantasma ─────────────────────────────────────────────────────────────────
     def _dedupe(self):
@@ -322,9 +392,22 @@ class ObstacleMemory:
                     if guard_codet and (id(k) in o.codet_peers
                                         or id(o) in k.codet_peers):
                         continue   # conos co-detectados: mantener separados
+                    # Misma regla que _merge (OBS_MEM_REAPPEAR_*): una lata que
+                    # la cámara NO vio este frame no se absorbe en una recién
+                    # vista que respecto a su última detección está muy de lado
+                    # Y más adelante. Sin esto el hueco MATCH_PX(75)..DEDUPE_PX(85)
+                    # se saltaba la regla: el cono pasado desaparecía sin PASADO
+                    # y el nuevo heredaba was_target/age (orillas949 12:13:12,
+                    # 78 px; con OBS_MEM_MAP_ROT_FISICA orillas954 cae ahí: 81 px).
+                    if (k.seen_last and not o.seen_last
+                            and self._reaparicion_imposible(o, k.x, k.y)):
+                        k.codet_peers.add(id(o))
+                        o.codet_peers.add(id(k))
+                        continue
                     # o es un duplicado de k (k ya tiene >= confianza) → descartar o
                     # (la marca de objetivo sobrevive a la fusión: es la misma lata)
                     k.was_target = k.was_target or o.was_target
+                    k.age = max(k.age, o.age)
                     merged_into_existing = True
                     break
             if not merged_into_existing:
@@ -530,16 +613,29 @@ class ObstacleMemory:
             if o.y > behind_y:                       # ya quedó detrás del robot
                 on_axis = abs(o.x0 - self.rx) <= pass_halfw
                 # Esquiva de DESPLAZAMIENTO LATERAL: la lata iba centrada y el
-                # carro SÍ está virando -- pero hacia el lado CONTRARIO de la
-                # lata (la esquiva de lado, casi sin rotar, así que la vía (b)
-                # por yaw no la agarra). Sin esto una esquiva lateral de una lata
-                # MÍA cae en DESCARTE_DE_LADO -> nunca manda pasado -> el ESP
-                # endereza encima de la lata que sigue ahí (run 2026-09-07).
+                # carro SÍ está virando -- hacia su LADO DE PASO (la esquiva de
+                # lado, casi sin rotar, así que la vía (b) por yaw no la agarra).
+                # Sin esto una esquiva lateral de una lata MÍA cae en
+                # DESCARTE_DE_LADO -> nunca manda pasado -> el ESP endereza encima
+                # de la lata que sigue ahí (run 2026-09-07).
+                # El lado de paso lo fija el COLOR (rojo por la derecha = steer>0,
+                # verde por la izquierda = steer<0), NO el lado del eje donde quedó
+                # x0: con el signo de x0, un rojo 11px a la derecha del centro
+                # esquivado por la derecha contaba como "virando HACIA la lata" ->
+                # DESCARTE_DE_LADO sin RECUPERANDO -> el chasis siguió a -26° hacia
+                # la pared exterior (orillas928 vuelta 2 x0=211 yaw=22; orillas929
+                # vuelta 3 x0=218 yaw=26). Colores sin lado de paso: signo de x0.
                 # Excluye beyond (siguiente segmento) y exige steer > umbral.
+                if o.color == "Red":
+                    _hacia_lado_paso = steer_deg > 0.0
+                elif o.color == "Green":
+                    _hacia_lado_paso = steer_deg < 0.0
+                else:
+                    _hacia_lado_paso = (steer_deg > 0.0) != ((o.x0 - self.rx) > 0.0)
                 steering_away = (
                     steering_now
                     and o.beyond is not True
-                    and (steer_deg > 0.0) != ((o.x0 - self.rx) > 0.0)
+                    and _hacia_lado_paso
                 )
                 centered = on_axis and (not steering_now or steering_away)
                 have_h = o.heading0 is not None and self._prev_heading is not None
@@ -560,7 +656,7 @@ class ObstacleMemory:
                     self.last_prune_reason = (
                         f"PASADO y={o.y:.0f}>{behind_y} ymin={o.y_min:.0f} "
                         f"x0={o.x0:.0f} yaw={yawed:.0f} "
-                        f"{_via} conf={o.conf:.2f}"
+                        f"{_via} conf={o.conf:.2f} beyond={o.beyond}"
                     )
                     passed = True
                 elif was_ahead:
@@ -736,6 +832,8 @@ class ObstacleMemory:
         self._merge(new_obs)
         self._dedupe()
         self.last_passed = self._prune(steer_deg)
+        for o in self._obs:
+            o.age += 1
 
         # Alineado 1:1, mismo orden, con la lista que se retorna abajo --
         # quien la consuma (detect_centerline vía obstacle_conf=) puede
@@ -785,7 +883,8 @@ class ObstacleMemory:
             best.was_target = True
 
     def classify_and_split(
-        self, classify_fn, rescue_fn=None, allow_pending: bool = True
+        self, classify_fn, rescue_fn=None, allow_pending: bool = True,
+        provisional: bool = False
     ) -> tuple[list[tuple[float, float, str]], list[tuple[float, float, str]], list[float]]:
         """
         Separa los obstáculos en memoria entre "mi recta" y "más allá" de la
@@ -819,14 +918,28 @@ class ObstacleMemory:
         allow_pending: False cuando la línea es la ESTIMADA (dead-reckon): esa
         solo puede diferir veredictos ya votados, no esconder un cono NUEVO.
 
+        provisional: True cuando la naranja es solo la lectura CRUDA de este
+        frame (sin confirmar, ver OrangeLineTracker.has_provisional). Esa solo
+        puede mandar a `beyond` latas NUEVAS (age < LINE_PROVISIONAL_MAX_AGE):
+        las que entran a cuadro junto con la cinta. Una lata que ya se venía
+        viendo espera a la línea confirmada. orillas942 vuelta 2: un óvalo del
+        tapete + el borde del rojo armaron una cinta provisional falsa y el rojo
+        que se esquivaba desde hacía ~13 frames se fue a `beyond` -> roce.
+
         Retorna (mine, beyond, mine_conf) — mine/beyond son listas de
         (x, y, color); mine_conf alineado 1:1 con mine.
         """
         mine: list[tuple[float, float, str]] = []
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
+        self.last_prov_blocked = []
+        _prov_max_age = int(getattr(C, "LINE_PROVISIONAL_MAX_AGE", 0))
         for o in self._obs:
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
+            if (provisional and result is False and o.beyond is not True
+                    and _prov_max_age > 0 and o.age >= _prov_max_age):
+                self.last_prov_blocked.append((o.x, o.y, o.color, o.age))
+                result = None                # sin opinión: sigue como estaba
             prev_bey = o._last_bey
             if result is not None:
                 o._last_bey = (result is False)

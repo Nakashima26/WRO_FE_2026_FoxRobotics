@@ -80,6 +80,28 @@ FLOOR_UPPER = np.array([35, 80, 255])
 FLOOR_LOWER_BLUE = np.array([95, 50, 10])
 FLOOR_UPPER_BLUE = np.array([150, 255, 220])
 
+# ─── Corrección de color por el piso (otra iluminación) — ver color_corr.py ───
+# Escala B,G,R de cada frame para que el piso de la franja de abajo quede del
+# color que tenía en el cuarto de pruebas -> los rangos HSV de todo el proyecto
+# siguen sirviendo con otra luz (orillas900: cinta naranja H 9->4, caía en rojo).
+# Con la luz de siempre las ganancias salen ~1.00 (no cambia nada). Si en el
+# cuarto de pruebas el log [COLOR] muestra ganancias lejos de 1, copia aquí el
+# piso_BGR que imprime.
+COLOR_CORR_ENABLED        = True
+COLOR_CORR_FLOOR_REF_BGR  = (175.0, 198.0, 213.0)  # piso del cuarto de pruebas (medido en orillas854)
+COLOR_CORR_EVERY_N        = 5      # re-mide el piso cada N frames (la tabla se aplica en TODOS)
+COLOR_CORR_ALPHA          = 0.3    # EMA de la ganancia por medida (suave, no parpadea)
+COLOR_CORR_ROI_TOP        = 0.70   # franja de medida: el 30% de abajo del frame (piso frente al carro)
+COLOR_CORR_FLOOR_S_MAX    = 90     # px de piso: poco saturados...
+COLOR_CORR_FLOOR_V_MIN    = 60     # ...y no oscuros (fuera paredes negras / sombras duras)
+COLOR_CORR_MIN_FLOOR_FRAC = 0.5    # si menos de esto de la franja es piso (cono enfrente) -> no re-mide
+COLOR_CORR_GAIN_MIN       = 0.6    # topes de ganancia por canal
+COLOR_CORR_GAIN_MAX       = 1.8
+COLOR_CORR_BRILLO_MAX     = 1.2    # el tono se corrige completo; el brillo sube máx. esto (más ->
+                                   # conos rojos reales pasan el tope V<=160 del rango Red)
+COLOR_CORR_SKIP_DELTA     = 0.02   # ganancias a menos de esto de 1.00 -> no aplica la tabla (0 ms)
+COLOR_CORR_LOG_EVERY_S    = 2.0    # log [COLOR] en journalctl (0 = apagado)
+
 FLOOR_LOWER_BLUE_WIDE = np.array([90, 15, 60])   # baja el mínimo de S y sube V
 FLOOR_UPPER_BLUE_WIDE = np.array([150, 255, 230])
 
@@ -508,6 +530,29 @@ RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
 # False = comportamiento viejo (un solo _Obs para los dos conos).
 OBS_MEM_SPLIT_CODETECTED = True
 
+# Reaparición IMPOSIBLE (2026-09-15, ver ObstacleMemory._reaparicion_imposible).
+# Una lata que la cámara no vio en el frame anterior no acepta una detección que,
+# respecto a donde se detectó por última vez (rotada con el giro real del carro),
+# aparece a la vez a más de LAT_PX de lado Y más de AHEAD_PX más adelante: es otra
+# lata del mismo color. orillas954: el rojo de la recta siguiente se fusionaba con
+# el rojo que se acababa de pasar (+66 lado, 25 adelante) y heredaba "mía".
+# Replay de 16 runs: 4 rechazos, efecto solo en 954 y 933. False = comportamiento viejo.
+OBS_MEM_REAPPEAR_REJECT   = True
+OBS_MEM_REAPPEAR_LAT_PX   = 40.0
+OBS_MEM_REAPPEAR_AHEAD_PX = 15.0
+
+# Rotación del mapa de memoria con el signo FÍSICO (+dθ) en _advance (2026-09-15).
+# El signo viejo (−dθ) predice la posición de un cono al frame siguiente PEOR que
+# no rotar (18 runs: error lateral mediana 8.6 px vs 2.0 px con +dθ, 4.0 sin rotar).
+# APAGADO a propósito: replay de 18 runs con True -> el PASADO sale ~1 frame antes
+# en ~130 esquivas, PERO aparecen pasado=1 NUEVOS a media esquiva de OTRO cono que
+# sigue enfrente (orillas931 x3, 936, 944 a +68° con el verde a 88 px): con el signo
+# correcto el cono se sigue a través del giro, conserva su heading0 viejo y hereda
+# yaw ajeno -> "PASADO esquiva", o su fantasma cruza behind_y antes -> RECUPERANDO
+# con el otro cono enfrente (mismo modo de falla que orillas822). El signo viejo lo
+# evitaba de rebote. No encender sin un candado que impida ese PASADO.
+OBS_MEM_MAP_ROT_FISICA = False
+
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6
@@ -669,7 +714,15 @@ LOCK_MATCH_RADIUS_PX = 70.0
 # reaparecía a y=280-284 -> rojo sin esquivar. 60 >> los 12px de orillas488 (el
 # caso de vaivén que el LOCK evita). MAX_Y=320 deja fuera un cono que ya va al
 # lado del carro (esos se ven a y~330-345 y solo estimados, no visibles).
-LOCK_SWITCH_CLOSER_PX = 60.0
+# 2026-09-14: 60 -> 40. orillas932 v1: el verde de la recta siguiente se vio 1 frame
+# antes que el rojo (entraba por el borde de la imagen durante RECUPERANDO), el LOCK
+# quedó en el verde y el rojo apareció 52/49/48px más cerca -> nunca cambió -> choque.
+# 40 sigue >> 12px de 488. Se probó "re-elegir por bbox al llegar el 2do cono" en vez
+# de esto y en orillas936 eligió un verde FANTASMA de memoria (sin detección, tomaba
+# prestado el bbox del rojo) -> choque; esta regla exige VISIBLE, un fantasma no pasa.
+# Simulado en 928-936: solo cambia el frame del choque de 932 (+2 cambios verde->verde
+# al arrancar).
+LOCK_SWITCH_CLOSER_PX = 40.0
 LOCK_SWITCH_VIS_PX    = 25.0
 LOCK_SWITCH_MAX_Y     = 320.0
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
@@ -769,6 +822,11 @@ LINE_CURVE_FRAG_PX       = 10.0  # pedazos de la misma cinta partida por un cono
 LINE_CLASSIFY_CONE_CENTER = True # clasificar el CENTRO del cono, no su pie
 LINE_PROVISIONAL         = True  # lectura cruda de cinta -> puede decir "beyond"
                                  # antes de que la estable se confirme
+LINE_PROVISIONAL_MAX_AGE = 8     # la provisional solo manda a beyond latas con menos de
+                                 # estos frames en memoria (~0.5 s); las que ya se venían
+                                 # viendo esperan a la naranja confirmada. orillas942 v2:
+                                 # óvalo del tapete + borde del rojo = cinta falsa, el rojo
+                                 # (13 frames) se fue a beyond. Correctas en 942: edad 0-3. 0 = apagado
 LINE_PENDING_BEYOND      = True  # cono nuevo del otro lado: no va como `mia`
                                  # mientras vota su primer veredicto
 LINE_HORIZ_FALLBACK_MIN_Y = 285.0  # sin curva ni recta: horizontal solo en la boca
@@ -797,10 +855,6 @@ PARK_PINK_RATIO_MIN = 0.28   # fracción del ROI que debe ser magenta
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
 PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
-# Área mínima (px BEV) de un blob magenta para contarlo como poste del cajón en
-# el plano BEV (obstacle-memory space). Solo monitoreo/dibujo -> ver
-# _park_pink_bev() en runtime_nuevo.py y draw_bev_debug() en centerline.py.
-PARK_BEV_MIN_AREA_PX = 40.0
 
 LINE_MIN_RUN_PX   = 6   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)
@@ -1091,3 +1145,23 @@ SERIAL_PORT    = "/dev/ttyS0"
 BAUDRATE       = 115200
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
+
+# ── Chequeo de cámara antes de dar LISTO (2026-09-14) ──────────────────────────
+# orillas940: la cámara arrancó mandando frames NEGROS y a los 5 s del GO libcamera
+# dio "Camera frontend has timed out"; el runtime siguió procesando el último frame
+# (ThreadedFrameGrabber.read() lo repite para siempre) con el LED de LISTO encendido.
+# Ahora el LED NO se prende hasta ver CAM_CHECK_FRAMES frames NUEVOS con imagen real
+# en CAM_CHECK_TIMEOUT_S; si falla, se cierra y reabre la cámara y se reintenta
+# (indefinidamente, LED apagado). Mientras espera el botón (desarmado) se sigue
+# vigilando: sin frames nuevos por CAM_STALE_S o CAM_BLACK_FRAMES negros seguidos ->
+# LED apagado, se cancela un botón pendiente y se repite el chequeo. Ya ARMADO no se
+# toca nada (reabrir a media ronda queda pendiente).
+CAM_CHECK_ENABLED   = True
+CAM_CHECK_FRAMES    = 15     # frames nuevos con imagen real para aprobar
+CAM_CHECK_TIMEOUT_S = 3.0    # tiempo máximo por intento
+CAM_CHECK_P99_MIN   = 60     # percentil 99 de luminancia por debajo = frame negro
+CAM_STALE_S         = 1.0    # desarmado: sin frame nuevo por esto -> cámara caída
+CAM_BLACK_FRAMES    = 15     # desarmado: frames negros seguidos -> cámara caída
+CAM_REOPEN_WAIT_S   = 4.0    # espera tras soltar la cámara antes de reabrir (igual que stop + sleep 4 + start)
+CAM_REOPEN_JOIN_S   = 35.0   # espera a que el hilo salga de un cap.read() colgado (~30 s); si no, el
+                             # proceso sale con código 3 y systemd (Restart=always) lo relanza

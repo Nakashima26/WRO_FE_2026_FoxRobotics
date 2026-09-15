@@ -32,7 +32,7 @@ _CAM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _CAM_DIR not in sys.path:
     sys.path.insert(0, _CAM_DIR)
 
-from vision import Vision
+from vision import Vision, open_camera
 from wro_runtime import (
     ThreadedFrameGrabber,
     AsyncVideoWriter,
@@ -49,6 +49,7 @@ from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
 from .mid_turn import MidTurnObstacleDetector
 from .bev_recorder import BevRecorder
+from .color_corr import FloorColorCorrector
 from . import config as C
 
 
@@ -139,32 +140,6 @@ def _park_pink(frame_bgr):
     full[y0:, :] = m
     return ratio, full
 
-def _park_pink_bev(bev_hsv):
-    """Postes magenta del cajón detectados en el plano BEV (obstacle-memory space).
-
-    Devuelve una lista de (x, y, w, h) en px BEV, una por poste rosa detectado.
-    A diferencia de `_park_pink` (que mide un RATIO sobre el frame de cámara para
-    INICIO / _check_parking_search), esto ubica el cajón ESPACIALMENTE en el mismo
-    marco donde vive la memoria de obstáculos, para dibujarlo y monitorearlo
-    durante la recta final. Solo monitoreo: NO entra a la centerline ni al PID."""
-    if bev_hsv is None or getattr(bev_hsv, "size", 0) == 0:
-        return []
-    m = None
-    for lo, hi in C.PARK_PINK_HSV:
-        cur = cv2.inRange(bev_hsv, lo, hi)
-        m = cur if m is None else (m | cur)
-    if m is None:
-        return []
-    cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_area = float(getattr(C, "PARK_BEV_MIN_AREA_PX", 40.0))
-    boxes = []
-    for c in cnts:
-        if cv2.contourArea(c) < min_area:
-            continue
-        boxes.append(cv2.boundingRect(c))
-    return boxes
-
-
 def _parse_direccion(ack: str) -> str | None:
     """dir= del ACK:V2 del ESP32: 'L'/'R' desde su 1er GIRANDO, '?' antes."""
     if not ack:
@@ -219,6 +194,8 @@ class PPRuntime:
         self.turn_dir_tracker = TurnDirectionTracker()
         # FASE 1 mid-turn: solo observa/registra (ver mid_turn.py). No actúa.
         self.mid_turn   = MidTurnObstacleDetector()
+        # Corrección de color por el piso (otra iluminación), ver color_corr.py
+        self.color_corr = FloorColorCorrector()
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -270,9 +247,6 @@ class PPRuntime:
         self._park_frames_seen: int = 0
         self._park_lost_frames: int = 0
         self._park_max_y_seen: int = 0
-        # Postes magenta del cajón ubicados en el plano BEV (obstacle-memory
-        # space) este frame — solo para dibujar/monitorear, ver _park_pink_bev.
-        self._park_bev_boxes: list = []
 
         # Serial
         self.serial_link = SerialLink(cfg.serial_port, cfg.baudrate)
@@ -544,6 +518,77 @@ class PPRuntime:
             return self.frame_grabber.read()
         return self.vision.cap.read()
 
+    # ── Chequeo de cámara (ver CAM_CHECK_* en config) ─────────────────────────
+
+    @staticmethod
+    def _frame_negro(frame) -> bool:
+        gray = cv2.cvtColor(frame[::4, ::4], cv2.COLOR_BGR2GRAY)
+        return float(np.percentile(gray, 99)) < C.CAM_CHECK_P99_MIN
+
+    def _camera_check(self) -> tuple[bool, str]:
+        """Espera CAM_CHECK_FRAMES frames NUEVOS con imagen real."""
+        t0 = time.monotonic()
+        last_id, buenos, negros = -1, 0, 0
+        while time.monotonic() - t0 < C.CAM_CHECK_TIMEOUT_S:
+            if self.frame_grabber is not None:
+                fid, _age = self.frame_grabber.freshness()
+                if fid == 0 or fid == last_id:
+                    time.sleep(0.01)
+                    continue
+                last_id = fid
+            ret, frame = self._read_frame()
+            if not ret or frame is None:
+                time.sleep(0.01)
+                continue
+            if self._frame_negro(frame):
+                negros += 1
+            else:
+                buenos += 1
+                if buenos >= C.CAM_CHECK_FRAMES:
+                    return True, f"{buenos} frames buenos en {time.monotonic() - t0:.1f}s"
+        if buenos == 0 and negros == 0:
+            return False, f"sin frames nuevos en {C.CAM_CHECK_TIMEOUT_S:.0f}s"
+        return False, f"{buenos} buenos / {negros} negros en {C.CAM_CHECK_TIMEOUT_S:.0f}s"
+
+    def _reopen_camera(self):
+        if self.frame_grabber is not None:
+            self.frame_grabber.stopped = True
+            self.frame_grabber.thread.join(timeout=C.CAM_REOPEN_JOIN_S)
+            if self.frame_grabber.thread.is_alive():
+                # Soltar la cámara con otro hilo metido en cap.read() puede tumbar
+                # GStreamer; mejor salir y que systemd relance el servicio.
+                print("[CAM-CHECK] Hilo de captura colgado -> salgo (systemd reinicia).", flush=True)
+                os._exit(3)
+            self.frame_grabber = None
+        try:
+            self.vision.cap.release()
+        except Exception as e:
+            print(f"[CAM-CHECK] release falló: {e}", flush=True)
+        time.sleep(C.CAM_REOPEN_WAIT_S)
+        try:
+            self.vision.cap = open_camera(self.cfg.cam_index)
+            self.vision.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception as e:
+            print(f"[CAM-CHECK] No se pudo reabrir la cámara: {e}", flush=True)
+            return
+        self._start_capture()
+
+    def _camera_reopen_and_gate(self):
+        self._reopen_camera()
+        self._camera_gate()
+
+    def _camera_gate(self):
+        """Bloquea (LED apagado) hasta que la cámara entregue imagen real."""
+        intento = 0
+        while True:
+            intento += 1
+            ok, why = self._camera_check()
+            if ok:
+                print(f"[CAM-CHECK] OK ({why}).", flush=True)
+                return
+            print(f"[CAM-CHECK] FALLA intento {intento}: {why} -> reabro la cámara.", flush=True)
+            self._reopen_camera()
+
     def _maybe_record(self, frame: np.ndarray, fps: float,
                       bev: np.ndarray | None = None):
         if not self.cfg.record_orillas:
@@ -690,7 +735,8 @@ class PPRuntime:
 
     # ── Loop principal ────────────────────────────────────────────────────────
 
-    def run(self, on_ready=None, should_start=None, should_record=None):
+    def run(self, on_ready=None, should_start=None, should_record=None,
+            on_camera_lost=None):
         # BLOQUEA hasta que el UART está listo (antes era no-op y el loop
         # arrancaba mandando V2 al vacío ~1.5 s -> el ESP32 rodaba en su
         # fallback wall-PID = "el carro avanza y no le entran datos").
@@ -698,16 +744,24 @@ class PPRuntime:
             print("[SERIAL] UART listo.", flush=True)
         self._start_capture()
 
-        # Warmup de cámara (esperar exposición automática estabilizada).
-        print(f"[INFO] Calentando cámara ({self.cfg.warmup_frames} frames)...", flush=True)
-        warmed = 0
-        while warmed < self.cfg.warmup_frames:
-            ret, _ = self._read_frame()
-            if ret:
-                warmed += 1
-            else:
-                time.sleep(0.01)
+        if C.CAM_CHECK_ENABLED:
+            # Antes de LISTO (el LED lo prende should_start(), que no se llama
+            # hasta el loop de abajo): la cámara tiene que dar imagen real.
+            print("[CAM-CHECK] Verificando que la cámara entregue imagen...", flush=True)
+            self._camera_gate()
+        else:
+            # Warmup de cámara (esperar exposición automática estabilizada).
+            print(f"[INFO] Calentando cámara ({self.cfg.warmup_frames} frames)...", flush=True)
+            warmed = 0
+            while warmed < self.cfg.warmup_frames:
+                ret, _ = self._read_frame()
+                if ret:
+                    warmed += 1
+                else:
+                    time.sleep(0.01)
         print("[INFO] Cámara estabilizada.", flush=True)
+        _cam_last_id  = -1
+        _cam_negros   = 0
 
         # ── ARRANQUE EN CALIENTE ──────────────────────────────────────────────
         # El loop de abajo corre YA (visión, detección, centerline, memoria,
@@ -734,6 +788,27 @@ class PPRuntime:
                 if not ret:
                     time.sleep(0.01)
                     continue
+
+                # ── Vigilancia de cámara mientras espera el botón ────────────
+                # Solo DESARMADO: sin frames nuevos o frames negros -> LED
+                # apagado, botón pendiente cancelado y se repite el chequeo.
+                if C.CAM_CHECK_ENABLED and not armed and self.frame_grabber is not None:
+                    _fid, _age = self.frame_grabber.freshness()
+                    _caida = None
+                    if _age > C.CAM_STALE_S:
+                        _caida = f"sin frames nuevos hace {_age:.1f}s"
+                    elif _fid != _cam_last_id:
+                        _cam_last_id = _fid
+                        _cam_negros = _cam_negros + 1 if self._frame_negro(frame) else 0
+                        if _cam_negros >= C.CAM_BLACK_FRAMES:
+                            _caida = f"{_cam_negros} frames negros seguidos"
+                    if _caida is not None:
+                        print(f"[CAM-CHECK] Cámara caída antes del GO: {_caida}.", flush=True)
+                        if on_camera_lost is not None:
+                            on_camera_lost()
+                        self._camera_reopen_and_gate()
+                        _cam_last_id, _cam_negros = -1, 0
+                        continue
 
                 self.loop_count += 1
                 if self.loop_count % self.cfg.process_every_n != 0:
@@ -790,6 +865,10 @@ class PPRuntime:
                 timing_ms["cap"] = (now - t_prev_end) * 1000.0
 
                 # ── Visión ──────────────────────────────────────────────────
+                # Corrección de color por el piso ANTES de todo lo que usa
+                # rangos HSV (conos, BEV/naranja/piso, rosa). Con la luz del
+                # cuarto de pruebas las ganancias son ~1 y no cambia nada.
+                frame = self.color_corr.process(frame)
                 frame = cv2.flip(frame, 1)
                 processed_frame, positions = self.vision.process_frame(frame)
                 t_vis = time.perf_counter()
@@ -848,15 +927,6 @@ class PPRuntime:
                         bev_hsv = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
                         _t1 = time.perf_counter()
                         bev_timing["warp"] = (_t1 - _t0) * 1000.0
-
-                        # ── Cajón magenta en el plano BEV (obstacle-memory) ──
-                        # Solo en la recta final: ubica los postes rosa en el
-                        # mismo marco donde vive la memoria de obstáculos para
-                        # dibujarlos y monitorear la aproximación al cajón.
-                        if self._park_buscando or self._tc >= 12:
-                            self._park_bev_boxes = _park_pink_bev(bev_hsv)
-                        else:
-                            self._park_bev_boxes = []
 
                         # Proyectar obstáculos detectados al plano BEV, y
                         # separar los que NO proyectaron (candidatos a hint lejano)
@@ -918,6 +988,13 @@ class PPRuntime:
                             # Alineado 1:1 con bev_obstacles (mismo orden) --
                             # ver detect_centerline(obstacle_conf=).
                             obstacle_conf = list(self.memory.last_confidences)
+                            if self.memory.last_reappear_rejects:
+                                print("[MEMREJ] reaparicion imposible, lata nueva: "
+                                      + " ".join(f"{c[0]} visto({xs},{ys})->det({nx},{ny}) "
+                                                 f"lado={dx:+d} adelante={-dy:+d}"
+                                                 for c, xs, ys, nx, ny, dx, dy
+                                                 in self.memory.last_reappear_rejects),
+                                      flush=True)
                             # "PASADO y" de _prune: la lata cayó por DETRÁS del eje
                             # (rebase DE FRENTE) o salió por el borde inferior del
                             # BEV. Respaldo del trigger medido, que cubre el rebase
@@ -1030,8 +1107,14 @@ class PPRuntime:
                                     ),
                                     rescue_fn=_rescue_fn,
                                     allow_pending=not orange_info.get("dead_reckoned", False),
+                                    provisional=not orange_info["seen"],
                                 )
                             )
+                            if self.memory.last_prov_blocked:
+                                print("[PROVBLOCK] naranja sin confirmar, lata vieja sigue mia: "
+                                      + " ".join(f"{c}({x:.0f},{y:.0f}) edad={a}"
+                                                 for x, y, c, a in self.memory.last_prov_blocked),
+                                      flush=True)
 
                         # ── LOCK al obstáculo primario ── con >=2 conos la
                         # centerline no puede satisfacer dos lados de paso
@@ -1112,29 +1195,6 @@ class PPRuntime:
                         else:
                             self._lock_xy = None
 
-                        # ── RECTA FINAL DEL CAJÓN: NO se esquiva NINGÚN cono ──
-                        # Por reglamento oficial de WRO, el carril adyacente al
-                        # cajón (el de la pared exterior) SIEMPRE está libre. Se
-                        # limpian TODOS los obstáculos: la centerline va derecho,
-                        # el LOCK se suelta, la memoria de color se olvida y el
-                        # mensaje sale con prio=0/mem=0. El ESP32 (parkBuscando)
-                        # hace wall-follow a la pared exterior sin bandazos. Sin
-                        # esto, un cono al entrar a la recta mandaba prio=1 y el
-                        # ESP32 le entregaba el volante a la Pi -> bandazo que
-                        # cruzaba la pista y arruinaba la búsqueda del cajón
-                        # (run 17:14:27-32).
-                        if (self._park_buscando or self._tc >= 12) and armed:
-                            if bev_obstacles or bev_obstacles_beyond:
-                                print(f"[PARK] Recta final: ignorando "
-                                      f"{len(bev_obstacles)}+{len(bev_obstacles_beyond)} "
-                                      f"cono(s) (carril del cajon libre por reglamento WRO)",
-                                      flush=True)
-                            bev_obstacles = []
-                            bev_obstacles_beyond = []
-                            obstacle_conf = []
-                            self._lock_xy = None
-                            self.memory.forget_color_obstacles()
-
                         # ── Dirección de giro: se infiere UNA SOLA VEZ (con
                         # persistencia, ver TurnDirectionTracker) y se queda fija
                         # toda la carrera. PRIMARIA: posición lateral de un
@@ -1200,8 +1260,7 @@ class PPRuntime:
                         # (orillas417). Con esto el trigger se apaga al PRIMER
                         # est=G, sin esperar la confirmación de 2 frames.
                         if (armed and not self._is_turning and self._prev_estado != "G"
-                                and not en_recuperacion_giro
-                                and not (self._park_buscando or self._tc >= 12)):
+                                and not en_recuperacion_giro):
                             _oy_cs = orange_info.get("near_y")
                             _corner_soon_meas = (
                                 orange_info.get("seen") and _oy_cs is not None
@@ -1353,17 +1412,6 @@ class PPRuntime:
                     if self._pasado_hold == 0:
                         self._pasado_from_measured = False
 
-                # Recta final del cajón: sin esquiva -> sin RECUPERANDO. Cancela
-                # cualquier pulso `pasado`/`interior` residual para que el ESP32
-                # se quede en wall-follow recto hacia el cajón (redundante con el
-                # vaciado de bev_obstacles de arriba, pero cubre pulsos ya armados
-                # antes de entrar a la recta).
-                if self._park_buscando or self._tc >= 12:
-                    pasado = False
-                    interior = False
-                    self._pasado_hold = 0
-                    self._pasado_from_measured = False
-
                 # Sin línea válida → recto (obs=0).
                 state = "pp_follow" if pp_active else "no_path"
 
@@ -1395,10 +1443,6 @@ class PPRuntime:
                     self._turn_delay_frames -= 1
                     _turn_hold = True
                 _turn_block = (self._ext_corner_block > 0) or _turn_hold
-                # Recta final: nunca forzar prio por bloqueo de giro (no hay más
-                # esquinas; el único objetivo es llegar recto al cajón).
-                if self._park_buscando or self._tc >= 12:
-                    _turn_block = False
 
                 serial_msg = self._build_serial_message(
                     obs_norm, state, len(bev_obstacles), pasado, interior,
@@ -1549,8 +1593,6 @@ class PPRuntime:
                         bev_obstacles, steer_deg, pp_active,
                         line_info=line_info,
                         bev_obstacles_beyond=bev_obstacles_beyond,
-                        park_boxes=self._park_bev_boxes,
-                        park_state=self._park_state,
                     )
                     bev_h = processed_frame.shape[0]
                     bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
@@ -1683,6 +1725,16 @@ def main():
         # start-delay), no durante el idle de "esperando botón".
         return _ss["btn_t"] is not None
 
+    def on_camera_lost():
+        # La cámara se cayó ANTES del GO: LED apagado (ya no está listo), se
+        # cancela un botón pendiente y should_start() vuelve a anunciar LISTO
+        # (y prender el LED) solo cuando el chequeo de cámara pase otra vez.
+        _ss["announced"] = False
+        _ss["btn_t"] = None
+        if _gpio is not None:
+            _gpio.output(27, _gpio.LOW)
+            print("[GPIO] LED apagado: cámara sin imagen.", flush=True)
+
     args = parse_args()
 
     threaded = True
@@ -1707,7 +1759,7 @@ def main():
     runtime = PPRuntime(cfg)   # abre la cámara AQUÍ, antes del botón
     try:
         runtime.run(on_ready=led_on, should_start=should_start,
-                    should_record=should_record)
+                    should_record=should_record, on_camera_lost=on_camera_lost)
     except KeyboardInterrupt:
         # SIGTERM (systemctl stop/restart) o Ctrl-C: run() ya corrió su
         # finally (cerró video/serial). Salir sin escupir traceback.
