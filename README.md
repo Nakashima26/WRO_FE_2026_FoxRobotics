@@ -1145,7 +1145,7 @@ FoxRobotics/
 ├── .github/workflows/deploy-pi.yml        # CI: push to main → git pull + service restart on the Pi
 ├── remote/                                # client/server remote-control helper (bench use)
 ├── videos_orillas/                        # Recorded HUD run footage (debug)
-├── t-photos/                              # Team photos            (pending upload)
+├── t-photos/                              # Team photos
 ├── v-photos/                              # Vehicle photos         (pending upload)
 ├── video/video.md                        # Competition run video links
 ├── requirements.txt                      # Pi Python dependencies (+ apt / Arduino notes)
@@ -1184,7 +1184,7 @@ Full-size images are in [`v-photos/`](v-photos/) (vehicle) and [`t-photos/`](t-p
   </tr>
   <tr>
     <td align="center"><img src="v-photos/isometric.jpeg" width="380" alt="Isometric view"><br><b>Isometric</b></td>
-    <td align="center"><i>Team photo — <code>t-photos/team.jpeg</code> (pending)</i></td>
+    <td align="center"><img src="t-photos/TeamPicture.jpeg" width="380" alt="Team photo"><br><b>Team</b></td>
   </tr>
 </table>
 
