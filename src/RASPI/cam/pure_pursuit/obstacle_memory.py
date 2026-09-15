@@ -30,7 +30,8 @@ from . import config as C
 class _Obs:
     __slots__ = ("x", "y", "color", "conf", "x0", "y0", "y_min", "heading0",
                  "xr", "yr", "anchored", "beyond", "_cls_vote", "_cls_votes",
-                 "_last_bey", "codet_peers", "was_target", "age")
+                 "_last_bey", "codet_peers", "was_target", "age",
+                 "xs", "ys", "hs", "seen_last")
 
     def __init__(self, x: float, y: float, color: str, conf: float,
                  heading0: float | None = None):
@@ -67,6 +68,13 @@ class _Obs:
         # no una x inferida frágil -> no le puede ganar la condición por
         # distancia en un latiguazo.
         self.heading0 = heading0
+        # Última posición DETECTADA (no estimada) y el heading del carro en ese
+        # momento, y si la cámara la vio en el update anterior. Los usa
+        # ObstacleMemory._reaparicion_imposible() (ver OBS_MEM_REAPPEAR_*).
+        self.xs = x
+        self.ys = y
+        self.hs = heading0
+        self.seen_last = True
         # y más chica (más adelante) que ha tenido esta lata según DETECCIONES
         # de cámara (no estima muerta). _prune() solo dispara "PASADO" si la
         # lata estuvo de verdad adelante en algún momento -- así una detección
@@ -127,6 +135,7 @@ class ObstacleMemory:
         self._elapsed_s: float = 0.0
         self.last_passed: bool = False   # ver _prune() / update()
         self.last_prov_blocked: list = []   # (x, y, color, age) que la naranja provisional NO pudo mandar a beyond
+        self.last_reappear_rejects: list = []   # rechazos de _reaparicion_imposible() del último update (log)
         self.last_prune_reason: str = "-"   # último motivo de poda, para overlay en pantalla
         self.last_confidences: list[float] = []   # alineado 1:1 con la lista que
                                                     # devolvió el último update() —
@@ -202,6 +211,8 @@ class ObstacleMemory:
     def _refresh_obs(self, o: "_Obs", nx: float, ny: float):
         """Re-visto: confiar en la posición fresca de la cámara."""
         o.x, o.y = nx, ny
+        o.xs, o.ys, o.hs = nx, ny, self._prev_heading
+        self._seen_ids.add(id(o))
         o.conf = C.OBS_MEM_REFRESH
         o.y_min = min(o.y_min, ny)   # detección, no estima
         # Ancla aún sin fijar: re-sembrarla con esta detección. Se fija
@@ -213,8 +224,43 @@ class ObstacleMemory:
             if ny >= getattr(C, "OBS_MEM_ANCHOR_MIN_Y", 200.0):
                 o.anchored = True
 
+    def _reaparicion_imposible(self, o: "_Obs", nx: float, ny: float) -> bool:
+        """True si la detección (nx, ny) NO puede ser la lata `o`.
+
+        Solo aplica a latas que la cámara NO vio en el update anterior (las que
+        se siguen frame a frame no se tocan). Se compara contra donde se DETECTÓ
+        por última vez, rotada con el giro real del carro desde entonces (signo
+        físico, el mismo del ancla geom de _advance). Mientras el carro avanza, una
+        lata que se deja de ver solo puede quedar igual o más atrás; aparecer a la
+        vez muy de lado Y más adelante es otra lata del mismo color.
+
+        orillas954: rojo de mi recta visto por última vez en (188,311); 2 frames
+        después el rojo de la recta SIGUIENTE en (250,287) -> +66 px de lado y 25 px
+        adelante -> se fusionaba (69 px < OBS_MEM_MATCH_PX) y heredaba el veredicto
+        "mía" -> esquiva fantasma a -68° -> choque. Replay de 16 runs (928-954): la
+        regla solo dispara ahí, en orillas933 (verde pegado al verde equivocado) y
+        una vez sin efecto en 932; el caso bueno más cercano va a 29 px de lado o
+        8 px adelante."""
+        if not getattr(C, "OBS_MEM_REAPPEAR_REJECT", True) or o.seen_last:
+            return False
+        h = self._prev_heading
+        dth = 0.0 if (h is None or o.hs is None) else ((h - o.hs + 180.0) % 360.0 - 180.0)
+        phi = math.radians(dth)
+        ux, uy = o.xs - self.rx, o.ys - self.ry
+        px = self.rx + ux * math.cos(phi) - uy * math.sin(phi)
+        py = self.ry + ux * math.sin(phi) + uy * math.cos(phi)
+        imposible = (abs(nx - px) > float(getattr(C, "OBS_MEM_REAPPEAR_LAT_PX", 40.0))
+                     and (ny - py) < -float(getattr(C, "OBS_MEM_REAPPEAR_AHEAD_PX", 15.0)))
+        if imposible:
+            self.last_reappear_rejects.append(
+                (o.color, round(o.xs), round(o.ys), round(nx), round(ny),
+                 round(nx - px), round(ny - py)))
+        return imposible
+
     def _merge(self, new_obs: list[tuple[float, float, str]]):
         match_r2 = C.OBS_MEM_MATCH_PX ** 2
+        self._seen_ids: set[int] = set()
+        self.last_reappear_rejects = []
         # Decaer todos primero; los que se re-vean recuperan confianza al fusionar.
         for o in self._obs:
             o.conf -= C.OBS_MEM_DECAY
@@ -242,7 +288,7 @@ class ObstacleMemory:
                     if o.color != color:
                         continue
                     d2 = (o.x - nx) ** 2 + (o.y - ny) ** 2
-                    if d2 <= match_r2:
+                    if d2 <= match_r2 and not self._reaparicion_imposible(o, nx, ny):
                         cand.append((d2, di, oi))
             cand.sort()
             det_pair: dict[int, int] = {}
@@ -271,15 +317,20 @@ class ObstacleMemory:
                         continue
                     _fresh[_a].codet_peers.add(id(_fresh[_b]))
                     _fresh[_b].codet_peers.add(id(_fresh[_a]))
+            self._marcar_vistos()
             return
 
         for nx, ny, color in new_obs:
             best = None
             best_d2 = match_r2
+            rechazados: list[_Obs] = []
             for o in self._obs:
                 if o.color != color:
                     continue
                 d2 = (o.x - nx) ** 2 + (o.y - ny) ** 2
+                if d2 <= match_r2 and self._reaparicion_imposible(o, nx, ny):
+                    rechazados.append(o)
+                    continue
                 if d2 <= best_d2:
                     best_d2 = d2
                     best = o
@@ -287,8 +338,19 @@ class ObstacleMemory:
                 self._refresh_obs(best, nx, ny)
             else:
                 if len(self._obs) < C.OBS_MEM_MAX:
-                    self._obs.append(_Obs(nx, ny, color, C.OBS_MEM_REFRESH,
-                                          heading0=self._prev_heading))
+                    nuevo = _Obs(nx, ny, color, C.OBS_MEM_REFRESH,
+                                 heading0=self._prev_heading)
+                    self._obs.append(nuevo)
+                    # Latas distintas: que _dedupe no las vuelva a juntar.
+                    for o in rechazados:
+                        nuevo.codet_peers.add(id(o))
+                        o.codet_peers.add(id(nuevo))
+        self._marcar_vistos()
+
+    def _marcar_vistos(self):
+        """seen_last = la cámara la vio (re-detectada o recién creada) en ESTE update."""
+        for o in self._obs:
+            o.seen_last = (id(o) in self._seen_ids) or (o.conf >= C.OBS_MEM_REFRESH - 1e-9)
 
     # ── Reduce duplicados fantasma ─────────────────────────────────────────────────────────────────
     def _dedupe(self):

@@ -530,6 +530,17 @@ RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
 # False = comportamiento viejo (un solo _Obs para los dos conos).
 OBS_MEM_SPLIT_CODETECTED = True
 
+# Reaparición IMPOSIBLE (2026-09-15, ver ObstacleMemory._reaparicion_imposible).
+# Una lata que la cámara no vio en el frame anterior no acepta una detección que,
+# respecto a donde se detectó por última vez (rotada con el giro real del carro),
+# aparece a la vez a más de LAT_PX de lado Y más de AHEAD_PX más adelante: es otra
+# lata del mismo color. orillas954: el rojo de la recta siguiente se fusionaba con
+# el rojo que se acababa de pasar (+66 lado, 25 adelante) y heredaba "mía".
+# Replay de 16 runs: 4 rechazos, efecto solo en 954 y 933. False = comportamiento viejo.
+OBS_MEM_REAPPEAR_REJECT   = True
+OBS_MEM_REAPPEAR_LAT_PX   = 40.0
+OBS_MEM_REAPPEAR_AHEAD_PX = 15.0
+
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
 PASADO_HOLD_FRAMES        = 6

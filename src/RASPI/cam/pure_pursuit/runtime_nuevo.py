@@ -988,6 +988,13 @@ class PPRuntime:
                             # Alineado 1:1 con bev_obstacles (mismo orden) --
                             # ver detect_centerline(obstacle_conf=).
                             obstacle_conf = list(self.memory.last_confidences)
+                            if self.memory.last_reappear_rejects:
+                                print("[MEMREJ] reaparicion imposible, lata nueva: "
+                                      + " ".join(f"{c[0]} visto({xs},{ys})->det({nx},{ny}) "
+                                                 f"lado={dx:+d} adelante={-dy:+d}"
+                                                 for c, xs, ys, nx, ny, dx, dy
+                                                 in self.memory.last_reappear_rejects),
+                                      flush=True)
                             # "PASADO y" de _prune: la lata cayó por DETRÁS del eje
                             # (rebase DE FRENTE) o salió por el borde inferior del
                             # BEV. Respaldo del trigger medido, que cubre el rebase
