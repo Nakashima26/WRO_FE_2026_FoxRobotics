@@ -586,7 +586,9 @@ const float         PARK_ARMADO_ANG_DEG       = 15.0f;
 const bool          PARK_REQUIERE_PI          = false;
 const unsigned long PARK_TIMEOUT_MS           = 10000;
 const int           PARK_FRENTE_CM            = 18;
-const unsigned long PARK_HUECO_MIN_MS         = 500;
+const unsigned long PARK_HUECO_MIN_MS         = 0;      // 2026-09-15: 500 -> 0. El poste 2 se acepta en
+                                                        // cuanto vuelve a haber bajada tras el hueco confirmado
+                                                        // (la máquina de estados ya ordena poste1/hueco/poste2)
 const unsigned long PARK_HUECO_TIMEOUT_MS     = 2500;
 const unsigned long PARK_PASS_EXTRA_MS        = 650;
 const unsigned long PARK_POSTE2_WAIT_MS       = 500;
@@ -2956,14 +2958,13 @@ void loop() {
     // ESTACIONANDO — Estacionamiento en paralelo en reversa (Obstacle Challenge)
     // ═══════════════════════════════════════════════════════════════════════════
     case ESTACIONANDO: {
-      // Sónar lateral del cajón con MEDIANA DE 3 (anti-glitch): el HC-SR04 lateral
-      // tiraba picos de 55-106 cm por multipath/eco perdido que el código crudo
-      // tomaba como "poste" o "hueco" y colapsaba el escaneo. La mediana los mata
-      // (un pico de 1 frame no sobrevive) preservando los flancos reales de pared.
-      static long parkExtBuf[3] = {200, 200, 200};
-      static int  parkExtIdx    = 0;
-      long  extInst         = parkParedEsIzquierda ? distL_raw : distR_raw;
-      long  extRaw          = mediana3(extInst, parkExtBuf, parkExtIdx);
+      // Sónar lateral del cajón CRUDO, igual que ESTACIONANDO_PUNTA (2026-09-15:
+      // se quitó la mediana de 3). Los picos de 55-106 cm por multipath ya no se
+      // cuelan: la clasificación de la fase 0 los marca como "lectura alta"
+      // (PARK_PUNTA_SALTO_MAX_CM) y no tocan base ni error, y tanto la bajada
+      // (PARK_CAIDA_N) como el hueco (PARK_GAP_N) piden 2 lecturas seguidas.
+      // La mediana además retrasaba un frame el flanco del poste.
+      long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
       int   servoHaciaPared = parkParedEsIzquierda ? 150 : 20;      // tope hacia la pared exterior
       int   servoDesdePared = parkParedEsIzquierda ? 20 : 150;      // contravuelta hacia el interior
@@ -3205,8 +3206,11 @@ void loop() {
         // ── Subfase 2: En Hueco de 33 cm, buscando Poste 2 ──
         else if (parkScanSubFase == 2) {
           unsigned long tHueco = millis() - parkHuecoEntryMs;
-          // Gate anti-falso: el trailing edge del poste 1 todavía puede verse
-          // como "bajada" los primeros ~200-300 ms. No aceptar nada antes de MIN.
+          // El orden de la máquina de estados ya es el candado: bajada confirmada
+          // (poste 1) -> hueco confirmado (PARK_GAP_N lecturas de pared) -> bajada
+          // confirmada otra vez (poste 2). El trailing edge del poste 1 no puede
+          // colarse porque para llegar aquí ya hubo pared limpia. PARK_HUECO_MIN_MS
+          // queda en 0; súbelo solo si un rebote del poste 1 dispara el poste 2.
           bool huecoMaduro   = (tHueco >= PARK_HUECO_MIN_MS);
           // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
