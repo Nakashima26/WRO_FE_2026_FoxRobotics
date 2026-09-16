@@ -53,8 +53,28 @@ class Vision:
             # de sus px caen en PARK_PINK_HSV; un cono rojo real es H med=0-1 /
             # B-R=0.07 / 1% rosa, y su NÚCLEO está en la banda 1 [0,5] -> subir
             # el piso de la banda 2 no lo afecta (solo pierde la cola H 173-176).
-            "Red": [(np.array([0, 150, 40]), np.array([5, 255, 160])),
-                        (np.array([177, 150, 40]), np.array([179, 255, 160]))],
+            #
+            # 2026-09-16 (sede nueva, orillas1013): con la luz de ahí el cono
+            # rojo NO sale en H 0-1 sino en H 169-178 — la cámara corre con AWB
+            # apagado y ganancias fijas <1.2,1.5> medidas en el cuarto de
+            # pruebas, así que una luz más fría empuja el rojo hacia el
+            # magenta. Y cerca del carro llega a V 208 (el tope 160 también lo
+            # tiraba). Resultado: el cono grande que tenía ENFRENTE (frames
+            # 276-285, 18k px rojos) daba CERO bboxes y el carro no lo esquivó.
+            # color_corr.py no lo tapó: allá el piso sale QUEMADO (V~237, 33%
+            # de px a 255) y un piso quemado ya no tiene tono -> ganancias ~1.
+            #
+            # La banda 2 baja 177 -> 168 y los topes de V suben. Lo que antes
+            # protegía de la pared magenta (subir el piso de H) ya no puede
+            # hacerlo, así que esa defensa se movió a RED_BR_MAX en
+            # process_color(), que separa por B/R y NO depende de la luz:
+            # cono rojo real B/R 0.11-0.35, pared rosa 0.45-0.60.
+            # Verificado sobre .avi grabados: orillas1013 (sede) 72 -> 130
+            # frames con rojo y el cono de los frames 276-285 pasa de 0 a
+            # detectado; orillas942 (pared rosa) 124 -> 125 sin falsos de
+            # pared; orillas1005 (luz de siempre) idéntico.
+            "Red": [(np.array([0, 150, 40]), np.array([5, 255, 200])),
+                        (np.array([168, 170, 40]), np.array([179, 255, 235]))],
             # Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
             "Green": [(np.array([30, 35, 25]), np.array([85, 255, 255]))]        
             # "Pink": [(np.array([140, 100, 100]), np.array([170, 255, 255]))],
@@ -62,7 +82,14 @@ class Vision:
 
         self.kernel = np.ones((3, 3), np.uint8)
 
-    def process_color(self, frame, mask, color_name):
+    # Tope de B/R para aceptar un blob como cono ROJO. Medido en frames:
+    # cono rojo real 0.11-0.35 (el rojo del cono casi no tiene azul), pared
+    # magenta del estacionamiento 0.45-0.60 (es rosa: mucho azul). A
+    # diferencia del piso de H que se usaba antes, esta razón NO se mueve con
+    # la temperatura de color de la sede — las dos se escalan parejo.
+    RED_BR_MAX = 0.42
+
+    def process_color(self, frame, mask, color_name, bgr=None):
         """Encuentra contornos y devuelve posiciones.
 
         Filtra por solidez (area_contorno / area_bbox) para descartar formas
@@ -94,6 +121,17 @@ class Vision:
             if solidity < MIN_SOLIDITY or aspect > MAX_ASPECT:
                 continue
 
+            # Rechazo de la pared magenta del estacionamiento por B/R (ver
+            # RED_BR_MAX). Se mide solo sobre los px del contorno, no del bbox.
+            if color_name == "Red" and bgr is not None:
+                cnt_mask = np.zeros(mask.shape, np.uint8)
+                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
+                sel = cnt_mask > 0
+                b_px = bgr[..., 0][sel].astype(np.float32)
+                r_px = bgr[..., 2][sel].astype(np.float32)
+                if float(np.median(b_px / np.maximum(r_px, 1.0))) > self.RED_BR_MAX:
+                    continue
+
             objects.append((x, y, w, h))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
             cv2.putText(frame, color_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
@@ -104,10 +142,14 @@ class Vision:
         """Detecta colores optimizado con NumPy."""
         frame = cv2.flip(frame, 1)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        # Copia limpia para el filtro B/R del rojo: `frame` se va ensuciando
+        # con los rectángulos blancos que dibuja process_color().
+        bgr = frame.copy()
 
         masks = {color: np.bitwise_or.reduce([cv2.inRange(hsv, lower, upper) for lower, upper in ranges])
                  for color, ranges in self.color_ranges.items()}
 
-        positions = {color: self.process_color(frame, mask, color) for color, mask in masks.items()}
+        positions = {color: self.process_color(frame, mask, color, bgr)
+                     for color, mask in masks.items()}
 
         return frame, positions
