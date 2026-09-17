@@ -805,8 +805,10 @@ LINE_CORE_MIN_PX = 8     # px de núcleo mínimos para aceptar el near_y. Medido
 # Pixeles naranjas pegados a un cono o a la pared magenta NO cuentan como línea
 # (el borde de la cuña de un rojo sobre el crema sale naranja pálido). Mismos
 # rangos que vision.py (Red/Green) + magenta del estacionamiento.
-LINE_CONE_HSV = [(np.array([0, 150, 40]),   np.array([5, 255, 160])),
-                 (np.array([177, 150, 40]), np.array([179, 255, 160])),
+# 2026-09-16: los topes de V suben igual que en vision.py (en la sede nueva el
+# cono cercano llega a V~208). Aquí solo se BORRAN px, así que de más no daña.
+LINE_CONE_HSV = [(np.array([0, 150, 40]),   np.array([5, 255, 200])),
+                 (np.array([177, 150, 40]), np.array([179, 255, 235])),
                  (np.array([35, 60, 40]),   np.array([75, 255, 200])),
                  (np.array([140, 50, 40]),  np.array([176, 255, 255]))]
 LINE_CONE_MASK_KERNEL = 9       # dilatación (px) de esos colores antes de borrar
