@@ -41,7 +41,7 @@ MPU6050 mpu(Wire);
 #define ECHO_F      33
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
-const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
+const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
 
 
 // ── PWM ───────────────────────────────────────────────────────────────────────
@@ -767,7 +767,7 @@ const int           PARK_PEGADO_CM            = 2;
 // con el corte ahora en 6 cm le toca la mitad de ese recorrido. 1200 deja ~2x de
 // margen sin convertir un eco perdido en 40 cm de embestida contra el poste.
 const unsigned long PARK_FWD_MS               = 1200;
-const float         PARK_FINAL_TOL_DEG        = 3.0f;
+const float         PARK_FINAL_TOL_DEG        = 5.0f;
 // Reversa final de enderezado DESPUÉS del acomodo hacia adelante (fases 12 y 13).
 // 2026-09-15: false = al terminar la fase 11 se acaba la maniobra ahí mismo. Con
 // true vuelve a reversear hasta quedar a PARK_FINAL_TOL_DEG, que es lo que estaba
@@ -2478,9 +2478,10 @@ void loop() {
         int vel = (tS < INICIO_RAMP_MS)
                   ? (int)map((long)tS, 0, (long)INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM)
                   : INICIO_PWM;
+        
         motorAdelante();
         escribirServo(inicioGirarDer ? 20 : 150);   // full hacia el lado de salida
-        delay(20);
+        delay(100);
         setMotor(vel);
         bool swingListo   = (deltaIni >= (float)(INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
