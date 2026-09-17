@@ -41,7 +41,7 @@ MPU6050 mpu(Wire);
 #define ECHO_F      33
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
-const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
+const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
 
 
 // ── PWM ───────────────────────────────────────────────────────────────────────
@@ -369,7 +369,23 @@ const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
 // esa pared en el peor caso (distExt > FAR_CM). En los casos cercanos llega antes
 // y se queda empujando -> la media vuelta sale siempre desde la pared, y
 // PARK_RETORNO_AVANCE_MS fija la distancia final al lote. Calibrar con el caso lejano.
-const unsigned long MANIOBRA_BACKOFF_13_MS  = 1350;  // = FAR_MS + 500
+const unsigned long MANIOBRA_BACKOFF_13_MS  = 1350;  // = FAR_MS + 500 (caso CERCANO)
+// A partir de aquí el retroceso 13 ya no es fijo: por cada cm que la pared
+// exterior esté MÁS lejos de FAR_CM, se le suman MS_POR_CM. Sin esto, en los
+// casos lejanos el carro no alcanzaba a llegar a la pared del lote y la media
+// vuelta arrancaba desde donde cayera.
+// Medido en las corridas 1025/1030/1032: maniobraDistExt salió 45 / 36 / 41, o
+// sea POR DEBAJO del umbral — en esas tres esto no habría hecho nada. El caso
+// lejano que tú viste no está en los logs que tengo, así que MS_POR_CM es un
+// punto de partida (a ~30 cm/s el backoff cubre ~1 cm cada 33 ms), no un valor
+// medido. Si sigue sin tocar la pared, súbelo.
+const int           MANIOBRA_BACKOFF_13_FAR_CM   = 60;
+const float         MANIOBRA_BACKOFF_13_MS_POR_CM = 17.0f;
+// Tope duro = base + 500 ms. Ese medio segundo es el máximo que hace falta según
+// lo visto en pista; más que eso son milisegundos de reversa A CIEGAS contra una
+// pared, sin sensor atrás. (Un primer intento con 35 ms/cm y tope 2400 escalaba
+// casi el doble de lo necesario.)
+const unsigned long MANIOBRA_BACKOFF_13_MAX_MS   = 2150;
 const int           MANIOBRA_BACKOFF_13_VEL = 100;   // PWM (bájalo si empuja muy fuerte contra la pared)
 // Tras los BACKOFF_13_MS sigue empujando en reversa esto más con el servo CENTRADO (sin
 // heading-hold): la cola se asienta plana contra la pared del lote y el chasis queda
@@ -631,9 +647,21 @@ const unsigned long PARK_PASS_EXTRA_MS        = 600;
 // Así que el avance se escala con la distancia de llegada: WAIT_MS es el valor
 // EN la distancia de referencia, y se corrige MS_POR_CM por cada cm de más o de
 // menos.
-const unsigned long PARK_POSTE2_WAIT_MS       = 676;   // valor en PARK_POSTE2_REF_CM
+const unsigned long PARK_POSTE2_WAIT_MS       = 580;   // valor en PARK_POSTE2_REF_CM
+// 2026-09-16 (run 1044): 556 -> 580. Con 556 y pnd=29 la fase 8 YA no topó (1441 ms
+// por condición en vez de 2500 por timeout, enderezó 36 deg, ang final -5.35), pero
+// quedó CORTO de avance y pegó con la pared de ATRÁS: le faltan ~24 ms.
 const float         PARK_POSTE2_REF_CM        = 28.0f; // la llegada de la 1019
-const float         PARK_POSTE2_MS_POR_CM     = 60.0f; // ms de avance por cm de llegada
+const float         PARK_POSTE2_MS_POR_CM     = 0.0f;  // ms de avance por cm de llegada
+// 2026-09-16: PENDIENTE A CERO. Todas las llegadas usan 556 ms, que es el único
+// valor que se ha visto estacionar bien (run 1025, pnd=26). Los otros dos puntos
+// que existen fallaron los dos por PASARSE: pnd=28 con 676 y pnd=29 con 600, y en
+// ambos la llanta delantera pegó al girar -> fase 8 topada y salida por timeout.
+// Con dos fallas del mismo lado y un solo acierto NO se puede estimar pendiente:
+// harían falta dos llegadas distintas que ambas funcionen. La +60 anterior venía
+// de 1019/1022, que también fallaron las dos. Cuando haya dos aciertos a distinta
+// distancia, ahí sí se pone pendiente; mientras tanto, el valor bueno para todos.
+// Anclado en la 1025: con REF=28, WAIT=516 y -20/cm, pnd=26 sigue dando 556 exactos.
 // Topes. El piso importa: si avanza MUY poco, arranca la reversa antes de
 // rebasar bien el poste 2 y la cola se lo lleva. El techo protege la trompa.
 const unsigned long PARK_POSTE2_MIN_MS        = 500;
@@ -643,7 +671,9 @@ const unsigned long PARK_POSTE2_MIN_MS        = 500;
 // 25 -> 676 sobró). Arriba de 28 no hay ni un punto, así que subir el avance con
 // la distancia era extrapolación sin respaldo — y en la 1024, con una llegada de
 // 30 cm, mandó 796 ms de más.
-const unsigned long PARK_POSTE2_MAX_MS        = 676;
+const unsigned long PARK_POSTE2_MAX_MS        = 600;
+// 2026-09-16: 676 -> 600. Solo recorta las llegadas de 27.3 cm para arriba (el
+// caso que se fue de largo); de 27 para abajo la ley manda y no cambia nada.
 const float         PARK_ALIGN_CM             = 25.0f;
 // 2026-09-15, medido en los 4 intentos de la noche (runs 1004-1007): con 700 ms
 // la fase 3 SIEMPRE salía por timeout, nunca por ángulo — llegaba a 19-29° en vez
@@ -742,8 +772,18 @@ const float         PARK_FINAL_TOL_DEG        = 3.0f;
 // 2026-09-15: false = al terminar la fase 11 se acaba la maniobra ahí mismo. Con
 // true vuelve a reversear hasta quedar a PARK_FINAL_TOL_DEG, que es lo que estaba
 // empujando el carro contra la pared de atrás.
-const bool          PARK_REV_FINAL            = false;
-const unsigned long PARK_REV0_TIMEOUT_MS      = 2500;
+// 2026-09-16 REACTIVADO, pero la fase 13 es otra cosa ahora: volante a tope
+// hacia AFUERA y corte por sonar frontal, no reversa recta hasta un ángulo.
+// Solo entra si al acabar la fase 11 el carro quedó a más de PARK_FINAL_TOL_DEG;
+// si ya salió derecho, se la salta.
+const bool          PARK_REV_FINAL            = true;
+const unsigned long PARK_REV0_TIMEOUT_MS      = 2500;   // (legacy, ya no se usa en f13)
+// dF al que se detiene la reversa de acomodo final. Cada cm extra vale ~2.3° de
+// enderezado, y también ~1 cm menos de aire con la pared TRASERA (sin sensor).
+const int           PARK_REV_FINAL_DF_CM      = 8;
+// Tope de seguridad. De dF~3 a dF=8 son ~5 cm = ~250 ms; 900 deja 3x de margen
+// sin convertir un eco perdido en una embestida a ciegas contra la pared trasera.
+const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
 // Distancia a la pared/poste de ENFRENTE a la que se detiene el avance final.
 // 2026-09-16 (run 1016): con 3 el corte por distancia SÍ funcionó — la traza va
 // dF = 9,8,6,5,4,3 y ahí dispara — pero entre la granularidad del sonar y el
@@ -874,6 +914,27 @@ const unsigned long PARK_RETORNO_REV_CCW_MS    = 1200;   // regreso con pared a 
 // probado. Si en pista resulta que el CW necesita otro tiempo, se separa aquí.
 const unsigned long PARK_RETORNO_REV_CW_MS     = 1200;   // regreso con pared a la DER (carrera CW)
 const int           PARK_RETORNO_REV_PWM       = 90;
+// ── La reversa del regreso también sigue la PARED, no solo el gyro ──────────
+// Ver el bloque de la fase 22. false = comportamiento anterior (solo rumbo a 0).
+// 2026-09-16 APAGADO tras la run 1031. El signo era correcto (el carro sí pasó de
+// dR=22 a dR=30), pero la fase salió a -2.8° de rumbo y en cuanto el escaneo
+// arranca hacia ADELANTE ese ángulo se invierte de efecto y vuelve a meter el
+// carro: dR se fue de 30 a 20 en 2 s y el seguidor pasó el escaneo rescatándolo.
+// Peor que no corregir. La 1025, sin esto, salía a 27 y se quedaba plana.
+// El problema de fondo: en 1200 ms de reversa (~26 cm) no caben las dos cosas —
+// correr 6 cm de lado exige ir ~13° inclinado, y no queda tramo para volver a 0.
+// Para reactivarlo hay que: (1) alargar la reversa, y (2) salir de la fase por
+// CONDICIÓN DE RUMBO (|ang| <= 1.5°) y no por reloj. Con eso vuelve a tener
+// sentido; así como está, no.
+const bool          PARK_RETORNO_REV_WALL      = false;
+const float         PARK_RETORNO_REV_KPOS      = 0.8f;  // grados de rumbo por cm de error
+const float         PARK_RETORNO_REV_ANG_MAX   = 8.0f;  // tope de la corrección
+// Últimos ms de la reversa SIN corregir distancia, para entregar el chasis recto.
+const unsigned long PARK_RETORNO_REV_RECTO_MS  = 350;
+// EN REVERSA EL SIGNO SE INVIERTE: para acercarse a la pared hay que apuntar la
+// trompa AFUERA. Si en pista ves que se aleja cuando debería acercarse (o al
+// revés), cambia esto a +1 y queda arreglado — no toques nada más.
+const int           PARK_RETORNO_REV_SIGNO     = -1;
 // Wall follower
 const int           PARK_PUNTA_PWM             = 95;     // PWM de la recta final
 const float         PARK_PUNTA_PARED_CM        = 31.0f;  // distancia a mantener de la pared exterior (lectura del sonar)
@@ -2898,6 +2959,10 @@ void loop() {
       // exigiendo pared lateral ABIERTA, o giroSucioArmado como red de
       // seguridad si el cajón tapara el lateral en otra esquina no prevista.
       bool esquinaConCajon = ((turnsCompleted % 4) == 3);
+      // _laAprox / _muyCerca: subidos del else — ahora la rama del cajón también
+      // los usa (ver ECO DE REOJO abajo).
+      bool _laAprox  = (direccionAproxLatch != 0);
+      bool _muyCerca = (distF > 0 && distF <= FRONT_TURN_REV_CM);
       bool enLaPared;
       int  debounceNecesario;
       if (esquinaConCajon) {
@@ -2906,8 +2971,24 @@ void loop() {
         // (dL=14 -> FORWARD), esperó a dF=17 y el arco de frente se incrustó en la
         // pared (fase 1 sin salida). En la ventana ancha de FORWARD se exige
         // !_hayLataMia (un cono a 50-75 cm no es la pared); REVERSE queda como estaba.
+        //
+        // ECO DE REOJO (orillas1040 giro 4): la ventana ancha de FORWARD NO puede
+        // confiar en el frontal sola, y no es mala suerte: es geometría. El preview
+        // solo elige FORWARD cuando la pared exterior está a _de < HUG_CM (20 cm).
+        // A esa distancia el haz del HC-SR04 (+-15°) raspa ESA MISMA pared y
+        // devuelve un eco a _de/sin(15°) = _de*3.86, o sea < 77 cm: SIEMPRE dentro
+        // de la ventana de 75. Medido en 1040: tras esquivar el rojo el carro quedó
+        // a dR=12-18 de la exterior; dF leyó 200 con el chasis chueco, saltó a 80 en
+        // el frame exacto en que se puso paralelo (ang=-1.02) y volvió a 197 en
+        // cuanto la maniobra lo rotó 20°. Disparó a dF=62 con la esquina a ~2 m y la
+        // cámara sin ver NADA adelante (0 detecciones, drop=0 sucio=0 alat=0).
+        // Por eso FORWARD exige evidencia lateral de que la esquina existe. REVERSE
+        // (<= 25 cm) queda igual: ahí el fantasma ya no alcanza y el borde del cajón
+        // sí puede tapar el lateral. _muyCerca queda como última red.
         enLaPared         = (distF > 0 && distF <= _umbralFront
-                             && (_revPrev || !_hayLataMia));
+                             && (_revPrev || _muyCerca
+                                 || (!_hayLataMia
+                                     && (paredAbierta || giroSucioArmado || _laAprox))));
         debounceNecesario = CRUCERO_FRONT_DEBOUNCE;
       } else {
         // !_hayLataMia: si la cámara ve una lata `mia`, ese dF corto ES la lata
@@ -2920,7 +3001,7 @@ void loop() {
         // esquina real aunque AHORA el lateral esté tapado por un obstáculo
         // cercano. Habilita el disparo por el frontal sin exigir paredAbierta en
         // este frame. Sigue exigiendo distF <= _umbralFront y !_hayLataMia.
-        bool _laAprox = (direccionAproxLatch != 0);
+        // (_laAprox se declara arriba, fuera del if)
         // PEGADO A LA PARED DE FRENTE: gira aunque el lateral NUNCA confirme la
         // apertura de la esquina. Pasa cuando el carro llega aplastado contra la
         // pared INTERIOR tras esquivar (el lateral interior no se despega ->
@@ -2929,7 +3010,7 @@ void loop() {
         // después, ya incrustado (run 2026-09-09 giro 2, dF=2). Mismo criterio
         // que la rama del cajón: frontal <= REV_CM, debounce CRUCERO_FRONT.
         // !_hayLataMia sigue: si es una lata, _saleLata ya la mandó a esquivar.
-        bool _muyCerca = (distF > 0 && distF <= FRONT_TURN_REV_CM);
+        // (_muyCerca se declara arriba, fuera del if)
         enLaPared         = (distF > 0 && distF <= _umbralFront
                              && (paredAbierta || giroSucioArmado || _laAprox || _muyCerca)
                              && !_hayLataMia);
@@ -3130,7 +3211,20 @@ void loop() {
         }
         setMotor(m13 ? MANIOBRA_BACKOFF_13_VEL : MANIOBRA_BACKOFF_VEL);
         unsigned long backoffMs;
-        if      (m13)                                          backoffMs = MANIOBRA_BACKOFF_13_MS + MANIOBRA_13_CUADRAR_MS;
+        // 2026-09-16: el retroceso de la MANIOBRA 13 escala con la pared exterior.
+        // Era fijo (1350 ms) y por eso en los casos lejanos no alcanzaba a TOCAR
+        // la pared del lote, que es justo lo que el comentario de la constante
+        // pedía calibrar. Arriba de MANIOBRA_BACKOFF_13_FAR_CM se le suman
+        // MANIOBRA_BACKOFF_13_MS_POR_CM por cada cm extra. Debajo del umbral no
+        // cambia nada: ahí ya llegaba y se quedaba empujando, que es lo correcto.
+        if (m13) {
+          backoffMs = MANIOBRA_BACKOFF_13_MS + MANIOBRA_13_CUADRAR_MS;
+          if (maniobraDistExt > MANIOBRA_BACKOFF_13_FAR_CM) {
+            backoffMs += (unsigned long)((maniobraDistExt - MANIOBRA_BACKOFF_13_FAR_CM)
+                                         * MANIOBRA_BACKOFF_13_MS_POR_CM);
+          }
+          if (backoffMs > MANIOBRA_BACKOFF_13_MAX_MS) backoffMs = MANIOBRA_BACKOFF_13_MAX_MS;
+        }
         else if (!maniobraReversa)                             backoffMs = MANIOBRA_BACKOFF_FWD_MS;
         else if (maniobraDistExt > MANIOBRA_BACKOFF_FAR_CM)    backoffMs = MANIOBRA_BACKOFF_FAR_MS;
         else                                                  backoffMs = MANIOBRA_BACKOFF_MS;
@@ -3285,7 +3379,33 @@ void loop() {
       if (parkFase == 22) {
         unsigned long revMs = parkParedEsIzquierda ? PARK_RETORNO_REV_CCW_MS : PARK_RETORNO_REV_CW_MS;
         motorReversa();
-        aplicarReversaHold(0.0f);
+        // 2026-09-16: esta reversa ya no sostiene solo el rumbo — también corrige
+        // la DISTANCIA a la pared. Motivo (run 1030): la media vuelta no cae
+        // siempre en el mismo ángulo (medido: 88.9 / 89.5 / 90.4 / 91.1 / 93.7),
+        // así que el carro salía de aquí a 23 cm una vez y a 27 otra, apuntando
+        // hacia la pared o no. El escaneo se pasaba los 5 s rescatándolo y aun
+        // así llegaba chueco. Corrigiendo aquí, el escaneo empieza igual siempre.
+        //
+        // OJO CON EL SIGNO — en reversa está INVERTIDO respecto al seguidor de
+        // adelante: para ACERCARSE a la pared hay que apuntar la trompa AFUERA
+        // (el que se mete es el tren trasero). Por eso el factor
+        // PARK_RETORNO_REV_SIGNO; si en pista corrige al revés, ponlo en +1.
+        float objetivoRev = 0.0f;
+        if (PARK_RETORNO_REV_WALL) {
+          unsigned long tRev = millis() - parkFaseMs;
+          // Los últimos ms van sin corrección: así sale RECTO y no le entrega al
+          // escaneo un chasis ladeado, que es justo lo que queríamos evitar.
+          bool tramoFinal = (revMs > PARK_RETORNO_REV_RECTO_MS)
+                            && (tRev >= revMs - PARK_RETORNO_REV_RECTO_MS);
+          bool lecturaOk  = (extRaw > 2 && extRaw <= (long)PARK_PARED_MAX_CM);
+          if (lecturaOk && !tramoFinal) {
+            float errPared = (float)extRaw - PARK_PARED_CM;   // >0 = lejos
+            float corr = constrain(errPared * PARK_RETORNO_REV_KPOS,
+                                   -PARK_RETORNO_REV_ANG_MAX, PARK_RETORNO_REV_ANG_MAX);
+            objetivoRev = (float)PARK_RETORNO_REV_SIGNO * haciaPared * corr;
+          }
+        }
+        aplicarReversaHold(objetivoRev);
         setMotor(PARK_RETORNO_REV_PWM);
         if (millis() - parkFaseMs >= revMs) {
           motorCoast();
@@ -3903,20 +4023,41 @@ void loop() {
         break;
       }
 
-      // ── Fase 13: reversa hasta ángulo de la recta = 0 ──────────────────
+      // ── Fase 13: reversa de acomodo FINAL ──────────────────────────────
+      // 2026-09-16: ya no reversea recto con heading-hold (eso necesitaba
+      // muchísimo recorrido para rotar y por eso empujaba contra la pared de
+      // atrás). Ahora es volante A TOPE hacia AFUERA: en reversa eso mete la
+      // cola y trae la trompa hacia la pared, que es justo la rotación que
+      // falta. Las corridas buenas terminan en 9-21° y esto se los come.
+      //
+      // Corta con el SONAR FRONTAL, que en este régimen es de fiar: con el
+      // carro casi derecho y lento, dF sale en escalones limpios de 1 cm, sin
+      // picos ni pérdidas de eco (verificado en 1025/1027). Nada que ver con la
+      // basura que lee a media contravuelta.
+      //
+      // Cuentas: el carro termina la fase 11 en dF ~3-5, y de ahí a
+      // PARK_REV_FINAL_DF_CM son ~4-5 cm de reversa = ~11° de enderezado.
+      // Si quieres que enderece MÁS, sube PARK_REV_FINAL_DF_CM (cada cm extra
+      // vale ~2.3°), pero cada cm sale del aire con la pared TRASERA, que es el
+      // único lado sin sensor. Por eso el timeout es corto y no negociable.
       if (parkFase == 13 && PARK_MODO_PARALELO) {
         motorReversa();
-        aplicarReversaHold(parkRumboRef);
+        escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
         setMotor(PARK_REV_PWM);
         float dif      = fabs(anguloGyro - parkRumboRef);
-        bool  alineado = (dif <= PARK_FINAL_TOL_DEG);
+        bool  alineado = (dif <= PARK_FINAL_TOL_DEG);          // ya derecho: no sigas
+        bool  frenteOk = (distF_filtrada > 0
+                          && distF_filtrada >= PARK_REV_FINAL_DF_CM);
         bool  pegado   = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
-        bool  timeout  = (millis() - parkFaseMs >= PARK_REV0_TIMEOUT_MS);
-        if (alineado || timeout) {
-          finalizarPark(alineado ? "REV a 0 OK" : "REV a 0 TIMEOUT");
-        } else if (pegado) {
-          // pegado de lado: no stalls; corta igual (ya acomodó enfrente)
-          finalizarPark("REV a 0 PEGADO");
+        bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
+        if (frenteOk || alineado || pegado || timeout) {
+          Serial.print("PARK fase 13 fin: dif="); Serial.print(dif, 1);
+          Serial.print(" dF="); Serial.print(distF_filtrada);
+          Serial.print(" ext="); Serial.println(extRaw);
+          finalizarPark(frenteOk ? "REV FINAL: dF objetivo"
+                      : alineado ? "REV FINAL: ya alineado"
+                      : pegado   ? "REV FINAL: pegado de lado"
+                                 : "REV FINAL: TIMEOUT");
         }
         break;
       }
