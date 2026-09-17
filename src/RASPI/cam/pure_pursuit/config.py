@@ -1034,7 +1034,16 @@ ORANGE_POST_TURN_CD_FRAMES = 40  # tras reset() del tracker (giro): ignora TODA 
 # arriesgarse a que se clasifique "más allá" por una lectura de línea que
 # todavía no se estabilizó sobre datos reales de esta recta.
 # 2026-08-28: 10->20 al pasar el pipeline de ~7fps a ~14fps (misma ventana en seg).
-TURN_RECOVERY_FRAMES = 20
+# 2026-09-17 (orillas1063 tc=8): 20->60. Tras el giro 8 el carro esquivó un verde
+# y, DURANTE la recuperación (est=R, ~48 frames después del giro), el barrido de
+# rumbo re-vio la cinta naranja del giro que ACABABA de salir -> _find_near_line_col
+# la enganchó (near_y=320 fijo, blob 40x25) -> el rojo de esta recta apareció en
+# y=281 < 320 y se clasificó `beyond` desde el 1er frame -> no lo esquivó. El
+# cooldown de 20 ya había expirado a los 48 frames. La recta giro8->giro9 dura
+# ~180 frames y la naranja REAL del siguiente corner sale al final, así que 60
+# tapa la cinta vieja sin tapar la buena. Si reaparece con una esquiva aún más
+# tardía tras el giro, súbelo más (o suprime la naranja también durante est=R).
+TURN_RECOVERY_FRAMES = 60
 
 # Clasificación "mía" / "más allá" de la línea naranja
 # (obstacle_memory.classify_and_split): NO es un latch permanente. Cada frame se
