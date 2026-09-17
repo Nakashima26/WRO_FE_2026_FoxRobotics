@@ -611,7 +611,39 @@ const unsigned long PARK_HUECO_MIN_MS         = 0;      // 2026-09-15: 500 -> 0.
                                                         // (la máquina de estados ya ordena poste1/hueco/poste2)
 const unsigned long PARK_HUECO_TIMEOUT_MS     = 2500;
 const unsigned long PARK_PASS_EXTRA_MS        = 600;
-const unsigned long PARK_POSTE2_WAIT_MS       = 650;
+// Cuánto avanza el carro DESPUÉS de ver el poste 2 antes de frenar y meterse.
+// 2026-09-16 (run 1019, rozó la pared de atrás): es la única palanca real contra
+// el fondo del cajón, porque no hay sonar trasero. Mover el arranque hacia
+// adelante recorre TODA la maniobra hacia adelante, y la consecuencia (quedar
+// más cerca del poste de ENFRENTE) sí la tienes medida: la fase 11 corta con
+// PARK_CENTER_HI_CM. O sea cambias un riesgo ciego por uno con sensor.
+// 650 -> 800 a ~25 cm/s (PARK_PWM=95) son ~3.7 cm más de aire atrás.
+//
+// 2026-09-16 (run 1022): pero NO puede ser fijo, y el motivo es geométrico.
+// El avance extra ayuda cuando el carro llega SEPARADO de la pared, y estorba
+// cuando llega pegado: los postes sobresalen de la pared hacia la pista, así que
+// mientras más pegado va el carro, más metida queda su trompa en la franja de
+// los postes — y adelantar el arranque la mete todavía más. Medido:
+//     1019  llegó a 28 cm  -> solo rozó la pared de ATRÁS
+//     1022  llegó a 25 cm  -> la llanta delantera pegó con el poste de ENFRENTE
+//           (en la fase 8 el ángulo SUBIÓ 46->51->53: el carro topó y pivoteó
+//            sobre el punto de contacto en vez de enderezarse)
+// Así que el avance se escala con la distancia de llegada: WAIT_MS es el valor
+// EN la distancia de referencia, y se corrige MS_POR_CM por cada cm de más o de
+// menos.
+const unsigned long PARK_POSTE2_WAIT_MS       = 676;   // valor en PARK_POSTE2_REF_CM
+const float         PARK_POSTE2_REF_CM        = 28.0f; // la llegada de la 1019
+const float         PARK_POSTE2_MS_POR_CM     = 60.0f; // ms de avance por cm de llegada
+// Topes. El piso importa: si avanza MUY poco, arranca la reversa antes de
+// rebasar bien el poste 2 y la cola se lo lleva. El techo protege la trompa.
+const unsigned long PARK_POSTE2_MIN_MS        = 500;
+// 2026-09-16 (run 1024): techo 900 -> 676, o sea el MISMO valor de referencia.
+// La ley solo puede RESTAR avance, nunca sumar. Motivo: los dos únicos datos que
+// existen están en 28 cm o por debajo (28 -> 650 faltó/676 hubiera servido;
+// 25 -> 676 sobró). Arriba de 28 no hay ni un punto, así que subir el avance con
+// la distancia era extrapolación sin respaldo — y en la 1024, con una llegada de
+// 30 cm, mandó 796 ms de más.
+const unsigned long PARK_POSTE2_MAX_MS        = 676;
 const float         PARK_ALIGN_CM             = 25.0f;
 // 2026-09-15, medido en los 4 intentos de la noche (runs 1004-1007): con 700 ms
 // la fase 3 SIEMPRE salía por timeout, nunca por ángulo — llegaba a 19-29° en vez
@@ -664,6 +696,15 @@ const bool          PARK_RECTO_ENABLED        = true;
 // Las dos ramas son la MISMA curva; la de abajo es la que faltaba y la que está
 // mordiendo hoy.
 // R medido ajustando final = pnb - 2R(1-cos a) a 4 corridas: 23.6/24.9/27.0/25.0.
+// 2026-09-16 (run 1019): 25 -> 30. Con 25 el modelo pidió 55° para una llegada
+// de 28 cm y el carro terminó a dR=2 cuando el objetivo son 7 — se metió 5 cm de
+// más, o sea giró de más. Despejando el radio de esa corrida sale ~30.5.
+// Subirlo baja el ángulo pedido (55 -> 49 para la misma llegada) y eso arregla
+// DOS cosas a la vez: deja de pasarse de lado Y retrocede ~4 cm menos, que es
+// justo lo que rozó atrás.
+// Ojo: las corridas 1014/1016 daban 24.7 y ~31 — hay dispersión porque la
+// contravuelta se corta en distintos ángulos. 30 es el mejor ajuste con lo que
+// hay hoy, no un número cerrado.
 const float         PARK_RADIO_CM             = 25.0f;
 // Distancia final a la pared exterior que se busca (misma lectura que parkBase).
 // 7 cm es lo que midió la corrida buena (21:38).
@@ -686,7 +727,16 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
 const float         PARK_ENDEREZA_TOL_DEG     = 15.0f;
 const int           PARK_PEGADO_CM            = 2;
-const unsigned long PARK_FWD_MS               = 650;
+// 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
+// PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
+// timeout con dF todavía en 8 cm, dejando al carro 15.9° chueco. Ahora manda la
+// distancia y esto queda de RED DE SEGURIDAD — no se puede quitar, porque si el
+// HC-SR04 pierde el eco la guarda `distF_filtrada > 0` deja pasar y sólo esto
+// detiene el avance.
+// 2026-09-16: 2000 -> 1200. En la 1016 la fase 11 cubrió dF 9->3 en ~1.2 s, y
+// con el corte ahora en 6 cm le toca la mitad de ese recorrido. 1200 deja ~2x de
+// margen sin convertir un eco perdido en 40 cm de embestida contra el poste.
+const unsigned long PARK_FWD_MS               = 1200;
 const float         PARK_FINAL_TOL_DEG        = 3.0f;
 // Reversa final de enderezado DESPUÉS del acomodo hacia adelante (fases 12 y 13).
 // 2026-09-15: false = al terminar la fase 11 se acaba la maniobra ahí mismo. Con
@@ -694,7 +744,15 @@ const float         PARK_FINAL_TOL_DEG        = 3.0f;
 // empujando el carro contra la pared de atrás.
 const bool          PARK_REV_FINAL            = false;
 const unsigned long PARK_REV0_TIMEOUT_MS      = 2500;
-const int           PARK_CENTER_HI_CM         = 4;
+// Distancia a la pared/poste de ENFRENTE a la que se detiene el avance final.
+// 2026-09-16 (run 1016): con 3 el corte por distancia SÍ funcionó — la traza va
+// dF = 9,8,6,5,4,3 y ahí dispara — pero entre la granularidad del sonar y el
+// coast del motor el carro se sigue ~1 cm y terminó en dF=2, tocando la pared
+// de enfrente. 3 -> 6 para que se detenga en ~5, que es exactamente
+// PARK_CENTER_TARGET_DF_CM (el centrado de diseño: 5 cm al frente, ~6 atrás).
+// De paso 6 cm está lejos del piso de ~2 cm del HC-SR04, donde las lecturas se
+// caen a 0 y el corte por distancia no dispararía.
+const int           PARK_CENTER_HI_CM         = 6;
 const int           PARK_CENTER_PWM_PAR       = 75;
 
 // Estado interno de ESTACIONANDO
@@ -962,6 +1020,10 @@ const int FORZADO_DEBOUNCE = 3;
 // muere (orillas690 g6). Prefiere rozar la lata a incrustarse en la pared. Solo
 // ronda de obstáculos. WALL_PANIC_CM apretado: el carro no debería llegar ahí.
 const int   WALL_PANIC_CM   = 18;
+// Umbral SOLO para la pared exterior en la recta del estacionamiento (giros
+// 4/8/12) — ver el bloque de wallPanic. Ponlo igual a WALL_PANIC_CM para
+// desactivar la guardia sin borrar nada.
+const int   WALL_PANIC_EXT_CM = 30;
 const float WALL_PANIC_GAIN = 2.4f;
 const int   WALL_PANIC_DEB  = 2;
 int contadorPanicL = 0, contadorPanicR = 0;
@@ -1023,8 +1085,38 @@ void escribirServo(int angulo) {
 //   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
 const int MOTOR_MAX = rondaObstaculos ? 120 : 180;
 
+// ── Rampa de arranque en REVERSA (2026-09-16) ───────────────────────────────
+// Toda reversa arrancaba de golpe al PWM pedido y el carro derrapaba: la rueda
+// delantera mete más fricción que las traseras, así que en el primer instante
+// el tren trasero patina en vez de empujar y el pivote sale sucio. La rampa da
+// ~150 ms para que el neumático agarre antes de llegar al PWM de trabajo.
+//
+// Vive dentro de setMotor() a propósito: hay ~20 llamadas a motorReversa() en
+// el archivo y así ninguna tiene que acordarse de rampear. Solo dispara en el
+// CAMBIO de dirección — una reversa que continúa (p.ej. la fase 14 del
+// estacionamiento, que viene enlazada de la fase 3) no se ve afectada.
+//
+// Solo REVERSA: la marcha adelante ya está calibrada y no se toca.
+// _MS es la perilla principal. 300 ms contra el derrape; si el pivote sale muy
+// lento, bájala a 200/150. 0 = apagar la rampa sin borrar nada.
+// _MIN: el pivote de MANIOBRA usaba 80 como PWM de arranque, así que 55 puede
+// quedar por DEBAJO de lo que el motor necesita para vencer el arranque con
+// carga. Síntoma: una pausa corta al empezar la reversa y luego un jalón. Si lo
+// ves, sube _MIN a 70 (y entonces _MS puede quedarse en 250).
+const unsigned long MOTOR_REV_RAMPA_MS   = 300;  // 0 = apagar la rampa
+const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
+int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
+unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
+
 void setMotor(int velocidad) {
   velocidad = constrain(velocidad, 0, MOTOR_MAX);
+  if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
+    unsigned long t = millis() - motorDirMs;
+    if (t < MOTOR_REV_RAMPA_MS) {
+      velocidad = (int)map((long)t, 0, (long)MOTOR_REV_RAMPA_MS,
+                           MOTOR_REV_RAMPA_MIN, velocidad);
+    }
+  }
   ledcWrite(PWMA, velocidad);
 }
 
@@ -1034,10 +1126,19 @@ void motorCoast() {
   setMotor(0);
   digitalWrite(A1, LOW);
   digitalWrite(A2, LOW);
+  motorDirActual = 0;
 }
 
-void motorAdelante() { digitalWrite(A1, HIGH); digitalWrite(A2, LOW); }
-void motorReversa()  { digitalWrite(A1, LOW);  digitalWrite(A2, HIGH); }
+// El sello de tiempo solo se re-arma cuando la dirección CAMBIA de verdad; estas
+// dos se llaman en cada vuelta del loop y si no, la rampa nunca avanzaría.
+void motorAdelante() {
+  digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
+  if (motorDirActual != 1) { motorDirActual = 1; motorDirMs = millis(); }
+}
+void motorReversa()  {
+  digitalWrite(A1, LOW);  digitalWrite(A2, HIGH);
+  if (motorDirActual != -1) { motorDirActual = -1; motorDirMs = millis(); }
+}
 
 // Mediana de las últimas 3 lecturas del sensor frontal. El HC-SR04 frontal
 // tira picos (55 <-> 199) por multipath / eco perdido; la mediana los rechaza,
@@ -1838,8 +1939,22 @@ void controlPID(long distL, long distR) {
   // Convención "centroServo + X": X positivo = izquierda.
   float wallPanic = 0.0;
   if (rondaObstaculos) {
-    contadorPanicL = (distL > 0 && distL < WALL_PANIC_CM) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
-    contadorPanicR = (distR > 0 && distR < WALL_PANIC_CM) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
+    // ── Guardia del cajón (2026-09-16) ────────────────────────────────────
+    // Medido en las runs 1016 y 1018: en la recta del estacionamiento el carro
+    // pasa a 2-5 cm de la pared EXTERIOR, las tres vueltas, las dos corridas.
+    // En las otras rectas va a 6-27. Ahí es donde roza el cajón (y muy
+    // probablemente también lo que frena el pivote de esa esquina).
+    // A 5 cm el panic normal ya da (18-5)*2.4 = 31 -> TOPADO en 30: no le falta
+    // fuerza, le falta arrancar antes. Por eso se sube el umbral, no la
+    // ganancia ni el tope.
+    // Solo la pared EXTERIOR y solo en los giros 4/8/12 — el 0 se excluye a
+    // propósito: ahí el carro acaba de salir del cajón y estar cerca es normal.
+    bool rectaCajon = (turnsCompleted == 4 || turnsCompleted == 8 || turnsCompleted == 12);
+    bool extEsIzq   = !direccionIzquierda;   // giro a la DER => exterior a la IZQ
+    int panicL = (rectaCajon &&  extEsIzq) ? WALL_PANIC_EXT_CM : WALL_PANIC_CM;
+    int panicR = (rectaCajon && !extEsIzq) ? WALL_PANIC_EXT_CM : WALL_PANIC_CM;
+    contadorPanicL = (distL > 0 && distL < panicL) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
+    contadorPanicR = (distR > 0 && distR < panicR) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
     // No dejes que wallPanic pelee contra un esquive ACTIVO de la Pi: el lateral
     // crítico del lado hacia el que la Pi vira suele ser el POSTE que rodea, no
     // una pared -> empujarlo al centro tira el carro contra/al lado equivocado
@@ -1848,8 +1963,8 @@ void controlPID(long distL, long distR) {
     bool piEsquivando = piPriority || piMemoryFrames > 0;
     bool dodgeIzq = piEsquivando && obsBiasNorm < -0.15f;   // Pi vira izquierda (p.ej. verde)
     bool dodgeDer = piEsquivando && obsBiasNorm >  0.15f;   // Pi vira derecha  (p.ej. rojo)
-    if (contadorPanicR >= WALL_PANIC_DEB && !dodgeDer) wallPanic += (WALL_PANIC_CM - distR) * WALL_PANIC_GAIN;  // cerca DER -> izq
-    if (contadorPanicL >= WALL_PANIC_DEB && !dodgeIzq) wallPanic -= (WALL_PANIC_CM - distL) * WALL_PANIC_GAIN;  // cerca IZQ -> der
+    if (contadorPanicR >= WALL_PANIC_DEB && !dodgeDer) wallPanic += (panicR - distR) * WALL_PANIC_GAIN;  // cerca DER -> izq
+    if (contadorPanicL >= WALL_PANIC_DEB && !dodgeIzq) wallPanic -= (panicL - distL) * WALL_PANIC_GAIN;  // cerca IZQ -> der
     wallPanic = constrain(wallPanic, -30.0f, 30.0f);
   }
 
@@ -3263,13 +3378,40 @@ void loop() {
           if (dtI > 0.2f) dtI = 0.2f;
           if (lecturaValida && parkCaidaCnt == 0 && PARK_PUNTA_KI_POS > 0.0f) {
             float iMax = PARK_PUNTA_I_MAX_DEG / PARK_PUNTA_KI_POS;
-            puntaIntPared = constrain(puntaIntPared + ((float)extRaw - PARK_PUNTA_PARED_CM) * dtI,
-                                      -iMax, iMax);
+            float errI = (float)extRaw - PARK_PARED_CM;
+            // 2026-09-16 (run 1014): anti-windup SIMÉTRICO. El escaneo arranca
+            // donde lo dejan las fases 22/23 (25-26 cm), o sea por DENTRO del
+            // objetivo, y con error constante el integral se satura en ~3 s
+            // pidiendo el tope de 6° de "aléjate". Al cruzar el objetivo ese
+            // acumulado ya no describe el error actual y empuja al carro de
+            // largo: en la 1014 llegó a 34 cm con el rumbo clavado en 6.00°,
+            // que es exactamente el tope del integral. Desenrollarlo tomaría
+            // otros ~5 s y el escaneo dura 7.
+            // 2026-09-16 (run 1020): el reset por cruce de cero QUITADO. Se puso
+            // cuando el objetivo era PARK_PUNTA_PARED_CM=31 y el escaneo
+            // arrancaba a 25-26, o sea 5-6 cm por dentro: ahí el integral se
+            // saturaba pidiendo "aléjate" y tiraba al carro de largo. Al bajar
+            // el objetivo a PARK_PARED_CM=28 el carro arranca JUSTO en el
+            // objetivo y el error oscila alrededor de cero -> el reset se
+            // disparaba una y otra vez y le borraba el integral justo cuando lo
+            // necesita. Y el integral está aquí precisamente para cancelar que
+            // el 0 del gyro no quede paralelo a la pared (el sesgo que deja la
+            // media vuelta): sin él, en la 1020 el carro se fue de 28 a 38 cm en
+            // 4 s, la base subió con él y la PARED MISMA pasó a leerse como un
+            // poste (38-10=28) -> poste 1 falso, poste 2 nunca, timeout.
+            puntaIntPared = constrain(puntaIntPared + errI * dtI, -iMax, iMax);
             if (extRaw < PARK_PUNTA_CERCA_CM && puntaIntPared > 0.0f) puntaIntPared = 0.0f;
           }
         }
         if (lecturaValida && parkCaidaCnt == 0) {
-          parkErrPared     = (float)extRaw - PARK_PUNTA_PARED_CM;
+          // PARK_PARED_CM (28), no PARK_PUNTA_PARED_CM (31): el paralelo tenía
+          // colgado el objetivo del modo de PUNTA, que se calibró para una
+          // maniobra distinta. PARK_PARED_CM existía pero era código muerto —
+          // sólo aparecía en el Serial.print que anunciaba "a 28 cm" mientras
+          // el carro perseguía 31. Menos distancia = menos retroceso en la
+          // maniobra (Delta*cot(alfa/2)): 31 -> 42 cm, 28 -> 41 cm, y sobre
+          // todo 8° menos que deshacer en la contravuelta.
+          parkErrPared     = (float)extRaw - PARK_PARED_CM;
           parkInvalidasCnt = 0;
         } else if (!lecturaValida && ++parkInvalidasCnt > 10) {
           parkErrPared = 0.0f;  // sin pared válida: solo sostiene el rumbo
@@ -3428,9 +3570,10 @@ void loop() {
           }
           if (tEn >= PARK_TIMEOUT_MS)    { finalizarPark("TIMEOUT sin cajon");      break; }
 
-          // Wall follower ParkinHalf (mismo que ESTACIONANDO_PUNTA fase 0)
+          // Wall follower ParkinHalf (mismas GANANCIAS que ESTACIONANDO_PUNTA
+          // fase 0, pero con el objetivo del paralelo: PARK_PARED_CM).
           if (parkScanSubFase < 4) {
-            float distPared = PARK_PUNTA_PARED_CM + parkErrPared;
+            float distPared = PARK_PARED_CM + parkErrPared;   // == extRaw
             float rumboRaw  = PARK_PUNTA_KPOS * parkErrPared
                               + PARK_PUNTA_KI_POS * puntaIntPared
                               + PARK_PUNTA_KPOS_CERCA * min(0.0f, distPared - PARK_PUNTA_CERCA_CM);
@@ -3476,7 +3619,14 @@ void loop() {
           motorAdelante();
           servoRumboPark(rumboObj);
           setMotor(PARK_PWM);
-          if (millis() - parkFaseMs >= PARK_POSTE2_WAIT_MS) {
+          // Avance escalado con la distancia de llegada (ver PARK_POSTE2_*).
+          // parkBase ya no se mueve aquí: el sonar viene viendo el poste 2, así
+          // que conserva el último valor bueno de la pared.
+          long espera = (long)PARK_POSTE2_WAIT_MS
+                      + (long)((parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MS_POR_CM);
+          if (!(parkBase > 5.0f)) espera = (long)PARK_POSTE2_WAIT_MS;   // base no creíble
+          espera = constrain(espera, (long)PARK_POSTE2_MIN_MS, (long)PARK_POSTE2_MAX_MS);
+          if (millis() - parkFaseMs >= (unsigned long)espera) {
             motorCoast();
             escribirServo(servoHaciaPared);  // pre-coloca FULL EXTERNO
             // Altura lateral con la que el carro llegó al cajón: es lo que la
