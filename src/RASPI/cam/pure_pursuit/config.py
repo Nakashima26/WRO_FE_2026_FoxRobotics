@@ -168,7 +168,7 @@ CENTERLINE_COMMIT_W   = 0.12   # peso de esquiva a partir del cual el punto del
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
-OBS_REAL_DIAMETER_MM = 75.0
+OBS_REAL_DIAMETER_MM = 80.0
 OBS_PHYSICAL_R_PX    = round(OBS_REAL_DIAMETER_MM / 2.0 / MM_PER_PX)  # ≈ 16 px
 OBS_SAFETY_R_PX      = 20    # margen de seguridad adicional (px)
 OBS_INFLATE_R        = OBS_PHYSICAL_R_PX + OBS_SAFETY_R_PX             # ≈ 35 px

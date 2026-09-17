@@ -247,6 +247,36 @@ const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa d
                                                     // fase 0), así que arrancar a MANIOBRA_VEL_REV
                                                     // es un inrush normal, no "plugging". Puedes
                                                     // bajarlo más o dejarlo en 0.
+// ── Arranque del pivote: GIRAR MIENTRAS RETROCEDE (2026-09-17) ──────────────
+// El pivote ponía el servo a tope en el MISMO instante en que arrancaba la
+// reversa, y el carro viene PARADO (300 ms de coast en la fase 0). Volante
+// atravesado + carro quieto = fricción de barrido pura: las delanteras se
+// clavan en el tapete y el tren trasero no rompe la inercia. El carro se atora,
+// y cuando por fin se suelta sale de golpe = el derrape en las vueltas.
+// La rampa de setMotor() (MOTOR_REV_RAMPA_MS) lo empeora: los primeros 300 ms
+// el motor va a PWM bajo, justo cuando la resistencia es la máxima del pivote.
+//
+// Arreglo: la dirección entra SOBRE LA MARCHA, no precargada.
+//   _RETRASO_MS : reversa RECTA (servo centrado) para romper la inercia — con
+//                 la rueda ya rodando el barrido casi desaparece.
+//   _RAMPA_MS   : de ahí el servo barre linealmente centro -> tope.
+// Cuesta ~3-4 cm de reversa recta de más. La salida del pivote sigue cerrando
+// por ángulo total (anguloGyro >= EXIT_DEG), así que NO hay que recalibrar
+// MANIOBRA_OVERSHOOT_DEG ni los backoff.
+//
+// Perillas: si todavía se atora, sube _RETRASO_MS (150-200) o baja
+// MOTOR_REV_RAMPA_MS para que llegue antes al PWM de trabajo. Si el pivote sale
+// muy abierto (se come pista antes de girar), baja _RETRASO_MS a 80.
+// _RETRASO_MS = 0 y _RAMPA_MS = 0 devuelven el comportamiento viejo.
+const unsigned long MANIOBRA_SERVO_RETRASO_MS = 50;  // reversa recta antes de empezar a girar
+const unsigned long MANIOBRA_SERVO_RAMPA_MS   = 120;  // barrido centro -> tope. 2026-09-17 tarde: 220 -> 120.
+                                                      // 220 dejaba el volante a medio girar demasiado tiempo -> el
+                                                      // pivote reversaba en ARCO ANCHO (se come pista) y el carro
+                                                      // terminaba cargado al INTERIOR (mal para ver el obstáculo de
+                                                      // la recta nueva). 120 cierra el pivote más rápido = sale más
+                                                      // pegado a la exterior = más centrado, y sigue entrando sobre
+                                                      // la marcha (anti-scrub). Si vuelve el derrape/atorón, súbelo
+                                                      // a 150-180; si aún sale cargado al interior, bájalo a 90.
 const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // reversa no llegó a 88° -> frena y termina de frente
 const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin llegar a la pared -> MANIOBRA igual (red de seguridad anti-atasco)
 const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
@@ -517,7 +547,7 @@ const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_G
 const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
-const int  INICIO_ANG_OUT_DEG          = 60;   // fase 1: ángulo de salida (nariz al interior)
+const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
 const int  INICIO_OVERSHOOT_DEG        = 8;    // corta el servo antes; la inercia completa (0 = sin corte)
 const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
                                                      //  ángulo — patina / topa la pared del cajón —
@@ -795,6 +825,37 @@ const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
 const int           PARK_CENTER_HI_CM         = 6;
 const int           PARK_CENTER_PWM_PAR       = 75;
 
+// ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
+// El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
+// lote: medido con la pendiente del sonar, la 1057 entró con +9° de sesgo y la
+// 1056 con +17°. De ahí salen TODOS los males del final:
+//   · el follower se satura contra el tope de "aléjate" y nunca recupera la
+//     distancia objetivo (1056: clavado a 19-20 cm en vez de 28),
+//   · el candado |anguloGyro| < PARK_ARMADO_ANG_DEG mide la chuecura contra un
+//     cero falso y TIRA postes buenos (1056 descartó el poste 2 con ang=17.4),
+//   · parkRumboRef se captura torcido y toda la maniobra de reversa se alinea
+//     a esa referencia (1057 terminó a +11.7° del carril de verdad).
+// El integral de pared existía justo para esto (ver nota de la 1020) pero está
+// capado a ±6° y ADEMÁS vive dentro del cap de rumbo, así que no puede expresar
+// un sesgo de 9-17°, y tarda ~15 s en cargarse cuando la fase 0 dura 5-9 s.
+//
+// Esto lo MIDE en ~1 s, sin integrar: con el carro avanzando a v, la pendiente
+// de la distancia a la pared da el rumbo real   phi = asin(d_punto / v)   y el
+// sesgo es   trim = anguloGyro_medio - phi   (con el signo del lado de pared).
+// Validado contra la 1057: ventana a 3.2° dando -2.5 cm/s -> trim +7.8; ventana
+// a 12.2° dando +2.4 cm/s -> trim +7.8; el paralelo real medido a mano: +8.9.
+//
+// PARK_TRIM_VEL_CM_S es la única perilla física y sale de la misma 1057: la
+// sensibilidad medida fue 0.54 (cm/s)/° => v = 0.54/sin(1°) = 31 cm/s a
+// PARK_PUNTA_PWM=95. Si cambias ese PWM, re-mídela (o el trim sale escalado).
+// Un error del 20% en v solo vale 20% DEL ÁNGULO medido (~1-2°).
+// PARK_TRIM_VEL_CM_S = 0 apaga todo esto y deja el comportamiento viejo.
+const float         PARK_TRIM_VEL_CM_S        = 31.0f;  // avance en fase 0 (cm/s)
+const int           PARK_TRIM_N               = 12;     // muestras de la ventana (~0.9 s)
+const float         PARK_TRIM_MAX_DEG         = 25.0f;  // tope del sesgo que acepta
+const float         PARK_TRIM_ALPHA           = 0.20f;  // filtro de la estimación
+const int           PARK_TRIM_LISTO_N         = 3;      // estimaciones antes de fiarse
+
 // Estado interno de ESTACIONANDO
 bool          parkBuscando          = false;
 unsigned long parkBuscandoEntryMs   = 0;
@@ -815,6 +876,15 @@ int           parkFrenteCnt         = 0;
 int           parkDfCnt             = 0;
 bool          parkRosaVisto         = false;
 float         parkErrPared          = 0.0f;
+// Referencia de rumbo medida contra la pared (ver PARK_TRIM_*)
+float         parkTrimPared         = 0.0f;  // lo que marca el gyro cuando va PARALELO
+bool          parkTrimListo         = false;
+int           parkTrimUpd           = 0;
+long          parkTrimD[PARK_TRIM_N];
+float         parkTrimA[PARK_TRIM_N];
+unsigned long parkTrimT[PARK_TRIM_N];
+int           parkTrimN             = 0;
+int           parkTrimIdx           = 0;
 float         parkRumboRef          = 0.0f;
 float         parkRumboArco0        = 0.0f;
 long          parkExtRaw            = 0;
@@ -895,7 +965,7 @@ const bool          PARK_TEST_RETORNO          = false;  // true = arranca direc
 const int           PARK_RETORNO_PWM           = 95;
 const int           PARK_RETORNO_PWM_MIN       = 80;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
-const unsigned long PARK_RETORNO_AVANCE_MS     = 300;    // avance recto ANTES de la media vuelta: más = termina más lejos
+const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // avance recto ANTES de la media vuelta: más = termina más lejos
                                                          // de la pared del lote (0 = gira desde parado como antes)
 const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes de 90; la inercia completa
 const unsigned long PARK_RETORNO_TIMEOUT_MS    = 4000;
@@ -1141,6 +1211,19 @@ void escribirServo(int angulo) {
   ledcWrite(SERVO_PIN, duty);
 }
 
+// Servo del pivote de MANIOBRA, entrando SOBRE LA MARCHA (ver el bloque
+// MANIOBRA_SERVO_*). tPivote = ms desde que arrancó la fase 1.
+//   [0, RETRASO)      -> centrado: el carro rompe la inercia en recta
+//   [RETRASO, +RAMPA) -> barrido lineal centro -> destino
+//   después           -> destino (tope), como siempre
+int servoPivoteRampa(unsigned long tPivote, int destino) {
+  if (tPivote < MANIOBRA_SERVO_RETRASO_MS) return centroServo;
+  unsigned long t = tPivote - MANIOBRA_SERVO_RETRASO_MS;
+  if (MANIOBRA_SERVO_RAMPA_MS == 0 || t >= MANIOBRA_SERVO_RAMPA_MS) return destino;
+  long recorrido = (long)(destino - centroServo);
+  return centroServo + (int)((recorrido * (long)t) / (long)MANIOBRA_SERVO_RAMPA_MS);
+}
+
 // Techo del PWM del motor — DISTINTO por tipo de ronda:
 //   ronda de obstáculos (rondaObstaculos=true) : 110 (maniobras lentas y finas)
 //   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
@@ -1282,6 +1365,51 @@ void servoRumboPark(float rumboRef) {
   escribirServo(constrain(centroServo + (int)out, 20, 150));
 }
 
+// ── Trim de rumbo contra la pared (ver el bloque PARK_TRIM_*) ────────────────
+void parkTrimReset() {
+  parkTrimPared = 0.0f;
+  parkTrimListo = false;
+  parkTrimUpd   = 0;
+  parkTrimN     = 0;
+  parkTrimIdx   = 0;
+}
+
+// Una muestra LIMPIA de pared (sin poste, sin eco perdido). Cuando la ventana
+// se llena saca la pendiente por mínimos cuadrados y actualiza la estimación.
+void parkTrimMuestra(long ext, float ang, unsigned long ahora, float haciaPared) {
+  if (PARK_TRIM_VEL_CM_S <= 1.0f) return;
+  parkTrimD[parkTrimIdx] = ext;
+  parkTrimA[parkTrimIdx] = ang;
+  parkTrimT[parkTrimIdx] = ahora;
+  parkTrimIdx = (parkTrimIdx + 1) % PARK_TRIM_N;   // ahora apunta a la MÁS VIEJA
+  if (parkTrimN < PARK_TRIM_N) { parkTrimN++; return; }
+
+  unsigned long t0 = parkTrimT[parkTrimIdx];
+  float st = 0, sd = 0, stt = 0, std_ = 0, sa = 0;
+  for (int i = 0; i < PARK_TRIM_N; i++) {
+    float t = (float)(long)(parkTrimT[i] - t0) / 1000.0f;
+    float d = (float)parkTrimD[i];
+    st += t; sd += d; stt += t * t; std_ += t * d; sa += parkTrimA[i];
+  }
+  float n   = (float)PARK_TRIM_N;
+  float den = n * stt - st * st;
+  if (den < 1e-3f) return;                    // ventana sin span de tiempo
+  float pend   = (n * std_ - st * sd) / den;  // cm/s (+ = alejándose de la pared)
+  float angMed = sa / n;
+  // phi = rumbo REAL respecto a "paralelo", en el marco de signos del gyro.
+  float sn  = constrain(pend / PARK_TRIM_VEL_CM_S, -0.6f, 0.6f);
+  float phi = -haciaPared * degrees(asin(sn));
+  float medido = constrain(angMed - phi, -PARK_TRIM_MAX_DEG, PARK_TRIM_MAX_DEG);
+
+  parkTrimUpd++;
+  if (parkTrimUpd == 1) parkTrimPared  = medido;                               // arranque directo
+  else                  parkTrimPared += PARK_TRIM_ALPHA * (medido - parkTrimPared);
+  if (parkTrimUpd >= PARK_TRIM_LISTO_N) parkTrimListo = true;
+}
+
+// Rumbo que hay que perseguir para ir PARALELO a la pared (0 si aún no se mide).
+float parkRumboParalelo() { return parkTrimListo ? parkTrimPared : 0.0f; }
+
 // ── Cierre de ESTACIONANDO (apaga motor, centra servo y finaliza carrera) ─────
 void finalizarPark(const char *motivo) {
   motorCoast();
@@ -1346,6 +1474,7 @@ void resetParkScan() {
   parkWiggleMs         = 0;
   puntaIntPared       = 0.0f;
   puntaIntMs          = millis();
+  parkTrimReset();
   motorAdelante();
   escribirServo(centroServo);
 }
@@ -1884,6 +2013,8 @@ void parsePiMessage(String line) {
       Serial2.print(",pnt="); Serial2.print(parkRectoMs);
       //   pnq : ángulo de entrada calculado para esta llegada (antes fijo en 60)
       Serial2.print(",pnq="); Serial2.print((int)parkAngObjetivo);
+      //   pntr : rumbo PARALELO medido contra la pared (ver PARK_TRIM_*); 999 = aún sin medir
+      Serial2.print(",pntr="); Serial2.print(parkTrimListo ? parkTrimPared : 999.0f, 1);
     }
     if (estado == ESTACIONANDO_PUNTA) {
       Serial2.print(",pnf="); Serial2.print(puntaFase);
@@ -3149,7 +3280,9 @@ void loop() {
                     : MANIOBRA_VEL_REV;
           if (delta > EXIT_DEG - 20) vel = min(vel, MANIOBRA_VEL_MIN);   // frena el último tramo
           motorReversa();
-          escribirServo(maniobraGirarDer ? 150 : 20);   // servo CONTRARIO al giro
+          // servo CONTRARIO al giro, pero entrando sobre la marcha (no de golpe
+          // con el carro parado: eso era el atorón / derrape). Ver MANIOBRA_SERVO_*.
+          escribirServo(servoPivoteRampa(tR, maniobraGirarDer ? 150 : 20));
           setMotor(vel);
         } else {
           if      (delta < 45)            velocidadMotor = 165;
@@ -3497,7 +3630,11 @@ void loop() {
           float dtI = (nowI - puntaIntMs) / 1000.0f;
           puntaIntMs = nowI;
           if (dtI > 0.2f) dtI = 0.2f;
-          if (lecturaValida && parkCaidaCnt == 0 && PARK_PUNTA_KI_POS > 0.0f) {
+          // !parkTrimListo: el integral era el PARCHE para el sesgo del gyro (nota
+          // de la 1020). Con el trim ya medido sobra, y si se deja corriendo
+          // mete hasta 6° de error encima de una referencia que ya es correcta.
+          if (lecturaValida && parkCaidaCnt == 0 && PARK_PUNTA_KI_POS > 0.0f
+              && !parkTrimListo) {
             float iMax = PARK_PUNTA_I_MAX_DEG / PARK_PUNTA_KI_POS;
             float errI = (float)extRaw - PARK_PARED_CM;
             // 2026-09-16 (run 1014): anti-windup SIMÉTRICO. El escaneo arranca
@@ -3534,13 +3671,19 @@ void loop() {
           // todo 8° menos que deshacer en la contravuelta.
           parkErrPared     = (float)extRaw - PARK_PARED_CM;
           parkInvalidasCnt = 0;
+          // Solo lecturas LIMPIAS de pared alimentan la referencia de rumbo.
+          parkTrimMuestra(extRaw, anguloGyro, millis(), haciaPared);
         } else if (!lecturaValida && ++parkInvalidasCnt > 10) {
           parkErrPared = 0.0f;  // sin pared válida: solo sostiene el rumbo
         }
 
+        // La chuecura se mide contra la pared (parkRumboParalelo), no contra el
+        // 0 del gyro: en la 1056 el carro iba PARALELO a la pared y este candado
+        // lo leía a 17.4° -> tiró el poste 2 bueno y se fue al TIMEOUT.
+        float parkAngRel = anguloGyro - parkRumboParalelo();
         bool armada = baseLista
                       && (tEn >= PARK_ARMADO_MS)
-                      && (fabs(anguloGyro) < PARK_ARMADO_ANG_DEG)
+                      && (fabs(parkAngRel) < PARK_ARMADO_ANG_DEG)
                       && (parkRosaVisto || !PARK_REQUIERE_PI || PARK_TEST_MANO);
 
         // ── Subfase 0: Buscando Poste 1 ──
@@ -3625,7 +3768,14 @@ void loop() {
             Serial.println(")");
 
             if (PARK_MODO_PARALELO) {
-              parkRumboRef = anguloGyro;
+              // TODA la maniobra de reversa se alinea contra esto. Tomar el
+              // anguloGyro del instante hornea la chuecura: en la 1057 se
+              // capturó +7.5 y el carro cerró "alineado" a +11.7 del carril
+              // real. El rumbo paralelo medido es la referencia correcta.
+              parkRumboRef = parkTrimListo ? parkTrimPared : anguloGyro;
+              Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
+              Serial.print(parkTrimListo ? " (PARED" : " (gyro");
+              Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.println(")");
               if (PARK_TEST_MANO) {
                 parkFase = 10;
                 Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
@@ -3700,7 +3850,12 @@ void loop() {
                               + PARK_PUNTA_KPOS_CERCA * min(0.0f, distPared - PARK_PUNTA_CERCA_CM);
             float limAlejar = (distPared < PARK_PUNTA_CERCA_CM) ? PARK_PUNTA_ANG_MAX_CERCA_DEG
                                                                 : PARK_PUNTA_ANG_MAX_DEG;
-            float rumboObj  = haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
+            // El cap solo limita la autoridad de POSICIÓN; el rumbo paralelo
+            // medido va por fuera. Antes todo el objetivo vivía dentro del cap:
+            // con un sesgo de 17° (1056) el máximo permitido (+12°) seguía
+            // apuntando 5° HACIA la pared y el carro no podía salir nunca.
+            float rumboObj  = parkRumboParalelo()
+                              + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
             motorAdelante();
             servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
             setMotor(PARK_PUNTA_PWM);
