@@ -1,51 +1,48 @@
 """
-calibra_luz.py — Calibración de color para OTRA ILUMINACIÓN (sede nueva).
+calibra_luz.py — Calibración de COLOR para Pure Pursuit (otra iluminación).
+
+El detector NO usa rangos RGB. Usa HSV (visión de conos en vision.py,
+cinta naranja / rosa / piso en config.py). El RGB se imprime solo para
+que veas cómo se ve el color; lo que hay que pegar es el HSV.
 
 POR QUÉ EXISTE
-  Los rangos HSV del proyecto (vision.py Red/Green, LINE_ORANGE_HSV,
-  PARK_PINK_HSV, FLOOR_*) se midieron con la luz del cuarto de pruebas y la
-  cámara corre con balance de blancos APAGADO y ganancias fijas
-  (vision.py: awb-enable=false colour-gains=<1.2,1.5>). Con otra luz TODO se
-  corre y los conos dejan de existir para el carro.
+  Los rangos se midieron con la luz del cuarto de pruebas y la cámara corre
+  con balance de blancos APAGADO y ganancias fijas (vision.py:
+  awb-enable=false colour-gains=<1.2,1.5>). Con otra luz TODO se corre y
+  los conos / la cinta / el rosa dejan de existir para el carro.
 
-  Medido en orillas1013 (sede 2026-09-16): el cono ROJO salió en H 169-178
-  (cola azulada del rojo) en vez de H 0-1. El rango de producción cubría
-  H<=5 y H>=177, así que el cono grande que el carro tenía ENFRENTE
-  (frames 276-285, 18k px rojos) daba CERO detecciones.
+  color_corr.py escala B,G,R para que el PISO quede del color de siempre.
+  Si el piso está quemado (V~255) no tiene tono y no corrige nada: entonces
+  hay que medir a mano con ESTE script.
 
-  color_corr.py debería tapar esto solo, pero se apoya en medir el PISO y
-  en esa sede el piso salía quemado (V~237, 33% de px a 255): un piso
-  quemado ya no tiene tono, las ganancias salen ~1 y no corrige nada.
-  Por eso hace falta medir a mano.
+CÓMO ENCUENTRA LOS OBJETOS (modo --avi / --vivo, sin clic)
+  No busca por HSV (si el tono está corrido no encuentra nada). Busca por
+  DOMINANCIA DE CANAL RGB, que aguanta el cambio de luz:
+    rojo    = R >> G y R >> B, sin amarillear (separa cono de cinta/piel)
+    verde   = G >> R y G >> B
+    naranja = rojo que amarillea (bastante G, poco B)
+    rosa    = rojizo CON mucho azul (pared magenta del estacionamiento)
 
-LA IDEA
-  Para ENCONTRAR el cono no se usa HSV (que es justo lo que está corrido):
-  se usa DOMINANCIA DE CANAL (R claramente por encima de G y B = objeto
-  rojo, pase lo que pase con la luz). Una vez ubicado el blob, se MIDE su
-  HSV real y se imprime el rango que sí lo cubre.
+USO — desde src/RASPI/cam/
 
-USO (en la Pi, sin pantalla — todo por SSH)
-  # 1) Ver si los rangos ACTUALES agarran los conos de esta sede, y si no,
-  #    cuál de los topes (H / S / V) es el que los está tirando:
-  python3 -m pure_pursuit.calibra_luz --avi videos_orillas/orillas1013.avi
+  # 1) Ventana en vivo: pinta el color o pulsa 'a' para auto-detectar.
+  #    Misma corrección de piso que el runtime. 1=rojo 2=verde 3=naranja 4=rosa.
+  python3 -m pure_pursuit.calibra_luz --gui
 
-  # 2) En vivo, con la cámara: pon un cono rojo y otro verde enfrente y
-  #    camina el carro por la pista. Imprime un resumen cada segundo.
-  python3 -m pure_pursuit.calibra_luz --vivo
+  # 2) Sin pantalla (SSH): pon un cono rojo y uno verde enfrente y camina.
+  python3 -m pure_pursuit.calibra_luz --vivo --sugerir
 
-  # 3) Rangos listos para pegar en vision.py / config.py:
-  python3 -m pure_pursuit.calibra_luz --avi ... --sugerir
+  # 3) Sobre una corrida grabada (panel izquierdo del HUD = lo que ve la visión):
+  python3 -m pure_pursuit.calibra_luz --avi videos_orillas/orillasNNNN.avi --sugerir
 
-  Con --avi se lee el panel IZQUIERDO del HUD (= processed_frame, ya
-  corregido por color_corr y volteado), que es exactamente lo que ve
-  Vision.process_frame(). Con --bin se lee el BEV limpio.
-
-OJO: el servicio wro-runtime tiene tomada la cámara. Para --vivo hay que
-pararlo ANTES (y NUNCA con `systemctl restart`, que deja la CSI colgada):
+OJO: el servicio wro-runtime tiene tomada la cámara. Para --gui / --vivo:
   sudo systemctl stop wro-runtime && sleep 4
   ... calibrar ...
   sudo systemctl start wro-runtime
+  NUNCA `systemctl restart` (deja la CSI colgada).
 """
+
+from __future__ import annotations
 
 import argparse
 import os
@@ -56,10 +53,25 @@ import time
 import cv2
 import numpy as np
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_CAM_DIR = os.path.dirname(_HERE)
+for _p in (_CAM_DIR, _HERE):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    from . import config as C
+    from .bev import BEVTransformer
+    from .color_corr import FloorColorCorrector
+except ImportError:
+    import config as C
+    from bev import BEVTransformer
+    from color_corr import FloorColorCorrector
+
+from vision import COLOR_RANGES, Vision, open_camera
+
 
 # ── Cómo se BUSCA cada objetivo (independiente de la luz) ────────────────────
-# No se usa HSV aquí a propósito: si el tono está corrido, buscar por tono no
-# encuentra nada. Se busca por qué canal domina y por cuánto.
 def _mask_rojo(b, g, r):
     """Cono ROJO. Lo que lo separa de la cinta naranja y de una mano/brazo es
     G contra B: el rojo del cono no amarillea (G queda AL NIVEL de B o por
@@ -92,6 +104,68 @@ OBJETIVOS = {
 }
 
 MIN_PX = 600          # blob mínimo para que la medición signifique algo
+PATCH_HALF = 4        # radio del parche al pintar en --gui
+
+# Dónde se pega cada rango (Pure Pursuit).
+DESTINO = {
+    "rojo":    "vision.py  COLOR_RANGES['Red']   (+ LINE_CONE_HSV en config.py)",
+    "verde":   "vision.py  COLOR_RANGES['Green'] (+ LINE_CONE_HSV en config.py)",
+    "naranja": "config.py  LINE_ORANGE_HSV  (cinta de esquina, se aplica en BEV)",
+    "rosa":    "config.py  PARK_PINK_HSV",
+    "piso":    "config.py  COLOR_CORR_FLOOR_REF_BGR  (BGR del piso, no HSV)",
+}
+
+# Espacio en el que el runtime aplica el rango.
+ESPACIO = {
+    "rojo":    "cam",
+    "verde":   "cam",
+    "rosa":    "cam",
+    "naranja": "bev",
+    "piso":    "cam",
+}
+
+OVERLAY_BGR = {
+    "rojo":    (40, 40, 255),
+    "verde":   (40, 220, 40),
+    "naranja": (0, 140, 255),
+    "rosa":    (180, 50, 220),
+    "piso":    (200, 200, 200),
+}
+
+
+def _rangos_prod() -> dict:
+    """Rangos ACTUALES del código, no una copia que se queda vieja."""
+    return {
+        "rojo":    [(tuple(int(x) for x in lo), tuple(int(x) for x in hi))
+                    for lo, hi in COLOR_RANGES["Red"]],
+        "verde":   [(tuple(int(x) for x in lo), tuple(int(x) for x in hi))
+                    for lo, hi in COLOR_RANGES["Green"]],
+        "naranja": [(tuple(int(x) for x in lo), tuple(int(x) for x in hi))
+                    for lo, hi in C.LINE_ORANGE_HSV],
+        "rosa":    [(tuple(int(x) for x in lo), tuple(int(x) for x in hi))
+                    for lo, hi in C.PARK_PINK_HSV],
+        "piso":    [(tuple(int(x) for x in C.FLOOR_LOWER),
+                     tuple(int(x) for x in C.FLOOR_UPPER))],
+    }
+
+
+def _fmt_ranges(rangos) -> str:
+    parts = []
+    for lo, hi in rangos:
+        parts.append(
+            f"(np.array([{lo[0]}, {lo[1]}, {lo[2]}]), "
+            f"np.array([{hi[0]}, {hi[1]}, {hi[2]}]))"
+        )
+    return "[" + ", ".join(parts) + "]"
+
+
+def _mask_hsv(hsv, rangos) -> np.ndarray:
+    m = np.zeros(hsv.shape[:2], np.uint8)
+    for lo, hi in rangos:
+        m = cv2.bitwise_or(
+            m, cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
+        )
+    return m
 
 
 class Acumulador:
@@ -99,27 +173,54 @@ class Acumulador:
 
     def __init__(self, nombre):
         self.nombre = nombre
-        # se guardan histogramas, no los px: no crece con la duracion
         self.hist_h = np.zeros(180, np.int64)
         self.hist_s = np.zeros(256, np.int64)
         self.hist_v = np.zeros(256, np.int64)
+        self.hist_b = np.zeros(256, np.int64)
+        self.hist_g = np.zeros(256, np.int64)
+        self.hist_r = np.zeros(256, np.int64)
         self.br = []         # mediana de B/R por frame (separa cono de pared rosa)
         self.frames = 0
         self.px = 0
 
+    def reset(self):
+        self.__init__(self.nombre)
+
     def add(self, hsv, bgr, m):
-        n = int(m.sum())
+        n = int(np.count_nonzero(m))
         if n < MIN_PX:
             return False
-        self.hist_h += np.bincount(hsv[..., 0][m], minlength=180)
-        self.hist_s += np.bincount(hsv[..., 1][m], minlength=256)
-        self.hist_v += np.bincount(hsv[..., 2][m], minlength=256)
-        b = bgr[..., 0][m].astype(np.float32)
-        r = bgr[..., 2][m].astype(np.float32)
+        sel = m.astype(bool) if m.dtype != bool else m
+        self.hist_h += np.bincount(hsv[..., 0][sel], minlength=180)
+        self.hist_s += np.bincount(hsv[..., 1][sel], minlength=256)
+        self.hist_v += np.bincount(hsv[..., 2][sel], minlength=256)
+        self.hist_b += np.bincount(bgr[..., 0][sel], minlength=256)
+        self.hist_g += np.bincount(bgr[..., 1][sel], minlength=256)
+        self.hist_r += np.bincount(bgr[..., 2][sel], minlength=256)
+        b = bgr[..., 0][sel].astype(np.float32)
+        r = bgr[..., 2][sel].astype(np.float32)
         self.br.append(float(np.median(b / np.maximum(r, 1.0))))
         self.frames += 1
         self.px += n
         return True
+
+    def add_patch(self, hsv_patch, bgr_patch):
+        """Parche chico al pintar: no exige MIN_PX."""
+        if hsv_patch.size == 0:
+            return
+        h = hsv_patch.reshape(-1, 3)
+        b = bgr_patch.reshape(-1, 3)
+        self.hist_h += np.bincount(h[:, 0], minlength=180)
+        self.hist_s += np.bincount(h[:, 1], minlength=256)
+        self.hist_v += np.bincount(h[:, 2], minlength=256)
+        self.hist_b += np.bincount(b[:, 0], minlength=256)
+        self.hist_g += np.bincount(b[:, 1], minlength=256)
+        self.hist_r += np.bincount(b[:, 2], minlength=256)
+        bb = b[:, 0].astype(np.float32)
+        rr = b[:, 2].astype(np.float32)
+        self.br.append(float(np.median(bb / np.maximum(rr, 1.0))))
+        self.frames += 1
+        self.px += int(h.shape[0])
 
     @staticmethod
     def _pct(hist, qs):
@@ -130,15 +231,10 @@ class Acumulador:
         return [int(np.searchsorted(acc, tot * q / 100.0)) for q in qs]
 
     def h_circular(self, qs=(2, 50, 98)):
-        """Percentiles de H tolerando el wrap 179->0 (el rojo vive a caballo).
-
-        Se rota el histograma al punto de corte más vacío, se saca el
-        percentil y se des-rota.
-        """
+        """Percentiles de H tolerando el wrap 179->0 (el rojo vive a caballo)."""
         hist = self.hist_h
         if hist.sum() == 0:
             return [0] * len(qs), 0
-        # el mejor corte es el bin (o hueco) con menos px alrededor
         suave = np.convolve(np.r_[hist, hist], np.ones(9), "same")[:180]
         corte = int(np.argmin(suave))
         rot = np.roll(hist, -corte)
@@ -149,47 +245,60 @@ class Acumulador:
         (h2, h50, h98), corte = self.h_circular()
         s2, s50, s98 = self._pct(self.hist_s, (2, 50, 98))
         v2, v50, v98 = self._pct(self.hist_v, (2, 50, 98))
+        b2, b50, b98 = self._pct(self.hist_b, (2, 50, 98))
+        g2, g50, g98 = self._pct(self.hist_g, (2, 50, 98))
+        r2, r50, r98 = self._pct(self.hist_r, (2, 50, 98))
         br = float(np.median(self.br)) if self.br else float("nan")
-        return dict(h=(h2, h50, h98), s=(s2, s50, s98), v=(v2, v50, v98),
-                    br=br, corte=corte, frames=self.frames, px=self.px)
+        return dict(
+            h=(h2, h50, h98), s=(s2, s50, s98), v=(v2, v50, v98),
+            b=(b2, b50, b98), g=(g2, g50, g98), r=(r2, r50, r98),
+            br=br, corte=corte, frames=self.frames, px=self.px,
+        )
 
     def banda_h(self, margen=4):
-        """Devuelve 1 o 2 tramos [lo,hi] de H que cubren p2..p98, partiendo
-        el tramo en dos si cruza el wrap 179->0 (como hace vision.py)."""
-        (h2, _, h98), corte = self.h_circular()
+        """1 o 2 tramos [lo,hi] de H que cubren p2..p98 (wrap 179->0)."""
+        (h2, _, h98), _corte = self.h_circular()
         lo = (h2 - margen) % 180
         hi = (h98 + margen) % 180
         if lo <= hi:
             return [(lo, hi)]
         return [(0, hi), (lo, 179)]
 
-
-# Copia literal de los rangos de vision.py — se comparan contra lo medido.
-# Si se cambian allá, cambiarlos aquí (este script solo REPORTA).
-RANGOS_PROD = {
-    "rojo":  [((0, 150, 40), (5, 255, 200)), ((168, 170, 40), (179, 255, 235))],
-    "verde": [((30, 35, 25), (85, 255, 255))],
-}
+    def sugerido(self, margen_h=4, margen_s=20, margen_v=20):
+        if self.px == 0:
+            return []
+        rs = self.resumen()
+        s_lo = max(0, rs["s"][0] - margen_s)
+        v_lo = max(0, rs["v"][0] - margen_v)
+        v_hi = min(255, rs["v"][2] + 25)
+        return [((lo, s_lo, v_lo), (hi, 255, v_hi)) for lo, hi in self.banda_h(margen_h)]
 
 
 def _pasa(hsv, m, rangos):
-    """px del blob que caen dentro de los rangos de producción, y cuántos
-    fallarían por CADA tope por separado (para saber a quién culpar)."""
-    H = hsv[..., 0][m].astype(np.int16)
-    S = hsv[..., 1][m].astype(np.int16)
-    V = hsv[..., 2][m].astype(np.int16)
+    """Fracción del blob que cae en los rangos de producción, y por tope H/S/V.
+
+    H/S/V se miden en la BANDA que más px cubre (no se mezclan topes de
+    dos tramos distintos: el rojo tiene banda 0-5 y banda 168-179).
+    """
+    sel = m.astype(bool) if getattr(m, "dtype", None) != bool else m
+    H = hsv[..., 0][sel].astype(np.int16)
+    S = hsv[..., 1][sel].astype(np.int16)
+    V = hsv[..., 2][sel].astype(np.int16)
+    if H.size == 0 or not rangos:
+        return 0.0, 0.0, 0.0, 0.0
     ok = np.zeros(H.shape, bool)
-    okh = np.zeros(H.shape, bool)
-    oks = np.zeros(H.shape, bool)
-    okv = np.zeros(H.shape, bool)
+    best = None
     for lo, hi in rangos:
-        okh |= (H >= lo[0]) & (H <= hi[0])
-        oks |= (S >= lo[1]) & (S <= hi[1])
-        okv |= (V >= lo[2]) & (V <= hi[2])
-        ok |= ((H >= lo[0]) & (H <= hi[0]) & (S >= lo[1]) & (S <= hi[1])
-               & (V >= lo[2]) & (V <= hi[2]))
-    n = max(1, H.size)
-    return ok.sum() / n, okh.sum() / n, oks.sum() / n, okv.sum() / n
+        okh = (H >= lo[0]) & (H <= hi[0])
+        oks = (S >= lo[1]) & (S <= hi[1])
+        okv = (V >= lo[2]) & (V <= hi[2])
+        full = okh & oks & okv
+        ok |= full
+        score = (float(full.mean()), float(okh.mean()) + float(oks.mean()) + float(okv.mean()),
+                 float(okh.mean()), float(oks.mean()), float(okv.mean()))
+        if best is None or score > best:
+            best = score
+    return float(ok.mean()), best[2], best[3], best[4]
 
 
 # ── Fuentes de frames ────────────────────────────────────────────────────────
@@ -222,28 +331,8 @@ def frames_bin(path):
                 yield n, img
 
 
-def frames_camara(cam_index, segundos):
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from vision import open_camera
-    cap = open_camera(cam_index)
-    t0 = time.monotonic()
-    k = 0
-    try:
-        while segundos <= 0 or time.monotonic() - t0 < segundos:
-            ok, f = cap.read()
-            if not ok:
-                continue
-            k += 1
-            yield k, cv2.flip(f, 1)
-    finally:
-        cap.release()
-
-
-# ── Reporte ──────────────────────────────────────────────────────────────────
 def _linea_piso(img):
-    """Color del piso en la franja de abajo + aviso de sobreexposición.
-    Es el número que va en COLOR_CORR_FLOOR_REF_BGR (si se quiere re-anclar)
-    y la señal de que el piso está quemado y color_corr no puede trabajar."""
+    """Color del piso en la franja de abajo + aviso de sobreexposición."""
     h = img.shape[0]
     roi = img[int(h * 0.70)::4, ::4]
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -255,67 +344,52 @@ def _linea_piso(img):
     return med, frac, quemado
 
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Mide los colores reales de la sede y dice por qué no se ve el rojo")
-    src = ap.add_mutually_exclusive_group(required=True)
-    src.add_argument("--avi", help="orillasNNN.avi (usa el panel izquierdo del HUD)")
-    src.add_argument("--bin", dest="binf", help="orillasNNN_bev.bin (BEV limpio)")
-    src.add_argument("--vivo", action="store_true", help="cámara en vivo (para el servicio primero)")
-    ap.add_argument("--segundos", type=float, default=0, help="--vivo: cuánto medir (0 = hasta Ctrl-C)")
-    ap.add_argument("--cada", type=int, default=1, help="procesar 1 de cada N frames")
-    ap.add_argument("--cam-index", type=int, default=0)
-    ap.add_argument("--sugerir", action="store_true", help="imprime los rangos listos para pegar")
-    args = ap.parse_args()
+def _channels(img):
+    return (img[..., 0].astype(np.int16),
+            img[..., 1].astype(np.int16),
+            img[..., 2].astype(np.int16))
 
-    if args.avi:
-        it = frames_avi(args.avi)
-    elif args.binf:
-        it = frames_bin(args.binf)
-    else:
-        it = frames_camara(args.cam_index, args.segundos)
 
-    acc = {k: Acumulador(k) for k in OBJETIVOS}
-    prod = {k: [0.0, 0.0, 0.0, 0.0, 0] for k in RANGOS_PROD}   # ok,h,s,v,frames
-    piso_acc, quemado_acc, nfr = [], [], 0
-    t_log = time.monotonic()
+def _print_objetivo(nom, a: Acumulador, prod_cov, sugerir: bool, rangos_prod):
+    if a.frames == 0 or a.px == 0:
+        print(f"\n{nom.upper()}: no se vio en ningun frame")
+        print(f"  pegar en {DESTINO[nom]}")
+        return
+    rs = a.resumen()
+    print(f"\n{nom.upper()}: {a.frames} frames, {a.px} px")
+    print(f"  pegar en {DESTINO[nom]}")
+    print(f"  HSV  H p2/med/p98 = {rs['h'][0]:3d} / {rs['h'][1]:3d} / {rs['h'][2]:3d}"
+          f"   S = {rs['s'][0]:3d} / {rs['s'][1]:3d} / {rs['s'][2]:3d}"
+          f"   V = {rs['v'][0]:3d} / {rs['v'][1]:3d} / {rs['v'][2]:3d}")
+    print(f"  RGB  R p2/med/p98 = {rs['r'][0]:3d} / {rs['r'][1]:3d} / {rs['r'][2]:3d}"
+          f"   G = {rs['g'][0]:3d} / {rs['g'][1]:3d} / {rs['g'][2]:3d}"
+          f"   B = {rs['b'][0]:3d} / {rs['b'][1]:3d} / {rs['b'][2]:3d}"
+          f"   (informativo: el código usa HSV, no RGB)")
+    extra = ""
+    if nom == "rojo":
+        extra = "   (cono real: <=0.35; pared rosa del estacionamiento: >=0.45)"
+    print(f"  B/R mediano = {rs['br']:.2f}{extra}")
+    if nom in rangos_prod and prod_cov is not None and prod_cov[4]:
+        ok, ph, ps, pv = (prod_cov[0] / prod_cov[4] * 100, prod_cov[1] / prod_cov[4] * 100,
+                          prod_cov[2] / prod_cov[4] * 100, prod_cov[3] / prod_cov[4] * 100)
+        print(f"  con los rangos ACTUALES pasa el {ok:.0f}% de esos px", end="")
+        if ok < 40:
+            culpa = min((("H", ph), ("S", ps), ("V", pv)), key=lambda t: t[1])
+            print(f"  <-- el tope que lo tira es {culpa[0]} "
+                  f"(solo {culpa[1]:.0f}% lo pasa; H={ph:.0f}% S={ps:.0f}% V={pv:.0f}%)")
+        else:
+            print("  (ok)")
+    if sugerir and a.px:
+        sug = a.sugerido()
+        print(f"  SUGERIDO HSV -> {_fmt_ranges(sug)}")
+        if nom == "naranja":
+            core_s = max(140, rs["s"][1] - 10)
+            cores = [((lo[0], core_s, lo[2]), (hi[0], 255, hi[2])) for lo, hi in sug]
+            print(f"  LINE_CORE_HSV  -> {_fmt_ranges(cores)}   "
+                  f"(mismo H, S mas alto: nucleo saturado de la cinta)")
 
-    try:
-        for n, img in it:
-            if n % args.cada:
-                continue
-            nfr += 1
-            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            b, g, r = (img[..., 0].astype(np.int16), img[..., 1].astype(np.int16),
-                       img[..., 2].astype(np.int16))
-            for nom, fn in OBJETIVOS.items():
-                m = fn(b, g, r)
-                if not acc[nom].add(hsv, img, m):
-                    continue
-                if nom in RANGOS_PROD:
-                    p = _pasa(hsv, m, RANGOS_PROD[nom])
-                    d = prod[nom]
-                    for i in range(4):
-                        d[i] += p[i]
-                    d[4] += 1
-            med, frac, quem = _linea_piso(img)
-            if frac > 0.2:
-                piso_acc.append(med)
-            quemado_acc.append(quem)
 
-            if args.vivo and time.monotonic() - t_log > 1.0:
-                t_log = time.monotonic()
-                rs = acc["rojo"].resumen()
-                d = prod["rojo"]
-                pct = (d[0] / d[4] * 100) if d[4] else 0.0
-                print(f"[cal] f={nfr} rojo: H{rs['h']} S{rs['s']} V{rs['v']} "
-                      f"B/R={rs['br']:.2f} vistos={rs['frames']} "
-                      f"-> pasan rango actual {pct:.0f}%", flush=True)
-    except KeyboardInterrupt:
-        print("\n[cal] interrumpido")
-
-    # ── informe ──────────────────────────────────────────────────────────────
-    print(f"\n=== {nfr} frames analizados ===")
+def _print_piso(piso_acc, quemado_acc):
     if quemado_acc:
         q = float(np.mean(quemado_acc)) * 100
         print(f"piso/exposicion: {q:.1f}% de los px estan QUEMADOS (V>=250)", end="")
@@ -335,43 +409,389 @@ def main():
         print("  -> color_corr.py va a saltarse todas las actualizaciones aqui "
               "(frac_piso=0.00 en el log [COLOR])")
 
-    for nom in ("rojo", "verde", "naranja", "rosa"):
-        a = acc[nom]
-        if a.frames == 0:
-            print(f"\n{nom.upper()}: no se vio en ningun frame")
-            continue
-        rs = a.resumen()
-        print(f"\n{nom.upper()}: {a.frames} frames, {a.px} px")
-        print(f"  H p2/med/p98 = {rs['h'][0]:3d} / {rs['h'][1]:3d} / {rs['h'][2]:3d}"
-              f"   S = {rs['s'][0]:3d} / {rs['s'][1]:3d} / {rs['s'][2]:3d}"
-              f"   V = {rs['v'][0]:3d} / {rs['v'][1]:3d} / {rs['v'][2]:3d}")
-        print(f"  B/R mediano = {rs['br']:.2f}"
-              + ("   (cono real: <=0.35; pared rosa del estacionamiento: >=0.45)"
-                 if nom == "rojo" else ""))
-        if nom in RANGOS_PROD:
-            d = prod[nom]
-            if d[4]:
-                ok, ph, ps, pv = (d[0] / d[4] * 100, d[1] / d[4] * 100,
-                                  d[2] / d[4] * 100, d[3] / d[4] * 100)
-                print(f"  con los rangos ACTUALES pasa el {ok:.0f}% de esos px", end="")
-                if ok < 40:
-                    culpa = min((("H", ph), ("S", ps), ("V", pv)), key=lambda t: t[1])
-                    print(f"  <-- el tope que lo tira es {culpa[0]} "
-                          f"(solo {culpa[1]:.0f}% lo pasa; H={ph:.0f}% S={ps:.0f}% V={pv:.0f}%)")
-                else:
-                    print("  (ok)")
-        if args.sugerir:
-            tramos = a.banda_h()
-            s_lo = max(0, rs['s'][0] - 20)
-            v_lo = max(0, rs['v'][0] - 20)
-            v_hi = min(255, rs['v'][2] + 25)
-            txt = ", ".join(f"(np.array([{lo}, {s_lo}, {v_lo}]), "
-                            f"np.array([{hi}, 255, {v_hi}]))" for lo, hi in tramos)
-            print(f"  SUGERIDO -> [{txt}]")
 
-    print("\nNota: los rangos sugeridos cubren p2..p98 de lo MEDIDO aqui. Antes de")
-    print("pegarlos, vuelve a correr este script sobre una run VIEJA (luz del")
-    print("cuarto de pruebas) para confirmar que no pierdes nada alla.")
+def _print_cone_sync_note():
+    print("\nSi cambias Red/Green/rosa, LINE_CONE_HSV en config.py debe cubrir")
+    print("los mismos tonos (borra px de cono/pared de la cinta naranja).")
+
+
+# ── Análisis batch (SSH / AVI) ───────────────────────────────────────────────
+def analizar(it, cada: int, vivo: bool, sugerir: bool):
+    rangos_prod = _rangos_prod()
+    acc = {k: Acumulador(k) for k in OBJETIVOS}
+    prod = {k: [0.0, 0.0, 0.0, 0.0, 0] for k in rangos_prod}
+    piso_acc, quemado_acc, nfr = [], [], 0
+    t_log = time.monotonic()
+
+    try:
+        for n, img in it:
+            if n % cada:
+                continue
+            nfr += 1
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            b, g, r = _channels(img)
+            for nom, fn in OBJETIVOS.items():
+                m = fn(b, g, r)
+                if not acc[nom].add(hsv, img, m):
+                    continue
+                if nom in rangos_prod:
+                    p = _pasa(hsv, m, rangos_prod[nom])
+                    d = prod[nom]
+                    for i in range(4):
+                        d[i] += p[i]
+                    d[4] += 1
+            med, frac, quem = _linea_piso(img)
+            if frac > 0.2:
+                piso_acc.append(med)
+            quemado_acc.append(quem)
+
+            if vivo and time.monotonic() - t_log > 1.0:
+                t_log = time.monotonic()
+                rs = acc["rojo"].resumen()
+                d = prod["rojo"]
+                pct = (d[0] / d[4] * 100) if d[4] else 0.0
+                print(f"[cal] f={nfr} rojo: H{rs['h']} S{rs['s']} V{rs['v']} "
+                      f"B/R={rs['br']:.2f} vistos={rs['frames']} "
+                      f"-> pasan rango actual {pct:.0f}%", flush=True)
+    except KeyboardInterrupt:
+        print("\n[cal] interrumpido")
+
+    print(f"\n=== {nfr} frames analizados ===")
+    _print_piso(piso_acc, quemado_acc)
+    for nom in ("rojo", "verde", "naranja", "rosa"):
+        _print_objetivo(nom, acc[nom], prod.get(nom), sugerir, rangos_prod)
+    if sugerir:
+        _print_cone_sync_note()
+        print("\nNota: los rangos sugeridos cubren p2..p98 de lo MEDIDO aqui. Antes de")
+        print("pegarlos, vuelve a correr este script sobre una run VIEJA (luz del")
+        print("cuarto de pruebas) para confirmar que no pierdes nada alla.")
+
+
+# ── GUI ──────────────────────────────────────────────────────────────────────
+def _tint(disp, mask, color, alpha=0.45):
+    if mask is None or not np.any(mask):
+        return
+    sel = mask > 0 if mask.dtype != bool else mask
+    overlay = disp[sel].astype(np.float32)
+    col = np.array(color, np.float32)
+    disp[sel] = (overlay * (1.0 - alpha) + col * alpha).astype(np.uint8)
+
+
+def _prepare_frame(raw, color_corr, use_corr, want_bev, bev):
+    """Misma corrección que runtime_nuevo: color_corr sobre el frame de cámara,
+    luego warp BEV si se pide (la naranja se detecta en BEV)."""
+    img = color_corr.process(raw) if (use_corr and color_corr is not None) else raw
+    if want_bev:
+        if bev is None or not bev.is_calibrated:
+            return img, False
+        return bev.warp(img), True
+    return img, False
+
+
+def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool):
+    rangos_prod = _rangos_prod()
+    acc = {k: Acumulador(k) for k in OBJETIVOS}
+    color_corr = FloorColorCorrector() if use_corr_0 else None
+    bev = BEVTransformer()
+    vision = Vision(cam_index, open_cam=False)
+
+    targets = ["rojo", "verde", "naranja", "rosa"]
+    tgt = "rojo"
+    use_corr = use_corr_0
+    overlay_mode = "prod"     # off | prod | sug | both
+    show_bboxes = True
+    dragging = False
+    mouse = (0, 0)
+    frozen = None             # frame congelado (útil con --image / 'f')
+    nfr = 0
+
+    win = "calibra_luz"
+    win_m = "calibra_luz mascara"
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(win_m, cv2.WINDOW_NORMAL)
+
+    state = {"hsv": None, "img": None}
+
+    def on_mouse(event, x, y, flags, param):
+        nonlocal dragging, mouse
+        mouse = (x, y)
+        if event == cv2.EVENT_LBUTTONDOWN:
+            dragging = True
+        elif event == cv2.EVENT_LBUTTONUP:
+            dragging = False
+        if dragging and state["hsv"] is not None:
+            hsv, img = state["hsv"], state["img"]
+            h, w = hsv.shape[:2]
+            x0, x1 = max(0, x - PATCH_HALF), min(w, x + PATCH_HALF + 1)
+            y0, y1 = max(0, y - PATCH_HALF), min(h, y + PATCH_HALF + 1)
+            acc[tgt].add_patch(hsv[y0:y1, x0:x1], img[y0:y1, x0:x1])
+
+    cv2.setMouseCallback(win, on_mouse)
+
+    print("[calibra] 1=rojo  2=verde  3=naranja  4=rosa")
+    print("[calibra] click+arrastrar = pintar pixeles   a = auto-detectar este color")
+    print("[calibra] r=reset  p=imprimir  s=sugerir todos  c=color_corr  b=BEV")
+    print("[calibra] m=overlay  d=bboxes  f=congelar  ESC/q=salir\n")
+    if force_bev and not bev.is_calibrated:
+        print("[calibra] --bev pedido pero no hay bev_calib.npz — naranja se mide en cámara.")
+    if not bev.is_calibrated:
+        print("[calibra] sin BEV: la cinta naranja se calibra en cámara (en carrera se ve en BEV).")
+
+    def current_space(nombre):
+        if force_bev:
+            return True
+        return ESPACIO.get(nombre, "cam") == "bev"
+
+    try:
+        while True:
+            if frozen is None:
+                raw = get_raw()
+                if raw is None:
+                    if image_mode:
+                        time.sleep(0.03)
+                        continue
+                    continue
+            else:
+                raw = frozen
+
+            nfr += 1
+            want_bev = current_space(tgt)
+            img, used_bev = _prepare_frame(raw, color_corr, use_corr, want_bev, bev)
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            state["hsv"] = hsv
+            state["img"] = img
+
+            b, g, rch = _channels(img)
+            auto_m = OBJETIVOS[tgt](b, g, rch).astype(np.uint8) * 255
+            prod_m = _mask_hsv(hsv, rangos_prod[tgt])
+            sug = acc[tgt].sugerido()
+            sug_m = _mask_hsv(hsv, sug) if sug else np.zeros(hsv.shape[:2], np.uint8)
+
+            disp = img.copy()
+            if overlay_mode in ("prod", "both"):
+                _tint(disp, prod_m, OVERLAY_BGR[tgt], 0.40)
+            if overlay_mode in ("sug", "both") and sug:
+                _tint(disp, sug_m, (0, 255, 255), 0.35)
+
+            if show_bboxes and not used_bev:
+                vis = img.copy()
+                vis, pos = vision.detect_on(vis)
+                for (x, y, w, h) in pos.get("Red", []):
+                    cv2.rectangle(disp, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                    cv2.putText(disp, "Red", (x, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                for (x, y, w, h) in pos.get("Green", []):
+                    cv2.rectangle(disp, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(disp, "Green", (x, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                pink_m = _mask_hsv(hsv, rangos_prod["rosa"])
+                ratio = float(np.count_nonzero(pink_m)) / max(1, pink_m.size)
+                cv2.putText(disp, f"rosa {ratio * 100:.0f}%", (8, disp.shape[0] - 14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 50, 220), 1)
+
+            mx, my = mouse
+            h, w = disp.shape[:2]
+            if 0 <= mx < w and 0 <= my < h:
+                hv = hsv[my, mx]
+                bv, gv, rv = img[my, mx]
+                live = f"HSV=({hv[0]},{hv[1]},{hv[2]})  RGB=({rv},{gv},{bv})"
+                cv2.circle(disp, (mx, my), PATCH_HALF, (0, 255, 255), 1)
+            else:
+                live = "HSV=(-,-,-)  RGB=(-,-,-)"
+
+            a = acc[tgt]
+            if a.px:
+                rs = a.resumen()
+                acum = (f"acum H[{rs['h'][0]}-{rs['h'][2]}] "
+                        f"S[{rs['s'][0]}-{rs['s'][2]}] V[{rs['v'][0]}-{rs['v'][2]}]  "
+                        f"n={a.px}")
+            else:
+                acum = "acum: pinta el color o pulsa 'a'"
+
+            gan = "-"
+            if color_corr is not None and use_corr:
+                g = color_corr.gains
+                gan = f"({g[0]:.2f},{g[1]:.2f},{g[2]:.2f})"
+            med, frac, quem = _linea_piso(img)
+            espacio = "BEV" if used_bev else "camara"
+
+            lines = [
+                f"{tgt.upper()}  espacio={espacio}  overlay={overlay_mode}  corr={'ON' if use_corr else 'OFF'} gan={gan}",
+                live,
+                acum,
+                f"piso BGR=({med[0]:.0f},{med[1]:.0f},{med[2]:.0f})  frac={frac:.2f}  quemado={quem * 100:.0f}%",
+                "1-4 color  a=auto  r=reset  p/s=print  c=corr  b=BEV  m=mask  d=bbox  f=freeze  q=salir",
+            ]
+            for i, txt in enumerate(lines):
+                cv2.putText(disp, txt, (8, 18 + i * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            (0, 0, 0), 3)
+                cv2.putText(disp, txt, (8, 18 + i * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            (0, 255, 255) if i == 0 else (240, 240, 240), 1)
+
+            mask_show = np.zeros_like(img)
+            if overlay_mode == "sug" and sug:
+                mask_show[sug_m > 0] = OVERLAY_BGR[tgt]
+            elif overlay_mode == "both":
+                mask_show[prod_m > 0] = (80, 80, 80)
+                if sug:
+                    mask_show[sug_m > 0] = OVERLAY_BGR[tgt]
+            else:
+                mask_show[prod_m > 0] = OVERLAY_BGR[tgt]
+            cv2.putText(mask_show, f"mascara {tgt} ({overlay_mode})", (8, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            cv2.imshow(win, disp)
+            cv2.imshow(win_m, mask_show)
+            key = cv2.waitKey(1) & 0xFF
+
+            if key in (27, ord("q")):
+                break
+            if key == ord("1"):
+                tgt = "rojo"
+            elif key == ord("2"):
+                tgt = "verde"
+            elif key == ord("3"):
+                tgt = "naranja"
+            elif key == ord("4"):
+                tgt = "rosa"
+            elif key == ord("r"):
+                acc[tgt].reset()
+                print(f"[calibra] reset {tgt}")
+            elif key == ord("a"):
+                ok = acc[tgt].add(hsv, img, auto_m > 0)
+                print(f"[calibra] auto {tgt}: "
+                      f"{'ok +' + str(int(np.count_nonzero(auto_m))) + ' px' if ok else 'blob demasiado chico'}")
+            elif key == ord("p"):
+                _print_objetivo(tgt, acc[tgt], None, True, rangos_prod)
+            elif key == ord("s"):
+                print(f"\n=== muestra GUI ({nfr} frames de visor) ===")
+                _print_piso(*_piso_from_frame(img))
+                for nom in targets:
+                    _print_objetivo(nom, acc[nom], None, True, rangos_prod)
+                _print_cone_sync_note()
+            elif key == ord("c"):
+                use_corr = not use_corr
+                print(f"[calibra] color_corr={'ON' if use_corr else 'OFF'}")
+            elif key == ord("b"):
+                force_bev = not force_bev
+                print(f"[calibra] BEV forzado={'ON' if force_bev else 'OFF (auto por color)'}")
+            elif key == ord("m"):
+                order = ["prod", "sug", "both", "off"]
+                overlay_mode = order[(order.index(overlay_mode) + 1) % len(order)]
+            elif key == ord("d"):
+                show_bboxes = not show_bboxes
+            elif key == ord("f"):
+                frozen = None if frozen is not None else raw.copy()
+                print(f"[calibra] freeze={'ON' if frozen is not None else 'OFF'}")
+            elif key == ord(" "):
+                # siguiente frame si es imagen fija: no-op; si es video, descongela
+                frozen = None
+    except KeyboardInterrupt:
+        print("\n[calibra] interrumpido")
+    finally:
+        cv2.destroyAllWindows()
+
+    print(f"\n=== cierre GUI ===")
+    for nom in targets:
+        _print_objetivo(nom, acc[nom], None, True, rangos_prod)
+    _print_cone_sync_note()
+
+
+def _piso_from_frame(img):
+    med, frac, quem = _linea_piso(img)
+    piso_acc = [med] if frac > 0.2 else []
+    return piso_acc, [quem]
+
+
+def frames_camara(cam_index, segundos, use_corr: bool):
+    cap = open_camera(cam_index)
+    corr = FloorColorCorrector() if use_corr else None
+    t0 = time.monotonic()
+    k = 0
+    try:
+        while segundos <= 0 or time.monotonic() - t0 < segundos:
+            ok, f = cap.read()
+            if not ok:
+                continue
+            k += 1
+            if corr is not None:
+                f = corr.process(f)
+            yield k, f
+    finally:
+        cap.release()
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Calibra HSV de conos / naranja / rosa para Pure Pursuit (otra luz)")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--avi", help="orillasNNN.avi (usa el panel izquierdo del HUD)")
+    src.add_argument("--bin", dest="binf", help="orillasNNN_bev.bin (BEV limpio)")
+    src.add_argument("--vivo", action="store_true", help="cámara en vivo, solo texto (SSH)")
+    src.add_argument("--gui", action="store_true", help="ventana: pintar / auto-detectar / overlay")
+    ap.add_argument("--image", type=str, default=None, help="--gui: foto fija en vez de cámara")
+    ap.add_argument("--segundos", type=float, default=0, help="--vivo: cuánto medir (0 = hasta Ctrl-C)")
+    ap.add_argument("--cada", type=int, default=1, help="procesar 1 de cada N frames")
+    ap.add_argument("--cam-index", type=int, default=None)
+    ap.add_argument("--sugerir", action="store_true", help="imprime los rangos listos para pegar")
+    ap.add_argument("--sin-corr", action="store_true",
+                    help="no aplicar color_corr.py (por defecto SÍ, como el runtime)")
+    ap.add_argument("--bev", action="store_true", help="--gui: forzar espacio BEV para todos los colores")
+    args = ap.parse_args()
+
+    cam_index = args.cam_index if args.cam_index is not None else C.CAM_INDEX
+    use_corr = not args.sin_corr
+
+    if args.gui:
+        if args.image:
+            img = cv2.imread(args.image)
+            if img is None:
+                raise SystemExit(f"[calibra] no se pudo leer {args.image}")
+            run_gui(lambda: img, cam_index, use_corr, args.bev, image_mode=True)
+            return
+        if args.avi:
+            cap = cv2.VideoCapture(args.avi)
+            if not cap.isOpened():
+                raise SystemExit(f"[calibra] no se pudo abrir {args.avi}")
+
+            def get_raw():
+                ok, f = cap.read()
+                if not ok:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ok, f = cap.read()
+                    if not ok:
+                        return None
+                return f[:, :640]
+            try:
+                run_gui(get_raw, cam_index, False, args.bev, image_mode=False)
+            finally:
+                cap.release()
+            return
+
+        print("[calibra] cámara en vivo. Si wro-runtime está arriba: "
+              "sudo systemctl stop wro-runtime && sleep 4", flush=True)
+        cap = open_camera(cam_index)
+
+        def get_raw():
+            ok, f = cap.read()
+            return f if ok else None
+        try:
+            run_gui(get_raw, cam_index, use_corr, args.bev, image_mode=False)
+        finally:
+            cap.release()
+        return
+
+    if args.avi:
+        it = frames_avi(args.avi)
+        vivo = False
+    elif args.binf:
+        it = frames_bin(args.binf)
+        vivo = False
+    else:
+        print("[calibra] cámara en vivo. Si wro-runtime está arriba: "
+              "sudo systemctl stop wro-runtime && sleep 4", flush=True)
+        it = frames_camara(cam_index, args.segundos, use_corr)
+        vivo = True
+
+    analizar(it, args.cada, vivo, args.sugerir)
 
 
 if __name__ == "__main__":

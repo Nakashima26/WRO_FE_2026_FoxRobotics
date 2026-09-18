@@ -38,48 +38,56 @@ def open_camera(cam_index=0):
     return cap
 
 
+# Rangos HSV de conos. Módulo-nivel para que calibra_luz.py los lea sin abrir
+# la cámara. Si los cambias, actualiza LINE_CONE_HSV en
+# pure_pursuit/config.py (borra px de cono de la cinta naranja).
+#
+# Banda 2 (cola azulada del rojo, wrap-around): H 173 -> 177.
+# La pared magenta del estacionamiento (rectas 1/5/9 y tras el 4o
+# giro) cae en H 172-175 con S~164 V~81 -> la banda 173-176 la
+# detectaba como cono Red y el carro daba un volantazo a "esquivarla"
+# (orillas809 ~seg 25: bbox Red sobre el panel magenta, mem R(x=241),
+# steer +46->+50). Medido en frames: pared H med=173 / B-R=0.50 / 87%
+# de sus px caen en PARK_PINK_HSV; un cono rojo real es H med=0-1 /
+# B-R=0.07 / 1% rosa, y su NÚCLEO está en la banda 1 [0,5] -> subir
+# el piso de la banda 2 no lo afecta (solo pierde la cola H 173-176).
+#
+# 2026-09-16 (sede nueva, orillas1013): con la luz de ahí el cono
+# rojo NO sale en H 0-1 sino en H 169-178 — la cámara corre con AWB
+# apagado y ganancias fijas <1.2,1.5> medidas en el cuarto de
+# pruebas, así que una luz más fría empuja el rojo hacia el
+# magenta. Y cerca del carro llega a V 208 (el tope 160 también lo
+# tiraba). Resultado: el cono grande que tenía ENFRENTE (frames
+# 276-285, 18k px rojos) daba CERO bboxes y el carro no lo esquivó.
+# color_corr.py no lo tapó: allá el piso sale QUEMADO (V~237, 33%
+# de px a 255) y un piso quemado ya no tiene tono -> ganancias ~1.
+#
+# La banda 2 baja 177 -> 168 y los topes de V suben. Lo que antes
+# protegía de la pared magenta (subir el piso de H) ya no puede
+# hacerlo, así que esa defensa se movió a RED_BR_MAX en
+# process_color(), que separa por B/R y NO depende de la luz:
+# cono rojo real B/R 0.11-0.35, pared rosa 0.45-0.60.
+# Verificado sobre .avi grabados: orillas1013 (sede) 72 -> 130
+# frames con rojo y el cono de los frames 276-285 pasa de 0 a
+# detectado; orillas942 (pared rosa) 124 -> 125 sin falsos de
+# pared; orillas1005 (luz de siempre) idéntico.
+#
+# Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
+COLOR_RANGES = {
+    "Red": [(np.array([0, 150, 40]), np.array([5, 255, 200])),
+            (np.array([168, 170, 40]), np.array([179, 255, 235]))],
+    "Green": [(np.array([30, 35, 25]), np.array([85, 255, 255]))],
+}
+
+
 class Vision:
-    def __init__(self, cam_index=0):
+    def __init__(self, cam_index=0, *, open_cam=True):
         """Inicializa la cámara y define los rangos de colores."""
-        self.cap = open_camera(cam_index)
-
+        self.cap = open_camera(cam_index) if open_cam else None
         self.color_ranges = {
-            # Banda 2 (cola azulada del rojo, wrap-around): H 173 -> 177.
-            # La pared magenta del estacionamiento (rectas 1/5/9 y tras el 4o
-            # giro) cae en H 172-175 con S~164 V~81 -> la banda 173-176 la
-            # detectaba como cono Red y el carro daba un volantazo a "esquivarla"
-            # (orillas809 ~seg 25: bbox Red sobre el panel magenta, mem R(x=241),
-            # steer +46->+50). Medido en frames: pared H med=173 / B-R=0.50 / 87%
-            # de sus px caen en PARK_PINK_HSV; un cono rojo real es H med=0-1 /
-            # B-R=0.07 / 1% rosa, y su NÚCLEO está en la banda 1 [0,5] -> subir
-            # el piso de la banda 2 no lo afecta (solo pierde la cola H 173-176).
-            #
-            # 2026-09-16 (sede nueva, orillas1013): con la luz de ahí el cono
-            # rojo NO sale en H 0-1 sino en H 169-178 — la cámara corre con AWB
-            # apagado y ganancias fijas <1.2,1.5> medidas en el cuarto de
-            # pruebas, así que una luz más fría empuja el rojo hacia el
-            # magenta. Y cerca del carro llega a V 208 (el tope 160 también lo
-            # tiraba). Resultado: el cono grande que tenía ENFRENTE (frames
-            # 276-285, 18k px rojos) daba CERO bboxes y el carro no lo esquivó.
-            # color_corr.py no lo tapó: allá el piso sale QUEMADO (V~237, 33%
-            # de px a 255) y un piso quemado ya no tiene tono -> ganancias ~1.
-            #
-            # La banda 2 baja 177 -> 168 y los topes de V suben. Lo que antes
-            # protegía de la pared magenta (subir el piso de H) ya no puede
-            # hacerlo, así que esa defensa se movió a RED_BR_MAX en
-            # process_color(), que separa por B/R y NO depende de la luz:
-            # cono rojo real B/R 0.11-0.35, pared rosa 0.45-0.60.
-            # Verificado sobre .avi grabados: orillas1013 (sede) 72 -> 130
-            # frames con rojo y el cono de los frames 276-285 pasa de 0 a
-            # detectado; orillas942 (pared rosa) 124 -> 125 sin falsos de
-            # pared; orillas1005 (luz de siempre) idéntico.
-            "Red": [(np.array([0, 150, 40]), np.array([5, 255, 200])),
-                        (np.array([168, 170, 40]), np.array([179, 255, 235]))],
-            # Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
-            "Green": [(np.array([30, 35, 25]), np.array([85, 255, 255]))]        
-            # "Pink": [(np.array([140, 100, 100]), np.array([170, 255, 255]))],
+            k: [(lo.copy(), hi.copy()) for lo, hi in ranges]
+            for k, ranges in COLOR_RANGES.items()
         }
-
         self.kernel = np.ones((3, 3), np.uint8)
 
     # Tope de B/R para aceptar un blob como cono ROJO. Medido en frames:
@@ -138,9 +146,8 @@ class Vision:
 
         return objects
 
-    def process_frame(self, frame):
-        """Detecta colores optimizado con NumPy."""
-        frame = cv2.flip(frame, 1)
+    def detect_on(self, frame):
+        """Detecta colores SIN voltear el frame (ya está en el espacio de trabajo)."""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         # Copia limpia para el filtro B/R del rojo: `frame` se va ensuciando
         # con los rectángulos blancos que dibuja process_color().
@@ -153,3 +160,8 @@ class Vision:
                      for color, mask in masks.items()}
 
         return frame, positions
+
+    def process_frame(self, frame):
+        """Detecta colores optimizado con NumPy."""
+        frame = cv2.flip(frame, 1)
+        return self.detect_on(frame)

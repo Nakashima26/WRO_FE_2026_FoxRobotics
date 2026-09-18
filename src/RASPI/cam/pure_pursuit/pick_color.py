@@ -1,6 +1,10 @@
 """
-pick_color.py — Selector interactivo de rango HSV para calibrar colores de piso
-(líneas guía azul/naranja del tapete WRO) o cualquier otro color.
+pick_color.py — Picker HSV simple (un color a la vez, min/max crudo).
+
+Para calibrar conos rojo/verde, cinta naranja y pared rosa CON otra luz
+(recomendado, es el que usa Pure Pursuit):
+
+    python3 -m pure_pursuit.calibra_luz --gui
 
 POR QUÉ:
   FLOOR_LOWER_BLUE / FLOOR_UPPER_BLUE / FLOOR_LOWER_ORANGE / FLOOR_UPPER_ORANGE
@@ -176,10 +180,12 @@ def main():
     from vision import open_camera
     from bev import BEVTransformer
     from config import CAM_INDEX
+    from color_corr import FloorColorCorrector
 
     cam_index = args.cam_index if args.cam_index is not None else CAM_INDEX
     cap = open_camera(cam_index)
     bev = BEVTransformer() if args.bev else None
+    corr = FloorColorCorrector()
     if args.bev and not bev.is_calibrated:
         print("[pick_color] --bev pedido pero no hay bev_calib.npz — corre calibrate.py primero.")
         sys.exit(1)
@@ -188,6 +194,7 @@ def main():
         ret, frame = cap.read()
         if not ret:
             return None
+        frame = corr.process(frame)
         frame = cv2.flip(frame, 1)
         if bev is not None:
             return bev.warp(frame)
