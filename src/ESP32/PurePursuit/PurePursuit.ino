@@ -42,6 +42,8 @@ MPU6050 mpu(Wire);
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
+const int TURNS_PER_RACE = 4;   // TEST: 1 vuelta (4 giros) y a estacionar. Revertir a 12 para carrera real.
+
 
 
 // ── PWM ───────────────────────────────────────────────────────────────────────
@@ -60,7 +62,7 @@ float KdWall = 1.35;
 // fija a la pared INTERIOR (la del lado hacia donde gira). Menos "hunting" y
 // línea más corta en rectas anchas; además la pared interior no "desaparece" en
 // las esquinas (esa es la exterior), así que el PID no se clava. 
-const float WALL_HOLD_CM = 25.0;
+const float WALL_HOLD_CM = 28.0;
 
 // El error de UNA sola pared tiene ~la mitad de ganancia geométrica que
 // distL-distR (al desplazarte lateralmente solo cambia un sensor, no dos). Sin
@@ -112,8 +114,8 @@ unsigned long lastDodgeMs = 0;   // último loop con esquiva activa (prio/mem/RE
 unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado SÍ corrió
 
 // ── Control ───────────────────────────────────────────────────────────────────
-int velocidadMotor = 180;
-int centroServo    = 80;
+int velocidadMotor = 160;
+int centroServo    = 90;
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -450,6 +452,7 @@ unsigned long maniobraSettleMs      = 0;   // inicio de la fase 6
 unsigned long maniobraSettleSampMs  = 0;   // millis del último sample de rate
 float         maniobraSettleAngPrev = 0.0f;// anguloGyro en el último sample
 int           maniobraSettleQuieto  = 0;   // samples consecutivos con rate por debajo del umbral
+int           maniobraPivoteHold    = 0;   // samples consecutivos dentro de tol en el pivote REV (lazo cerrado)
 float         maniobraIdealRot      = 0.0f;// rotación (con signo) que deja el chasis cuadrado con la
                                            // recta nueva; finalizarManiobra() pasa (anguloGyro - esto)
                                            // como residual a la recuperación (ver MANIOBRA_RESIDUAL_MAX_DEG)
@@ -785,7 +788,7 @@ const unsigned long PARK_RECTO_MAX_MS         = 500;
 const unsigned long PARK_WIGGLE_INT_MS        = 0;      // reversa con volante al lado contrario
 const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante hacia la pared
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
-const float         PARK_ENDEREZA_TOL_DEG     = 15.0f;
+const float         PARK_ENDEREZA_TOL_DEG     = 19.0f;
 const int           PARK_PEGADO_CM            = 2;
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
@@ -1010,7 +1013,7 @@ const int           PARK_PUNTA_PWM             = 95;     // PWM de la recta fina
 const float         PARK_PUNTA_PARED_CM        = 31.0f;  // distancia a mantener de la pared exterior (lectura del sonar)
                                                          // 2026-09-15: 30 -> 35 (orillas949 se enchuecaba hacia la pared) -> 33
                                                          // (orillas950 con 35 se saltó el 1er poste: eco débil más lejos)
-const float         PARK_PUNTA_KPOS            = 1.0f;   // grados de rumbo objetivo por cm de error de pared
+const float         PARK_PUNTA_KPOS            = 2.0f;   // grados de rumbo objetivo por cm de error de pared
                                                          // (2026-09-15: 0.8 -> 1.2 -> 1.0: con 1.2 + KP_ANG 3.0 el servo
                                                          // se iba a tope en ambos sentidos, orillas953)
 // Integral del error de pared: compensa que el 0 del gyro no quede paralelo a la pared
@@ -1167,7 +1170,6 @@ const int VEL_INICIAL = 110;
 // ── Carrera ───────────────────────────────────────────────────────────────────
 int  turnsCompleted      = 0;
 bool raceFinished        = false;
-const int TURNS_PER_RACE = 12;
 // true  = el carro NUNCA se detiene: al llegar a TURNS_PER_RACE sigue dando vueltas
 //         (ni maniobra 13, ni media vuelta, ni estacionamiento, ni TERMINANDO).
 //         turnsCompleted sigue subiendo (13, 14, ...) y se ve en tc= del ACK.
@@ -1201,7 +1203,7 @@ int  idxR = 0;
 // Actuadores
 // ═══════════════════════════════════════════════════════════════════════════════
 
-int ultimoServo = 80;   // último ángulo escrito al servo — para debug en el ACK
+int ultimoServo = 90;   // último ángulo escrito al servo — para debug en el ACK
 
 void escribirServo(int angulo) {
   angulo = constrain(angulo, 0, 180);
@@ -1362,7 +1364,7 @@ void decidirManiobra(long distL, long distR) {
 void servoRumboPark(float rumboRef) {
   float out = PARK_KP_ANG * (rumboRef - anguloGyro) - PARK_KD_RATE * gyroRate;
   out = constrain(out, (float)-PARK_SERVO_MAX, (float)PARK_SERVO_MAX);
-  escribirServo(constrain(centroServo + (int)out, 20, 150));
+  escribirServo(constrain(centroServo + (int)out, 30, 160));
 }
 
 // ── Trim de rumbo contra la pared (ver el bloque PARK_TRIM_*) ────────────────
@@ -1520,7 +1522,7 @@ void iniciarEstacionandoRetorno() {
   parkFase         = 20;
   parkFaseMs       = millis();
   motorCoast();
-  escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? 150 : 20));
+  escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? 160 : 30));
   Serial.println("==================================================");
   Serial.print("-> MEDIA VUELTA (giro 13), luego paralelo. Pared del regreso: ");
   Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
@@ -1590,7 +1592,7 @@ void iniciarEstacionandoPunta(bool retorno) {
   if (retorno) {
     motorCoast();
     // Con avance previo arranca recto; sin él, la fase 20 espera a que llegue a tope.
-    escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (puntaParedIzq ? 150 : 20));
+    escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (puntaParedIzq ? 160 : 30));
     puntaRumboGiro0 = anguloGyro;
     puntaFase       = 20;
     puntaFaseMs     = millis();
@@ -1606,7 +1608,7 @@ void iniciarEstacionandoPunta(bool retorno) {
 void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG) {
   float out = kpAng * (rumboRef - anguloGyro) - PARK_PUNTA_KD_RATE * gyroRate;
   out = constrain(out, (float)-PARK_PUNTA_SERVO_MAX, (float)PARK_PUNTA_SERVO_MAX);
-  escribirServo(constrain(centroServo + (int)out, 20, 150));
+  escribirServo(constrain(centroServo + (int)out, 30, 160));
 }
 
 void finalizarPunta(const char *motivo) {
@@ -1755,9 +1757,21 @@ unsigned long lastRevHoldMs = 0;
 const float REV_HOLD_I_CLAMP  = 20.0f;  // tope del integral (grados·s)
 const float REV_HOLD_OUT_MAX  = 34.0f;  // tope de |servo - centro| durante la fase 4
 
-// Mantiene anguloGyro en headingRef mientras el carro retrocede recto en fase 4.
-// Escribe el servo directo (como escribirServo(centroServo) al que reemplaza).
-void aplicarReversaHold(float headingRef) {
+// ── Pivote de reversa en LAZO CERRADO ───────────────────────────────────────
+// El pivote de la MANIOBRA (fase 1 en reversa) usa aplicarReversaHoldClamp hacia
+// el objetivo REAL (maniobraIdealRot, con signo) en vez de tope fijo + corte
+// anticipado: el servo se satura al inicio (error grande) y se centra al llegar,
+// así el chasis CONVERGE al ángulo y ya no depende de que la inercia complete un
+// MANIOBRA_OVERSHOOT_DEG adivinado (esa apuesta era lo que dejaba el carro chueco).
+const float MANIOBRA_PIVOTE_OUT_MAX  = 60.0f;  // tope de |servo-centro| en el pivote (casi lock completo)
+const float MANIOBRA_PIVOTE_TOL_DEG  = 3.0f;   // |objetivo - anguloGyro| para darlo por bueno
+const int   MANIOBRA_PIVOTE_HOLD_N   = 3;      // loops seguidos dentro de tol (~60 ms) => convergido
+const float MANIOBRA_PIVOTE_SLOW_DEG = 30.0f;  // dentro de esto del objetivo baja a VEL_MIN (crawl fino)
+
+// Núcleo del heading-hold de reversa con tope de salida parametrizable. La fase 4
+// (y demás usos) llaman al wrapper con REV_HOLD_OUT_MAX (correcciones suaves); el
+// pivote de reversa llama con MANIOBRA_PIVOTE_OUT_MAX para girar casi a tope.
+void aplicarReversaHoldClamp(float headingRef, float outMax) {
   unsigned long now = millis();
   float dt = (now - lastRevHoldMs) / 1000.0f;
   lastRevHoldMs = now;
@@ -1770,8 +1784,13 @@ void aplicarReversaHold(float headingRef) {
 
   // Signo NEGADO vs el PID de adelante: en reversa, servo izq -> el chasis va der.
   float out = -(KpRev * err + KiRev * integralRev + KdRev * deriv);
-  out = constrain(out, -REV_HOLD_OUT_MAX, REV_HOLD_OUT_MAX);
-  escribirServo(constrain(centroServo + (int)out, 20, 150));
+  out = constrain(out, -outMax, outMax);
+  escribirServo(constrain(centroServo + (int)out, 30, 160));
+}
+// Mantiene anguloGyro en headingRef mientras el carro retrocede recto en fase 4.
+// Escribe el servo directo (como escribirServo(centroServo) al que reemplaza).
+void aplicarReversaHold(float headingRef) {
+  aplicarReversaHoldClamp(headingRef, REV_HOLD_OUT_MAX);
 }
 
 
@@ -2262,7 +2281,7 @@ void controlPID(long distL, long distR) {
       }
     }
 
-    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), 20, 150);
+    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), 30, 160);
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
@@ -2294,7 +2313,7 @@ void controlPID(long distL, long distR) {
     }
 
     int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
-    servoAngle = constrain(servoAngle + (int)wallPanic, 20, 150);
+    servoAngle = constrain(servoAngle + (int)wallPanic, 30, 160);
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
 
@@ -2314,7 +2333,7 @@ void controlPID(long distL, long distR) {
   }
 
   outputFinal = constrain(outputFinal, -25, 25);
-  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, 20, 150));
+  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, 30, 160));
   setMotor(velocidadMotor);
 
   // ── Debug UART ────────────────────────────────────────────────────────────
@@ -2611,7 +2630,7 @@ void loop() {
                   : INICIO_PWM;
         
         motorAdelante();
-        escribirServo(inicioGirarDer ? 20 : 150);   // full hacia el lado de salida
+        escribirServo(inicioGirarDer ? 30 : 160);   // full hacia el lado de salida
         delay(100);
         setMotor(vel);
         bool swingListo   = (deltaIni >= (float)(INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG));
@@ -2640,7 +2659,7 @@ void loop() {
       // ── Fase 3: CONTRA — contravuelta para re-alinear con la recta ─────────
       if (inicioFase == 3) {
         motorAdelante();
-        escribirServo(inicioGirarDer ? 150 : 20);   // full al lado CONTRARIO
+        escribirServo(inicioGirarDer ? 160 : 30);   // full al lado CONTRARIO
         setMotor(INICIO_PWM);
         bool alineado = (deltaIni <= (float)INICIO_ENDEREZA_MARGEN_DEG);
         bool timeout  = (millis() - inicioFaseMs >= INICIO_CONTRA_TIMEOUT_MS);
@@ -2913,7 +2932,7 @@ void loop() {
       else                   velocidadMotor = 120;
 
       setMotor(velocidadMotor);
-      escribirServo(direccionIzquierda ? 150 : 20);
+      escribirServo(direccionIzquierda ? 160 : 30);
 
       if (delta >= AngGiro) {
         escribirServo(centroServo);
@@ -3253,6 +3272,10 @@ void loop() {
         if (millis() - maniobraFaseMs >= MANIOBRA_FRENO_MS) {
           motorReversa();                 // motor parado -> arranca en reversa
           anguloGyro       = 0;
+          integralRev      = 0;           // PID de reversa limpio para el pivote de lazo cerrado
+          prevErrorRev     = 0;
+          lastRevHoldMs    = millis();
+          maniobraPivoteHold = 0;
           maniobraPivoteMs = millis();
           maniobraFase     = 1;           // pivote en reversa
         }
@@ -3278,22 +3301,42 @@ void loop() {
                     ? (int)map((long)tR, 0, (long)MANIOBRA_RAMP_MS,
                                MANIOBRA_VEL_MIN, MANIOBRA_VEL_REV)
                     : MANIOBRA_VEL_REV;
-          if (delta > EXIT_DEG - 20) vel = min(vel, MANIOBRA_VEL_MIN);   // frena el último tramo
+          // LAZO CERRADO: el servo se controla contra el objetivo REAL
+          // (maniobraIdealRot, con signo) en vez de ir a tope fijo. errPivote = lo
+          // que falta rotar; al acercarse el servo se centra solo y el chasis se
+          // detiene EN el ángulo -> ya no depende de la inercia + overshoot fijo.
+          float errPivote = maniobraIdealRot - anguloGyro;
+          if (fabs(errPivote) < MANIOBRA_PIVOTE_SLOW_DEG)
+            vel = min(vel, MANIOBRA_VEL_MIN);   // crawl fino cerca del objetivo
           motorReversa();
-          // servo CONTRARIO al giro, pero entrando sobre la marcha (no de golpe
-          // con el carro parado: eso era el atorón / derrape). Ver MANIOBRA_SERVO_*.
-          escribirServo(servoPivoteRampa(tR, maniobraGirarDer ? 150 : 20));
+          // Anti-scrub: los primeros ms el servo va al centro (la rueda ya rueda
+          // antes de cargar el lock) y recién ahí entra el PID. Ver MANIOBRA_SERVO_*.
+          if (tR < MANIOBRA_SERVO_RETRASO_MS) escribirServo(centroServo);
+          else aplicarReversaHoldClamp(maniobraIdealRot, MANIOBRA_PIVOTE_OUT_MAX);
           setMotor(vel);
         } else {
           if      (delta < 45)            velocidadMotor = 165;
           else if (delta < EXIT_DEG - 20) velocidadMotor = 145;
           else                            velocidadMotor = 100;   // último tramo: crawl
           motorAdelante();
-          escribirServo(maniobraGirarDer ? 20 : 150);    // servo hacia el giro
+          escribirServo(maniobraGirarDer ? 30 : 160);    // servo hacia el giro
           setMotor(velocidadMotor);
         }
 
-        if (delta >= EXIT_DEG) {
+        bool pivoteListo;
+        if (maniobraReversa) {
+          // Convergido: dentro de tolerancia del objetivo por varios loops seguidos.
+          // El lazo sigue corrigiendo (si se pasa, regresa), así que N loops dentro =
+          // asentado EN el ángulo, no sólo de paso. Sin corte anticipado ni overshoot.
+          if (fabs(maniobraIdealRot - anguloGyro) <= MANIOBRA_PIVOTE_TOL_DEG)
+            maniobraPivoteHold++;
+          else
+            maniobraPivoteHold = 0;
+          pivoteListo = (maniobraPivoteHold >= MANIOBRA_PIVOTE_HOLD_N);
+        } else {
+          pivoteListo = (delta >= EXIT_DEG);   // FWD: sin cambio (tope + coast)
+        }
+        if (pivoteListo) {
           maniobraFase   = 2;
           maniobraFaseMs = millis();
           motorCoast();
@@ -3440,8 +3483,8 @@ void loop() {
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
-      int   servoHaciaPared = parkParedEsIzquierda ? 150 : 20;      // tope hacia la pared exterior
-      int   servoDesdePared = parkParedEsIzquierda ? 20 : 150;      // contravuelta hacia el interior
+      int   servoHaciaPared = parkParedEsIzquierda ? 160 : 30;      // tope hacia la pared exterior
+      int   servoDesdePared = parkParedEsIzquierda ? 30 : 160;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
       if (piPark >= 1) parkRosaVisto = true;
 
@@ -4258,7 +4301,7 @@ void loop() {
     case ESTACIONANDO_PUNTA: {
       long  extRaw     = puntaParedIzq ? distL_raw : distR_raw;
       float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared"
-      int   servoTope  = puntaParedIzq ? 150 : 20;       // servo a tope hacia la pared
+      int   servoTope  = puntaParedIzq ? 160 : 30;       // servo a tope hacia la pared
       puntaExtRaw = extRaw;
       if (piPark >= 1) puntaRosaVisto = true;
 
