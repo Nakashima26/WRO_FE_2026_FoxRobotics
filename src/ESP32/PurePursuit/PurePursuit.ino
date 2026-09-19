@@ -41,8 +41,8 @@ MPU6050 mpu(Wire);
 #define ECHO_F      33
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
-const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
-const int TURNS_PER_RACE = 4;   // TEST: 1 vuelta (4 giros) y a estacionar. Revertir a 12 para carrera real.
+const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
+const int TURNS_PER_RACE = 12;   // TEST: 1 vuelta (4 giros) y a estacionar. Revertir a 12 para carrera real.
 
 
 
@@ -116,6 +116,7 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
 int centroServo    = 90;
+int fullSpeed_MS = 2000;
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -788,7 +789,7 @@ const unsigned long PARK_RECTO_MAX_MS         = 500;
 const unsigned long PARK_WIGGLE_INT_MS        = 0;      // reversa con volante al lado contrario
 const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante hacia la pared
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
-const float         PARK_ENDEREZA_TOL_DEG     = 19.0f;
+const float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
 const int           PARK_PEGADO_CM            = 2;
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
@@ -826,6 +827,20 @@ const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
 // De paso 6 cm está lejos del piso de ~2 cm del HC-SR04, donde las lecturas se
 // caen a 0 y el corte por distancia no dispararía.
 const int           PARK_CENTER_HI_CM         = 6;
+// La fase 11 es la que fija la POSICIÓN LONGITUDINAL final: avanza hasta que el
+// frontal baje de PARK_CENTER_HI_CM y ahí se planta. Medido en 1154 vs 1155: el
+// frontal NUNCA llegó a <=6 en ninguna muestra del ACK y aun así las dos fases
+// terminaron — o sea las cortó un PICO suelto entre muestras. Con alpha=0.85 una
+// sola lectura cruda de 3 cm jala el filtrado de 15 a ~4.8 y dispara la salida.
+// Resultado: el carro se planta donde le cayó el pico. 1154 quedó en dF=9 y 1155
+// en dF=15, SEIS CM más atrás — justo el desplazamiento que se ve a ojo y que se
+// come el aire trasero. En esta fase el frontal viene sucísimo porque el carro
+// está rotando: la traza de 1155 va 15,15,...,14, luego 48,71,78,59,57,61 y de
+// vuelta a 15.
+// Con N lecturas SEGUIDAS bajo el umbral, un pico suelto ya no planta el carro.
+// PARK_FWD_MS sigue acotando por si la pared nunca aparece.
+// PARA REVERTIR: PARK_CENTER_DEB = 1.
+const int           PARK_CENTER_DEB           = 3;
 const int           PARK_CENTER_PWM_PAR       = 75;
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
@@ -856,8 +871,73 @@ const int           PARK_CENTER_PWM_PAR       = 75;
 const float         PARK_TRIM_VEL_CM_S        = 31.0f;  // avance en fase 0 (cm/s)
 const int           PARK_TRIM_N               = 12;     // muestras de la ventana (~0.9 s)
 const float         PARK_TRIM_MAX_DEG         = 25.0f;  // tope del sesgo que acepta
-const float         PARK_TRIM_ALPHA           = 0.20f;  // filtro de la estimación
+// 2026-09-18: 0.20 -> 0.40. El sesgo del gyro no es un valor fijo con ruido, DERIVA:
+// medido sobre los sonares logueados de la fase 0, el "gyro cuando el carro va
+// paralelo" salió +7.3/+7.3/+9.4/+9.0/+7.4/+9.3 en la 1140 (plano) pero
+// +12.0/+13.9/+19.3/+18.8/+18.4/+21.1 en la 1141 — sube ~1.6°/s. Contra una rampa
+// un EMA de 0.20 se queda corto: aterriza en ~16.6 cuando la verdad era ~21 (4.5°
+// de atraso, y esos 4.5° son los que abrieron el swing de más). Con 0.40 el atraso
+// baja a ~1.5°. PARA REVERTIR: regrésalo a 0.20.
+const float         PARK_TRIM_ALPHA           = 0.40f;  // filtro de la estimación
 const int           PARK_TRIM_LISTO_N         = 3;      // estimaciones antes de fiarse
+// El valor que se LATCHEA en parkRumboRef no es el instantáneo sino la MEDIANA de
+// las últimas N actualizaciones (~0.5 s). Motivo: durante la fase 0 la estimación
+// oscila mientras el chasis maniobra (1142: rango 10.8°, 1143: 8.6°) y solo se
+// asienta al final. Si el poste 2 cae en un momento malo, toda la reversa se
+// alinea contra un valor de paso — que es justo lo que mató a la 1141, con la
+// estimación todavía subiendo ~1.6°/s.
+// Verificado contra 1142/1143: con el carro ya asentado, mediana y valor vivo
+// coinciden dentro de 0.8° y 0.1° -> en las runs buenas esto NO cambia nada.
+// PARA REVERTIR: PARK_TRIM_MED_N = 1 (vuelve a usar el valor instantáneo).
+const int           PARK_TRIM_MED_N           = 15;
+
+// ── Velocímetro por separación de postes ────────────────────────────────────
+// El carro puede medir su propia velocidad de avance ANTES de necesitarla: entre
+// la detección del POSTE 1 y la del POSTE 2 recorre una distancia fija, así que
+// v = PARK_POSTE_SEP_CM / dt. Medido sobre logs (runs 1145-1153) da 21.2, 21.8,
+// 23.1, 23.6, 24.3, 24.3 cm/s — consistente, y cuadra con el otro velocímetro
+// (la tasa de giro de la fase 3, w = v/R) en la velocidad RELATIVA entre runs.
+// Sirve para que la fase 1 avance siempre la misma DISTANCIA en vez del mismo
+// TIEMPO: espera = WAIT_MS * (VEL_REF / v_medida).
+// OJO CON LA MAGNITUD: el rango medido (21.2-24.3) son solo ~1.8 cm de avance a
+// 580 ms. Es real pero chico contra los ~5 cm de aire trasero, y encima
+// PARK_POSTE2_MAX_MS = 600 solo deja sumar 20 ms sobre los 580. Si quieres que
+// esta compensación de verdad se mueva, hay que ensanchar ese tope.
+// 2026-09-18 APAGADO tras medirlo en pista (1154 vs 1155). El velocimetro SIGUE
+// midiendo y publicandose en vel=, pero ya no toca el avance. Razon: la diferencia
+// REAL de velocidad entre runs es de ~2% (tiempo de carrera 54.0 s vs 55.1 s, que
+// es la medicion de baseline largo y por tanto la fiable), y este metodo tuvo un
+// error mayor que eso: reporto 23.4 vs 24.3, o sea el signo AL REVES.
+// El culpable es el supuesto de PARK_POSTE_SEP_CM: la distancia entre las dos
+// detecciones depende de que tan pegado venga el carro a la pared (1154 llego con
+// base 24, 1155 con 27). Tres cm de diferencia lateral contaminan mas que el 2%
+// de velocidad que se quiere medir.
+// Consecuencia practica: 2% de velocidad = 0.25 cm de avance. La variacion de
+// velocidad entre runs NO alcanza para explicar un roce trasero.
+// PARA REACTIVAR: true (y antes arregla la dependencia con la distancia lateral).
+const bool          PARK_VEL_COMP             = false;
+const float         PARK_POSTE_SEP_CM         = 34.0f;  // avance entre las dos detecciones
+const float         PARK_VEL_REF_CM_S         = 23.0f;  // velocidad a la que se afinó WAIT_MS
+// Fuera de esta banda la medición no es creíble (poste perdido, doble rebote):
+// se ignora y se usa el tiempo nominal, así el peor caso es "no hace nada".
+const float         PARK_VEL_MIN_CM_S         = 15.0f;
+const float         PARK_VEL_MAX_CM_S         = 35.0f;
+
+// ── Anti-atoro de la reversa (fases 3 y 8) ──────────────────────────────────
+// En una contravuelta sana el carro gira a ~25°/s (1140: 56.96 -> 34.17 en menos
+// de 1 s). Cuando topa, el gyro se CONGELA: la 1141 se quedó clavada en 55.79 con
+// dL clavado en 73 durante más de 1.3 s, y siguió empujando hasta vencer los 2500
+// ms de PARK_CONTRA_TIMEOUT_MS. Lo mismo en 1054/1134/1136. Ese empuje ciego es lo
+// que mete el carro contra la pared de atrás: no hay sensor de ese lado, así que
+// el único que puede darse cuenta es el propio gyro dejando de moverse.
+// Si en PARK_ATORO_MS el rumbo no cambió ni PARK_ATORO_DEG, se corta la fase ahí
+// mismo. En una reversa sana ni se acerca (25°/s = 12° en 500 ms).
+// No se arma hasta PARK_ATORO_GRACIA_MS porque al entrar a la fase el servo se va
+// de tope a tope y el carro se queda un instante quieto raspando.
+// PARA DESACTIVAR: PARK_ATORO_DEG = 0.
+const float         PARK_ATORO_DEG            = 1.5f;   // cambio mínimo de rumbo...
+const unsigned long PARK_ATORO_MS             = 500;    // ...en esta ventana
+const unsigned long PARK_ATORO_GRACIA_MS      = 350;    // sin vigilar al entrar a la fase
 
 // Estado interno de ESTACIONANDO
 bool          parkBuscando          = false;
@@ -880,7 +960,17 @@ int           parkDfCnt             = 0;
 bool          parkRosaVisto         = false;
 float         parkErrPared          = 0.0f;
 // Referencia de rumbo medida contra la pared (ver PARK_TRIM_*)
-float         parkTrimPared         = 0.0f;  // lo que marca el gyro cuando va PARALELO
+float         parkTrimPared         = 0.0f;   // lo que marca el gyro cuando va PARALELO
+// Anti-atoro: rumbo y marca de tiempo de la última vez que el carro SÍ giraba.
+int           parkCenterCnt         = 0;      // debounce de la fase 11 (ver PARK_CENTER_DEB)
+unsigned long parkPoste1Ms          = 0;      // millis de la detección del POSTE 1
+float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
+float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
+int           parkTrimMedN          = 0;
+int           parkTrimMedIdx        = 0;
+float         parkAtoroAng          = 0.0f;
+unsigned long parkAtoroMs           = 0;
+bool          parkAtoroDisparo      = false;   // la fase anterior se cortó por atoro
 bool          parkTrimListo         = false;
 int           parkTrimUpd           = 0;
 long          parkTrimD[PARK_TRIM_N];
@@ -1138,7 +1228,7 @@ const int VEL_APROX2         = 90;
 // limpio". El frontal baja gradual y fiable dentro de ~1 m, así que es un
 // trigger más estable que el lateral en esa aproximación. Subilo si el arco de
 // 90° raspa la pared de enfrente al arrancar desde acá.
-const int FRONT_FORCE_GIRO_CM = 37;
+const int FRONT_FORCE_GIRO_CM = 40;
 
 // giroForzado sin debounce disparaba con UN solo glitch de crosstalk/multipath
 // del frontal (distF < 45 por 1-2 frames aunque la pared real estuviera a más
@@ -1369,6 +1459,12 @@ void servoRumboPark(float rumboRef) {
 
 // ── Trim de rumbo contra la pared (ver el bloque PARK_TRIM_*) ────────────────
 void parkTrimReset() {
+  parkCenterCnt    = 0;
+  parkPoste1Ms     = 0;
+  parkVelCmS       = 0.0f;
+  parkAtoroDisparo = false;
+  parkTrimMedN     = 0;
+  parkTrimMedIdx   = 0;
   parkTrimPared = 0.0f;
   parkTrimListo = false;
   parkTrimUpd   = 0;
@@ -1407,10 +1503,58 @@ void parkTrimMuestra(long ext, float ang, unsigned long ahora, float haciaPared)
   if (parkTrimUpd == 1) parkTrimPared  = medido;                               // arranque directo
   else                  parkTrimPared += PARK_TRIM_ALPHA * (medido - parkTrimPared);
   if (parkTrimUpd >= PARK_TRIM_LISTO_N) parkTrimListo = true;
+
+  parkTrimMed[parkTrimMedIdx] = parkTrimPared;
+  parkTrimMedIdx = (parkTrimMedIdx + 1) % PARK_TRIM_MED_N;
+  if (parkTrimMedN < PARK_TRIM_MED_N) parkTrimMedN++;
+}
+
+// Mediana de las últimas estimaciones (ver PARK_TRIM_MED_N). Con menos de 3
+// muestras devuelve el valor vivo, así no hay hueco al arrancar.
+float parkTrimMediana() {
+  if (parkTrimMedN < 3) return parkTrimPared;
+  float v[PARK_TRIM_MED_N];
+  for (int i = 0; i < parkTrimMedN; i++) v[i] = parkTrimMed[i];
+  for (int i = 0; i < parkTrimMedN; i++)
+    for (int j = i + 1; j < parkTrimMedN; j++)
+      if (v[j] < v[i]) { float t = v[i]; v[i] = v[j]; v[j] = t; }
+  return v[parkTrimMedN / 2];
+}
+
+// Dispersión (max-min) de esas mismas estimaciones -> ACK tps=. Grande = el trim
+// todavía no se asienta y el latch es una lotería.
+float parkTrimSpread() {
+  if (parkTrimMedN < 2) return 0.0f;
+  float mn = parkTrimMed[0], mx = parkTrimMed[0];
+  for (int i = 1; i < parkTrimMedN; i++) {
+    if (parkTrimMed[i] < mn) mn = parkTrimMed[i];
+    if (parkTrimMed[i] > mx) mx = parkTrimMed[i];
+  }
+  return mx - mn;
 }
 
 // Rumbo que hay que perseguir para ir PARALELO a la pared (0 si aún no se mide).
 float parkRumboParalelo() { return parkTrimListo ? parkTrimPared : 0.0f; }
+
+// ── Anti-atoro (ver el bloque PARK_ATORO_*) ─────────────────────────────────
+// Llamar cada loop dentro de una fase de reversa, con el parkFaseMs de esa fase.
+// true = el rumbo lleva PARK_ATORO_MS sin moverse PARK_ATORO_DEG => el carro topó.
+// Mientras siga girando se re-arma sola, así que no necesita inicialización aparte.
+bool parkAtoroDetecta(unsigned long faseMs) {
+  if (PARK_ATORO_DEG <= 0.0f) return false;          // desactivado
+  unsigned long ahora = millis();
+  if (ahora - faseMs < PARK_ATORO_GRACIA_MS) {       // gracia de entrada: solo arma
+    parkAtoroAng = anguloGyro;
+    parkAtoroMs  = ahora;
+    return false;
+  }
+  if (fabs(anguloGyro - parkAtoroAng) >= PARK_ATORO_DEG) {   // sigue girando
+    parkAtoroAng = anguloGyro;
+    parkAtoroMs  = ahora;
+    return false;
+  }
+  return (ahora - parkAtoroMs >= PARK_ATORO_MS);
+}
 
 // ── Cierre de ESTACIONANDO (apaga motor, centra servo y finaliza carrera) ─────
 void finalizarPark(const char *motivo) {
@@ -2044,6 +2188,21 @@ void parsePiMessage(String line) {
     //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
     //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
     Serial2.print(",rr=");   Serial2.print(rerefCount);
+    //   tp   : parkTrimPared — lo que marca el gyro cuando el carro va PARALELO a
+    //          la pared, medido con la pendiente del sonar lateral. Si crece a lo
+    //          largo de la fase 0, ESO es la deriva del gyro (1141: +12 -> +21).
+    //   tl   : parkTrimListo — 0 = la medición NO convergió y todo se cae al gyro.
+    //   at   : la última fase 8 se cortó por ATORO (el carro topó) en vez de por
+    //          rumbo o por timeout.
+    Serial2.print(",tp=");   Serial2.print(parkTrimPared, 1);
+    Serial2.print(",tl=");   Serial2.print(parkTrimListo ? 1 : 0);
+    Serial2.print(",at=");   Serial2.print(parkAtoroDisparo ? 1 : 0);
+    //   tps  : dispersión de las últimas PARK_TRIM_MED_N estimaciones. Chica = el
+    //          trim ya se asentó; grande = todavía se está moviendo.
+    Serial2.print(",tps=");  Serial2.print(parkTrimSpread(), 1);
+    //   vel  : velocidad de avance medida entre poste 1 y poste 2 (cm/s).
+    //          0 = no se pudo medir -> la fase 1 usó el tiempo nominal.
+    Serial2.print(",vel=");  Serial2.print(parkVelCmS, 1);
     Serial2.println();
     return;
   }
@@ -2734,7 +2893,7 @@ void loop() {
       // Ronda cerrada: si la pared de ENFRENTE ya está cerca, baja la velocidad
       // en la aproximación para que detectarEsquina() alcance a confirmar qué
       // lado se abre antes de que el carro se pase la esquina.
-      if (!rondaObstaculos && distF > 0 && distF < FRONT_SLOWDOWN_CM) {
+      if (!rondaObstaculos && distF > 0 && distF < FRONT_SLOWDOWN_CM) {//(millis() - lastTurnTime > 1500)) {
         velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
       }
 
@@ -2927,16 +3086,16 @@ void loop() {
 
       if (turnsCompleted == 0) {
         velocidadMotor = VEL_INICIAL;   // primera curva: lento todo el arco, sin salto
-      } else if (delta < 45) velocidadMotor = 165;
-      else if (delta < 70)   velocidadMotor = 145;
-      else                   velocidadMotor = 120;
+      } else if (delta < 45) velocidadMotor = 145;
+      else if (delta < 70)   velocidadMotor = 135;
+      else                   velocidadMotor = 115;
 
       setMotor(velocidadMotor);
       escribirServo(direccionIzquierda ? 160 : 30);
 
       if (delta >= AngGiro) {
         escribirServo(centroServo);
-        velocidadMotor = 180;
+        velocidadMotor = 160;
 
         // Resetear integrales
         integralWall = 0; prevErrorWall = 0;
@@ -3741,6 +3900,7 @@ void loop() {
 
           if (bajada && armada && posteConfirmado) {
             parkCaidaLectura = extRaw;
+            parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -3804,6 +3964,16 @@ void loop() {
             parkScanSubFase = 3;
             parkGapCnt      = 0;
             parkCaidaCnt    = 0;
+            // Velocímetro: distancia fija entre postes / tiempo transcurrido.
+            if (parkPoste1Ms != 0) {
+              float dt = (float)(millis() - parkPoste1Ms) / 1000.0f;
+              if (dt > 0.2f) {
+                float v = PARK_POSTE_SEP_CM / dt;
+                parkVelCmS = (v >= PARK_VEL_MIN_CM_S && v <= PARK_VEL_MAX_CM_S) ? v : 0.0f;
+                Serial.print("PARK vel medida="); Serial.print(v, 1);
+                Serial.println(parkVelCmS > 0.0f ? " cm/s" : " cm/s (FUERA DE BANDA, se ignora)");
+              }
+            }
             Serial.print("PARK: 2a PARED / POSTE 2 (sonar caida tHueco=");
             Serial.print(tHueco);
             Serial.print("ms ext="); Serial.print(extRaw);
@@ -3815,7 +3985,7 @@ void loop() {
               // anguloGyro del instante hornea la chuecura: en la 1057 se
               // capturó +7.5 y el carro cerró "alineado" a +11.7 del carril
               // real. El rumbo paralelo medido es la referencia correcta.
-              parkRumboRef = parkTrimListo ? parkTrimPared : anguloGyro;
+              parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
               Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
               Serial.print(parkTrimListo ? " (PARED" : " (gyro");
               Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.println(")");
@@ -3944,6 +4114,11 @@ void loop() {
           long espera = (long)PARK_POSTE2_WAIT_MS
                       + (long)((parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MS_POR_CM);
           if (!(parkBase > 5.0f)) espera = (long)PARK_POSTE2_WAIT_MS;   // base no creíble
+          // Avance por DISTANCIA y no por tiempo: si el carro viene más lento,
+          // necesita más ms para recorrer los mismos cm (ver PARK_VEL_COMP).
+          // parkVelCmS = 0 -> no se pudo medir -> se queda el tiempo nominal.
+          if (PARK_VEL_COMP && parkVelCmS > 0.0f)
+            espera = (long)((float)espera * (PARK_VEL_REF_CM_S / parkVelCmS));
           espera = constrain(espera, (long)PARK_POSTE2_MIN_MS, (long)PARK_POSTE2_MAX_MS);
           if (millis() - parkFaseMs >= (unsigned long)espera) {
             motorCoast();
@@ -4153,9 +4328,13 @@ void loop() {
         bool  alineado   = (difHeading <= PARK_ENDEREZA_TOL_DEG);
         bool  pegado     = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
         bool  timeout    = (millis() - parkFaseMs >= PARK_CONTRA_TIMEOUT_MS);
-        if (alineado || pegado || timeout) {
+        // Topó contra algo (casi siempre la pared de atrás): el gyro se congela y
+        // seguir reverseando solo empuja. Cortar YA en vez de esperar el timeout.
+        bool  atorado    = parkAtoroDetecta(parkFaseMs);
+        if (alineado || pegado || timeout || atorado) {
           motorCoast();
           escribirServo(centroServo);
+          parkAtoroDisparo = atorado;
           parkFase   = 9;
           parkFaseMs = millis();
           Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
@@ -4163,6 +4342,7 @@ void loop() {
           Serial.print(" ext="); Serial.print(extRaw);
           if (alineado) Serial.print(" ALINEADO");
           if (pegado)   Serial.print(" PEGADO");
+          if (atorado)  Serial.print(" ATORADO");
           Serial.println(timeout ? " TIMEOUT)" : ")");
         }
         break;
@@ -4174,6 +4354,7 @@ void loop() {
         escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           motorAdelante();
+          parkCenterCnt = 0;          // arma limpio el debounce de la fase 11
           parkFase   = 11;
           parkFaseMs = millis();
           Serial.println("PARK fase 11: ACOMODO ENFRENTE");
@@ -4186,7 +4367,9 @@ void loop() {
         motorAdelante();
         servoRumboPark(parkRumboRef);
         setMotor(PARK_CENTER_PWM_PAR);
-        bool dfTope  = (distF_filtrada > 0 && distF_filtrada <= PARK_CENTER_HI_CM);
+        bool dfCerca = (distF_filtrada > 0 && distF_filtrada <= PARK_CENTER_HI_CM);
+        parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
+        bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
         bool timeout = (millis() - parkFaseMs >= PARK_FWD_MS);
         if (dfTope || timeout) {
           motorCoast();
