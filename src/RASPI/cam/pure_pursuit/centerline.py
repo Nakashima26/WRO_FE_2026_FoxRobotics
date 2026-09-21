@@ -353,12 +353,42 @@ def _extract_thin_blue_line(hsv: np.ndarray, shape: tuple) -> np.ndarray:
 
 # ── Detección de centerline ───────────────────────────────────────────────────
 
+def _smooth_temporal(
+    points: list[tuple[float, int]],
+    state: dict[int, float],
+    alpha: float,
+) -> list[tuple[float, int]]:
+    """
+    EMA del X por fila Y entre frames. `state` lo posee el caller (runtime)
+    para no meter estado global. alpha=1 → solo frame actual; 0.25 → 25% nuevo.
+    """
+    if not points or alpha >= 0.999:
+        state.clear()
+        state.update({int(y): float(x) for x, y in points})
+        return points
+    if alpha <= 0.0:
+        return points
+    blended: list[tuple[float, int]] = []
+    new_state: dict[int, float] = {}
+    for x, y in points:
+        yi = int(y)
+        if yi in state:
+            x = (1.0 - alpha) * state[yi] + alpha * float(x)
+        blended.append((float(x), y))
+        new_state[yi] = float(x)
+    state.clear()
+    state.update(new_state)
+    return blended
+
+
 def detect_centerline(
     bev_bgr: np.ndarray,
     bev_obstacles: list[tuple[float, float, str]],
     bev_hsv: np.ndarray | None = None,
     obstacle_conf: list[float] | None = None,
     stats_out: dict | None = None,
+    temporal_state: dict[int, float] | None = None,
+    temporal_alpha: float | None = None,
 ) -> list[tuple[int, int]]:
     """
     Detecta la línea central del corredor en la imagen BEV.
@@ -396,6 +426,10 @@ def detect_centerline(
                      físico (OBS_INFLATE_R, más abajo) -- ese se mantiene
                      completo siempre, sin importar la confianza; solo
                      atenúa cuánto se abre el path hacia el lado preferido.
+      temporal_state / temporal_alpha:
+                     EMA entre frames del X por fila Y, ANTES de limit/smooth
+                     espacial, para que enforce+clamp sigan mandando. El
+                     dict lo posee el runtime. alpha None → config.
 
     Retorna lista de (x, y) en coordenadas BEV, ordenada de abajo (robot)
     hacia arriba (adelante).  Lista vacía si no hay suficiente piso visible.
@@ -671,6 +705,10 @@ def detect_centerline(
                               round(float(np.clip(cx, 0, w - 1)), 1)])
 
     if points:
+        if temporal_state is not None:
+            if temporal_alpha is None:
+                temporal_alpha = float(getattr(C, "CENTERLINE_TEMPORAL_ALPHA", 0.0))
+            points = _smooth_temporal(points, temporal_state, float(temporal_alpha))
         _dbg_raw = {int(yy): xx for xx, yy in points}
         points = _limit_lateral_step(points, weights)
         _dbg_lim = {int(yy): xx for xx, yy in points}
@@ -702,6 +740,9 @@ def detect_centerline(
                       + ("  <<< SALTO" if (raw is not None and enf is not None
                                           and abs(raw - enf) > 18) else ""),
                       flush=True)
+
+    if not points and temporal_state is not None:
+        temporal_state.clear()
 
     if stats_out is not None:
         # weights se llena 1:1 con points en cada rama del muestreo fila-a-fila y
