@@ -41,7 +41,7 @@ MPU6050 mpu(Wire);
 #define ECHO_F      33
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
-const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
+const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
 const int TURNS_PER_RACE = 12;   // TEST: 1 vuelta (4 giros) y a estacionar. Revertir a 12 para carrera real.
 
 
@@ -235,7 +235,7 @@ const int  CRUCERO_STRAIGHTEN_DEG = 15; // en CRUCERO, si el chasis entró/qued�
 const int  MANIOBRA_OVERSHOOT_DEG = 14; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
-const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear)
+const int  HUG_CM           = 28;      // pared exterior <= esto -> FORWARD (no cabe reversear)
 const int  MANIOBRA_VEL_REV  = 100;     // PWM objetivo del motor en la reversa-pivote
 const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el golpe de corriente)
 
@@ -285,6 +285,8 @@ const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin lleg
 const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
                                        // no los laterales) antes de disparar MANIOBRA
 const int CRUCERO_PARED_DEBOUNCE = 3;  // ídem, cuando SÍ hay lateral abierta confirmando
+const int CRUCERO_MUY_CERCA_DEBOUNCE = 2; // ídem, cuando dF ya <= FRONT_TURN_REV_CM (pegado a la pared de
+                                          // frente): confirma en 2 lecturas para disparar cerca de 25 cm
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -558,18 +560,29 @@ const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la 
                                                      //  pasa a la fase 2 igual; la contravuelta y la
                                                      //  reversa terminan de cuadrar lo que haya)
 const unsigned long INICIO_MID_MS      = 1;  // fase 2: tramo recto entre los dos giros
-const int  INICIO_ENDEREZA_MARGEN_DEG  = 8;    // fase 3: sale de la contravuelta con este margen a 0
+const int  INICIO_CONTRA_CORRIGE_DEG   = 25;   // fase 3: la contravuelta hacia ADELANTE solo corrige estos grados
+                                              //  (medidos desde el pico de la fase 1); lo que falte lo
+                                              //  cuadra la reversa con heading-hold (fase 5)
+const int  INICIO_ENDEREZA_MARGEN_DEG  = 8;    // fase 3: piso — nunca pide terminar por debajo de este margen a 0
 const unsigned long INICIO_CONTRA_TIMEOUT_MS = 4000; // red de seguridad de la fase 3
-const int  INICIO_REV_PWM             = 100;  // fase 5: PWM de la reversa
-const unsigned long INICIO_REV_MS      = 2250; // fase 5: duración de la reversa (colchón de seguridad)
+const float INICIO_REV_OUT_MAX         = 45.0f; // fase 5: tope de |servo-centro| en la reversa (corrige el residuo)
+const int  INICIO_REV_PWM             = 100;  // fases 5/8: PWM de la reversa
+const unsigned long INICIO_REV_MS      = 2600; // fases 5+8: presupuesto TOTAL de reversa (colchón de seguridad)
+const float INICIO_REV_CORR_TOL_DEG    = 4.0f; // fase 5: corta la reversa-corrige al llegar a |ang| <= esto (adelanta a 0 por la inercia)
+const unsigned long INICIO_REV_CORR_TIMEOUT_MS = 1500; // fase 5: red de seguridad si no llega a 0
+const unsigned long INICIO_REV_PAUSA_MS = 300;  // fase 7: coast entre la reversa-corrige y la reversa recta
+const unsigned long INICIO_REV_RECTO_MIN_MS = 500; // fase 8: reversa recta mínima aunque la fase 5 haya gastado el presupuesto
 const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
                                               // (si el cajón deja lectura ambigua, no se arriesga el
                                               //  latch global: la 1ª esquina real decide como siempre)
 
+
 // Estado interno de INICIO
 bool inicioEvaluado = false;   // one-shot: ¿ya se decidió si entrar a INICIO?
-int  inicioFase     = -1;      // -1 init | 1 swing | 2 recto | 3 contra | 4 coast | 5 reversa | 6 settle
+int  inicioFase     = -1;      // -1 init | 1 swing | 2 recto | 3 contra | 4 coast | 5 reversa-corrige | 7 pausa | 8 reversa recta | 6 settle
 bool inicioGirarDer = false;   // lado de salida del cajón (servo full hacia ahí en la fase 1)
+unsigned long inicioRevMs = 0; // inicio de la reversa (fase 5): base del presupuesto INICIO_REV_MS
+float inicioAngPico = 0.0f;    // máx |anguloGyro| alcanzado en las fases 1-3 (ref. de la contravuelta)
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
 float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample de la fase 6
 unsigned long inicioSettleSampMs  = 0;
@@ -1046,7 +1059,7 @@ bool          cajonParedDetectada    = false;
 // ver dónde cae la trompa. Si cae antes del lote -> PARK_PUNTA_AJUSTE_MS > 0;
 // si cae sobre el poste lejano -> PARK_PUNTA_AJUSTE_MS < 0.
 const bool          PARK_DE_PUNTA              = true;   // punta 7 pts si PARK_MODO_PARALELO=false
-const bool          PARK_MODO_PARALELO        = true;   // true = paralelo 10 pts (scan + reversa wiggle)
+const bool          PARK_MODO_PARALELO        = false;   // true = paralelo 10 pts (scan + reversa wiggle)
 const bool          PARK_TEST_MANO            = false;
 const bool          PARK_PUNTA_TEST_MANO       = false;  // true = prueba A MANO (motor apagado). Usa PARK_TEST_PARED_IZQ
                                                          // (con PARK_TEST_RECTA_COMPLETA=true arranca aquí CON motor)
@@ -2724,12 +2737,16 @@ void loop() {
     //    1 SWING  : servo full hacia el lado de salida, avanza (rampa de PWM)
     //               hasta |anguloGyro| >= INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG.
     //    2 RECTO  : servo centro, avanza de frente INICIO_MID_MS.
-    //    3 CONTRA : servo full al lado CONTRARIO, avanza hasta |anguloGyro| <=
-    //               INICIO_ENDEREZA_MARGEN_DEG (la inercia lo lleva a ~0).
+    //    3 CONTRA : servo full al lado CONTRARIO, avanza SOLO hasta corregir
+    //               INICIO_CONTRA_CORRIGE_DEG desde el pico de la fase 1; el
+    //               residuo lo cierra la reversa (fase 5).
     //    4 COAST  : motorCoast + servo centro, MANIOBRA_FRENO_MS (antes de reversa).
-    //    5 REVERSA: motorReversa + aplicarReversaHold(0) (recto, lazo cerrado)
-    //               durante INICIO_REV_MS — colchón por si hay un obstáculo
-    //               pegado a la salida del cajón.
+    //    5 REV-CORRIGE: reversa con hold a 0 y servo saturado, hasta |ang| <=
+    //               INICIO_REV_CORR_TOL_DEG (o timeout).
+    //    7 PAUSA  : motorCoast + servo centro INICIO_REV_PAUSA_MS (mata la inercia).
+    //    8 REV-RECTA: reversa con hold suave el resto de INICIO_REV_MS (presupuesto
+    //               total de reversa — colchón por si hay un obstáculo pegado a
+    //               la salida del cajón).
     //    6 SETTLE : motorCoast, espera a que deje de rotar, luego finalizarInicio().
     // ═══════════════════════════════════════════════════════════════════════════
     case INICIO: {
@@ -2767,6 +2784,7 @@ void loop() {
         integralWall   = 0; prevErrorWall = 0;
         inicioFaseMs   = millis();
         inicioFase     = 1;
+        inicioAngPico  = 0.0f;
         motorAdelante();
         Serial.print("INICIO fase 1 SWING salida=");
         Serial.print(inicioGirarDer ? "DER" : "IZQ");
@@ -2780,6 +2798,7 @@ void loop() {
       }
 
       float deltaIni = fabs(anguloGyro);
+      if (inicioFase <= 3 && deltaIni > inicioAngPico) inicioAngPico = deltaIni;   // pico (incluye la inercia)
 
       // ── Fase 1: SWING — saca la nariz hacia el interior ────────────────────
       if (inicioFase == 1) {
@@ -2820,9 +2839,15 @@ void loop() {
         motorAdelante();
         escribirServo(inicioGirarDer ? 160 : 30);   // full al lado CONTRARIO
         setMotor(INICIO_PWM);
-        bool alineado = (deltaIni <= (float)INICIO_ENDEREZA_MARGEN_DEG);
+        // Corrige solo INICIO_CONTRA_CORRIGE_DEG desde el pico (o llega al piso de
+        // margen si el pico fue chico); el residuo lo cierra la reversa (fase 5).
+        float angFin  = max((float)INICIO_ENDEREZA_MARGEN_DEG,
+                            inicioAngPico - (float)INICIO_CONTRA_CORRIGE_DEG);
+        bool alineado = (deltaIni <= angFin);
         bool timeout  = (millis() - inicioFaseMs >= INICIO_CONTRA_TIMEOUT_MS);
         if (alineado || timeout) {
+          Serial.print("INICIO fase 3 fin: pico="); Serial.print(inicioAngPico, 1);
+          Serial.print(" ang="); Serial.println(anguloGyro, 1);
           escribirServo(centroServo);
           motorCoast();
           inicioFase   = 4;
@@ -2842,16 +2867,61 @@ void loop() {
           lastRevHoldMs = millis();
           inicioFase    = 5;
           inicioFaseMs  = millis();
+          inicioRevMs   = millis();   // presupuesto total de reversa (fases 5 + 8)
         }
         break;
       }
 
-      // ── Fase 5: REVERSA con heading-hold (retrocede RECTO) ─────────────────
+      // ── Fase 5: REVERSA-CORRIGE — cierra el residuo hasta ~0° ──────────────
+      //   Retrocede con el servo saturado hacia el lado que endereza. En cuanto
+      //   |anguloGyro| entra a INICIO_REV_CORR_TOL_DEG (o timeout) corta: el
+      //   volante NO se deja puesto, si no la inercia de giro lo pasa de 0.
       if (inicioFase == 5) {
         motorReversa();
-        aplicarReversaHold(0.0f);   // mantiene anguloGyro en 0 mientras retrocede
+        aplicarReversaHoldClamp(0.0f, INICIO_REV_OUT_MAX);
         setMotor(INICIO_REV_PWM);
-        if (millis() - inicioFaseMs >= INICIO_REV_MS) {
+        bool enCero  = (deltaIni <= INICIO_REV_CORR_TOL_DEG);
+        bool tCorrig = (millis() - inicioFaseMs >= INICIO_REV_CORR_TIMEOUT_MS);
+        if (enCero || tCorrig) {
+          Serial.print("INICIO fase 5 fin: ang="); Serial.print(anguloGyro, 1);
+          Serial.println(tCorrig && !enCero ? " (timeout)" : "");
+          motorCoast();
+          escribirServo(centroServo);
+          inicioFase   = 7;
+          inicioFaseMs = millis();
+        }
+        break;
+      }
+
+      // ── Fase 7: PAUSA — coast con volante al centro, mata la inercia ───────
+      //   Motor flotando + servo recto: el carro deja de rotar y de rodar antes
+      //   de arrancar la reversa recta (que rampea desde PWM bajo).
+      if (inicioFase == 7) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - inicioFaseMs >= INICIO_REV_PAUSA_MS) {
+          motorReversa();
+          integralRev   = 0; prevErrorRev = 0;
+          lastRevHoldMs = millis();
+          inicioFase    = 8;
+          inicioFaseMs  = millis();
+          Serial.print("INICIO fase 8 REVERSA RECTA: ang="); Serial.println(anguloGyro, 1);
+        }
+        break;
+      }
+
+      // ── Fase 8: REVERSA RECTA con heading-hold suave ───────────────────────
+      //   Completa el colchón de INICIO_REV_MS (descontando lo ya retrocedido en
+      //   la fase 5, con piso INICIO_REV_RECTO_MIN_MS). Aquí el error es chico,
+      //   así que el hold usa el tope normal (REV_HOLD_OUT_MAX).
+      if (inicioFase == 8) {
+        motorReversa();
+        aplicarReversaHold(0.0f);
+        setMotor(INICIO_REV_PWM);
+        unsigned long yaRev = inicioFaseMs - inicioRevMs;   // ms de reversa en fase 5 + pausa
+        unsigned long durRecto = (INICIO_REV_MS > yaRev + INICIO_REV_RECTO_MIN_MS)
+                                 ? (INICIO_REV_MS - yaRev) : INICIO_REV_RECTO_MIN_MS;
+        if (millis() - inicioFaseMs >= durRecto) {
           motorCoast();
           escribirServo(centroServo);
           inicioFase          = 6;
@@ -3327,6 +3397,12 @@ void loop() {
         debounceNecesario = (paredAbierta || _laAprox) ? CRUCERO_PARED_DEBOUNCE
                                                        : CRUCERO_FRONT_DEBOUNCE;
       }
+      // Ya en la ventana de la pared (dF <= REV_CM): el debounce de 3-5 lecturas son
+      // ~150-250 ms = 6-9 cm a la velocidad de crucero, o sea el carro disparaba a
+      // dF ~15 en vez de a 25 y el pivote arrancaba tarde/incrustado. Aquí ya no
+      // hay fantasma posible (el eco de reojo cae a >75), así que se confirma rápido.
+      if (_muyCerca && debounceNecesario > CRUCERO_MUY_CERCA_DEBOUNCE)
+        debounceNecesario = CRUCERO_MUY_CERCA_DEBOUNCE;
       bool cruceroLargo = (millis() - cruceroEntryMs) > CRUCERO_TIMEOUT_MS;  // red de seguridad
       // gapOk: dos MANIOBRA reales nunca caen < MANIOBRA_MIN_GAP_MS (la maniobra
       // + aproximación ya tarda varios s). Si el trigger por frontal quiere

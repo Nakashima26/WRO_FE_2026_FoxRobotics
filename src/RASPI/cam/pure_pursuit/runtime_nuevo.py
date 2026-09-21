@@ -605,6 +605,8 @@ class PPRuntime:
             self.bev_recorder.write(self.record_count, bev)
         if self.record_count % max(1, self.cfg.record_every_n) != 0:
             return
+        if frame is None:            # HUD no armado en este frame
+            return
         if self.video_writer is None:
             out_fps = (max(self.cfg.record_fps, fps / max(1, self.cfg.record_every_n))
                        if fps > 0 else self.cfg.record_fps)
@@ -622,6 +624,8 @@ class PPRuntime:
         # escritura a disco síncrona en cada frame.
         self.cam_frame_count += 1
         if self.cam_frame_count % max(1, self.cfg.cam_frame_every_n) != 0:
+            return
+        if frame is None:            # HUD no armado en este frame
             return
         try:
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
@@ -1571,37 +1575,49 @@ class PPRuntime:
                 timing_ms["ser"] = (t_ser - t_bev) * 1000.0
 
                 # ── Display ──────────────────────────────────────────────────
-                self._annotate(processed_frame, steer_deg, obs_norm,
-                            pp_active, len(path_points), positions,
-                            serial_msg, fps, len(bev_obstacles),
-                            self.memory.last_prune_reason, timing_ms, bev_timing)
+                # HUD (texto + BEV debug + resize + hstack): solo se CONSUME en los frames que de
+                # verdad se escriben -- vista VNC (cada cam_frame_every_n), .avi (cada record_every_n)
+                # o ventana. Armarlo en TODOS costaba ~14 ms/frame (~18% del loop a 14 fps). Los
+                # 'want_*' espian los contadores SIN incrementarlos (_maybe_record/_write_cam_frame
+                # los incrementan igual que antes), asi que el frame que se escribe es el mismo.
+                _do_rec = (should_record is None or should_record())
+                _want_cam = ((self.cam_frame_count + 1) % max(1, self.cfg.cam_frame_every_n)) == 0
+                _want_rec = (_do_rec and self.cfg.record_orillas
+                             and ((self.record_count + 1) % max(1, self.cfg.record_every_n)) == 0)
+                combined = None
+                if self.cfg.show_window or _want_cam or _want_rec:
+                    self._annotate(processed_frame, steer_deg, obs_norm,
+                                pp_active, len(path_points), positions,
+                                serial_msg, fps, len(bev_obstacles),
+                                self.memory.last_prune_reason, timing_ms, bev_timing)
 
-                # HUD del rosa — DESPUÉS de todo el pipeline (el BEV ya se
-                # calculó arriba con el frame limpio), así que dibujar acá no
-                # puede tocar la visión. Muestra el HUD cuando está DESARMADO
-                # o cuando está buscando el cajón en la recta final.
-                if not armed or self._park_buscando or self._tc >= 12:
-                    try:
-                        _pr_h, _pm_h = _park_pink(processed_frame)
-                        self._draw_park_pink(processed_frame, _pr_h, _pm_h)
-                    except Exception:
-                        pass
+                    # HUD del rosa — DESPUÉS de todo el pipeline (el BEV ya se
+                    # calculó arriba con el frame limpio), así que dibujar acá no
+                    # puede tocar la visión. Muestra el HUD cuando está DESARMADO
+                    # o cuando está buscando el cajón en la recta final.
+                    if not armed or self._park_buscando or self._tc >= 12:
+                        try:
+                            _pr_h, _pm_h = _park_pink(processed_frame)
+                            self._draw_park_pink(processed_frame, _pr_h, _pm_h)
+                        except Exception:
+                            pass
 
-                if bev_frame is not None:
-                    bev_debug = draw_bev_debug(
-                        bev_frame, path_points, lookahead_pt,
-                        bev_obstacles, steer_deg, pp_active,
-                        line_info=line_info,
-                        bev_obstacles_beyond=bev_obstacles_beyond,
-                    )
-                    bev_h = processed_frame.shape[0]
-                    bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
-                    combined = np.hstack([processed_frame, bev_small])
-                else:
-                    combined = processed_frame
+                    if bev_frame is not None:
+                        bev_debug = draw_bev_debug(
+                            bev_frame, path_points, lookahead_pt,
+                            bev_obstacles, steer_deg, pp_active,
+                            line_info=line_info,
+                            bev_obstacles_beyond=bev_obstacles_beyond,
+                        )
+                        bev_h = processed_frame.shape[0]
+                        bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
+                        combined = np.hstack([processed_frame, bev_small])
+                    else:
+                        combined = processed_frame
 
                 t_disp = time.perf_counter()
-                timing_ms["disp"] = (t_disp - t_ser) * 1000.0
+                if combined is not None:            # 'disp' = ultimo costo REAL del HUD armado
+                    timing_ms["disp"] = (t_disp - t_ser) * 1000.0
 
                 if self.cfg.show_window:
                     cv2.imshow("WRO Pure Pursuit + Memoria", combined)
@@ -1612,7 +1628,7 @@ class PPRuntime:
                 # start-delay + la run). El pipeline desarmado corre antes pero
                 # NO se graba -> el archivo no acumula el rato de "esperando
                 # botón". El _write_cam_frame (vista VNC) sí corre siempre.
-                if should_record is None or should_record():
+                if _do_rec:
                     self._maybe_record(combined, fps, bev=bev_frame)
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
 
