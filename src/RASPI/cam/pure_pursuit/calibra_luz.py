@@ -104,7 +104,7 @@ OBJETIVOS = {
 }
 
 MIN_PX = 600          # blob mínimo para que la medición signifique algo
-PATCH_HALF = 10       # radio del parche al pintar en --gui (grande a propósito: en Mac el clic es fácil de perder)
+PATCH_HALF = 4        # radio del parche al pintar en --gui
 
 # Dónde se pega cada rango (Pure Pursuit).
 DESTINO = {
@@ -488,8 +488,7 @@ def _prepare_frame(raw, color_corr, use_corr, want_bev, bev):
     return img, False
 
 
-def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
-            start_frozen: bool = False):
+def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool):
     rangos_prod = _rangos_prod()
     acc = {k: Acumulador(k) for k in OBJETIVOS}
     color_corr = FloorColorCorrector() if use_corr_0 else None
@@ -499,85 +498,40 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
     targets = ["rojo", "verde", "naranja", "rosa"]
     tgt = "rojo"
     use_corr = use_corr_0
-    overlay_mode = "off"      # off | prod | sug | both  (off = solo se ve TU pintura)
-    show_bboxes = False
+    overlay_mode = "prod"     # off | prod | sug | both
+    show_bboxes = True
     dragging = False
     mouse = (0, 0)
     frozen = None             # frame congelado (útil con --image / 'f')
     nfr = 0
-    _first = True
-    single_step = False
-    paint = {k: None for k in OBJETIVOS}   # máscara de lo que YA pintaste
-    _cb_ok = False
 
     win = "calibra_luz"
     win_m = "calibra_luz mascara"
-    # AUTOSIZE: 1 px imagen = 1 px ventana. WINDOW_NORMAL en Mac/Retina
-    # descuadra el mouse y el clic "no hace nada".
-    cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)
-    cv2.namedWindow(win_m, cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(win_m, cv2.WINDOW_NORMAL)
 
     state = {"hsv": None, "img": None}
 
-    def _xy_img(x, y):
-        img = state["img"]
-        if img is None:
-            return x, y
-        h, w = img.shape[:2]
-        if 0 <= x < w and 0 <= y < h:
-            return x, y
-        try:
-            _wx, _wy, ww, wh = cv2.getWindowImageRect(win)
-            if ww > 0 and wh > 0:
-                x = int(round(x * w / ww))
-                y = int(round(y * h / wh))
-        except Exception:
-            pass
-        if x >= w or y >= h:
-            x, y = x // 2, y // 2
-        return int(np.clip(x, 0, w - 1)), int(np.clip(y, 0, h - 1))
-
-    def _sample_at(x, y, verbose=False):
-        hsv, img = state["hsv"], state["img"]
-        if hsv is None or img is None:
-            return 0
-        x, y = _xy_img(x, y)
-        h, w = hsv.shape[:2]
-        x0, x1 = max(0, x - PATCH_HALF), min(w, x + PATCH_HALF + 1)
-        y0, y1 = max(0, y - PATCH_HALF), min(h, y + PATCH_HALF + 1)
-        if x1 <= x0 or y1 <= y0:
-            return 0
-        acc[tgt].add_patch(hsv[y0:y1, x0:x1], img[y0:y1, x0:x1])
-        if paint[tgt] is None or paint[tgt].shape[:2] != (h, w):
-            paint[tgt] = np.zeros((h, w), np.uint8)
-        paint[tgt][y0:y1, x0:x1] = 255
-        n = (x1 - x0) * (y1 - y0)
-        if verbose:
-            print(f"[calibra] pintado {tgt} en ({x},{y}) +{n} px  total={acc[tgt].px}",
-                  flush=True)
-        return n
-
     def on_mouse(event, x, y, flags, param):
-        nonlocal dragging, mouse, _cb_ok
-        _cb_ok = True
+        nonlocal dragging, mouse
         mouse = (x, y)
-        if event == cv2.EVENT_LBUTTONDOWN or event == cv2.EVENT_LBUTTONDBLCLK:
+        if event == cv2.EVENT_LBUTTONDOWN:
             dragging = True
-            _sample_at(x, y, verbose=True)
         elif event == cv2.EVENT_LBUTTONUP:
             dragging = False
-        elif event == cv2.EVENT_MOUSEMOVE and (dragging or (flags & cv2.EVENT_FLAG_LBUTTON)):
-            dragging = True
-            _sample_at(x, y, verbose=False)
+        if dragging and state["hsv"] is not None:
+            hsv, img = state["hsv"], state["img"]
+            h, w = hsv.shape[:2]
+            x0, x1 = max(0, x - PATCH_HALF), min(w, x + PATCH_HALF + 1)
+            y0, y1 = max(0, y - PATCH_HALF), min(h, y + PATCH_HALF + 1)
+            acc[tgt].add_patch(hsv[y0:y1, x0:x1], img[y0:y1, x0:x1])
 
     cv2.setMouseCallback(win, on_mouse)
-    cv2.setMouseCallback(win_m, on_mouse)
 
     print("[calibra] 1=rojo  2=verde  3=naranja  4=rosa")
-    print("[calibra] CLIC en la ventana 'calibra_luz' (no en Terminal) y ARRASTRA")
-    print("[calibra] Si el clic no pinta: cursor sobre el color y ESPACIO")
-    print("[calibra] a=auto-detectar   n=siguiente frame   f=play/pausa")
-    print("[calibra] r=reset  p=imprimir  s=sugerir todos  q=salir\n")
+    print("[calibra] click+arrastrar = pintar pixeles   a = auto-detectar este color")
+    print("[calibra] r=reset  p=imprimir  s=sugerir todos  c=color_corr  b=BEV")
+    print("[calibra] m=overlay  d=bboxes  f=congelar  ESC/q=salir\n")
     if force_bev and not bev.is_calibrated:
         print("[calibra] --bev pedido pero no hay bev_calib.npz — naranja se mide en cámara.")
     if not bev.is_calibrated:
@@ -597,14 +551,6 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
                         time.sleep(0.03)
                         continue
                     continue
-                if start_frozen and _first:
-                    frozen = raw.copy()
-                    _first = False
-                    print("[calibra] pausado — clic en la IMAGEN (ventana 'calibra_luz'), no en Terminal")
-                    print("[calibra] o pon el cursor sobre el color y pulsa ESPACIO")
-                elif single_step:
-                    frozen = raw.copy()
-                    single_step = False
             else:
                 raw = frozen
 
@@ -622,8 +568,6 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
             sug_m = _mask_hsv(hsv, sug) if sug else np.zeros(hsv.shape[:2], np.uint8)
 
             disp = img.copy()
-            if paint[tgt] is not None and paint[tgt].shape[:2] == disp.shape[:2]:
-                _tint(disp, paint[tgt], (0, 255, 255), 0.55)
             if overlay_mode in ("prod", "both"):
                 _tint(disp, prod_m, OVERLAY_BGR[tgt], 0.40)
             if overlay_mode in ("sug", "both") and sug:
@@ -643,26 +587,24 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
                 cv2.putText(disp, f"rosa {ratio * 100:.0f}%", (8, disp.shape[0] - 14),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 50, 220), 1)
 
-            mx, my = _xy_img(*mouse)
+            mx, my = mouse
             h, w = disp.shape[:2]
             if 0 <= mx < w and 0 <= my < h:
                 hv = hsv[my, mx]
                 bv, gv, rv = img[my, mx]
                 live = f"HSV=({hv[0]},{hv[1]},{hv[2]})  RGB=({rv},{gv},{bv})"
-                cv2.circle(disp, (mx, my), PATCH_HALF, (0, 255, 255), 2)
-                cv2.drawMarker(disp, (mx, my), (0, 255, 255), cv2.MARKER_CROSS, 18, 1)
+                cv2.circle(disp, (mx, my), PATCH_HALF, (0, 255, 255), 1)
             else:
-                live = "HSV=(-,-,-)  pon el mouse en la ventana calibra_luz"
-            if not _cb_ok:
-                live = "el mouse no llega a OpenCV — usa ESPACIO con la ventana al frente"
+                live = "HSV=(-,-,-)  RGB=(-,-,-)"
 
             a = acc[tgt]
             if a.px:
                 rs = a.resumen()
-                acum = (f"pintados {a.px} px de {tgt}   HSV H {rs['h'][0]}-{rs['h'][2]}  "
-                        f"S {rs['s'][0]}-{rs['s'][2]}  V {rs['v'][0]}-{rs['v'][2]}")
+                acum = (f"acum H[{rs['h'][0]}-{rs['h'][2]}] "
+                        f"S[{rs['s'][0]}-{rs['s'][2]}] V[{rs['v'][0]}-{rs['v'][2]}]  "
+                        f"n={a.px}")
             else:
-                acum = f"aun no pintas {tgt}: clic/espacio SOLO sobre ese color"
+                acum = "acum: pinta el color o pulsa 'a'"
 
             gan = "-"
             if color_corr is not None and use_corr:
@@ -672,11 +614,11 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
             espacio = "BEV" if used_bev else "camara"
 
             lines = [
-                f"midiendo {tgt.upper()}   (1 rojo  2 verde  3 naranja  4 rosa)",
+                f"{tgt.upper()}  espacio={espacio}  overlay={overlay_mode}  corr={'ON' if use_corr else 'OFF'} gan={gan}",
                 live,
                 acum,
-                "r = BORRAR lo pintado de este color     p = ver rango HSV",
-                "espacio = muestrear   n = otro frame   q = salir (no guarda solo)",
+                f"piso BGR=({med[0]:.0f},{med[1]:.0f},{med[2]:.0f})  frac={frac:.2f}  quemado={quem * 100:.0f}%",
+                "1-4 color  a=auto  r=reset  p/s=print  c=corr  b=BEV  m=mask  d=bbox  f=freeze  q=salir",
             ]
             for i, txt in enumerate(lines):
                 cv2.putText(disp, txt, (8, 18 + i * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
@@ -684,19 +626,21 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
                 cv2.putText(disp, txt, (8, 18 + i * 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                             (0, 255, 255) if i == 0 else (240, 240, 240), 1)
 
-            mask_show = (img // 2).copy()
-            if paint[tgt] is not None and paint[tgt].shape[:2] == mask_show.shape[:2]:
-                mask_show[paint[tgt] > 0] = (0, 255, 255)
-            cv2.putText(mask_show, f"AMARILLO = lo que pintaste de {tgt}   r = borrar",
-                        (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            cv2.putText(mask_show, "esto NO se pega solo al robot; p imprime el HSV",
-                        (8, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1)
+            mask_show = np.zeros_like(img)
+            if overlay_mode == "sug" and sug:
+                mask_show[sug_m > 0] = OVERLAY_BGR[tgt]
+            elif overlay_mode == "both":
+                mask_show[prod_m > 0] = (80, 80, 80)
+                if sug:
+                    mask_show[sug_m > 0] = OVERLAY_BGR[tgt]
+            else:
+                mask_show[prod_m > 0] = OVERLAY_BGR[tgt]
+            cv2.putText(mask_show, f"mascara {tgt} ({overlay_mode})", (8, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
             cv2.imshow(win, disp)
             cv2.imshow(win_m, mask_show)
-            cv2.setMouseCallback(win, on_mouse)
-            cv2.setMouseCallback(win_m, on_mouse)
-            key = cv2.waitKey(20) & 0xFF
+            key = cv2.waitKey(1) & 0xFF
 
             if key in (27, ord("q")):
                 break
@@ -710,14 +654,9 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
                 tgt = "rosa"
             elif key == ord("r"):
                 acc[tgt].reset()
-                paint[tgt] = None
                 print(f"[calibra] reset {tgt}")
             elif key == ord("a"):
                 ok = acc[tgt].add(hsv, img, auto_m > 0)
-                if ok:
-                    if paint[tgt] is None or paint[tgt].shape[:2] != auto_m.shape[:2]:
-                        paint[tgt] = np.zeros(auto_m.shape[:2], np.uint8)
-                    paint[tgt][auto_m > 0] = 255
                 print(f"[calibra] auto {tgt}: "
                       f"{'ok +' + str(int(np.count_nonzero(auto_m))) + ' px' if ok else 'blob demasiado chico'}")
             elif key == ord("p"):
@@ -742,14 +681,9 @@ def run_gui(get_raw, cam_index, use_corr_0, force_bev, image_mode: bool,
             elif key == ord("f"):
                 frozen = None if frozen is not None else raw.copy()
                 print(f"[calibra] freeze={'ON' if frozen is not None else 'OFF'}")
-            elif key == ord("n"):
-                single_step = True
-                frozen = None
-                print("[calibra] siguiente frame")
             elif key == ord(" "):
-                n = _sample_at(*mouse, verbose=True)
-                if n == 0:
-                    print("[calibra] pon el cursor SOBRE la imagen y pulsa espacio otra vez")
+                # siguiente frame si es imagen fija: no-op; si es video, descongela
+                frozen = None
     except KeyboardInterrupt:
         print("\n[calibra] interrumpido")
     finally:
@@ -785,24 +719,15 @@ def frames_camara(cam_index, segundos, use_corr: bool):
         cap.release()
 
 
-def _panel_camara(frame):
-    """HUD de la Pi = cámara 640 + BEV. Video de WhatsApp/pantalla = usar todo."""
-    if frame is None:
-        return None
-    w = frame.shape[1]
-    return frame[:, :640] if w > 640 else frame
-
-
 def main():
     ap = argparse.ArgumentParser(
         description="Calibra HSV de conos / naranja / rosa para Pure Pursuit (otra luz)")
-    ap.add_argument("--gui", action="store_true",
-                    help="ventana: pintar / auto-detectar / overlay (se puede juntar con --avi/--image)")
-    src = ap.add_mutually_exclusive_group(required=False)
-    src.add_argument("--avi", help="video .avi/.mp4 (HUD: panel izquierdo; si es más angosto, el frame entero)")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--avi", help="orillasNNN.avi (usa el panel izquierdo del HUD)")
     src.add_argument("--bin", dest="binf", help="orillasNNN_bev.bin (BEV limpio)")
     src.add_argument("--vivo", action="store_true", help="cámara en vivo, solo texto (SSH)")
-    ap.add_argument("--image", type=str, default=None, help="foto fija (implica --gui)")
+    src.add_argument("--gui", action="store_true", help="ventana: pintar / auto-detectar / overlay")
+    ap.add_argument("--image", type=str, default=None, help="--gui: foto fija en vez de cámara")
     ap.add_argument("--segundos", type=float, default=0, help="--vivo: cuánto medir (0 = hasta Ctrl-C)")
     ap.add_argument("--cada", type=int, default=1, help="procesar 1 de cada N frames")
     ap.add_argument("--cam-index", type=int, default=None)
@@ -811,10 +736,6 @@ def main():
                     help="no aplicar color_corr.py (por defecto SÍ, como el runtime)")
     ap.add_argument("--bev", action="store_true", help="--gui: forzar espacio BEV para todos los colores")
     args = ap.parse_args()
-    if args.image:
-        args.gui = True
-    if not any([args.gui, args.avi, args.binf, args.vivo]):
-        ap.error("indica --gui, --avi, --vivo o --image")
 
     cam_index = args.cam_index if args.cam_index is not None else C.CAM_INDEX
     use_corr = not args.sin_corr
@@ -824,8 +745,7 @@ def main():
             img = cv2.imread(args.image)
             if img is None:
                 raise SystemExit(f"[calibra] no se pudo leer {args.image}")
-            run_gui(lambda: img, cam_index, use_corr, args.bev, image_mode=True,
-                    start_frozen=True)
+            run_gui(lambda: img, cam_index, use_corr, args.bev, image_mode=True)
             return
         if args.avi:
             cap = cv2.VideoCapture(args.avi)
@@ -839,10 +759,9 @@ def main():
                     ok, f = cap.read()
                     if not ok:
                         return None
-                return _panel_camara(f)
+                return f[:, :640]
             try:
-                run_gui(get_raw, cam_index, False, args.bev, image_mode=False,
-                        start_frozen=True)
+                run_gui(get_raw, cam_index, False, args.bev, image_mode=False)
             finally:
                 cap.release()
             return

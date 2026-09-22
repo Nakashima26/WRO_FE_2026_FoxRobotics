@@ -196,7 +196,6 @@ class PPRuntime:
         self.mid_turn   = MidTurnObstacleDetector()
         # Corrección de color por el piso (otra iluminación), ver color_corr.py
         self.color_corr = FloorColorCorrector()
-        self._cl_temporal: dict[int, float] = {}
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -1246,7 +1245,6 @@ class PPRuntime:
                         path_points = detect_centerline(
                             bev_frame, bev_obstacles, bev_hsv=bev_hsv,
                             obstacle_conf=obstacle_conf, stats_out=cl_stats,
-                            temporal_state=self._cl_temporal,
                         )
                         _t5 = time.perf_counter()
                         bev_timing["dc"] = (_t5 - _t4) * 1000.0
