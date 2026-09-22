@@ -97,7 +97,19 @@ class Vision:
     # la temperatura de color de la sede — las dos se escalan parejo.
     RED_BR_MAX = 0.42
 
-    def process_color(self, frame, mask, color_name, bgr=None):
+    # 2026-09-22 (orillas1190, luz fuerte): falsos en cada vuelta, separados
+    # por razones que no se mueven con la luz. Medido re-pasando vision sobre
+    # 6 runs (1190/1189 hoy, 1013 sede, 1005/1064/1150 luz normal):
+    #   - cinta NARANJA de esquina como Red: G/R 0.38-0.46 (tiene verde, por
+    #     eso es naranja); cono rojo real G/R 0.05-0.13. Tope 0.28.
+    #   - piso blanco/celeste y zona quemada del park como Green: S mediana
+    #     37-44 (la banda Green acepta S>=35); cono verde real S 120-160.
+    #     Piso 70.
+    # 0 conos reales perdidos en las 6 runs; en 1005/1064/1150 casi no rechaza.
+    RED_GR_MAX = 0.28
+    GREEN_S_MIN_MED = 70
+
+    def process_color(self, frame, mask, color_name, bgr=None, hsv=None):
         """Encuentra contornos y devuelve posiciones.
 
         Filtra por solidez (area_contorno / area_bbox) para descartar formas
@@ -139,6 +151,18 @@ class Vision:
                 r_px = bgr[..., 2][sel].astype(np.float32)
                 if float(np.median(b_px / np.maximum(r_px, 1.0))) > self.RED_BR_MAX:
                     continue
+                sel_m = sel & (mask > 0)
+                g_px = bgr[..., 1][sel_m].astype(np.float32)
+                r_m = np.maximum(bgr[..., 2][sel_m].astype(np.float32), 1.0)
+                if g_px.size and float(np.median(g_px / r_m)) > self.RED_GR_MAX:
+                    continue   # cinta naranja (ver RED_GR_MAX)
+
+            if color_name == "Green" and hsv is not None:
+                cnt_mask = np.zeros(mask.shape, np.uint8)
+                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
+                sel = (cnt_mask > 0) & (mask > 0)
+                if sel.any() and float(np.median(hsv[..., 1][sel])) < self.GREEN_S_MIN_MED:
+                    continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
 
             objects.append((x, y, w, h))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
@@ -156,7 +180,7 @@ class Vision:
         masks = {color: np.bitwise_or.reduce([cv2.inRange(hsv, lower, upper) for lower, upper in ranges])
                  for color, ranges in self.color_ranges.items()}
 
-        positions = {color: self.process_color(frame, mask, color, bgr)
+        positions = {color: self.process_color(frame, mask, color, bgr, hsv)
                      for color, mask in masks.items()}
 
         return frame, positions

@@ -235,7 +235,20 @@ const int  CRUCERO_STRAIGHTEN_DEG = 15; // en CRUCERO, si el chasis entró/qued�
 const int  MANIOBRA_OVERSHOOT_DEG = 14; // sale del pivote a (AngGiro - esto): el carro sigue
                                         // rotando por inercia y sin esto la recta nueva
                                         // arrancaba ~10-15° chueca (orillas460)
-const int  HUG_CM           = 28;      // pared exterior <= esto -> FORWARD (no cabe reversear)
+const int  HUG_CM           = 20;      // pared exterior <= esto -> FORWARD (no cabe reversear).
+                                       // 2026-09-22: 28 -> 20 + histéresis (orillas1188 giro 4:
+                                       // dL oscilaba 27-29 justo en el límite -> preview REVERSE
+                                       // esperó a dF=25, la decisión final leyó 27 -> FORWARD a
+                                       // dF=15 -> se incrustó en la pared de enfrente).
+const int  HUG_HIST_CM      = 6;       // modo FORWARD solo se suelta si la exterior pasa de
+                                       // HUG_CM + esto (21-25 = zona muerta: se queda el modo previo)
+const int  HUG_PEGADO_N     = 2;       // lecturas FRESCAS seguidas <= HUG_CM -> modo FORWARD
+const int  HUG_SEPARADO_N   = 3;       // lecturas FRESCAS seguidas >= HUG_CM+HUG_HIST_CM -> modo REVERSE
+const int  FWD_MIN_FRONT_CM = 35;      // fallback: con la pared de enfrente <= esto el arco FORWARD
+                                       // ya no cabe -> se fuerza REVERSE aunque el modo diga FORWARD
+bool giroModoFwd       = false;        // modo latcheado de la aproximación actual (ver actualizarModoGiro)
+int  hugPegadoStreak   = 0;
+int  hugSeparadoStreak = 0;
 const int  MANIOBRA_VEL_REV  = 100;     // PWM objetivo del motor en la reversa-pivote
 const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el golpe de corriente)
 
@@ -1426,6 +1439,58 @@ bool esManiobra13() {
 // (según la distancia a la pared EXTERIOR, la que SÍ existe — el "sin pared"
 // nunca se usa como número). La llama CRUCERO en el frame del trigger (para
 // elegir el umbral frontal) y latchea con maniobraDecidida=true.
+// Distancia a la pared EXTERIOR del giro que viene (la que SÍ existe) y de qué
+// lado está. Misma lógica que usaba el preview de CRUCERO.
+long distExteriorGiro(long distL, long distR, bool &extEsIzq) {
+  if (primerGiro) {
+    // Dirección ya latcheada -> la pared exterior es la del lado CONTRARIO
+    // al giro (giro izq -> exterior = derecha/distR; giro der -> distL).
+    // Su lectura DIRECTA, nunca un min(dL,dR): si el carro llega aplastado
+    // contra la pared INTERIOR tras esquivar un cono (dL/dR interior corto)
+    // el min tomaba esa interior -> preview FORWARD -> ventana frontal
+    // ancha -> MANIOBRA ~35 cm antes de la pared (run 2026-09-09, vuelta 5).
+    extEsIzq = !direccionIzquierda;
+  } else if (direccionAproxLatch == 1) {
+    extEsIzq = false;   // abrió IZQ -> giro a la izquierda -> exterior = derecha
+  } else if (direccionAproxLatch == 2) {
+    extEsIzq = true;    // abrió DER -> giro a la derecha -> exterior = izquierda
+  } else {
+    // 1ª esquina, dirección aún desconocida -> heurística por qué lado abre.
+    bool _da = (distR > umbralPared), _ia = (distL > umbralPared);
+    if      (_da && !_ia) extEsIzq = true;
+    else if (_ia && !_da) extEsIzq = false;
+    else                  extEsIzq = (distL < distR);
+  }
+  return extEsIzq ? distL : distR;
+}
+
+// Modo FORWARD/REVERSE con memoria de la aproximación: entra a FORWARD si la
+// exterior estuvo pegada (<= HUG_CM) HUG_PEGADO_N lecturas seguidas, y solo lo
+// suelta si se separa claro (>= HUG_CM + HUG_HIST_CM) HUG_SEPARADO_N lecturas.
+// En la zona 21-25 cm se queda el modo previo: llegar a 21 tras venir a 15-18
+// sigue siendo FORWARD, y el ruido de ±1 cm ya no voltea la decisión.
+// Solo cuenta lecturas frescas del sonar exterior (el filtrado se repite
+// entre pings y contaría doble).
+void actualizarModoGiro(long de, bool fresca) {
+  if (!fresca || de <= 0) return;
+  if (de <= HUG_CM) {
+    hugSeparadoStreak = 0;
+    if (++hugPegadoStreak >= HUG_PEGADO_N) giroModoFwd = true;
+  } else if (de >= HUG_CM + HUG_HIST_CM) {
+    hugPegadoStreak = 0;
+    if (++hugSeparadoStreak >= HUG_SEPARADO_N) giroModoFwd = false;
+  } else {
+    hugPegadoStreak   = 0;
+    hugSeparadoStreak = 0;
+  }
+}
+
+void resetModoGiro() {
+  giroModoFwd       = false;
+  hugPegadoStreak   = 0;
+  hugSeparadoStreak = 0;
+}
+
 void decidirManiobra(long distL, long distR) {
   bool derAbierta = (distR > umbralPared);
   bool izqAbierta = (distL > umbralPared);
@@ -1450,11 +1515,20 @@ void decidirManiobra(long distL, long distR) {
   }
   direccionIzquierda = !maniobraGirarDer;   // para el dir= del ACK
 
-  // ── FWD vs REVERSE ── SIEMPRE fresco, según la pared EXTERIOR del giro
-  //    (giro der -> exterior = izq/distL; giro izq -> exterior = der/distR).
+  // ── FWD vs REVERSE ── el MISMO modo que eligió la ventana frontal del preview
+  //    (giroModoFwd, con memoria de la aproximación), no la lectura instantánea:
+  //    antes eran dos lecturas distintas y en el límite se contradecían
+  //    (orillas1188 giro 4). distExt se sigue guardando para maniobraRetroceso.
   long distExt = maniobraGirarDer ? distL : distR;
   maniobraDistExt  = distExt;
-  maniobraReversa  = (maniobraDistExt >= HUG_CM);
+  maniobraReversa  = !giroModoFwd;
+  // Fallback: si pese a todo toca FORWARD con la pared de enfrente ya encima,
+  // el arco no cabe (se incrusta en fase 1) -> REVERSE.
+  if (!maniobraReversa && distF_filtrada > 0 && distF_filtrada <= FWD_MIN_FRONT_CM) {
+    maniobraReversa = true;
+    Serial.print("[HUG] FORWARD sin espacio (dF="); Serial.print((long)distF_filtrada);
+    Serial.println(") -> REVERSE");
+  }
 
   // ── ¿RETROCEDER un poco DESPUÉS de la maniobra? ── solo si la pared exterior
   //    (la que sigo) tiene holgura: > MANIOBRA_BACKOFF_MIN_CM. Si voy pegado a
@@ -1829,6 +1903,7 @@ void finalizarManiobra() {
   maniobraDecidida = false;
   maniobraFase     = -1;
   estado           = SIGUIENDO;
+  resetModoGiro();                 // la aproximación a la siguiente esquina empieza de cero
   turnsCompleted++;
   if (MODO_CONTINUO) {
     // Sin parada: ni estaciona ni termina, sigue corriendo vueltas.
@@ -2159,6 +2234,7 @@ void parsePiMessage(String line) {
     //   alat  : direccionAproxLatch (0 nada, 1 abrió IZQ, 2 abrió DER — hueco leído en la aproximación)
     Serial2.print(",fase="); Serial2.print(maniobraFase);
     Serial2.print(",rev=");  Serial2.print(maniobraReversa ? 1 : 0);
+    Serial2.print(",hug=");  Serial2.print(giroModoFwd ? 1 : 0);   // modo del PRÓXIMO giro (1 = FORWARD)
     Serial2.print(",gd=");   Serial2.print(maniobraGirarDer ? 1 : 0);
     Serial2.print(",dL=");   Serial2.print((long)distL_filtrada);
     Serial2.print(",dR=");   Serial2.print((long)distR_filtrada);
@@ -2719,6 +2795,14 @@ void loop() {
   long distF_med = leerF ? medianaFront(leerDistancia(TRIG_F, ECHO_F)) : 200;
   if (leerF) distF_filtrada = filtroEMA(distF_med, distF_filtrada);
   long distF = (long)distF_filtrada;
+
+  // Modo FORWARD/REVERSE del próximo giro: se alimenta durante toda la
+  // aproximación (SIGUIENDO/RECUPERANDO/CRUCERO) con el sonar exterior.
+  if (rondaObstaculos && (estado == SIGUIENDO || estado == RECUPERANDO || estado == CRUCERO)) {
+    bool _extIzq;
+    long _de = distExteriorGiro(distL, distR, _extIzq);
+    actualizarModoGiro(_de, _extIzq ? leerL : leerR);
+  }
 
   switch (estado) {
 
@@ -3304,30 +3388,9 @@ void loop() {
       // pegado a la pared (FRONT_TURN_REV_CM), FORWARD necesita espacio para el
       // arco (FRONT_TURN_FWD_CM, ancho). `_de` = distancia a la pared EXTERIOR
       // del giro (la que SÍ existe), igual que la calcula decidirManiobra().
-      bool _revPrev;
-      {
-        long _de;
-        if (primerGiro) {
-          // Dirección ya latcheada -> la pared exterior es la del lado CONTRARIO
-          // al giro (giro izq -> exterior = derecha/distR; giro der -> distL).
-          // Su lectura DIRECTA, nunca un min(dL,dR): si el carro llega aplastado
-          // contra la pared INTERIOR tras esquivar un cono (dL/dR interior corto)
-          // el min tomaba esa interior -> preview FORWARD -> ventana frontal
-          // ancha -> MANIOBRA ~35 cm antes de la pared (run 2026-09-09, vuelta 5).
-          _de = direccionIzquierda ? distR : distL;
-        } else if (direccionAproxLatch == 1) {
-          _de = distR;   // abrió IZQ -> giro a la izquierda -> exterior = derecha
-        } else if (direccionAproxLatch == 2) {
-          _de = distL;   // abrió DER -> giro a la derecha -> exterior = izquierda
-        } else {
-          // 1ª esquina, dirección aún desconocida -> heurística por qué lado abre.
-          bool _da = (distR > umbralPared), _ia = (distL > umbralPared);
-          if      (_da && !_ia) _de = distL;
-          else if (_ia && !_da) _de = distR;
-          else                  _de = ((distR > distL) ? distL : distR);
-        }
-        _revPrev = (_de >= HUG_CM);
-      }
+      // El modo sale de giroModoFwd (actualizarModoGiro, con histéresis y memoria
+      // de la aproximación) y decidirManiobra usa ESE mismo modo.
+      bool _revPrev = !giroModoFwd;
       int _umbralFront = _revPrev ? FRONT_TURN_REV_CM : FRONT_TURN_FWD_CM;
 
       // Esquina del cajón de estacionamiento (turno 4/8/12): el obstáculo chico
