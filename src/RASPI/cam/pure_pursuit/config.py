@@ -18,11 +18,6 @@ from pathlib import Path
 
 # ─── Rutas ────────────────────────────────────────────────────────────────────
 CALIB_FILE = Path(__file__).parent / "bev_calib.npz"
-# Intrínsecos opcionales (K + distorsión) de calibrate_intrinsics.py.
-# Si existe, calibrate.py clickea sobre la imagen undistorsionada y el runtime
-# hace remap antes del warp. Una homografía vieja (sin este archivo / sin flag
-# undistort_used) NO se mezcla con undistort — hay que rehacer el BEV.
-INTRINSICS_FILE = Path(__file__).parent / "cam_intrinsics.npz"
 
 # ─── BEV — imagen de salida ───────────────────────────────────────────────────
 BEV_W      = 400          # píxeles de ancho
@@ -75,15 +70,6 @@ CALIB_POINT_LABELS = [
 # Umbral de error medio de reproyección (px BEV) a partir del cual calibrate.py
 # advierte que probablemente un clic quedó mal puesto.
 CALIB_MAX_MEAN_ERR_PX = 4.0
-# Tras el clic, cornerSubPix busca la esquina real del marcador. Si se mueve
-# más que esto, se asume que no había esquina (cinta lisa) y se deja el clic.
-CALIB_SUBPIX_WIN = 11
-CALIB_SUBPIX_MAX_SHIFT_PX = 4.0
-# Grilla métrica proyectada sobre la cámara (validación visual de H).
-CALIB_GRID_STEP_MM = 100.0
-# Tablero para calibrate_intrinsics.py: esquinas INTERNAS (cols, rows).
-CHESSBOARD_INNER = (9, 6)
-CHESSBOARD_SQUARE_MM = 25.0
 
 WALL_MARGIN_PX = 40
 
@@ -168,9 +154,6 @@ CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
 CENTERLINE_COLOR_APPROACH_MAX_STEER_DEG = 0.0
 CENTERLINE_COLOR_APPROACH_Y            = 300.0   # px BEV; y del cono por debajo de esto = "lejos"
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
-# EMA del X de cada fila Y entre frames (0 = apagado). Baja zigzag de máscara
-# sin otra capa de clamps. 0.25 = 25% frame nuevo / 75% path anterior.
-CENTERLINE_TEMPORAL_ALPHA = 0.25
 CENTERLINE_DEBUG      = False  # 2026-08-29: APAGADO. El log [CLDBG] fila-a-fila
                               # llenaba el journal de la Pi (74MB) y rotaba los
                               # datos útiles en minutos. Encender solo para

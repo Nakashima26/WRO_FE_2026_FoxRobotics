@@ -4,46 +4,31 @@ Todos los comandos se corren desde `src/RASPI/cam/`.
 
 ---
 
-## 1. Calibrar la cámara (una sola vez, o si mueves el montaje)
+## 1. Calibrar la cámara (una sola vez)
 
-La Pi Cam v2 tiene barrel distortion. La homografía asume pinhole: si puedes,
-calibra intrínsecos **antes** del BEV. Los videos de corrida (HUD cámara|BEV)
-**no sirven** para reestimar H — el BEV ya está warpeado y no hay marcadores.
+Necesitas la cámara montada en su posición final en el robot, apuntando al piso.
 
-### 1a. Intrínsecos (opcional, chessboard)
+Coloca 4 marcadores físicos (papel, cinta) en el suelo en estas posiciones relativas al eje delantero del robot:
 
-```bash
-python -m pure_pursuit.calibrate_intrinsics
-```
-
-ESPACIO captura el tablero (mín. ~8 poses, bordes y cerca/lejos). C calcula, S guarda `cam_intrinsics.npz`.
-
-### 1b. Homografía BEV (9 puntos en el suelo)
-
-Coloca marcadores en las posiciones de `CALIB_REAL_MM` (grilla 3×3: cerca / media / lejos × izq / centro / der).
+| Punto | Lateral | Adelante |
+|-------|---------|----------|
+| A     | 10 cm izquierda | 20 cm |
+| B     | 10 cm derecha   | 20 cm |
+| C     | 15 cm izquierda | 38 cm |
+| D     | 15 cm derecha   | 38 cm |
 
 ```bash
 python -m pure_pursuit.calibrate
 ```
 
-1. Ventana en vivo → `C` congela
-2. Clic en los 9 marcadores en orden (subpíxel automático). Derecho = deshacer
-3. Preview BEV + **grilla métrica** sobre la cámara: las líneas deben coincidir con el piso
-4. `S` guarda `bev_calib.npz` (hasta pulsar S no se pisa el archivo)
-5. `R` rehacer
+1. Se abre una ventana con la cámara en vivo
+2. Presiona `C` para congelar el frame
+3. Haz clic en los 4 marcadores en orden: A → B → C → D
+4. Se abre una segunda ventana con la vista BEV en tiempo real — verifica que se vea bien
+5. Presiona `S` para guardar → genera `pure_pursuit/bev_calib.npz`
+6. Presiona `R` para rehacer si los puntos quedaron mal
 
-Si existe `cam_intrinsics.npz`, los clics son sobre la imagen undistorsionada.
-
-### 1c. Comprobar con un AVI de corrida (no recalibra)
-
-```bash
-python -m pure_pursuit.replay_calib --self-test
-python -m pure_pursuit.replay_calib --avi /ruta/orillasNNNN.avi --save-dir /tmp/bev_replay
-```
-
-Izquierda = cámara del HUD, centro = re-warp con la H actual, derecha = BEV grabado.
-
-> Si mueves o cambias el ángulo de la cámara, repite 1b (y 1a si cambias el lente).
+> Si mueves o cambias el ángulo de la cámara, repite este paso.
 
 ---
 
@@ -162,8 +147,6 @@ python -m pure_pursuit.runtime --serial-port /dev/ttyUSB0
 | Archivo | Para qué |
 |---------|----------|
 | `calibrate.py` | Calibrar la homografía BEV con la cámara real |
-| `calibrate_intrinsics.py` | Chessboard → K + distorsión (`cam_intrinsics.npz`) |
-| `replay_calib.py` | Self-test sintético / re-warp del HUD de una corrida |
 | `test_vision.py` | Probar visión + centerline sin robot ni serial |
 | `runtime.py` | Runtime completo para competencia |
 | `config.py` | Todos los parámetros ajustables (HSV, lookahead, gains) |

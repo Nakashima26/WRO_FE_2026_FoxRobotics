@@ -36,7 +36,6 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
     bev        = BEVTransformer()
     controller = PurePursuitController()
     vision     = Vision(cam_index)
-    cl_temporal: dict[int, float] = {}
 
     # ── Cámara o video ────────────────────────────────────────────────────────
     if video_path:
@@ -106,9 +105,7 @@ def run(cam_index: int = C.CAM_INDEX, video_path: str | None = None) -> None:
                     if result is not None:
                         bev_obstacles.append((result[0], result[1], color_name))
 
-            path_points = detect_centerline(
-                bev_frame, bev_obstacles, temporal_state=cl_temporal
-            )
+            path_points = detect_centerline(bev_frame, bev_obstacles)
         except Exception as e:
             import traceback
             print(f"[ERROR] {e}", flush=True)
