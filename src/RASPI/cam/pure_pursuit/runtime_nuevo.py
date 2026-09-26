@@ -162,6 +162,18 @@ def _parse_tc(ack: str) -> int | None:
     except (ValueError, IndexError):
         return None
 
+def _parse_tpr(ack: str) -> int | None:
+    """tpr= del ACK:V2 del ESP32: TURNS_PER_RACE del .ino (4 en tests, 12 en carrera)."""
+    if not ack:
+        return None
+    idx = ack.find("tpr=")
+    if idx < 0:
+        return None
+    try:
+        return int(ack[idx + 4:].split(",")[0])
+    except (ValueError, IndexError):
+        return None
+
 def _parse_pb(ack: str) -> bool | None:
     """pb= del ACK:V2 del ESP32: 1 si parkBuscando es True."""
     if not ack:
@@ -241,6 +253,8 @@ class PPRuntime:
 
         # ── ESTACIONAMIENTO — búsqueda del cajón en la recta final ────────────
         self._tc: int = 0
+        # TURNS_PER_RACE del ESP32 (tpr= en el ACK). 12 hasta que llegue el 1er ACK.
+        self._tpr: int = 12
         self._park_buscando: bool = False
         self._park_state: int = 0         # 0=no busca, 1=viendo cajon, 2=cajon alineado (iniciar reversa)
         self._park_dist_cm: int = 0
@@ -687,17 +701,17 @@ class PPRuntime:
                 cv2.rectangle(frame, (int(xs.min()), int(ys.min())),
                               (int(xs.max()), int(ys.max())), col, 2)
         txt = (f"PARK state={self._park_state} pink={ratio * 100:.1f}%"
-               if (self._park_buscando or self._tc >= 12)
+               if (self._park_buscando or self._tc >= self._tpr)
                else f"PINK {ratio * 100:.0f}% / thr {thr * 100:.0f}%")
         cv2.putText(frame, txt,
                     (10, frame.shape[0] - 14),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, col, 2)
 
     def _check_parking_search(self, frame_bgr, armed: bool):
-        """Búsqueda activa del cajón magenta en la recta final tras giro 12."""
+        """Búsqueda activa del cajón magenta en la recta final (tc >= TURNS_PER_RACE del ESP)."""
         if not armed:
             return
-        if not (self._park_buscando or self._tc >= 12):
+        if not (self._park_buscando or self._tc >= self._tpr):
             return
         if self._park_state == 2:
             return  # ya disparó la orden de estacionamiento
@@ -1477,6 +1491,10 @@ class PPRuntime:
                 if _tc_now is not None:
                     self._tc = _tc_now
 
+                _tpr_now = _parse_tpr(serial_ack)
+                if _tpr_now is not None and _tpr_now > 0:
+                    self._tpr = _tpr_now
+
                 _pb_now = _parse_pb(serial_ack)
                 if _pb_now is not None:
                     self._park_buscando = _pb_now
@@ -1595,7 +1613,7 @@ class PPRuntime:
                     # calculó arriba con el frame limpio), así que dibujar acá no
                     # puede tocar la visión. Muestra el HUD cuando está DESARMADO
                     # o cuando está buscando el cajón en la recta final.
-                    if not armed or self._park_buscando or self._tc >= 12:
+                    if not armed or self._park_buscando or self._tc >= self._tpr:
                         try:
                             _pr_h, _pm_h = _park_pink(processed_frame)
                             self._draw_park_pink(processed_frame, _pr_h, _pm_h)

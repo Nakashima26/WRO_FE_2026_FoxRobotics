@@ -42,7 +42,21 @@ MPU6050 mpu(Wire);
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
-const int TURNS_PER_RACE = 12;   // TEST: 1 vuelta (4 giros) y a estacionar. Revertir a 12 para carrera real.
+const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
+
+// ── ESTACIONAMIENTO: ÚNICO switch ─────────────────────────────────────────────
+// Antes eran PARK_ENABLED + PARK_DE_PUNTA + PARK_MODO_PARALELO y había que mover
+// dos a la vez (PARK_DE_PUNTA=true con PARK_MODO_PARALELO=true estacionaba en
+// PARALELO). Ahora el modo es uno solo:
+//   PARK_NINGUNO  : tras la última vuelta, TERMINANDO (avanza un poco y frena)
+//   PARK_PUNTA    : de punta, 7 pts  (estado ESTACIONANDO_PUNTA)
+//   PARK_PARALELO : paralelo, 10 pts (estado ESTACIONANDO)
+// PARK_MEDIA_VUELTA aplica a los dos modos:
+//   true  = sigue hasta la MANIOBRA 13, media vuelta y estaciona REGRESANDO
+//   false = estaciona de frente justo tras el giro 12
+enum ModoPark { PARK_NINGUNO, PARK_PUNTA, PARK_PARALELO };
+const ModoPark PARK_MODO         = PARK_PUNTA;
+const bool     PARK_MEDIA_VUELTA = true;
 
 
 
@@ -116,7 +130,6 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
 int centroServo    = 90;
-int fullSpeed_MS = 2000;
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -143,9 +156,6 @@ int   piPark       = 0;       // park=N: etapa del cajón vista por la Pi en la 
                                // final (0 nada | 1 magenta ADELANTE | 2 magenta ya
                                // salió del campo de visión = lo estamos pasando /
                                // pasamos). Solo tiene sentido con parkBuscando.
-int   piParkDistCm = 0;       // pd=N: distancia (cm, BEV) al bloque magenta más
-                               // cercano que sigue adelante. 0 = desconocida.
-bool  piReady      = false;
 
 unsigned long lastPiMsgMs = 0;
 const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
@@ -179,8 +189,6 @@ bool piReadyReceived = false;
 bool piFirstV2Received = false;
 unsigned long readyMs = 0;                          // millis() cuando llegó READY
 const unsigned long FIRST_V2_TIMEOUT_MS = 3000;     // si tras READY nunca llega V2, seguir igual
-unsigned long bootStartMs = 0;
-const unsigned long BOOT_WAIT_PI_MS = 1000;
 
 // One-shot: la primera vez que el carro va a rodar de verdad (tras pasar el gate
 // de WAIT_FIRST_V2) se re-anclan lastTurnTime y timeStart a ESE instante. Sin
@@ -205,12 +213,11 @@ bool marchaIniciada = false;
 // frame al arrancar (inicio=1) -> el carro parte dentro del estacionamiento y
 // hace una "S" pre-programada para salir antes de entregar el volante a
 // SIGUIENDO. Si inicio=0 nunca se entra a este estado (arranque normal).
-// ESTACIONANDO: solo ronda de obstáculos, tras el giro 12 (PARK_ENABLED). Es el
+// ESTACIONANDO: solo ronda de obstáculos, PARK_MODO = PARK_PARALELO. Es el
 // ESPEJO de INICIO: estacionamiento paralelo EN REVERSA dentro del cajón
-// magenta de la recta de salida. La búsqueda del cajón NO es un estado aparte:
-// es SIGUIENDO con la bandera parkBuscando (así conserva esquiva de conos y
-// RECUPERANDO), solo que sin detectar esquinas y con la salida a ESTACIONANDO.
-// ESTACIONANDO_PUNTA: alternativa a ESTACIONANDO (PARK_DE_PUNTA). Tras el giro 12
+// magenta de la recta de salida. (Con PARK_ESPERA_PI=true la búsqueda del cajón
+// es SIGUIENDO con la bandera parkBuscando; con false entra directo al escaneo.)
+// ESTACIONANDO_PUNTA: PARK_MODO = PARK_PUNTA. Tras el giro 12 (o la 13)
 // sigue la pared exterior SIN visión y, al bajar el ultrasónico exterior por el
 // 1er poste magenta, gira 90° y mete la trompa al lote (parcial). Ver su bloque.
 enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
@@ -284,15 +291,11 @@ const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa d
 // MOTOR_REV_RAMPA_MS para que llegue antes al PWM de trabajo. Si el pivote sale
 // muy abierto (se come pista antes de girar), baja _RETRASO_MS a 80.
 // _RETRASO_MS = 0 y _RAMPA_MS = 0 devuelven el comportamiento viejo.
+// OJO (limpieza 2026-09-26): la _RAMPA_MS (barrido lineal centro -> tope) ya NO
+// existe. El pivote de reversa pasó a lazo cerrado (aplicarReversaHoldClamp, ver
+// MANIOBRA_PIVOTE_*) y la función de la rampa quedó sin llamarse: moverla no
+// hacía nada. Tras _RETRASO_MS el PID toma el servo directo.
 const unsigned long MANIOBRA_SERVO_RETRASO_MS = 50;  // reversa recta antes de empezar a girar
-const unsigned long MANIOBRA_SERVO_RAMPA_MS   = 120;  // barrido centro -> tope. 2026-09-17 tarde: 220 -> 120.
-                                                      // 220 dejaba el volante a medio girar demasiado tiempo -> el
-                                                      // pivote reversaba en ARCO ANCHO (se come pista) y el carro
-                                                      // terminaba cargado al INTERIOR (mal para ver el obstáculo de
-                                                      // la recta nueva). 120 cierra el pivote más rápido = sale más
-                                                      // pegado a la exterior = más centrado, y sigue entrando sobre
-                                                      // la marcha (anti-scrub). Si vuelve el derrape/atorón, súbelo
-                                                      // a 150-180; si aún sale cargado al interior, bájalo a 90.
 const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // reversa no llegó a 88° -> frena y termina de frente
 const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin llegar a la pared -> MANIOBRA igual (red de seguridad anti-atasco)
 const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
@@ -411,7 +414,7 @@ const int           MANIOBRA_BACKOFF_MIN_CM = 40;   // SOLO retrocede si la pare
 // (distExt > FAR_CM) retrocede más tiempo, para separarse bien de la recta nueva.
 const int           MANIOBRA_BACKOFF_FAR_CM = 70;
 const unsigned long MANIOBRA_BACKOFF_FAR_MS = 850;
-// MANIOBRA 13 (solo con PARK_PUNTA_VUELTA_13): tras el pivote la pared que queda
+// MANIOBRA 13 (solo con PARK_MEDIA_VUELTA): tras el pivote la pared que queda
 // ATRÁS es la pared del lote. Aquí el retroceso ya no es por tiers: siempre corre
 // (también en 20-40 cm, donde normalmente no hay) y dura lo suficiente para TOCAR
 // esa pared en el peor caso (distExt > FAR_CM). En los casos cercanos llega antes
@@ -516,13 +519,14 @@ int  aproxOpenStreakIzq      = 0;
 int  aproxOpenStreakDer      = 0;
 const int APROX_DIR_LATCH_FRAMES = 3;  // frames seguidos de un lado abierto para latchear
 
-const float wallSettleCm    = 8.0;   // |distL-distR| por debajo de esto = "centrado"
 const float headingSettleDeg = 6.0;  // |errorGyro| por debajo de esto = "alineado"
+// (RECUPERANDO sale SOLO por heading; el viejo wallSettleCm/wallOk se calculaba
+//  pero nunca entraba en la condición de salida, se quitó.)
 
 // Red de seguridad: si el robot entra a RECUPERANDO cerca de una esquina real
 // (donde un ultrasónico lee "sin pared" legítimamente, no por desalineación),
-// wallOk puede no cumplirse NUNCA y el estado se quedaría atorado para siempre.
-// Este timeout fuerza la salida aunque wallOk/headingOk no se hayan cumplido.
+// headingOk puede no cumplirse NUNCA y el estado se quedaría atorado para siempre.
+// Este timeout fuerza la salida aunque headingOk no se haya cumplido.
 unsigned long recuperandoEntryMs = 0;
 const unsigned long recuperandoTimeoutMs = 1500;
 // Dwell de RECUPERANDO: NO sale en el mismísimo frame en que roza headingOk
@@ -602,21 +606,29 @@ unsigned long inicioSettleSampMs  = 0;
 int           inicioSettleQuieto  = 0;
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ESTACIONANDO — Estacionamiento en paralelo en reversa (Obstacle Challenge)
+// ESTACIONANDO — Estacionamiento en PARALELO en reversa (PARK_MODO = PARK_PARALELO)
 // ═══════════════════════════════════════════════════════════════════════════════
-// Tras el giro 12 el auto entra a la recta inicial en busca del cajón delimitado
-// por los dos postes magenta (200x20x100 mm). La maniobra es el ESPEJO de INICIO:
-//   Fase 0: FRENO_PREV  (motorCoast durante MANIOBRA_FRENO_MS antes de reversa)
-//   Fase 1: REV_SWING   (reversa con servo a la pared exterior, cola al cajón)
-//   Fase 2: REV_CONTRA  (reversa con contravuelta para re-alinear paralelo a 0°)
-//   Fase 3: FRENO_MID   (motorCoast durante MANIOBRA_FRENO_MS antes de adelante)
-//   Fase 4: CENTRADO    (avance corto recto con heading-hold entre postes)
-//   Fase 5: FIN         (freno total, servo al centro, carrera terminada)
-
-const bool          PARK_ENABLED             = true;  // true = busca y estaciona tras la vuelta 12
-const bool          PARK_TEST_DIRECTO        = false; // true = inicia INMEDIATO en reversa (pon el carro AL LADO del cajón)
+// Fases (ver case ESTACIONANDO):
+//   20-23 : media vuelta + reversa del regreso (solo con PARK_MEDIA_VUELTA)
+//   0     : sigue la pared exterior y escanea poste 1 / hueco / poste 2
+//   1     : avance extra tras el poste 2 (PARK_POSTE2_*)
+//   2     : coast + servo a tope hacia la pared
+//   3     : reversa a tope hasta parkAngObjetivo      -> 14 (recto) o 4
+//   14    : reversa recta que compensa la altura de llegada (PARK_RECTO_*)
+//   4/5/6 : reversa a tope / meneo (PARK_WIGGLE_* = 0 -> se saltan)
+//   8     : contravuelta en reversa hasta alinear
+//   9, 11 : coast y acomodo hacia adelante hasta PARK_CENTER_HI_CM
+//   12,13 : reversa final opcional (PARK_REV_FINAL)
+//   10    : prueba a mano (PARK_TEST_MANO)
+// Pruebas de estacionamiento (valen para el PARK_MODO elegido arriba):
+const bool          PARK_TEST_DIRECTO        = false; // (solo paralelo) inicia INMEDIATO en reversa (pon el carro AL LADO del cajón)
 const bool          PARK_TEST_RECTA_COMPLETA = false; // true = inicia en recta final (pon el carro AL INICIO de la recta)
+const bool          PARK_TEST_MANO           = false; // true = prueba A MANO (motor apagado), arranca en el escaneo
+const bool          PARK_TEST_RETORNO        = false; // true = arranca directo en la media vuelta (pon el carro como si acabara
+                                                      // la MANIOBRA 13). Gira hacia PARK_TEST_PARED_IZQ (= pared del regreso)
 const bool          PARK_TEST_PARED_IZQ      = true;  // en tests: true = cajón en pared IZQ (como en tus fotos), false = DER
+const bool          PARK_EN_PRUEBA = PARK_TEST_DIRECTO || PARK_TEST_RECTA_COMPLETA
+                                     || PARK_TEST_MANO || PARK_TEST_RETORNO;
 // Entrada a ESTACIONANDO desde la recta final (parkBuscando).
 // false (2026-09-15) = entra a la fase 0 EN CUANTO empieza la recta: el escaneo por
 //   sonar encuentra los postes solo (PARK_REQUIERE_PI=false) y el seguidor mantiene
@@ -641,22 +653,9 @@ const int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la man
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
 const int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
-const unsigned long PARK_REV1_TIMEOUT_MS     = 3000;  // timeout fase 1 metida (ms)
 const int           PARK_REV_PWM             = 85;    // PWM de marcha atrás — suave para control preciso
-const int           PARK_ENDEREZA_MARGEN_DEG = 3;     // margen para considerar alineado (|ang| <= 3 deg)
-const unsigned long PARK_REV2_TIMEOUT_MS     = 3500;  // timeout fase 2 contravuelta (ms)
-const unsigned long PARK_CENTER_MS           = 400;   // avance suave para centrado entre postes (ms)
-const int           PARK_CENTER_PWM          = 75;    // PWM suave de centrado adelante
-
-// ── Límites ultrasónicos de estacionamiento ────────────────────────────────────
-// Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm.
-// El sensor frontal (distF) apunta al poste magenta delantero:
-// - Si distF >= 8 cm frente al poste delantero, ya retrocedimos 8 cm y quedan solo ~3 cm atrás:
-//   "¡YA ESTAMOS MUY ATRÁS!" -> Corte inmediato de reversa para no chocar el poste trasero.
-const int           PARK_REV_MAX_DF_CM        = 8;    // cm: distancia máxima permitida a la barrera frontal en reversa
-const int           PARK_REV_VALID_DF_MAX_CM  = 18;   // cm: rango para validar que distF ve la barrera y no pista vacía
-const int           PARK_WALL_TARGET_CM       = 6;    // cm: distancia lateral a la pared para considerarse pegado
-const int           PARK_CENTER_TARGET_DF_CM  = 5;    // cm: objetivo de centrado adelante (5 cm al frente, ~6 cm atrás)
+// Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
+// diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
 
 // Paralelo 10 pts — scan poste1/hueco/poste2 + maniobra en reversa (wiggle)
@@ -686,7 +685,6 @@ const unsigned long PARK_HUECO_MIN_MS         = 0;      // 2026-09-15: 500 -> 0.
                                                         // cuanto vuelve a haber bajada tras el hueco confirmado
                                                         // (la máquina de estados ya ordena poste1/hueco/poste2)
 const unsigned long PARK_HUECO_TIMEOUT_MS     = 2500;
-const unsigned long PARK_PASS_EXTRA_MS        = 600;
 // Cuánto avanza el carro DESPUÉS de ver el poste 2 antes de frenar y meterse.
 // 2026-09-16 (run 1019, rozó la pared de atrás): es la única palanca real contra
 // el fondo del cajón, porque no hay sonar trasero. Mover el arranque hacia
@@ -837,7 +835,6 @@ const float         PARK_FINAL_TOL_DEG        = 5.0f;
 // Solo entra si al acabar la fase 11 el carro quedó a más de PARK_FINAL_TOL_DEG;
 // si ya salió derecho, se la salta.
 const bool          PARK_REV_FINAL            = true;
-const unsigned long PARK_REV0_TIMEOUT_MS      = 2500;   // (legacy, ya no se usa en f13)
 // dF al que se detiene la reversa de acomodo final. Cada cm extra vale ~2.3° de
 // enderezado, y también ~1 cm menos de aire con la pared TRASERA (sin sensor).
 const int           PARK_REV_FINAL_DF_CM      = 8;
@@ -848,8 +845,8 @@ const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
 // 2026-09-16 (run 1016): con 3 el corte por distancia SÍ funcionó — la traza va
 // dF = 9,8,6,5,4,3 y ahí dispara — pero entre la granularidad del sonar y el
 // coast del motor el carro se sigue ~1 cm y terminó en dF=2, tocando la pared
-// de enfrente. 3 -> 6 para que se detenga en ~5, que es exactamente
-// PARK_CENTER_TARGET_DF_CM (el centrado de diseño: 5 cm al frente, ~6 atrás).
+// de enfrente. 3 -> 6 para que se detenga en ~5, que es exactamente el
+// centrado de diseño (5 cm al frente, ~6 atrás).
 // De paso 6 cm está lejos del piso de ~2 cm del HC-SR04, donde las lecturas se
 // caen a 0 y el corte por distancia no dispararía.
 const int           PARK_CENTER_HI_CM         = 6;
@@ -982,7 +979,6 @@ int           parkAltasCnt          = 0;   // lecturas altas seguidas (eco perdi
 int           parkGapCnt            = 0;
 int           parkInvalidasCnt      = 0;
 int           parkFrenteCnt         = 0;
-int           parkDfCnt             = 0;
 bool          parkRosaVisto         = false;
 float         parkErrPared          = 0.0f;
 // Referencia de rumbo medida contra la pared (ver PARK_TRIM_*)
@@ -1005,15 +1001,9 @@ unsigned long parkTrimT[PARK_TRIM_N];
 int           parkTrimN             = 0;
 int           parkTrimIdx           = 0;
 float         parkRumboRef          = 0.0f;
-float         parkRumboArco0        = 0.0f;
 long          parkExtRaw            = 0;
 long          parkCaidaLectura      = 0;
 unsigned long parkHuecoEntryMs      = 0;
-unsigned long parkPassExtraMs       = 0;
-int           parkCenterMode        = 0;
-int           parkCenterOkCnt       = 0;
-int           parkRetryN            = 0;
-unsigned long parkWiggleMs          = 0;
 float         parkBaseLlegada       = 0.0f; // parkBase latcheada al parar junto al cajón (fase 1 -> 2)
 unsigned long parkRectoMs           = 0;    // duración calculada del tramo recto de la fase 14
 float         parkAngObjetivo       = (float)PARK_ANG_IN_DEG; // ángulo de entrada calculado para esta llegada
@@ -1047,9 +1037,9 @@ bool          cajonParedDetectada    = false;
 //   Fase 4 ARCO   : avanza con servo a tope hasta PARK_PUNTA_ARCO_DEG, o dF tope
 //   Fase 5 ENTRA  : recto (gyro hold) hacia la pared hasta dF tope o timeout
 //   Fase 6 FIN    : motor apagado, carrera terminada
-//   Fase 10 MANO  : (solo PARK_PUNTA_TEST_MANO) servo a tope, motor apagado
+//   Fase 10 MANO  : (solo PARK_TEST_MANO) servo a tope, motor apagado
 //
-// MEDIA VUELTA (PARK_PUNTA_VUELTA_13=true): el carro NO estaciona tras el giro 12.
+// MEDIA VUELTA (PARK_MEDIA_VUELTA=true): el carro NO estaciona tras el giro 12.
 // Sigue la carrera normal por la recta de salida (esquivando con colores: el cono
 // del borde de la esquina 12 todavía es de la vuelta 3), hace la MANIOBRA 13 como
 // siempre y, en vez de volver a SIGUIENDO, da 90° MÁS hacia adelante en el mismo
@@ -1066,21 +1056,13 @@ bool          cajonParedDetectada    = false;
 // sentido (esquina 13) y la vecina (recta de salida). Si no ve la bajada, TIENE que
 // parar antes de salir de la recta de salida (PARK_PUNTA_TIMEOUT_MS).
 //
-// Prueba a mano (PARK_PUNTA_TEST_MANO=true): arranca directo aquí con el motor
-// SIEMPRE apagado. Empuja el carro por el carril hasta que imprima "BAJADA";
-// el servo se va a tope hacia la pared y ahí empujas el carro por el arco para
-// ver dónde cae la trompa. Si cae antes del lote -> PARK_PUNTA_AJUSTE_MS > 0;
-// si cae sobre el poste lejano -> PARK_PUNTA_AJUSTE_MS < 0.
-const bool          PARK_DE_PUNTA              = true;   // punta 7 pts si PARK_MODO_PARALELO=false
-const bool          PARK_MODO_PARALELO        = false;   // true = paralelo 10 pts (scan + reversa wiggle)
-const bool          PARK_TEST_MANO            = false;
-const bool          PARK_PUNTA_TEST_MANO       = false;  // true = prueba A MANO (motor apagado). Usa PARK_TEST_PARED_IZQ
-                                                         // (con PARK_TEST_RECTA_COMPLETA=true arranca aquí CON motor)
-const bool          PARK_PUNTA_VUELTA_13       = true;   // true = sigue hasta la MANIOBRA 13, media vuelta y estaciona REGRESANDO
-                                                         // false = estaciona de frente justo tras el giro 12
-const bool          PARK_TEST_RETORNO          = false;  // true = arranca directo en la media vuelta (pon el carro como si acabara
-                                                         // la MANIOBRA 13). Gira hacia PARK_TEST_PARED_IZQ (= pared del regreso)
-// Media vuelta (fases 20-23)
+// Prueba a mano (PARK_TEST_MANO=true con PARK_MODO=PARK_PUNTA): arranca directo
+// aquí con el motor SIEMPRE apagado. Empuja el carro por el carril hasta que
+// imprima "BAJADA"; el servo se va a tope hacia la pared y ahí empujas el carro
+// por el arco para ver dónde cae la trompa. Si cae antes del lote ->
+// PARK_PUNTA_AJUSTE_MS > 0; si cae sobre el poste lejano -> PARK_PUNTA_AJUSTE_MS < 0.
+// (El modo de estacionamiento y PARK_MEDIA_VUELTA se eligen arriba del todo.)
+// Media vuelta (fases 20-23, en ESTACIONANDO y en ESTACIONANDO_PUNTA)
 const int           PARK_RETORNO_PWM           = 95;
 const int           PARK_RETORNO_PWM_MIN       = 80;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
@@ -1305,15 +1287,7 @@ float alpha         = 0.85;
 float distL_filtrada = 0;
 float distR_filtrada = 0;
 float distF_filtrada = 0;   // sensor frontal (solo ronda de obstáculos)
-
-// Mediana de 3 previa al EMA en los laterales — rechaza picos de 1 frame
-// (rasante por yaw / crosstalk) que si no cruzaban umbralPared y disparaban
-// un giro falso.
-long bufL[3] = {200, 200, 200};
-long bufR[3] = {200, 200, 200};
-int  idxL = 0;
-int  idxR = 0;
-
+// (Los laterales NO tienen mediana, solo el EMA: ver LATERAL_OPEN_DEBOUNCE.)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Actuadores
@@ -1329,22 +1303,18 @@ void escribirServo(int angulo) {
   ledcWrite(SERVO_PIN, duty);
 }
 
-// Servo del pivote de MANIOBRA, entrando SOBRE LA MARCHA (ver el bloque
-// MANIOBRA_SERVO_*). tPivote = ms desde que arrancó la fase 1.
-//   [0, RETRASO)      -> centrado: el carro rompe la inercia en recta
-//   [RETRASO, +RAMPA) -> barrido lineal centro -> destino
-//   después           -> destino (tope), como siempre
-int servoPivoteRampa(unsigned long tPivote, int destino) {
-  if (tPivote < MANIOBRA_SERVO_RETRASO_MS) return centroServo;
-  unsigned long t = tPivote - MANIOBRA_SERVO_RETRASO_MS;
-  if (MANIOBRA_SERVO_RAMPA_MS == 0 || t >= MANIOBRA_SERVO_RAMPA_MS) return destino;
-  long recorrido = (long)(destino - centroServo);
-  return centroServo + (int)((recorrido * (long)t) / (long)MANIOBRA_SERVO_RAMPA_MS);
+// PWM de arranque suave: sube lineal de pwmMin a pwm en rampMs (t = ms desde el arranque).
+int rampaPWM(unsigned long t, unsigned long rampMs, int pwmMin, int pwm) {
+  if (t >= rampMs) return pwm;
+  return (int)map((long)t, 0, (long)rampMs, pwmMin, pwm);
 }
 
 // Techo del PWM del motor — DISTINTO por tipo de ronda:
-//   ronda de obstáculos (rondaObstaculos=true) : 110 (maniobras lentas y finas)
+//   ronda de obstáculos (rondaObstaculos=true) : 120 (maniobras lentas y finas)
 //   ronda cerrada       (rondaObstaculos=false): 180 (fiuuummmmm)
+// OJO: setMotor() recorta TODO a esto. SIGUIENDO/CRUCERO/RECUPERANDO piden
+// MOTOR_MAX (antes decían 180 y salían a 120), y los 165/145 del pivote FWD
+// también salen a 120: la velocidad de crucero se cambia AQUÍ.
 const int MOTOR_MAX = rondaObstaculos ? 120 : 180;
 
 // ── Rampa de arranque en REVERSA (2026-09-16) ───────────────────────────────
@@ -1407,31 +1377,23 @@ void motorReversa()  {
 // el EMA no. Sin esto un pico espurio disparaba MANIOBRA antes de la esquina.
 // 3 (no 5): con 5 el retraso de la mediana metía tarde el slowdown y el carro
 // llegaba con poca pista a la esquina.
+long med3(long a, long b, long c) {
+  return max(min(a, b), min(max(a, b), c));
+}
+
 long medianaFront(long nueva) {
   static long buf[3] = {200, 200, 200};
   static int  idx = 0;
   buf[idx] = nueva;
   idx = (idx + 1) % 3;
-  long s[3];
-  for (int i = 0; i < 3; i++) s[i] = buf[i];
-  for (int i = 0; i < 3; i++)
-    for (int j = i + 1; j < 3; j++)
-      if (s[j] < s[i]) { long t = s[i]; s[i] = s[j]; s[j] = t; }
-  return s[1];
-}
-
-long mediana3(long nueva, long buf[3], int &idx) {
-  buf[idx] = nueva;
-  idx = (idx + 1) % 3;
-  long a = buf[0], b = buf[1], c = buf[2];
-  return max(min(a, b), min(max(a, b), c));
+  return med3(buf[0], buf[1], buf[2]);
 }
 
 // La MANIOBRA en curso es la 13 (la de la media vuelta para estacionar). Durante
 // ella turnsCompleted todavía vale 12: finalizarManiobra() lo incrementa al cerrar.
 bool esManiobra13() {
   return !MODO_CONTINUO
-         && rondaObstaculos && PARK_ENABLED && PARK_DE_PUNTA && PARK_PUNTA_VUELTA_13
+         && rondaObstaculos && PARK_MODO != PARK_NINGUNO && PARK_MEDIA_VUELTA
          && turnsCompleted == TURNS_PER_RACE;
 }
 
@@ -1489,6 +1451,27 @@ void resetModoGiro() {
   giroModoFwd       = false;
   hugPegadoStreak   = 0;
   hugSeparadoStreak = 0;
+}
+
+// Vigilancia de la esquina de CRUCERO (caídas del lateral + latch de dirección
+// de aproximación) desde cero. Se llama al entrar/salir de CRUCERO.
+void resetVigilanciaEsquina() {
+  contadorFront       = 0;
+  lateralWatchActivo  = false;
+  lateralOpenStreak   = 0;
+  lateralDropCount    = 0;
+  giroSucioArmado     = false;
+  direccionAproxLatch = 0;
+  aproxOpenStreakIzq  = 0;
+  aproxOpenStreakDer  = 0;
+}
+
+// SIGUIENDO/RECUPERANDO -> CRUCERO.
+void entrarCrucero() {
+  resetVigilanciaEsquina();
+  cruceroEntryMs = millis();
+  cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
+  estado         = CRUCERO;
 }
 
 void decidirManiobra(long distL, long distR) {
@@ -1646,14 +1629,11 @@ bool parkAtoroDetecta(unsigned long faseMs) {
 // ── Cierre de ESTACIONANDO (apaga motor, centra servo y finaliza carrera) ─────
 void finalizarPark(const char *motivo) {
   motorCoast();
-  setMotor(0);
   escribirServo(centroServo);
   parkFase     = 7;
   raceFinished = true;
   Serial.println("==================================================");
-  Serial.print  ("  ESTACIONAMIENTO ");
-  Serial.print  (PARK_MODO_PARALELO ? "PARALELO (10 pts)" : "DE PUNTA (7 pts)");
-  Serial.print  (" TERMINADO: ");
+  Serial.print  ("  ESTACIONAMIENTO PARALELO (10 pts) TERMINADO: ");
   Serial.println(motivo);
   Serial.print  ("  Heading final vs recta: "); Serial.print(anguloGyro, 2); Serial.println(" deg");
   Serial.print  ("  Base pared="); Serial.print(parkBase, 1);
@@ -1665,15 +1645,14 @@ void finalizarPark(const char *motivo) {
   Serial.println("==================================================");
 }
 
-void latchParedCajon(bool retorno) {
-  if (PARK_TEST_MANO || PARK_TEST_DIRECTO || PARK_TEST_RECTA_COMPLETA || PARK_TEST_RETORNO) {
-    parkParedEsIzquierda = PARK_TEST_PARED_IZQ;
-  } else if (cajonParedDetectada) {
-    parkParedEsIzquierda = retorno ? !cajonParedEsIzquierda : cajonParedEsIzquierda;
-  } else {
-    bool ida = !direccionIzquierda;
-    parkParedEsIzquierda = retorno ? !ida : ida;
-  }
+// Lado de la pared del lote (true = izquierda). El lote SIEMPRE está en la pared
+// EXTERIOR de la recta de salida: yendo en el sentido de la carrera está del lado
+// contrario al giro; al regresar tras la media vuelta queda del OTRO lado, que es
+// justo hacia donde gira la media vuelta.
+bool paredCajonEsIzq(bool retorno) {
+  if (PARK_EN_PRUEBA) return PARK_TEST_PARED_IZQ;
+  bool ida = cajonParedDetectada ? cajonParedEsIzquierda : !direccionIzquierda;
+  return retorno ? !ida : ida;
 }
 
 void resetParkScan() {
@@ -1689,22 +1668,15 @@ void resetParkScan() {
   parkGapCnt           = 0;
   parkInvalidasCnt     = 0;
   parkFrenteCnt        = 0;
-  parkDfCnt            = 0;
   parkRosaVisto        = false;
   parkErrPared         = 0.0f;
   parkRumboRef         = 0.0f;
-  parkRumboArco0       = 0.0f;
   parkExtRaw           = 0;
   parkCaidaLectura     = 0;
   parkHuecoEntryMs     = 0;
-  parkPassExtraMs      = 0;
-  parkCenterMode       = 0;
-  parkCenterOkCnt      = 0;
   parkBaseLlegada      = 0.0f;
   parkRectoMs          = 0;
   parkAngObjetivo      = (float)PARK_ANG_IN_DEG;
-  parkRetryN           = 0;
-  parkWiggleMs         = 0;
   puntaIntPared       = 0.0f;
   puntaIntMs          = millis();
   parkTrimReset();
@@ -1716,27 +1688,24 @@ void resetParkScan() {
 void iniciarEstacionando() {
   estado       = ESTACIONANDO;
   parkBuscando = false;
-  latchParedCajon(false);
+  parkParedEsIzquierda = paredCajonEsIzq(false);
   resetParkScan();
 
   if (PARK_TEST_DIRECTO) {
     motorCoast();
     escribirServo(centroServo);
     parkRumboRef = anguloGyro;
-    parkFase     = PARK_MODO_PARALELO ? 2 : 1;
+    parkFase     = 2;
     parkFaseMs   = millis();
     Serial.println("-> TEST DIRECTO: Iniciando en posicion de lanzamiento para reversa");
   } else if (PARK_TEST_MANO) {
     motorCoast();
-    setMotor(0);
     escribirServo(centroServo);
     Serial.println("-> TEST A MANO: Motor apagado, empuja el carro para ver deteccion y angulos");
   }
 
   Serial.println("==================================================");
-  Serial.print("-> ESTACIONANDO ");
-  Serial.print(PARK_MODO_PARALELO ? "EN PARALELO (10 pts)" : "DE PUNTA (7 pts)");
-  Serial.print(": sigo pared ");
+  Serial.print("-> ESTACIONANDO EN PARALELO (10 pts): sigo pared ");
   Serial.print(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
   Serial.print(" a "); Serial.print(PARK_PARED_CM, 0); Serial.print(" cm");
   Serial.println(PARK_TEST_MANO ? " (PRUEBA A MANO, motor apagado)" : "");
@@ -1746,7 +1715,7 @@ void iniciarEstacionando() {
 void iniciarEstacionandoRetorno() {
   estado       = ESTACIONANDO;
   parkBuscando = false;
-  latchParedCajon(true);
+  parkParedEsIzquierda = paredCajonEsIzq(true);
   parkRumboGiro0   = anguloGyro;
   parkSettleQuieto = 0;
   parkSettleSampMs = millis();
@@ -1804,21 +1773,12 @@ void iniciarEstacionandoPunta(bool retorno) {
   parkBuscando   = false;
   puntaRosaVisto = false;
   puntaRetorno   = retorno;
-  // El lote SIEMPRE está en la pared EXTERIOR de la recta de salida (misma lógica
-  // que iniciarEstacionando). Yendo en el sentido de la carrera está del lado
-  // contrario al giro; al regresar tras la media vuelta queda del OTRO lado, que
-  // es justo hacia donde gira la media vuelta.
-  if (PARK_PUNTA_TEST_MANO || PARK_TEST_RECTA_COMPLETA || PARK_TEST_RETORNO) {
-    puntaParedIzq = PARK_TEST_PARED_IZQ;
-  } else {
-    bool paredIzqIda = cajonParedDetectada ? cajonParedEsIzquierda : !direccionIzquierda;
-    puntaParedIzq    = retorno ? !paredIzqIda : paredIzqIda;
-  }
+  puntaParedIzq  = paredCajonEsIzq(retorno);
   Serial.println("==================================================");
   Serial.print("-> ESTACIONANDO DE PUNTA");
   Serial.print(retorno ? " (media vuelta, pared del regreso " : " (de frente, pared ");
   Serial.print(puntaParedIzq ? "IZQUIERDA)" : "DERECHA)");
-  Serial.println(PARK_PUNTA_TEST_MANO ? " PRUEBA A MANO, motor apagado" : "");
+  Serial.println(PARK_TEST_MANO ? " PRUEBA A MANO, motor apagado" : "");
   Serial.println("==================================================");
   if (retorno) {
     motorCoast();
@@ -1834,6 +1794,14 @@ void iniciarEstacionandoPunta(bool retorno) {
   }
 }
 
+// Punto de entrada ÚNICO al estacionamiento según PARK_MODO (ver arriba del todo).
+// retorno=true: tras la MANIOBRA 13 (media vuelta y estaciona regresando).
+void iniciarEstacionamiento(bool retorno) {
+  if (PARK_MODO == PARK_PUNTA) iniciarEstacionandoPunta(retorno);
+  else if (retorno)            iniciarEstacionandoRetorno();
+  else                         iniciarParkBuscando();
+}
+
 // Servo "recto" hacia un heading (gyro PD) para ESTACIONANDO_PUNTA. Convención
 // del proyecto: servo > centro = izquierda; anguloGyro/gyroRate > 0 = CCW (izq).
 void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG) {
@@ -1844,7 +1812,6 @@ void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG) {
 
 void finalizarPunta(const char *motivo) {
   motorCoast();
-  setMotor(0);
   escribirServo(centroServo);
   puntaFase    = 6;
   raceFinished = true;
@@ -1879,7 +1846,7 @@ void finalizarManiobra() {
   motorAdelante();
   escribirServo(centroServo);
   setMotor(0);
-  velocidadMotor = 180;
+  velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
   // Residual real vs la recta nueva (NO zerar a ciegas): si el pivote sub/sobre-
@@ -1908,19 +1875,10 @@ void finalizarManiobra() {
   if (MODO_CONTINUO) {
     // Sin parada: ni estaciona ni termina, sigue corriendo vueltas.
   } else if (turnsCompleted >= TURNS_PER_RACE) {
-    if (rondaObstaculos && PARK_ENABLED && PARK_DE_PUNTA) {
-      if (!PARK_PUNTA_VUELTA_13) {
-        iniciarEstacionandoPunta(false);         // giro 12: estaciona de frente
-      } else if (turnsCompleted > TURNS_PER_RACE) {
-        if (PARK_MODO_PARALELO) iniciarEstacionandoRetorno();
-        else iniciarEstacionandoPunta(true);   // giro 13: media vuelta y estaciona regresando
-      }
-      // giro 12 con PARK_PUNTA_VUELTA_13: sigue la carrera normal (SIGUIENDO) hasta la esquina 13
-    } else if (rondaObstaculos && PARK_ENABLED) {
-      iniciarParkBuscando();
-    } else {
-      iniciarTerminando();
-    }
+    if (PARK_MODO == PARK_NINGUNO)            iniciarTerminando();
+    else if (!PARK_MEDIA_VUELTA)              iniciarEstacionamiento(false);  // giro 12: de frente
+    else if (turnsCompleted > TURNS_PER_RACE) iniciarEstacionamiento(true);   // giro 13: media vuelta
+    // giro 12 con PARK_MEDIA_VUELTA: sigue la carrera normal (SIGUIENDO) hasta la esquina 13
   }
   Serial.print("MANIOBRA completada ");
   Serial.print(turnsCompleted);
@@ -1953,7 +1911,7 @@ void finalizarInicio() {
   motorAdelante();
   escribirServo(centroServo);
   setMotor(0);
-  velocidadMotor = 180;
+  velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
   anguloObjetivo = 0;
@@ -2037,10 +1995,10 @@ long leerDistancia(int trig, int echo) {
   delayMicroseconds(10);
   digitalWrite(trig, LOW);
 
-  // 6000 us: 100 cm ida+vuelta = 5882 us, cubre todo el rango útil (umbralPared
-  // = 100 cm incluido). El caso "sin eco" es justo el de la esquina y quema el
-  // timeout completo cada loop -> con 6000 en vez de 7000 el loop respira un
-  // poco más rápido cuando más importa.
+  // Timeout 7000 us ≈ 119 cm: cubre todo el rango útil (umbralPared = 100 cm =
+  // 5882 us). El caso "sin eco" es justo el de la esquina y quema el timeout
+  // completo cada loop; bajarlo a 6000 haría respirar un poco el loop (el
+  // comentario viejo decía 6000 pero el código siempre tuvo 7000).
   long dur  = pulseIn(echo, HIGH, 7000);
   long dist = dur * 0.034 / 2;
   if (dist == 0 || dist > 200) dist = 200;
@@ -2076,13 +2034,23 @@ bool detectarEsquina(long distL, long distR, long distF) {
 // Protocolo serial con Raspberry Pi
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Valor del campo `clave` (p.ej. "prio=") de un mensaje V1/V2, hasta la coma
+// siguiente. false = el campo no viene en el mensaje.
+bool campoPi(const String &line, const char *clave, String &valor) {
+  int idx = line.indexOf(clave);
+  if (idx < 0) return false;
+  int ini = idx + strlen(clave);
+  int end = line.indexOf(',', ini);
+  valor = (end >= 0) ? line.substring(ini, end) : line.substring(ini);
+  return true;
+}
+
 void parsePiMessage(String line) {
   line.trim();
 
   // ── Handshake ──────────────────────────────────────────────────────────────
   if (line.startsWith("READY")) {
     piReadyReceived = true;
-    piReady         = true;
     lastPiMsgMs     = millis();
     if (readyMs == 0) readyMs = millis();
     Serial2.println("ACK:READY");
@@ -2094,108 +2062,33 @@ void parsePiMessage(String line) {
   //      o:  V1,obs=+0.123,turn=0,state=avoid_red,prio=1,mem=18,pp=0
   //          (ambos se parsean igual — solo difiere el campo pp=)
   if (line.startsWith("V1,") || line.startsWith("V2,")) {
-
-    // obs
-    int idx = line.indexOf("obs=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 4, end) : line.substring(idx + 4);
-      obsBiasNorm = constrain(s.toFloat(), -1.0, 1.0);
-    }
-
-    // turn
-    idx = line.indexOf("turn=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
-      int v = s.toInt();
-      turnHint = (v > 0) ? 1 : (v < 0) ? -1 : 0;
-    }
-
-    // prio
-    idx = line.indexOf("prio=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
-      piPriority = (s.toInt() != 0);
-    }
-
-    // mem
-    idx = line.indexOf("mem=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 4, end) : line.substring(idx + 4);
-      piMemoryFrames = max(0L, s.toInt());
-    }
+    String v;
+    if (campoPi(line, "obs=", v))  obsBiasNorm = constrain(v.toFloat(), -1.0, 1.0);
+    if (campoPi(line, "turn=", v)) { int t = v.toInt(); turnHint = (t > 0) ? 1 : (t < 0) ? -1 : 0; }
+    if (campoPi(line, "prio=", v)) piPriority = (v.toInt() != 0);
+    if (campoPi(line, "mem=", v))  piMemoryFrames = max(0L, v.toInt());
 
     // Marca del último frame CON obstáculo activo -> grace post-esquiva de
     // SIGUIENDO->CRUCERO (deja aterrizar el pulso `pasado`).
     if (piPriority || piMemoryFrames > 0) ultimoObstaculoMs = millis();
 
-    // pp  — campo nuevo en V2; ausente en mensajes V1 → pp=false por defecto
-    idx = line.indexOf(",pp=");
-    if (idx >= 0) {
-      String s = line.substring(idx + 4);
-      // solo toma el dígito antes de cualquier coma extra
-      int end = s.indexOf(',');
-      if (end >= 0) s = s.substring(0, end);
-      piPurePursuit = (s.toInt() != 0);
-    } else {
-      piPurePursuit = false;   // mensaje V1 sin campo pp → modo obstáculo
-    }
+    // Campos que, si NO vienen (V1), valen false:
+    //   pp     : la Pi está en Pure Pursuit (",pp=" con coma para no confundirlo)
+    //   pasado : evento de UN frame, el robot ya atravesó físicamente el obstáculo
+    //   intr   : el obstáculo se pasa por el mismo lado hacia el que gira la pista
+    //            (corner_lines.py); sin dirección confirmada -> sigue bloqueando
+    piPurePursuit  = campoPi(line, ",pp=", v)    && v.toInt() != 0;
+    piPasado       = campoPi(line, "pasado=", v) && v.toInt() != 0;
+    piInteriorPass = campoPi(line, "intr=", v)   && v.toInt() != 0;
 
-    // pasado — evento de un solo frame: el robot ya atravesó físicamente el
-    // obstáculo. Ausente en V1 → false por defecto.
-    idx = line.indexOf("pasado=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 7, end) : line.substring(idx + 7);
-      piPasado = (s.toInt() != 0);
-    } else {
-      piPasado = false;
-    }
-
-    // intr — el obstáculo actual se pasa por el mismo lado hacia el que va
-    // a girar la pista (ver corner_lines.py en la Pi). Ausente en V1 o si
-    // la Pi aún no confirmó la dirección de giro → false por defecto
-    // (mismo comportamiento de siempre: sigue bloqueando).
-    idx = line.indexOf("intr=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
-      piInteriorPass = (s.toInt() != 0);
-    } else {
-      piInteriorPass = false;
-    }
-
-    // inicio — la Pi vio rosa MAYORITARIO en el frame al arrancar (está en el
-    // estacionamiento) -> el ESP32 hace la maniobra de salida (case INICIO)
-    // antes de SIGUIENDO. Debe venir ya en el PRIMER V2. Ausente en V1 -> se
-    // ignora. SOLO se setea a true (sticky): la Pi solo tiene que afirmarlo una
-    // vez; el one-shot de loop() lo consume una sola vez.
-    idx = line.indexOf("inicio=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 7, end) : line.substring(idx + 7);
-      if (s.toInt() != 0) piInicioEstacionamiento = true;
-    }
+    // inicio — la Pi vio rosa MAYORITARIO al arrancar (está en el estacionamiento)
+    // -> maniobra de salida (case INICIO). Debe venir ya en el PRIMER V2. SOLO se
+    // setea a true (sticky); el one-shot de loop() lo consume una sola vez.
+    if (campoPi(line, "inicio=", v) && v.toInt() != 0) piInicioEstacionamiento = true;
 
     // park — etapa del cajón vista por la Pi en la recta final
-    idx = line.indexOf("park=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 5, end) : line.substring(idx + 5);
-      piPark = s.toInt();
-    }
-    // pd — distancia estimada (cm, BEV) al bloque magenta más cercano
-    idx = line.indexOf("pd=");
-    if (idx >= 0) {
-      int end = line.indexOf(',', idx);
-      String s = (end >= 0) ? line.substring(idx + 3, end) : line.substring(idx + 3);
-      piParkDistCm = s.toInt();
-    }
+    if (campoPi(line, "park=", v)) piPark = v.toInt();
 
-    piReady           = true;
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
@@ -2246,12 +2139,15 @@ void parsePiMessage(String line) {
     // ── DEBUG heading/control (2026-09-07: "heading es mi pata de palo") ──
     //   ao   : anguloObjetivo — el TARGET de heading que persigue el gyro PID
     //   eg   : errorGyro (anguloObjetivo - anguloGyro, capado ±20 en controlPID)
-    //   srv  : último ángulo escrito al servo (80 = centro; <80 der, >80 izq)
+    //   srv  : último ángulo escrito al servo (centroServo = centro; menor der, mayor izq)
     //   tc   : turnsCompleted — qué esquina física va (0..12)
     Serial2.print(",ao=");   Serial2.print(anguloObjetivo, 1);
     Serial2.print(",eg=");   Serial2.print(errorGyro, 1);
     Serial2.print(",srv=");  Serial2.print(ultimoServo);
     Serial2.print(",tc=");   Serial2.print(turnsCompleted);
+    //   tpr  : TURNS_PER_RACE. La Pi busca el rosa del cajón cuando tc >= tpr, así
+    //          que probar con 4 vueltas o correr 12 funciona sin tocar la Pi.
+    Serial2.print(",tpr=");  Serial2.print(TURNS_PER_RACE);
     Serial2.print(",pb=");   Serial2.print(parkBuscando ? 1 : 0);
     //   pnf/pnx/pnb : ESTACIONANDO(_PUNTA) — fase, sonar exterior, línea base (pns = subfase del scan paralelo)
     if (estado == ESTACIONANDO) {
@@ -2307,7 +2203,6 @@ void parsePiMessage(String line) {
     if (x >= 0 && x <= 640) {
       obsBiasNorm   = constrain((float(x) - 320.0) / 320.0, -1.0, 1.0);
       piPurePursuit = false;
-      piReady       = true;
       lastPiMsgMs   = millis();
       Serial2.println("ACK:X");
     }
@@ -2604,7 +2499,7 @@ void controlPID(long distL, long distR) {
 // detectarEsquina() y acotado a TERMINANDO_MS. Al vencer el tiempo frena y marca
 // la carrera como terminada (raceFinished) — el loop() ya deja el carro parado.
 void terminando(long distL, long distR) {
-  velocidadMotor = 180;
+  velocidadMotor = MOTOR_MAX;
   controlPID(distL, distR);
 
   if (millis() - terminandoEntryMs >= TERMINANDO_MS) {
@@ -2653,29 +2548,24 @@ void setup() {
   lastPIDTime  = millis();
   lastGyroTime = millis();
   lastPiMsgMs  = 0;
-  bootStartMs  = millis();
   anguloObjetivo = 0;
 
-  // Esperar READY de la Pi (igual que Controller_PI.ino)
+  // Esperar READY de la Pi (igual que Controller_PI.ino). Bloquea SIN timeout:
+  // loop() siempre arranca con piReadyReceived = true.
   Serial.println("Esperando READY desde Pi...");
   piReadyReceived = false;
-  unsigned long waitStart = millis();
-  while (!piReadyReceived) { // && (millis() - waitStart < 30000)) {
+  while (!piReadyReceived) {
     if (Serial2.available()) {
       String line = Serial2.readStringUntil('\n');
       line.trim();
       if (line.indexOf("READY") >= 0) {
         piReadyReceived = true;
-        piReady         = true;
         timeStart = millis();
         readyMs   = millis();
         Serial.println("Recibido READY. Esperando primer V2...");
       }
     }
     delay(50);
-  }
-  if (!piReadyReceived) {
-    Serial.println("Timeout Pi — continuando sin señal Pi.");
   }
   Serial.println("Sistema listo (PurePursuit)");
 }
@@ -2688,24 +2578,11 @@ void setup() {
 void loop() {
   readPiSerial();
 
-  // Espera boot si la Pi todavía no respondió
-  if (!piReadyReceived) {
-    if ((millis() - bootStartMs) < BOOT_WAIT_PI_MS) {
-      escribirServo(centroServo);
-      setMotor(0);
-      Serial.println(" | Estado:WAIT_PI");
-      delay(20);
-      return;
-    }
-    // Pasó el timeout de arranque → continuar de todas formas
-  }
-
   // READY llegó PERO todavía no el primer V2 -> NO rodar. Si no, controlPID()
   // cae en el fallback wall-PID y el carro avanza ~0.5 s sin ver el obstáculo.
   // Con la Pi mandando el primer V2 justo tras READY, esto son unos ms; el
   // timeout evita quedar atorado para siempre si la Pi muere tras el READY.
-  if (piReadyReceived && !piFirstV2Received
-      && (millis() - readyMs) < FIRST_V2_TIMEOUT_MS) {
+  if (!piFirstV2Received && (millis() - readyMs) < FIRST_V2_TIMEOUT_MS) {
     escribirServo(centroServo);
     setMotor(0);
     Serial.println(" | Estado:WAIT_FIRST_V2");
@@ -2716,12 +2593,13 @@ void loop() {
   if (raceFinished) {
     setMotor(0);
     escribirServo(centroServo);
-    Serial.println(" | TERMINADO giros=12/12");
+    Serial.print(" | TERMINADO giros="); Serial.print(turnsCompleted);
+    Serial.print("/"); Serial.println(TURNS_PER_RACE);
     delay(20);
     return;
   }
 
-  // Arranque REAL del carro (ya pasó WAIT_PI y WAIT_FIRST_V2): re-ancla timeStart
+  // Arranque REAL del carro (ya pasó WAIT_FIRST_V2): re-ancla timeStart
   // aquí para que (millis()-timeStart) mida desde que empieza a rodar, no desde
   // el READY -> el grace de arranque (millis()-timeStart > 500) y el cooldownGiro
   // cuentan desde la marcha real. Contra el giro-falso en la zona de salida queda
@@ -2742,17 +2620,16 @@ void loop() {
     if (MODO_CONTINUO) {
       Serial.println("-> MODO CONTINUO: sin estacionamiento ni parada");
     }
-    if (!MODO_CONTINUO && PARK_DE_PUNTA && PARK_TEST_RETORNO) {
-      turnsCompleted = TURNS_PER_RACE + 1;   // tc=13 -> la Pi busca el rosa
-      iniciarEstacionandoPunta(true);
-    } else if (!MODO_CONTINUO && PARK_DE_PUNTA && (PARK_PUNTA_TEST_MANO || PARK_TEST_RECTA_COMPLETA)) {
-      turnsCompleted = TURNS_PER_RACE;   // tc=12 -> la Pi busca el rosa
-      iniciarEstacionandoPunta(false);
-    } else if (!MODO_CONTINUO && PARK_TEST_DIRECTO) {
+    // Las pruebas arrancan en el modo que diga PARK_MODO (punta o paralelo).
+    bool pruebaPark = !MODO_CONTINUO && PARK_MODO != PARK_NINGUNO;
+    if (pruebaPark && PARK_MODO == PARK_PARALELO && PARK_TEST_DIRECTO) {
       iniciarEstacionando();
-    } else if (!MODO_CONTINUO && PARK_TEST_RECTA_COMPLETA) {
-      turnsCompleted = TURNS_PER_RACE;
-      iniciarParkBuscando();
+    } else if (pruebaPark && PARK_TEST_RETORNO) {
+      turnsCompleted = TURNS_PER_RACE + 1;   // tc=13 -> la Pi busca el rosa
+      iniciarEstacionamiento(true);
+    } else if (pruebaPark && (PARK_TEST_MANO || PARK_TEST_RECTA_COMPLETA)) {
+      turnsCompleted = TURNS_PER_RACE;       // tc=12 -> la Pi busca el rosa
+      iniciarEstacionamiento(false);
     } else if (rondaObstaculos && piInicioEstacionamiento) {
       estado     = INICIO;
       inicioFase = -1;
@@ -2763,9 +2640,9 @@ void loop() {
   // PARK_PUNTA_SOLO_EXTERIOR: en la búsqueda del cajón solo el sonar exterior (sin
   // crosstalk del interior ni del frontal). Aplica a ESTACIONANDO_PUNTA fase 0 y al
   // scan paralelo (ESTACIONANDO fase 0). Al pasar a fase >= 1 vuelven los tres.
-  bool parkSoloExterior = PARK_PUNTA_SOLO_EXTERIOR && !PARK_PUNTA_TEST_MANO && !PARK_TEST_MANO
+  bool parkSoloExterior = PARK_PUNTA_SOLO_EXTERIOR && !PARK_TEST_MANO
                           && ((estado == ESTACIONANDO_PUNTA && puntaFase == 0)
-                           || (estado == ESTACIONANDO && PARK_MODO_PARALELO && parkFase == 0));
+                           || (estado == ESTACIONANDO && parkFase == 0));
   bool paredExtIzq = (estado == ESTACIONANDO_PUNTA) ? puntaParedIzq : parkParedEsIzquierda;
   bool leerL = !parkSoloExterior || paredExtIzq;
   bool leerR = !parkSoloExterior || !paredExtIzq;
@@ -2790,7 +2667,7 @@ void loop() {
 
   // Sensor frontal: en ronda de obstáculos alimenta CRUCERO/MANIOBRA; en ronda
   // cerrada sirve para frenar un poco al acercarse a la pared de enfrente
-  // (FRONT_SLOWDOWN_CM). Mediana de 5 (rechaza picos) + un EMA suave encima.
+  // (FRONT_SLOWDOWN_CM). Mediana de 3 (rechaza picos) + un EMA suave encima.
   // Apagado = 200 ("nada enfrente") para la lógica; el filtrado conserva su valor.
   long distF_med = leerF ? medianaFront(leerDistancia(TRIG_F, ECHO_F)) : 200;
   if (leerF) distF_filtrada = filtroEMA(distF_med, distF_filtrada);
@@ -2844,8 +2721,8 @@ void loop() {
         long r1 = leerDistancia(TRIG_R, ECHO_R);
         long r2 = leerDistancia(TRIG_R, ECHO_R);
         long r3 = leerDistancia(TRIG_R, ECHO_R);
-        long dL0 = max(min(l1, l2), min(max(l1, l2), l3));   // mediana de 3
-        long dR0 = max(min(r1, r2), min(max(r1, r2), r3));
+        long dL0 = med3(l1, l2, l3);
+        long dR0 = med3(r1, r2, r3);
 
         // El cajón SIEMPRE está sobre la pared exterior. El lateral más corto es
         // esa pared: si es dL, la pared está a la izquierda -> el carro sale
@@ -2886,11 +2763,7 @@ void loop() {
 
       // ── Fase 1: SWING — saca la nariz hacia el interior ────────────────────
       if (inicioFase == 1) {
-        unsigned long tS = millis() - inicioFaseMs;
-        int vel = (tS < INICIO_RAMP_MS)
-                  ? (int)map((long)tS, 0, (long)INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM)
-                  : INICIO_PWM;
-        
+        int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM);
         motorAdelante();
         escribirServo(inicioGirarDer ? 30 : 160);   // full hacia el lado de salida
         delay(100);
@@ -3041,7 +2914,7 @@ void loop() {
     }
 
     case SIGUIENDO: {
-      velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : 180;
+      velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
       if (parkBuscando) velocidadMotor = PARK_APPROACH_PWM;
 
       // Ronda cerrada: si la pared de ENFRENTE ya está cerca, baja la velocidad
@@ -3097,15 +2970,8 @@ void loop() {
       // así que sin eso el comportamiento es idéntico al de siempre.
       bool bloqueadoPorObstaculo = (piPriority || (piMemoryFrames > 0)) && !piInteriorPass;
 
-      // 2026-08-28: gate de alineación. En un latiguazo de esquiva el chasis
-      // queda ladeado (visto en pista a +37deg) y un ultrasónico lateral lee
-      // "sin pared" -> detectarEsquina() disparaba una falsa esquina.
-      // 25° (no 15): con 15 el carro no lograba mantenerse recto y NO detectaba
-      // la esquina real -> se iba de frente. 25 bloquea el latiguazo (37°) pero
-      // permite esquinas reales con algo de error de heading. (Con
-      // INTERIOR_PASS_ENABLED=False el bloqueo por obstáculo ya tapa el caso
-      // original; esto es red de seguridad.)
-      bool chasisAlineado = fabs(anguloGyro) < 25.0f;
+      // (Limpieza 2026-09-26: aquí había un `chasisAlineado = |ang| < 25°` que se
+      //  calculaba pero NUNCA se usaba en la condición de giro; se quitó.)
 
       if ((millis() - lastTurnTime > cooldownGiro)
           && millis() - timeStart > 500)
@@ -3131,17 +2997,7 @@ void loop() {
               && distF > 0 && distF < FRONT_CRUCERO_CM) {
             contadorFront++;
             if (contadorFront >= esquinaDebounce) {
-              contadorFront   = 0;
-              cruceroEntryMs  = millis();
-              cruceroCerca    = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
-              lateralWatchActivo = false;
-              lateralOpenStreak  = 0;
-              lateralDropCount   = 0;
-              giroSucioArmado    = false;
-              direccionAproxLatch = 0;
-              aproxOpenStreakIzq  = 0;
-              aproxOpenStreakDer  = 0;
-              estado          = CRUCERO;
+              entrarCrucero();
               Serial.println("-> CRUCERO");
             }
           } else {
@@ -3176,7 +3032,7 @@ void loop() {
     }
 
     case RECUPERANDO: {
-      velocidadMotor = 180;
+      velocidadMotor = MOTOR_MAX;
       controlPID(distL, distR);   // toma el branch RECUPERANDO de controlPID()
 
       // Prioridad absoluta durante la recta final: si la Pi ya confirmó que el
@@ -3188,7 +3044,6 @@ void loop() {
         break;
       }
 
-      bool wallOk    = abs(errorWall) < wallSettleCm;
       bool headingOk = abs(errorGyro) < headingSettleDeg;
       // El dwell arranca cuando el heading YA se alcanzó (no desde que entró a
       // RECUPERANDO). Si se pierde, se re-arma.
@@ -3218,16 +3073,7 @@ void loop() {
         // compromete otra esquina/vuelta). Se vuelve a SIGUIENDO, donde el
         // chequeo de piPark==2 dispara el estacionamiento.
         if (rondaObstaculos && !piPriority && paredAdelante && !parkBuscando) {
-          cruceroEntryMs = millis();
-          cruceroCerca   = false;   // fuerza el edge-detect de la 1ª frame de CRUCERO
-          lateralWatchActivo = false;
-          lateralOpenStreak  = 0;
-          lateralDropCount   = 0;
-          giroSucioArmado    = false;
-          direccionAproxLatch = 0;
-          aproxOpenStreakIzq  = 0;
-          aproxOpenStreakDer  = 0;
-          estado         = CRUCERO;
+          entrarCrucero();
         } else {
           estado = SIGUIENDO;
         }
@@ -3279,8 +3125,8 @@ void loop() {
     // vuelve a SIGUIENDO para esquivarlo.
     // ═══════════════════════════════════════════════════════════════════════════
     case CRUCERO: {
-      velocidadMotor = 180;
-      if (piPasado) piPasado = false;   // pulso viejo/rezagado: CRUCERO ya mantiene heading
+      velocidadMotor = MOTOR_MAX;
+      piPasado = false;   // pulso viejo/rezagado: CRUCERO ya mantiene heading
       // Cerca de la pared -> pura gyro+wall (controlPID lo enruta con cruceroCerca).
       // Lejos -> visión (el centerline todavía va recto).
       // TAMBIÉN gyro-hold si el chasis está chueco (> CRUCERO_STRAIGHTEN_DEG): hay
@@ -3322,14 +3168,7 @@ void loop() {
                         && fabs(anguloGyro) < CRUCERO_YIELD_ANG_DEG;
       if (_saleClaro || _saleLata) {
         estado = SIGUIENDO;             // apareció obstáculo mío -> a esquivarlo
-        contadorFront      = 0;
-        lateralWatchActivo = false;
-        lateralOpenStreak  = 0;
-        lateralDropCount   = 0;
-        giroSucioArmado    = false;
-        direccionAproxLatch = 0;
-        aproxOpenStreakIzq  = 0;
-        aproxOpenStreakDer  = 0;
+        resetVigilanciaEsquina();
         break;
       }
 
@@ -3477,15 +3316,8 @@ void loop() {
 
       if ((contadorFront >= debounceNecesario && gapOk) || cruceroLargo) {
         bool _fueSucio = giroSucioArmado;
-        contadorFront      = 0;
-        lateralWatchActivo = false;
-        lateralOpenStreak  = 0;
-        lateralDropCount   = 0;
-        giroSucioArmado    = false;
         decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada (usa direccionAproxLatch)
-        direccionAproxLatch = 0;         // consumido; la próxima esquina lo re-latchea
-        aproxOpenStreakIzq  = 0;
-        aproxOpenStreakDer  = 0;
+        resetVigilanciaEsquina();        // latch consumido; la próxima esquina lo re-latchea
         maniobraFase  = -1;              // MANIOBRA hará el phase-init
         piPurePursuit = false;
         estado        = MANIOBRA;
@@ -3595,10 +3427,7 @@ void loop() {
 
         if (maniobraReversa) {
           unsigned long tR = millis() - maniobraPivoteMs;
-          int vel = (tR < MANIOBRA_RAMP_MS)
-                    ? (int)map((long)tR, 0, (long)MANIOBRA_RAMP_MS,
-                               MANIOBRA_VEL_MIN, MANIOBRA_VEL_REV)
-                    : MANIOBRA_VEL_REV;
+          int vel = rampaPWM(tR, MANIOBRA_RAMP_MS, MANIOBRA_VEL_MIN, MANIOBRA_VEL_REV);
           // LAZO CERRADO: el servo se controla contra el objetivo REAL
           // (maniobraIdealRot, con signo) en vez de ir a tope fijo. errPivote = lo
           // que falta rotar; al acercarse el servo se centra solo y el chasis se
@@ -3791,9 +3620,7 @@ void loop() {
         unsigned long t = millis() - parkFaseMs;
         unsigned long tArranque = (PARK_RETORNO_AVANCE_MS > 0) ? 0UL : 200UL;
         unsigned long tMov = (t > tArranque) ? (t - tArranque) : 0UL;
-        int vel = (tMov < PARK_RETORNO_RAMP_MS)
-                  ? (int)map((long)tMov, 0, (long)PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM)
-                  : PARK_RETORNO_PWM;
+        int vel = rampaPWM(tMov, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
         if (t < PARK_RETORNO_AVANCE_MS) {
           motorAdelante();
           servoRumboPunta(parkRumboGiro0);
@@ -4045,23 +3872,7 @@ void loop() {
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
             Serial.print(" rosa="); Serial.println(parkRosaVisto ? 1 : 0);
 
-            if (!PARK_MODO_PARALELO) {
-              // Fallback De Punta: salta directo a preparar el arco
-              parkRumboRef = anguloGyro;
-              if (PARK_TEST_MANO) {
-                parkRumboArco0 = anguloGyro;
-                parkFase       = 10;
-                Serial.println("PUNTA MANO: servo a tope -> empuja el carro por el arco");
-              } else {
-                motorCoast();
-                escribirServo(centroServo);
-                parkFase   = 1;
-                parkFaseMs = millis();
-              }
-              break;
-            }
-
-            // Modo Paralelo: avanza a subfase 1 (espera hueco tras poste 1)
+            // Avanza a subfase 1 (espera hueco tras poste 1)
             parkScanSubFase = 1;
             parkGapCnt      = 0;
             parkCaidaCnt    = 0;  // no arrastrar la caída del poste 1
@@ -4100,7 +3911,7 @@ void loop() {
           // (recta final, ~1 s tras entrar a ESTACIONANDO) y el timeout de
           // hueco disparaba reversa en el trailing del POSTE 1.
           if (poste2Detect) {
-            parkScanSubFase = 3;
+            parkScanSubFase = 3;   // (solo para el pns= del ACK: la fase 0 termina aquí)
             parkGapCnt      = 0;
             parkCaidaCnt    = 0;
             // Velocímetro: distancia fija entre postes / tiempo transcurrido.
@@ -4119,68 +3930,32 @@ void loop() {
             Serial.print(" base="); Serial.print(parkBase, 1);
             Serial.println(")");
 
-            if (PARK_MODO_PARALELO) {
-              // TODA la maniobra de reversa se alinea contra esto. Tomar el
-              // anguloGyro del instante hornea la chuecura: en la 1057 se
-              // capturó +7.5 y el carro cerró "alineado" a +11.7 del carril
-              // real. El rumbo paralelo medido es la referencia correcta.
-              parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
-              Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
-              Serial.print(parkTrimListo ? " (PARED" : " (gyro");
-              Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.println(")");
-              if (PARK_TEST_MANO) {
-                parkFase = 10;
-                Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
-              } else {
-                parkFase   = 1;
-                parkFaseMs = millis();
-                Serial.println("PARK fase 1: espera 500ms a 25cm de pared EXTERIOR");
-              }
-              break;
+            // TODA la maniobra de reversa se alinea contra esto. Tomar el
+            // anguloGyro del instante hornea la chuecura: en la 1057 se
+            // capturó +7.5 y el carro cerró "alineado" a +11.7 del carril
+            // real. El rumbo paralelo medido es la referencia correcta.
+            parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
+            Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
+            Serial.print(parkTrimListo ? " (PARED" : " (gyro");
+            Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.println(")");
+            if (PARK_TEST_MANO) {
+              parkFase = 10;
+              Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
+            } else {
+              parkFase   = 1;
+              parkFaseMs = millis();
+              Serial.println("PARK fase 1: avance extra tras el poste 2 (PARK_POSTE2_*)");
             }
+            break;
           } else if (tHueco >= PARK_HUECO_TIMEOUT_MS && (tHueco - PARK_HUECO_TIMEOUT_MS) < 40) {
             Serial.print("PARK: hueco largo sin 2a pared (t=");
             Serial.print(tHueco); Serial.println("ms) — sigo buscando, no reverseo");
-          }
-        }
-        // ── Subfase 3: Sobre Poste 2, esperando despeje ──
-        else if (parkScanSubFase == 3) {
-          if (despejado) {
-            parkGapCnt++;
-            if (parkGapCnt >= PARK_GAP_N) {
-              parkScanSubFase = 4;
-              parkPassExtraMs = millis();
-              Serial.println("PARK: POSTE 2 REBASADO -> Avance extra para colocar eje trasero");
-            }
-          } else {
-            parkGapCnt = 0;
-          }
-        }
-        // ── Subfase 4: Avance extra para colocar eje trasero delante de Poste 2 ──
-        else if (parkScanSubFase == 4) {
-          if (millis() - parkPassExtraMs >= PARK_PASS_EXTRA_MS) {
-            Serial.print("PARK: POSICION DE LANZAMIENTO OK! t=");
-            Serial.print(millis() - parkEntryMs);
-            Serial.print("ms ang="); Serial.println(anguloGyro, 1);
-
-            if (PARK_TEST_MANO) {
-              parkRumboRef = anguloGyro;
-              parkFase     = 10;
-              Serial.println("PARK MANO: Listo para simular reversa");
-            } else {
-              motorCoast();
-              escribirServo(centroServo);
-              parkFase   = 1;
-              parkFaseMs = millis();
-            }
-            break;
           }
         }
 
         // Control dinámico durante la Fase 0
         if (PARK_TEST_MANO) {
           motorCoast();
-          setMotor(0);
           escribirServo(centroServo);
         } else {
           // Red de seguridad: timeout. FRENTE solo si SOLO_EXTERIOR está apagado (con
@@ -4195,27 +3970,21 @@ void loop() {
 
           // Wall follower ParkinHalf (mismas GANANCIAS que ESTACIONANDO_PUNTA
           // fase 0, pero con el objetivo del paralelo: PARK_PARED_CM).
-          if (parkScanSubFase < 4) {
-            float distPared = PARK_PARED_CM + parkErrPared;   // == extRaw
-            float rumboRaw  = PARK_PUNTA_KPOS * parkErrPared
-                              + PARK_PUNTA_KI_POS * puntaIntPared
-                              + PARK_PUNTA_KPOS_CERCA * min(0.0f, distPared - PARK_PUNTA_CERCA_CM);
-            float limAlejar = (distPared < PARK_PUNTA_CERCA_CM) ? PARK_PUNTA_ANG_MAX_CERCA_DEG
-                                                                : PARK_PUNTA_ANG_MAX_DEG;
-            // El cap solo limita la autoridad de POSICIÓN; el rumbo paralelo
-            // medido va por fuera. Antes todo el objetivo vivía dentro del cap:
-            // con un sesgo de 17° (1056) el máximo permitido (+12°) seguía
-            // apuntando 5° HACIA la pared y el carro no podía salir nunca.
-            float rumboObj  = parkRumboParalelo()
-                              + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
-            motorAdelante();
-            servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
-            setMotor(PARK_PUNTA_PWM);
-          } else {
-            motorAdelante();
-            servoRumboPunta(anguloGyro);
-            setMotor(PARK_PUNTA_PWM);
-          }
+          float distPared = PARK_PARED_CM + parkErrPared;   // == extRaw
+          float rumboRaw  = PARK_PUNTA_KPOS * parkErrPared
+                            + PARK_PUNTA_KI_POS * puntaIntPared
+                            + PARK_PUNTA_KPOS_CERCA * min(0.0f, distPared - PARK_PUNTA_CERCA_CM);
+          float limAlejar = (distPared < PARK_PUNTA_CERCA_CM) ? PARK_PUNTA_ANG_MAX_CERCA_DEG
+                                                              : PARK_PUNTA_ANG_MAX_DEG;
+          // El cap solo limita la autoridad de POSICIÓN; el rumbo paralelo
+          // medido va por fuera. Antes todo el objetivo vivía dentro del cap:
+          // con un sesgo de 17° (1056) el máximo permitido (+12°) seguía
+          // apuntando 5° HACIA la pared y el carro no podía salir nunca.
+          float rumboObj  = parkRumboParalelo()
+                            + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
+          motorAdelante();
+          servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
+          setMotor(PARK_PUNTA_PWM);
         }
 
         Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
@@ -4226,86 +3995,75 @@ void loop() {
         break;
       }
 
-      // ── Fase 1: ESPERA 500 ms a 25 cm (Paralelo) / FRENO PREVIO (Punta) ──
+      // ── Fase 1: avance extra tras el poste 2 (PARK_POSTE2_*) a PARK_ALIGN_CM ──
       if (parkFase == 1) {
-        if (PARK_MODO_PARALELO) {
-          if (PARK_TEST_MANO) {
-            motorCoast();
-            setMotor(0);
-            escribirServo(centroServo);
-            break;
-          }
-          bool lecturaValida = (extRaw > 2 && extRaw <= PARK_PARED_MAX_CM);
-          if (lecturaValida) {
-            parkErrPared     = (float)extRaw - PARK_ALIGN_CM;
-            parkInvalidasCnt = 0;
-          } else if (++parkInvalidasCnt > 10) {
-            parkErrPared = 0.0f;
-          }
-          float rumboObj = haciaPared * constrain(PARK_KPOS * parkErrPared,
-                                                  -PARK_ANG_MAX_DEG, PARK_ANG_MAX_DEG);
-          motorAdelante();
-          servoRumboPark(rumboObj);
-          setMotor(PARK_PWM);
-          // Avance escalado con la distancia de llegada (ver PARK_POSTE2_*).
-          // parkBase ya no se mueve aquí: el sonar viene viendo el poste 2, así
-          // que conserva el último valor bueno de la pared.
-          long espera = (long)PARK_POSTE2_WAIT_MS
-                      + (long)((parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MS_POR_CM);
-          if (!(parkBase > 5.0f)) espera = (long)PARK_POSTE2_WAIT_MS;   // base no creíble
-          // Avance por DISTANCIA y no por tiempo: si el carro viene más lento,
-          // necesita más ms para recorrer los mismos cm (ver PARK_VEL_COMP).
-          // parkVelCmS = 0 -> no se pudo medir -> se queda el tiempo nominal.
-          if (PARK_VEL_COMP && parkVelCmS > 0.0f)
-            espera = (long)((float)espera * (PARK_VEL_REF_CM_S / parkVelCmS));
-          espera = constrain(espera, (long)PARK_POSTE2_MIN_MS, (long)PARK_POSTE2_MAX_MS);
-          if (millis() - parkFaseMs >= (unsigned long)espera) {
-            motorCoast();
-            escribirServo(servoHaciaPared);  // pre-coloca FULL EXTERNO
-            // Altura lateral con la que el carro llegó al cajón: es lo que la
-            // fase 14 tiene que compensar. parkBase (EMA de la pared, no el
-            // instantáneo) porque el sonar ya está viendo el poste 2.
-            parkBaseLlegada = parkBase;
-            // Ángulo de entrada para ESTA llegada. delta = corrimiento lateral
-            // que hace falta; un arco de ida+vuelta de ángulo a entrega
-            // 2R(1-cos a), así que se invierte. Si delta >= R el arco se queda
-            // en el tope de 60° y lo que sobra lo pone el recto de la fase 14.
-            {
-              float delta = parkBaseLlegada - PARK_FINAL_CM;
-              float dosR  = 2.0f * PARK_RADIO_CM;
-              if (!(parkBaseLlegada > 5.0f) || delta >= PARK_RADIO_CM) {
-                parkAngObjetivo = (float)PARK_ANG_IN_DEG;
-              } else if (delta <= 0.0f) {
-                parkAngObjetivo = (float)PARK_ANG_MIN_IN_DEG;
-              } else {
-                parkAngObjetivo = degrees(acos(1.0f - delta / dosR));
-                parkAngObjetivo = constrain(parkAngObjetivo,
-                                            (float)PARK_ANG_MIN_IN_DEG,
-                                            (float)PARK_ANG_IN_DEG);
-              }
-            }
-            parkFase   = 2;
-            parkFaseMs = millis();
-            Serial.print("PARK fase 2: COAST (ext=");
-            Serial.print(extRaw);
-            Serial.print(" base="); Serial.print(parkBaseLlegada, 1);
-            Serial.print(" ang="); Serial.print(anguloGyro, 1);
-            Serial.println(") -> reversa FULL EXTERNO");
-          }
-        } else {
+        if (PARK_TEST_MANO) {
           motorCoast();
           escribirServo(centroServo);
-          if (millis() - parkFaseMs >= PARK_PUNTA_FRENO_MS) {
-            parkFaseMs   = millis();
-            parkRumboRef = anguloGyro;
-            parkFase     = 3;
+          break;
+        }
+        bool lecturaValida = (extRaw > 2 && extRaw <= PARK_PARED_MAX_CM);
+        if (lecturaValida) {
+          parkErrPared     = (float)extRaw - PARK_ALIGN_CM;
+          parkInvalidasCnt = 0;
+        } else if (++parkInvalidasCnt > 10) {
+          parkErrPared = 0.0f;
+        }
+        float rumboObj = haciaPared * constrain(PARK_KPOS * parkErrPared,
+                                                -PARK_ANG_MAX_DEG, PARK_ANG_MAX_DEG);
+        motorAdelante();
+        servoRumboPark(rumboObj);
+        setMotor(PARK_PWM);
+        // Avance escalado con la distancia de llegada (ver PARK_POSTE2_*).
+        // parkBase ya no se mueve aquí: el sonar viene viendo el poste 2, así
+        // que conserva el último valor bueno de la pared.
+        long espera = (long)PARK_POSTE2_WAIT_MS
+                    + (long)((parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MS_POR_CM);
+        if (!(parkBase > 5.0f)) espera = (long)PARK_POSTE2_WAIT_MS;   // base no creíble
+        // Avance por DISTANCIA y no por tiempo: si el carro viene más lento,
+        // necesita más ms para recorrer los mismos cm (ver PARK_VEL_COMP).
+        // parkVelCmS = 0 -> no se pudo medir -> se queda el tiempo nominal.
+        if (PARK_VEL_COMP && parkVelCmS > 0.0f)
+          espera = (long)((float)espera * (PARK_VEL_REF_CM_S / parkVelCmS));
+        espera = constrain(espera, (long)PARK_POSTE2_MIN_MS, (long)PARK_POSTE2_MAX_MS);
+        if (millis() - parkFaseMs >= (unsigned long)espera) {
+          motorCoast();
+          escribirServo(servoHaciaPared);  // pre-coloca FULL EXTERNO
+          // Altura lateral con la que el carro llegó al cajón: es lo que la
+          // fase 14 tiene que compensar. parkBase (EMA de la pared, no el
+          // instantáneo) porque el sonar ya está viendo el poste 2.
+          parkBaseLlegada = parkBase;
+          // Ángulo de entrada para ESTA llegada. delta = corrimiento lateral
+          // que hace falta; un arco de ida+vuelta de ángulo a entrega
+          // 2R(1-cos a), así que se invierte. Si delta >= R el arco se queda
+          // en el tope de 60° y lo que sobra lo pone el recto de la fase 14.
+          {
+            float delta = parkBaseLlegada - PARK_FINAL_CM;
+            float dosR  = 2.0f * PARK_RADIO_CM;
+            if (!(parkBaseLlegada > 5.0f) || delta >= PARK_RADIO_CM) {
+              parkAngObjetivo = (float)PARK_ANG_IN_DEG;
+            } else if (delta <= 0.0f) {
+              parkAngObjetivo = (float)PARK_ANG_MIN_IN_DEG;
+            } else {
+              parkAngObjetivo = degrees(acos(1.0f - delta / dosR));
+              parkAngObjetivo = constrain(parkAngObjetivo,
+                                          (float)PARK_ANG_MIN_IN_DEG,
+                                          (float)PARK_ANG_IN_DEG);
+            }
           }
+          parkFase   = 2;
+          parkFaseMs = millis();
+          Serial.print("PARK fase 2: COAST (ext=");
+          Serial.print(extRaw);
+          Serial.print(" base="); Serial.print(parkBaseLlegada, 1);
+          Serial.print(" ang="); Serial.print(anguloGyro, 1);
+          Serial.println(") -> reversa FULL EXTERNO");
         }
         break;
       }
 
-      // ── Fase 2: COAST + servo FULL EXTERNO, luego REV SWING (Paralelo) ──
-      if (parkFase == 2 && PARK_MODO_PARALELO) {
+      // ── Fase 2: COAST + servo FULL EXTERNO, luego REV SWING ──────────────
+      if (parkFase == 2) {
         motorCoast();
         escribirServo(servoHaciaPared);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
@@ -4318,49 +4076,36 @@ void loop() {
         break;
       }
 
-      // ── Fase 3: REV SWING FULL EXTERNO (Paralelo) / PREP (Punta) ────────
+      // ── Fase 3: REV SWING FULL EXTERNO hasta parkAngObjetivo ────────────
       if (parkFase == 3) {
-        if (PARK_MODO_PARALELO) {
-          motorReversa();
-          escribirServo(servoHaciaPared);
-          setMotor(PARK_REV_PWM);
-          float swingMag    = fabs(anguloGyro - parkRumboRef);
-          bool  swingListo  = (swingMag >= (parkAngObjetivo - (float)PARK_OVERSHOOT_DEG));
-          bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
-          if (swingListo || swingTimeout) {
-            // Tramo recto que se come el exceso de altura lateral (ver
-            // PARK_RECTO_*). Sale 0 si viene igual o más pegado que D0, si la
-            // base no es creíble, o si la compensación está apagada.
-            float exceso = parkBaseLlegada - PARK_RECTO_D0_CM;
-            bool  baseOk = (parkBaseLlegada > 5.0f && parkBaseLlegada <= (float)PARK_PARED_MAX_CM);
-            if (PARK_RECTO_ENABLED && baseOk && exceso > 0.0f && PARK_RECTO_VEL_CMS > 1.0f) {
-              float ms = (exceso / (0.866f * PARK_RECTO_VEL_CMS)) * 1000.0f;
-              parkRectoMs = (unsigned long)min(ms, (float)PARK_RECTO_MAX_MS);
-            } else {
-              parkRectoMs = 0;
-            }
-            parkFase   = (parkRectoMs > 0) ? 14 : 4;
-            parkFaseMs = millis();
-            Serial.print("PARK fase "); Serial.print(parkFase);
-            Serial.print(parkRectoMs > 0 ? ": RECTO a 60deg " : ": REV FULL EXTERNO (recto 0) ");
-            Serial.print("(swing="); Serial.print(swingMag, 1);
-            Serial.print(swingTimeout ? " TIMEOUT" : "");
-            Serial.print(" d="); Serial.print(parkBaseLlegada, 1);
-            Serial.print(" d0="); Serial.print(PARK_RECTO_D0_CM, 1);
-            Serial.print(" tau="); Serial.print(parkRectoMs);
-            Serial.println("ms)");
+        motorReversa();
+        escribirServo(servoHaciaPared);
+        setMotor(PARK_REV_PWM);
+        float swingMag    = fabs(anguloGyro - parkRumboRef);
+        bool  swingListo  = (swingMag >= (parkAngObjetivo - (float)PARK_OVERSHOOT_DEG));
+        bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
+        if (swingListo || swingTimeout) {
+          // Tramo recto que se come el exceso de altura lateral (ver
+          // PARK_RECTO_*). Sale 0 si viene igual o más pegado que D0, si la
+          // base no es creíble, o si la compensación está apagada.
+          float exceso = parkBaseLlegada - PARK_RECTO_D0_CM;
+          bool  baseOk = (parkBaseLlegada > 5.0f && parkBaseLlegada <= (float)PARK_PARED_MAX_CM);
+          if (PARK_RECTO_ENABLED && baseOk && exceso > 0.0f && PARK_RECTO_VEL_CMS > 1.0f) {
+            float ms = (exceso / (0.866f * PARK_RECTO_VEL_CMS)) * 1000.0f;
+            parkRectoMs = (unsigned long)min(ms, (float)PARK_RECTO_MAX_MS);
+          } else {
+            parkRectoMs = 0;
           }
-        } else {
-          motorCoast();
-          escribirServo(servoHaciaPared);
-          if (millis() - parkFaseMs >= PARK_PUNTA_SERVO_MS) {
-            motorAdelante();
-            parkRumboArco0 = anguloGyro;
-            parkDfCnt      = 0;
-            parkFase       = 4;
-            parkFaseMs     = millis();
-            Serial.print("PUNTA fase 4: ARCO desde ang="); Serial.println(anguloGyro, 1);
-          }
+          parkFase   = (parkRectoMs > 0) ? 14 : 4;
+          parkFaseMs = millis();
+          Serial.print("PARK fase "); Serial.print(parkFase);
+          Serial.print(parkRectoMs > 0 ? ": RECTO a 60deg " : ": REV FULL EXTERNO (recto 0) ");
+          Serial.print("(swing="); Serial.print(swingMag, 1);
+          Serial.print(swingTimeout ? " TIMEOUT" : "");
+          Serial.print(" d="); Serial.print(parkBaseLlegada, 1);
+          Serial.print(" d0="); Serial.print(PARK_RECTO_D0_CM, 1);
+          Serial.print(" tau="); Serial.print(parkRectoMs);
+          Serial.println("ms)");
         }
         break;
       }
@@ -4370,7 +4115,7 @@ void loop() {
       // retroceder recto es puro corrimiento lateral (0.866 cm por cm). Al
       // terminar, la maniobra de siempre (fase 4 en adelante) arranca como si
       // el carro hubiera llegado a PARK_RECTO_D0_CM.
-      if (parkFase == 14 && PARK_MODO_PARALELO) {
+      if (parkFase == 14) {
         motorReversa();
         escribirServo(centroServo);
         setMotor(PARK_REV_PWM);
@@ -4383,70 +4128,38 @@ void loop() {
         break;
       }
 
-      // ── Fase 4: REV 300 ms FULL EXTERNO (Paralelo) / ARCO (Punta) ───────
+      // ── Fase 4: REV FULL EXTERNO PARK_REV_EXT_HOLD_MS (0 = de paso) ─────
       if (parkFase == 4) {
-        if (PARK_MODO_PARALELO) {
-          motorReversa();
-          escribirServo(servoHaciaPared);
-          setMotor(PARK_REV_PWM);
-          if (millis() - parkFaseMs >= PARK_REV_EXT_HOLD_MS) {
-            // Sin meneo (PARK_WIGGLE_*_MS = 0) se salta directo a la contravuelta.
-            parkFase   = (PARK_WIGGLE_INT_MS > 0) ? 5
-                       : (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
-            parkFaseMs = millis();
-            Serial.print("PARK fase "); Serial.print(parkFase);
-            Serial.println(parkFase == 8 ? ": FULL INTERNO hasta heading recta ~ 0 (sin meneo)"
-                                         : ": meneo");
-          }
-        } else {
-          unsigned long tA = millis() - parkFaseMs;
-          int vel = (tA < PARK_PUNTA_RAMP_MS)
-                    ? (int)map((long)tA, 0, (long)PARK_PUNTA_RAMP_MS, PARK_PUNTA_ARCO_PWM_MIN, PARK_PUNTA_ARCO_PWM)
-                    : PARK_PUNTA_ARCO_PWM;
-          motorAdelante();
-          escribirServo(servoHaciaPared);
-          setMotor(vel);
-
-          float girado = (anguloGyro - parkRumboArco0) * haciaPared;
-          parkDfCnt = (distF_filtrada > 0 && distF_filtrada <= PARK_PUNTA_DF_STOP_CM) ? parkDfCnt + 1 : 0;
-
-          if (parkDfCnt >= PARK_PUNTA_DF_N)      { finalizarPark("PUNTA ARCO: dF tope"); break; }
-          if (tA >= PARK_PUNTA_ARCO_TIMEOUT_MS)  { finalizarPark("PUNTA ARCO: timeout"); break; }
-          if (girado >= (float)(PARK_PUNTA_ARCO_DEG - PARK_PUNTA_OVERSHOOT_DEG)) {
-            if (PARK_PUNTA_ENTRA_MS == 0) { finalizarPark("PUNTA ARCO: angulo"); break; }
-            parkFase   = 5;
-            parkFaseMs = millis();
-            Serial.print("PUNTA fase 5: ENTRA girado="); Serial.println(girado, 1);
-            break;
-          }
+        motorReversa();
+        escribirServo(servoHaciaPared);
+        setMotor(PARK_REV_PWM);
+        if (millis() - parkFaseMs >= PARK_REV_EXT_HOLD_MS) {
+          // Sin meneo (PARK_WIGGLE_*_MS = 0) se salta directo a la contravuelta.
+          parkFase   = (PARK_WIGGLE_INT_MS > 0) ? 5
+                     : (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
+          parkFaseMs = millis();
+          Serial.print("PARK fase "); Serial.print(parkFase);
+          Serial.println(parkFase == 8 ? ": FULL INTERNO hasta heading recta ~ 0 (sin meneo)"
+                                       : ": meneo");
         }
         break;
       }
 
-      // ── Fase 5: FULL INTERNO 200 ms (Paralelo) / ENTRA (Punta) ──────────
+      // ── Fase 5: meneo FULL INTERNO PARK_WIGGLE_INT_MS (0 = se salta) ────
       if (parkFase == 5) {
-        if (PARK_MODO_PARALELO) {
-          motorReversa();
-          escribirServo(servoDesdePared);
-          setMotor(PARK_REV_PWM);
-          if (millis() - parkFaseMs >= PARK_WIGGLE_INT_MS) {
-            parkFase   = (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
-            parkFaseMs = millis();
-            Serial.print("PARK fase "); Serial.println(parkFase);
-          }
-        } else {
-          motorAdelante();
-          servoRumboPark(parkRumboArco0 + haciaPared * (float)PARK_PUNTA_ARCO_DEG);
-          setMotor(PARK_PUNTA_ENTRA_PWM);
-          parkDfCnt = (distF_filtrada > 0 && distF_filtrada <= PARK_PUNTA_DF_STOP_CM) ? parkDfCnt + 1 : 0;
-          if (parkDfCnt >= PARK_PUNTA_DF_N)                 { finalizarPark("PUNTA ENTRA: dF tope"); break; }
-          if (millis() - parkFaseMs >= PARK_PUNTA_ENTRA_MS) { finalizarPark("PUNTA ENTRA: tiempo");  break; }
+        motorReversa();
+        escribirServo(servoDesdePared);
+        setMotor(PARK_REV_PWM);
+        if (millis() - parkFaseMs >= PARK_WIGGLE_INT_MS) {
+          parkFase   = (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
+          parkFaseMs = millis();
+          Serial.print("PARK fase "); Serial.println(parkFase);
         }
         break;
       }
 
-      // ── Fase 6: FULL EXTERNO 100 ms (Paralelo) ─────────────────────────
-      if (parkFase == 6 && PARK_MODO_PARALELO) {
+      // ── Fase 6: meneo FULL EXTERNO PARK_WIGGLE_EXT_MS (0 = se salta) ────
+      if (parkFase == 6) {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
@@ -4459,7 +4172,7 @@ void loop() {
       }
 
       // ── Fase 8: FULL INTERNO; luego SIEMPRE acomodo ENFRENTE ────────────
-      if (parkFase == 8 && PARK_MODO_PARALELO) {
+      if (parkFase == 8) {
         motorReversa();
         escribirServo(servoDesdePared);
         setMotor(PARK_REV_PWM);
@@ -4488,7 +4201,7 @@ void loop() {
       }
 
       // ── Fase 9: COAST antes de ir adelante ─────────────────────────────
-      if (parkFase == 9 && PARK_MODO_PARALELO) {
+      if (parkFase == 9) {
         motorCoast();
         escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
@@ -4502,7 +4215,7 @@ void loop() {
       }
 
       // ── Fase 11: ACOMODO ENFRENTE ──────────────────────────────────────
-      if (parkFase == 11 && PARK_MODO_PARALELO) {
+      if (parkFase == 11) {
         motorAdelante();
         servoRumboPark(parkRumboRef);
         setMotor(PARK_CENTER_PWM_PAR);
@@ -4529,7 +4242,7 @@ void loop() {
       }
 
       // ── Fase 12: COAST antes de reversear a 0 ──────────────────────────
-      if (parkFase == 12 && PARK_MODO_PARALELO) {
+      if (parkFase == 12) {
         motorCoast();
         escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
@@ -4561,7 +4274,7 @@ void loop() {
       // Si quieres que enderece MÁS, sube PARK_REV_FINAL_DF_CM (cada cm extra
       // vale ~2.3°), pero cada cm sale del aire con la pared TRASERA, que es el
       // único lado sin sensor. Por eso el timeout es corto y no negociable.
-      if (parkFase == 13 && PARK_MODO_PARALELO) {
+      if (parkFase == 13) {
         motorReversa();
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
         setMotor(PARK_REV_PWM);
@@ -4583,25 +4296,9 @@ void loop() {
         break;
       }
 
-      // ── Fase 6 legacy: sawtooth (solo de punta no llega aquí; idle) ────
-      if (parkFase == 6 && !PARK_MODO_PARALELO) {
-        finalizarPark("PUNTA: fase 6 inesperada");
-        break;
-      }
-
-      // ── Fase 7: FIN — robot completamente estacionado y apagado ───────────
-      if (parkFase == 7) {
-        motorCoast();
-        setMotor(0);
-        escribirServo(centroServo);
-        raceFinished = true;
-        break;
-      }
-
       // ── Fase 10: PRUEBA A MANO — servo activo hacia pared, motor apagado ───
       if (parkFase == 10) {
         motorCoast();
-        setMotor(0);
         escribirServo(servoHaciaPared);
         if (millis() - parkLogMs >= 200) {
           parkLogMs = millis();
@@ -4705,7 +4402,7 @@ void loop() {
         bool armada = baseLista
                       && (tEn >= PARK_PUNTA_ARMADO_MS)
                       && (fabs(anguloGyro) < PARK_PUNTA_ARMADO_ANG_DEG)
-                      && (puntaRosaVisto || !PARK_PUNTA_REQUIERE_PI || PARK_PUNTA_TEST_MANO);
+                      && (puntaRosaVisto || !PARK_PUNTA_REQUIERE_PI || PARK_TEST_MANO);
 
         if (lecturaBaja && puntaCaidaCnt == PARK_PUNTA_CAIDA_N && !armada) {
           Serial.print("PUNTA: bajada IGNORADA (no armada: base=");
@@ -4722,7 +4419,7 @@ void loop() {
           Serial.print(" lectura="); Serial.print(extRaw);
           Serial.print(" ang="); Serial.print(anguloGyro, 1);
           Serial.print(" rosa="); Serial.println(puntaRosaVisto ? 1 : 0);
-          if (PARK_PUNTA_TEST_MANO) {
+          if (PARK_TEST_MANO) {
             puntaRumboArco0 = anguloGyro;
             puntaFase       = 10;
             Serial.println("PUNTA MANO: servo a tope -> empuja el carro por el arco");
@@ -4735,9 +4432,8 @@ void loop() {
           break;
         }
 
-        if (PARK_PUNTA_TEST_MANO) {
+        if (PARK_TEST_MANO) {
           motorCoast();
-          setMotor(0);
           escribirServo(centroServo);
         } else {
           // Red de seguridad: algo muy cerca de frente o se acabó el tiempo.
@@ -4833,9 +4529,7 @@ void loop() {
       // ── Fase 4: ARCO — servo a tope hasta el ángulo o dF tope ───────────────
       if (puntaFase == 4) {
         unsigned long tA = millis() - puntaFaseMs;
-        int vel = (tA < PARK_PUNTA_RAMP_MS)
-                  ? (int)map((long)tA, 0, (long)PARK_PUNTA_RAMP_MS, PARK_PUNTA_ARCO_PWM_MIN, PARK_PUNTA_ARCO_PWM)
-                  : PARK_PUNTA_ARCO_PWM;
+        int vel = rampaPWM(tA, PARK_PUNTA_RAMP_MS, PARK_PUNTA_ARCO_PWM_MIN, PARK_PUNTA_ARCO_PWM);
         motorAdelante();
         escribirServo(servoTope);
         setMotor(vel);
@@ -4872,7 +4566,6 @@ void loop() {
       // ── Fase 10: PRUEBA A MANO — servo a tope, motor apagado ────────────────
       if (puntaFase == 10) {
         motorCoast();
-        setMotor(0);
         escribirServo(servoTope);
         if (millis() - puntaLogMs >= 200) {
           puntaLogMs = millis();
@@ -4891,9 +4584,7 @@ void loop() {
         // tope. Con avance previo ya va rodando y el servo llega en movimiento.
         unsigned long tArranque = (PARK_RETORNO_AVANCE_MS > 0) ? 0UL : PARK_PUNTA_SERVO_MS;
         unsigned long tMov = (t > tArranque) ? (t - tArranque) : 0UL;
-        int vel = (tMov < PARK_RETORNO_RAMP_MS)
-                  ? (int)map((long)tMov, 0, (long)PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM)
-                  : PARK_RETORNO_PWM;
+        int vel = rampaPWM(tMov, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
 
         // 1) Avance RECTO antes de girar: la media vuelta termina más lejos de la
         //    pared del lote (orillas898 quedó a 17-19 cm y el seguidor no alcanzó a
