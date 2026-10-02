@@ -169,6 +169,29 @@ class Vision:
                 if sel.any() and float(np.median(hsv[..., 1][sel])) < self.GREEN_S_MIN_MED:
                     continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
 
+            # Rechazo de la pared magenta del estacionamiento por B/R (ver
+            # RED_BR_MAX). Se mide solo sobre los px del contorno, no del bbox.
+            if color_name == "Red" and bgr is not None:
+                cnt_mask = np.zeros(mask.shape, np.uint8)
+                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
+                sel = cnt_mask > 0
+                b_px = bgr[..., 0][sel].astype(np.float32)
+                r_px = bgr[..., 2][sel].astype(np.float32)
+                if float(np.median(b_px / np.maximum(r_px, 1.0))) > self.RED_BR_MAX:
+                    continue
+                sel_m = sel & (mask > 0)
+                g_px = bgr[..., 1][sel_m].astype(np.float32)
+                r_m = np.maximum(bgr[..., 2][sel_m].astype(np.float32), 1.0)
+                if g_px.size and float(np.median(g_px / r_m)) > self.RED_GR_MAX:
+                    continue   # cinta naranja (ver RED_GR_MAX)
+
+            if color_name == "Green" and hsv is not None:
+                cnt_mask = np.zeros(mask.shape, np.uint8)
+                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
+                sel = (cnt_mask > 0) & (mask > 0)
+                if sel.any() and float(np.median(hsv[..., 1][sel])) < self.GREEN_S_MIN_MED:
+                    continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
+
             objects.append((x, y, w, h))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
             cv2.putText(frame, color_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)

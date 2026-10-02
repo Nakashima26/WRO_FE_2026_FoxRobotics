@@ -5,7 +5,7 @@ Hardware:
   Cámara  : Raspberry Pi Camera v2  (FOV ~62°, resolución proceso 640×480)
   Motor   : N20 DC 50:1 + etapa LEGO 2:1  → ratio total 100:1
   Servo   : SG90  (centro = 80°, límite mecánico ±35° efectivo en rueda)
-  Chassis : 210×140×80 mm  |  batalla ~100 mm (estimado)
+  Chassis : 180×130 mm  |  batalla 113 mm
   ESP32   : recibe protocolo V2 por UART Serial2 (RX=17, TX=16) @ 115200
   Pi GPIO : LED en 27, botón arranque en 17
 
@@ -197,7 +197,7 @@ OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MI
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
-WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
+WHEELBASE_PX   = 56.5    # batalla del vehículo en px BEV   (= 113 mm)
 MAX_STEER_DEG  = 60.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
@@ -631,7 +631,7 @@ MIDTURN_SIDE_DEADBAND_PX  = 24.0   # |bev_x - eje| bajo esto -> lado '?' (indeci
 # CLEAR_PX = medio ancho del chasis + inflado de la lata. Si el centro de la
 # lata está a >= esto del eje de avance, el borde del carro libra el borde
 # inflado de la lata yendo recto.
-ROBOT_HALF_WIDTH_PX      = round(140.0 / 2.0 / MM_PER_PX)        # chasis 140mm -> 35 px
+ROBOT_HALF_WIDTH_PX      = round(130.0 / 2.0 / MM_PER_PX)        # chasis 130mm -> 32 px
 OBS_MEM_GEOM_CLEAR_PX    = ROBOT_HALF_WIDTH_PX + OBS_INFLATE_R   # 35 + 36 = 71 px
 # ── Perillas de AJUSTE FINO (mover solo estas en pista) ─────────────────────
 # AHEAD_MARGIN_PX: cuánto puede seguir ADELANTE la lata (marco actual) y aún
