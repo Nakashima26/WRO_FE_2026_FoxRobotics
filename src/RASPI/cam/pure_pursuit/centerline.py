@@ -99,7 +99,7 @@ def _widest_free_segment(row_mask: np.ndarray, min_width: int) -> int | None:
     return (bounds[0] + bounds[1]) // 2
 
 
-def _ramp_weight(row_y: int, obs_y: float) -> float:
+def _ramp_weight(row_y: int, obs_y: float, ramp_px: float | None = None) -> float:
     """
     0 = ignorar la lata (usar centro del pasillo), 1 = lado de paso completo.
     Entra sobre CENTERLINE_RAMP_PX, se mantiene en 1 dentro del inflado, y SALE
@@ -113,7 +113,7 @@ def _ramp_weight(row_y: int, obs_y: float) -> float:
     delante que estorbe a la SIGUIENTE lata (rojo->verde, lados opuestos).
     """
     full_r = float(C.OBS_INFLATE_R)
-    ramp = max(full_r + 1.0, float(C.CENTERLINE_RAMP_PX))
+    ramp = max(full_r + 1.0, float(C.CENTERLINE_RAMP_PX if ramp_px is None else ramp_px))
     exit_ramp = max(full_r + 1.0, float(getattr(C, "CENTERLINE_EXIT_RAMP_PX", 90.0)))
     d = float(row_y) - float(obs_y)  # >0: la fila aún no llega a la lata
 
@@ -159,6 +159,85 @@ def _pass_side_cx(row_mask: np.ndarray, safe_row_mask: np.ndarray, ox: float, co
         return int(min(iox - C.OBS_INFLATE_R, max(cx, iox - off_max)))
 
     return None
+
+
+def _outside_sheet(ox: float, oy: float, w: int, h: int) -> bool:
+    return ox < 0.0 or oy < 0.0 or ox >= w or oy >= h
+
+
+def _far_pass_cx(free_cx: int | None, color: str, w: int) -> int | None:
+    """Lata todavía visible, con el pie fuera de la hoja de 80 cm.
+
+    El lado de paso de una lata DENTRO de la imagen se mide desde su centro.
+    Si el centro está fuera, ese cálculo empuja el path hacia el borde y del
+    lado contrario. Aquí solo se abre el corredor hacia el lado WRO, con tope.
+    """
+    if free_cx is None or color not in ("Red", "Green"):
+        return None
+    shift = int(getattr(C, "FAR_LINE_SHIFT_PX", 56))
+    if color == "Green":
+        return max(0, int(free_cx) - shift)
+    return min(w - 1, int(free_cx) + shift)
+
+
+def seen_above_obstacles(bev: BEVTransformer, positions: dict) -> list[tuple[float, float, str]]:
+    """Pies que la cámara ve y que caen fuera de la hoja, todavía en el piso.
+
+    El warp de 400 px no tiene dónde pintarlos. El horizonte (decenas de
+    metros) se descarta. Lo que queda entra a la línea mientras siga el bbox.
+    """
+    out: list[tuple[float, float, str]] = []
+    if bev is None or not getattr(bev, "is_calibrated", False):
+        return out
+    fwd_min = float(getattr(C, "FAR_LINE_MIN_FWD_MM", 200.0))
+    fwd_max = float(getattr(C, "FAR_LINE_MAX_FWD_MM", 2200.0))
+    lat_max = float(getattr(C, "FAR_LINE_MAX_LAT_MM", 1400.0))
+    y_max = getattr(C, "OBS_PROJ_Y_MAX", C.ROBOT_BEV_Y - 6)
+    for color_name in ("Red", "Green"):
+        for obj in positions.get(color_name, []):
+            x, y, w, h = obj
+            result = bev.cam_to_bev(x + w * 0.5, y + h)
+            if result is None:
+                continue
+            bx, by = result
+            if bev.bev_in_bounds(bx, by) or by >= 0.0 or by >= y_max:
+                continue
+            lat = (bx - C.ROBOT_BEV_X) * C.MM_PER_PX
+            fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX
+            if fwd < fwd_min or fwd > fwd_max or abs(lat) > lat_max:
+                continue
+            out.append((bx, by, color_name))
+    return out
+
+
+def bend_line_above(
+    points: list[tuple[int, int]],
+    above: list[tuple[float, float, str]],
+) -> list[tuple[int, int]]:
+    """Abre el tramo lejano de la línea hacia el lado de paso.
+
+    El lookahead mira a 20 cm. Esos puntos no se mueven: moverlos comía el
+    verde del sur en la segunda vuelta. Lo que está más arriba sí se abre
+    mientras la cámara siga viendo la lata.
+    """
+    if not points or not above:
+        return points
+    ox, oy, color = max(above, key=lambda o: o[1])
+    cutoff = C.ROBOT_BEV_Y - float(C.LOOKAHEAD_MAX_PX) * 1.25 - 20.0
+    ramp = float(getattr(C, "FAR_LINE_RAMP_PX", 250.0))
+    out: list[tuple[int, int]] = []
+    for x, y in points:
+        if y >= cutoff:
+            out.append((x, y))
+            continue
+        w = _ramp_weight(y, oy, ramp)
+        dest = _far_pass_cx(int(round(x)), color, C.BEV_W) if w > 0 else None
+        if dest is None:
+            out.append((x, y))
+            continue
+        nx = (1.0 - w) * float(x) + w * float(dest)
+        out.append((int(round(nx)), int(y)))
+    return out
 
 
 def _wall_urgency_cx(row_mask: np.ndarray, side: int) -> int | None:
@@ -424,6 +503,8 @@ def detect_centerline(
     # ── 2. Eliminar obstáculos + sesgo de color WRO ───────────────────────────
     free_mask = floor_mask.copy()
     for ox, oy, color in bev_obstacles:
+        if _outside_sheet(ox, oy, w, h):
+            continue
         ix, iy = int(round(ox)), int(round(oy))
 
         # Zona de seguridad simétrica alrededor del obstáculo
@@ -532,13 +613,20 @@ def detect_centerline(
             # arriba) si este obstáculo lleva varios frames sin verse de
             # verdad -- menos autoridad para comprometer un giro fuerte
             # basado en una posición cada vez más especulativa.
-            wgt = _ramp_weight(y, oy) * conf
+            outside = _outside_sheet(ox, oy, w, h)
+            ramp_px = float(getattr(C, "FAR_LINE_RAMP_PX", 250.0)) if outside else None
+            wgt = _ramp_weight(y, oy, ramp_px) * conf
             if wgt > best_w:
-                cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
+                if outside:
+                    cx_side = _far_pass_cx(free_cx, color, w)
+                else:
+                    cx_side = _pass_side_cx(row, safe_mask[y, :], ox, color)
                 if cx_side is not None:
                     best_w = wgt
                     pass_cx = cx_side
-                    best_ox = ox
+                    # Fuera de la hoja, el centro real está a metros. La
+                    # corrección de lado usa el punto de paso, no ese centro.
+                    best_ox = float(cx_side) if outside else ox
                     best_color = color
 
         # Urgencia frontal por pared tiene prioridad sobre el sesgo de color

@@ -748,6 +748,16 @@ TURN_TIMEOUT_S = 3.0
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
 # todavía no proyecta dentro del rango calibrado.  Se usa SOLO para empezar a
 # centrar el steer con anticipación.
+# Lata que la cámara sigue viendo pero cuyo pie cae fuera de los 400 px.
+# No entra a la memoria ni al filtro de la naranja: solo abre la línea hacia
+# el lado de paso mientras el bbox siga ahí. El horizonte (>2.2 m o >1.4 m
+# de lado) no cuenta.
+FAR_LINE_SHIFT_PX    = 56      # tope del desplazamiento, = inflado de la lata
+FAR_LINE_RAMP_PX     = 250.0   # abre la línea arriba; no llega al lookahead (20 cm)
+FAR_LINE_MIN_FWD_MM  = 200.0
+FAR_LINE_MAX_FWD_MM  = 2200.0
+FAR_LINE_MAX_LAT_MM  = 1400.0
+
 FAR_HINT_ENABLED     = True
 FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)
 FAR_HINT_MAX_STEER   = 12.0     # grados máx que puede aportar el hint (<< MAX_STEER_DEG)

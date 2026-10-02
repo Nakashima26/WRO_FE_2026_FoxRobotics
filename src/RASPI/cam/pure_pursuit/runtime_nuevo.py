@@ -45,7 +45,10 @@ from wro_runtime import (
 )
 
 from .bev import BEVTransformer
-from .centerline import detect_centerline, map_obstacle_to_bev, draw_bev_debug
+from .centerline import (
+    bend_line_above, detect_centerline, draw_bev_debug,
+    map_obstacle_to_bev, seen_above_obstacles,
+)
 from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_pass
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
@@ -1758,11 +1761,25 @@ class PPRuntime:
                 bev_timing["line"] = (_t4 - _t3) * 1000.0
 
                 # Detectar centerline (con obstáculos recordados+nuevos,
-                # ya sin los que quedaron más allá de la naranja)
+                # ya sin los que quedaron más allá de la naranja).
+                # Lo que la cámara sigue viendo por arriba de la hoja entra
+                # solo aquí: no a la memoria ni al filtro de la naranja.
                 path_points = detect_centerline(
                     bev_frame, bev_obstacles, bev_hsv=bev_hsv,
                     obstacle_conf=obstacle_conf, stats_out=cl_stats,
                 )
+                # La lata que sigue viéndose por arriba de la hoja abre solo
+                # el tramo lejano. El punto del lookahead no se mueve.
+                if not self._is_turning:
+                    above = seen_above_obstacles(self.bev, positions)
+                    if bev_obstacles:
+                        mine = {c for _, _, c in bev_obstacles}
+                        above = [a for a in above if a[2] in mine]
+                    if above and path_points:
+                        path_points = bend_line_above(path_points, above)
+                        print("[LINEUP] " + " ".join(
+                            f"{c}@({x:.0f},{y:.0f})" for x, y, c in above),
+                              flush=True)
                 _t5 = time.perf_counter()
                 bev_timing["dc"] = (_t5 - _t4) * 1000.0
 
