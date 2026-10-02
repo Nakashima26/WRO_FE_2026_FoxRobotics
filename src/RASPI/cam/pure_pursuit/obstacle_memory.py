@@ -121,10 +121,12 @@ class ObstacleMemory:
     """
 
     def __init__(self,
-                 robot_x: int = C.ROBOT_BEV_X,
-                 robot_y: int = C.ROBOT_BEV_Y):
-        self.rx = robot_x
-        self.ry = robot_y
+                 robot_x: int | None = None,
+                 robot_y: int | None = None):
+        # Leer config al construir. El default de Python se congela en el
+        # import, y el twin mueve ROBOT_BEV_Y antes de crear el runtime.
+        self.rx = C.ROBOT_BEV_X if robot_x is None else robot_x
+        self.ry = C.ROBOT_BEV_Y if robot_y is None else robot_y
         self._obs: list[_Obs] = []
         self._prev_heading: float | None = None
         self._last_dheading: float = 0.0   # Δheading del último update (predicción _prune)

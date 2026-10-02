@@ -138,7 +138,12 @@ class Vision:
             solidity = area / bbox_area if bbox_area > 0 else 0
             aspect = max(w, h) / max(1, min(w, h))
 
-            if solidity < MIN_SOLIDITY or aspect > MAX_ASPECT:
+            # La cinta es angosta y poco sólida. Con la mira a 45° y el lente
+            # de 120° una lata a 40–65 cm se ve alta (aspecto ~2.3–2.5) pero
+            # compacta (solidez ~0.85); el tope 2.2 se la comía.
+            if solidity < MIN_SOLIDITY:
+                continue
+            if aspect > MAX_ASPECT and solidity < 0.55:
                 continue
 
             # Rechazo de la pared magenta del estacionamiento por B/R (ver

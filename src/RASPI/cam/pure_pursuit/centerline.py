@@ -554,7 +554,9 @@ def detect_centerline(
             weights.append(best_w)
             continue
 
-        if free_cx is None and pass_cx is None:
+        base_cx = free_cx
+
+        if base_cx is None and pass_cx is None:
             # Sin hueco válido en esta fila: no dejar un vacío en el path —
             # usar el pixel con mayor margen de seguridad (distanceTransform),
             # que ya calculamos arriba para safe_mask.
@@ -617,13 +619,13 @@ def detect_centerline(
                 weights.append(1.0)
             continue
 
-        if free_cx is None:
+        if base_cx is None:
             assert pass_cx is not None
             cx = float(pass_cx)
         elif pass_cx is None or best_w <= 0.0:
-            cx = float(free_cx)
+            cx = float(base_cx)
         else:
-            cx = (1.0 - best_w) * float(free_cx) + best_w * float(pass_cx)
+            cx = (1.0 - best_w) * float(base_cx) + best_w * float(pass_cx)
 
             # El blend también puede quedar del lado INCORRECTO del obstáculo
             # (transitable, pero violando la regla de color WRO) si free_cx
@@ -723,6 +725,7 @@ def draw_bev_debug(
     pp_active: bool = False,
     line_info: dict | None = None,
     bev_obstacles_beyond: list[tuple[float, float, str]] | None = None,
+    robot_xy: tuple[int, int] | None = None,
 ) -> np.ndarray:
     """
     Dibuja sobre la imagen BEV:
@@ -807,7 +810,7 @@ def draw_bev_debug(
         cv2.circle(out, (lx, ly), 8, (0, 0, 0), 2)
 
     # Robot
-    rx, ry = C.ROBOT_BEV_X, C.ROBOT_BEV_Y
+    rx, ry = (C.ROBOT_BEV_X, C.ROBOT_BEV_Y) if robot_xy is None else robot_xy
     cv2.circle(out, (rx, ry), 9, (255, 80, 0), -1)
     cv2.arrowedLine(out, (rx, ry), (rx, ry - 25), (255, 255, 255), 2, tipLength=0.35)
 

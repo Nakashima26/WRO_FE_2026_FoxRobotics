@@ -40,6 +40,25 @@ MPU6050 mpu(Wire);
 #define TRIG_F      14   // HC-SR04 frontal (ronda de obstáculos: CRUCERO/MANIOBRA)
 #define ECHO_F      33
 
+#ifndef FOX_ENCODER
+#define FOX_ENCODER 0
+#endif
+#ifndef FOX_TOF
+#define FOX_TOF 0
+#endif
+
+#if FOX_ENCODER && !defined(FOX_SIL)
+#define ENC_PIN_A   34
+#define ENC_PIN_B   39
+#endif
+
+#if FOX_TOF && !defined(FOX_SIL)
+#include <VL53L1X.h>
+#define TOF_XSHUT_L 25
+#define TOF_XSHUT_R 4
+#define TOF_XSHUT_B 5
+#endif
+
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
 const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
@@ -119,6 +138,7 @@ unsigned long lastGyroTime = 0;
 
 // ── Giroscopio ────────────────────────────────────────────────────────────────
 float anguloGyro    = 0;
+float anguloTotal   = 0;      // yaw continuo (misma integración que anguloGyro, sin reset)
 float anguloObjetivo = 0;
 // Velocidad de giro filtrada (°/s, mismo signo que anguloGyro). La usa el gate
 // del re-referenciado de CRUCERO para no adoptar como "recto" un chasis que
@@ -156,6 +176,10 @@ int   piPark       = 0;       // park=N: etapa del cajón vista por la Pi en la 
                                // final (0 nada | 1 magenta ADELANTE | 2 magenta ya
                                // salió del campo de visión = lo estamos pasando /
                                // pasamos). Solo tiene sentido con parkBuscando.
+int   piGr           = 0;     // gr=1: Pi autoriza giro rápido (GIRO_RAPIDO_MODO==2)
+int   piGf           = 0;     // gf=<cm>: umbral frontal del giro rápido (>0 override)
+int   piGv           = 0;     // gv=1: verde adelante y cerca (abrir el arco)
+bool  piEsquina      = false; // es=1: la cámara vio la naranja hace poco (la esquina existe)
 
 unsigned long lastPiMsgMs = 0;
 const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
@@ -220,8 +244,47 @@ bool marchaIniciada = false;
 // ESTACIONANDO_PUNTA: PARK_MODO = PARK_PUNTA. Tras el giro 12 (o la 13)
 // sigue la pared exterior SIN visión y, al bajar el ultrasónico exterior por el
 // 1er poste magenta, gira 90° y mete la trompa al lote (parcial). Ver su bloque.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, GIRO_RAPIDO, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
 Estado estado = SIGUIENDO;
+
+// Odometría ESP (marco de arranque: x adelante, y izquierda, mm)
+long  odomMm   = 0;
+long  poseX    = 0;
+long  poseY    = 0;
+float odomVfilt = 0.0f;
+int   pwmActual = 0;
+#if FOX_ENCODER
+volatile int32_t encCount = 0;
+int32_t encCountPrev = 0;
+#if !defined(FOX_SIL)
+portMUX_TYPE encMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint8_t encPrevAB = 0;
+static const int8_t encTrans[16] = {
+  0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
+};
+void IRAM_ATTR encIsr() {
+  uint8_t a = digitalRead(ENC_PIN_A) ? 1 : 0;
+  uint8_t b = digitalRead(ENC_PIN_B) ? 1 : 0;
+  uint8_t ab = (a << 1) | b;
+  int8_t d = encTrans[(encPrevAB << 2) | ab];
+  encPrevAB = ab;
+  if (d) encCount += d;
+}
+#endif
+#endif
+#if FOX_TOF
+int tofMm[3] = {-1, -1, -1};   // 0=L 1=R 2=traseira
+#if !defined(FOX_SIL)
+VL53L1X tofL, tofR, tofB;
+#endif
+#endif
+
+// GIRO_RAPIDO — estado interno
+float grObjetivo = 0.0f;
+float grIncl     = 0.0f;
+int   grHold     = 0;
+unsigned long grEntryMs = 0;
+bool  maniobraGirarDerGr = false;   // latcheado al entrar (misma lógica que decidirManiobra)
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
 const int  FRONT_TURN_FWD_CM = 75;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
@@ -303,6 +366,45 @@ const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (so
 const int CRUCERO_PARED_DEBOUNCE = 3;  // ídem, cuando SÍ hay lateral abierta confirmando
 const int CRUCERO_MUY_CERCA_DEBOUNCE = 2; // ídem, cuando dF ya <= FRONT_TURN_REV_CM (pegado a la pared de
                                           // frente): confirma en 2 lecturas para disparar cerca de 25 cm
+
+// ── GIRO_RAPIDO (alternativa a MANIOBRA por tramos) ───────────────────────────
+const int GIRO_RAPIDO_MODO       = 0;    // 0=off 1=siempre 2=solo si Pi manda gr=1
+// Asientos (wro_field.SEATS): tres filas a lo largo de la recta, en ±500 y 0 mm
+// del centro. La pared del fondo está a 1500 mm, así que la última fila —la
+// última donde puede haber una lata— queda a 100 cm. Se giran 5 cm después,
+// para alcanzar a esquivar esa lata, sin esperar la naranja.
+const int GR_ULTIMA_FILA_CM      = 100;
+const int GR_MARGEN_ESQUIVA_CM   = 5;
+const int GR_FRONT_CM            = GR_ULTIMA_FILA_CM - GR_MARGEN_ESQUIVA_CM; // 95
+// Más adentro de esto el arco saldría pegado a la pared: se hace MANIOBRA.
+const int GR_VENTANA_CM          = 55;   // dispara entre 40 y 95 cm
+const int GR_MIN_FRONT_CM        = 20;
+// |anguloGyro| bajo el cual la recta ya está tomada (se zerea al cerrar el giro).
+const float GR_RECTO_DEG         = 12.0f;
+// Desde que TERMINA un giro (lastTurnTime en completarTurnoObstaculos).
+// Sin esto, al salir todavía ves la pared de la esquina y disparas otra.
+const unsigned long GR_GAP_MS    = 4000;
+// es=1 de la Pi cuenta como evidencia lateral de esquina (un cono de la recta que
+// sigue suele tapar el sonar del lado del giro) mientras el V2 sea reciente.
+const unsigned long GR_PI_ESQUINA_MS = 300;
+const float GR_EXT_TARGET_CM     = 25.0f;
+const float GR_KP                = 2.5f;
+const float GR_KD                = 0.12f;
+const int GR_PWM                 = 115;
+const int GR_PWM_FIN             = 100;
+const float GR_TOL_DEG           = 5.0f;
+const int GR_HOLD_N              = 3;
+const unsigned long GR_TIMEOUT_MS = 2500;
+// Verde se pasa por la izquierda. En un giro a la derecha el tope (servo 30)
+// mete el arco por dentro de esa lata. Mientras gv=1, no cerrar más que esto.
+const int GR_VERDE_ABRE          = 32;
+const int GR_ABORT_CM            = 12;
+
+// ── Odometría (Pi) ────────────────────────────────────────────────────────────
+const float ODOM_PWM_K           = 3.5f;
+const int   ODOM_PWM_0           = 25;
+const float ODOM_TAU_S           = 0.25f;
+const float ENC_CUENTAS_POR_MM   = 20.73f;   // 7*4*50*2/(PI*43), recalibrar en pista
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -457,6 +559,7 @@ unsigned long ultimoObstaculoMs = 0;   // millis del último V2 con piPriority |
 unsigned long cruceroEntryMs = 0;
 bool cruceroCerca      = false;        // en CRUCERO: true = cerca de la pared -> pura gyro+wall (sin visión)
 int  contadorFront     = 0;            // debounce del sensor frontal
+int  contadorGrFront   = 0;            // debounce giro rápido (umbral GR)
 bool maniobraDecidida  = false;
 bool maniobraGirarDer  = false;
 bool maniobraReversa   = false;
@@ -576,7 +679,10 @@ const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la 
                                                      //  ángulo — patina / topa la pared del cajón —
                                                      //  pasa a la fase 2 igual; la contravuelta y la
                                                      //  reversa terminan de cuadrar lo que haya)
-const unsigned long INICIO_MID_MS      = 1;  // fase 2: tramo recto entre los dos giros
+const unsigned long INICIO_MID_MS      = 700; // fase 2: sale del cajón antes de la contravuelta.
+                                              //  Con batalla 113 mm y rueda a 46.32° el arco de la fase 1
+                                              //  termina con la nariz todavía en la punta de la madera;
+                                              //  ~700 ms recto la pasan. Con 1 ms la reversa se mete en ella.
 const int  INICIO_CONTRA_CORRIGE_DEG   = 25;   // fase 3: la contravuelta hacia ADELANTE solo corrige estos grados
                                               //  (medidos desde el pico de la fase 1); lo que falte lo
                                               //  cuadra la reversa con heading-hold (fase 5)
@@ -596,6 +702,8 @@ const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear 
 
 // Estado interno de INICIO
 bool inicioEvaluado = false;   // one-shot: ¿ya se decidió si entrar a INICIO?
+unsigned long inicioFinMs = 0; // cierre de INICIO; 0 = no hubo salida de cajón
+const unsigned long INICIO_HOLGURA_GIRO_MS = 2500; // no disparar GIRO_RAPIDO pegado al cajón
 int  inicioFase     = -1;      // -1 init | 1 swing | 2 recto | 3 contra | 4 coast | 5 reversa-corrige | 7 pausa | 8 reversa recta | 6 settle
 bool inicioGirarDer = false;   // lado de salida del cajón (servo full hacia ahí en la fase 1)
 unsigned long inicioRevMs = 0; // inicio de la reversa (fase 5): base del presupuesto INICIO_REV_MS
@@ -1066,9 +1174,16 @@ bool          cajonParedDetectada    = false;
 const int           PARK_RETORNO_PWM           = 95;
 const int           PARK_RETORNO_PWM_MIN       = 80;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
-const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // avance recto ANTES de la media vuelta: más = termina más lejos
-                                                         // de la pared del lote (0 = gira desde parado como antes)
-const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes de 90; la inercia completa
+const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // solo el estacionamiento en paralelo
+const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes del ángulo; la inercia completa
+// Tras la vuelta 12: U de 180° en la recta, no la reversa de la media vuelta.
+// Se gira hacia la pared exterior que ya va al lado. Hacia el otro lado el
+// arco (2 radios) cae dentro de la isla. La naranja solo dice "esta es la
+// esquina": si todavía hay lata, se sigue esquivando. El frontal es el tope.
+const int           PARK_UTURN_DEG             = 170;    // 180 menos el overshoot
+const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
+const int           PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 const unsigned long PARK_RETORNO_TIMEOUT_MS    = 4000;
 const unsigned long PARK_RETORNO_SETTLE_MAX_MS = 670;    // tope de la espera a que deje de rotar (>= MANIOBRA_FRENO_MS)
 // Reversa recta tras la media vuelta, para tener carrera antes del 1er poste. En CCW
@@ -1162,7 +1277,8 @@ const unsigned long PARK_PUNTA_PING_MIN_MS     = 30;     // fase 0 con un solo s
                                                          // disparado muy seguido oye el eco tardío de su pulso anterior)
 // Maniobra
 const unsigned long PARK_PUNTA_FRENO_MS        = 350;    // coast tras la bajada (el carro se detiene)
-const long          PARK_PUNTA_AJUSTE_MS       = 0;      // + avanza recto / - retrocede recto antes del arco (0 = nada)
+const int           PARK_PUNTA_HUECO_MM        = 0;      // gira al abrirse el hueco; más adentro la trompa da en el poste lejano
+const int           PARK_PUNTA_AJUSTE_MM       = 0;      // el hueco ya posicionó; no avanzar otra vez
 const int           PARK_PUNTA_AJUSTE_PWM      = 90;
 const unsigned long PARK_PUNTA_SERVO_MS        = 200;    // espera a que el servo llegue a tope antes de avanzar
 const int           PARK_PUNTA_ARCO_PWM        = 95;
@@ -1175,7 +1291,7 @@ const int           PARK_PUNTA_OVERSHOOT_DEG   = 8;      // corta antes; la iner
 // el poste. orillas953: detectó a +10.8°, el arco relativo giró 60° y frenó por dF a -49°.
 const bool          PARK_PUNTA_ARCO_ABSOLUTO   = true;
 const unsigned long PARK_PUNTA_ARCO_TIMEOUT_MS = 4000;
-const unsigned long PARK_PUNTA_ENTRA_MS        = 800;    // tras el arco, recto hacia la pared máx. esto (0 = no entra más)
+const int           PARK_PUNTA_ENTRA_MM        = 160;    // tras el arco, recto hacia la pared máx. esto (0 = no entra más)
 const int           PARK_PUNTA_ENTRA_PWM       = 85;
 const int           PARK_PUNTA_DF_STOP_CM      = 8;      // frontal <= esto -> para (arco o entrada)
 const int           PARK_PUNTA_DF_N            = 2;      // lecturas seguidas
@@ -1200,8 +1316,16 @@ float         puntaIntPared     = 0.0f;  // integral del error de pared (cm·s),
 unsigned long puntaIntMs        = 0;
 float         puntaRumboRef     = 0.0f;  // heading de la recta al detectar (fase 2)
 float         puntaRumboArco0   = 0.0f;  // heading al empezar el arco
-bool          puntaRetorno      = false; // estacionando tras la media vuelta (MANIOBRA 13)
-float         puntaRumboGiro0   = 0.0f;  // heading al empezar la media vuelta
+bool          puntaRetorno      = false; // estacionando de regreso, tras la U
+float         puntaRumboGiro0   = 0.0f;  // heading al empezar la U
+bool          parkUturnPendiente = false; // vuelta 12 cerrada: falta la U
+long          parkUturnOdom0     = 0;
+bool          parkNaranjaVista   = false;
+int           puntaMuros         = 0;     // paredes del cajón ya contadas (0..2)
+bool          puntaEnPoste       = false; // la bajada actual ya se contó
+bool          puntaHueco         = false; // entre la 1a y la 2a pared
+long          puntaOdom0         = 0;
+int           puntaServoU        = 0;      // servo latcheado de la U (no re-medirlo a media curva)
 unsigned long puntaSettleSampMs = 0;
 int           puntaSettleQuieto = 0;
 long          puntaExtRaw       = 0;     // diag: última lectura cruda del sonar exterior
@@ -1350,6 +1474,7 @@ void setMotor(int velocidad) {
     }
   }
   ledcWrite(PWMA, velocidad);
+  pwmActual = velocidad;
 }
 
 // Motor en coast (terminales flotando) — para frenar suave y dejar caer la
@@ -1453,10 +1578,137 @@ void resetModoGiro() {
   hugSeparadoStreak = 0;
 }
 
+bool giroRapidoPermitido() {
+  if (GIRO_RAPIDO_MODO == 0) return false;
+  if (GIRO_RAPIDO_MODO == 1) return true;
+  return piGr != 0;
+}
+
+float extWallTargetCrucero() {
+  if (estado == CRUCERO && giroRapidoPermitido()) return GR_EXT_TARGET_CM;
+  return EXT_WALL_TARGET_CM;
+}
+
+void latchDireccionGiro(long distL, long distR, bool &girarDer) {
+  bool derAbierta = (distR > umbralPared);
+  bool izqAbierta = (distL > umbralPared);
+  if (primerGiro) {
+    girarDer = !direccionIzquierda;
+  } else {
+    if      (direccionAproxLatch == 1) girarDer = false;
+    else if (direccionAproxLatch == 2) girarDer = true;
+    else if (derAbierta && !izqAbierta) girarDer = true;
+    else if (izqAbierta && !derAbierta) girarDer = false;
+    else                               girarDer = (distR > distL);
+    primerGiro = true;
+  }
+  direccionIzquierda = !girarDer;
+}
+
+void entrarGiroRapido(long distL, long distR) {
+  latchDireccionGiro(distL, distR, maniobraGirarDerGr);
+  maniobraGirarDer = maniobraGirarDerGr;
+  grIncl = constrain(anguloGyro, -MANIOBRA_INCL_ENTRADA_MAX_DEG, MANIOBRA_INCL_ENTRADA_MAX_DEG);
+  anguloGyro = 0;
+  float sg = maniobraGirarDerGr ? -1.0f : 1.0f;
+  grObjetivo = sg * constrain(AngGiro - grIncl * sg, 70.0f, 110.0f);
+  grHold     = 0;
+  grEntryMs  = millis();
+  integralGyro  = 0; prevErrorGyro = 0;
+  piPurePursuit = false;
+  estado        = GIRO_RAPIDO;
+  Serial.print("-> GIRO_RAPIDO dir="); Serial.print(maniobraGirarDerGr ? "DER" : "IZQ");
+  Serial.print(" obj="); Serial.println(grObjetivo, 1);
+}
+
+void actualizarOdometria() {
+  float ds = 0.0f;
+#if FOX_ENCODER
+  int32_t cnt;
+#if defined(FOX_SIL)
+  cnt = sil_encoder_count();
+#else
+  portENTER_CRITICAL(&encMux);
+  cnt = encCount;
+  portEXIT_CRITICAL(&encMux);
+#endif
+  ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
+  encCountPrev = cnt;
+#else
+  static unsigned long odomLastMs = 0;
+  unsigned long now = millis();
+  float dt = (odomLastMs == 0) ? 0.02f : (now - odomLastMs) / 1000.0f;
+  odomLastMs = now;
+  if (dt <= 0.0f) dt = 0.02f;
+  float v_cmd = 0.0f;
+  int dirOdom = motorDirActual;
+  if (dirOdom == 0 && pwmActual > ODOM_PWM_0) {
+    if (digitalRead(A1) && !digitalRead(A2))      dirOdom = 1;
+    else if (!digitalRead(A1) && digitalRead(A2)) dirOdom = -1;
+  }
+  if (dirOdom != 0 && pwmActual > ODOM_PWM_0)
+    v_cmd = ODOM_PWM_K * (float)(pwmActual - ODOM_PWM_0);
+  if (dirOdom < 0) v_cmd = -v_cmd;
+  float alpha = dt / ODOM_TAU_S;
+  if (alpha > 1.0f) alpha = 1.0f;
+  odomVfilt += (v_cmd - odomVfilt) * alpha;
+  ds = odomVfilt * dt;
+#endif
+  odomMm += (long)lroundf(ds);
+  float yawRad = anguloTotal * PI / 180.0f;
+  poseX += (long)lroundf(ds * cos(yawRad));
+  poseY += (long)lroundf(ds * sin(yawRad));
+}
+
+#if FOX_TOF && !defined(FOX_SIL)
+void initToF() {
+  pinMode(TOF_XSHUT_L, OUTPUT);
+  pinMode(TOF_XSHUT_R, OUTPUT);
+  pinMode(TOF_XSHUT_B, OUTPUT);
+  digitalWrite(TOF_XSHUT_L, LOW);
+  digitalWrite(TOF_XSHUT_R, LOW);
+  digitalWrite(TOF_XSHUT_B, LOW);
+  delay(10);
+  digitalWrite(TOF_XSHUT_L, HIGH);
+  delay(10);
+  tofL.setTimeout(500);
+  if (!tofL.init()) { Serial.println("ToF L fail"); return; }
+  tofL.setAddress(0x30);
+  tofL.setDistanceMode(VL53L1X::Long);
+  tofL.startContinuous(33);
+  digitalWrite(TOF_XSHUT_R, HIGH);
+  delay(10);
+  tofR.setTimeout(500);
+  if (!tofR.init()) { Serial.println("ToF R fail"); return; }
+  tofR.setAddress(0x31);
+  tofR.setDistanceMode(VL53L1X::Long);
+  tofR.startContinuous(33);
+  digitalWrite(TOF_XSHUT_B, HIGH);
+  delay(10);
+  tofB.setTimeout(500);
+  if (!tofB.init()) { Serial.println("ToF B fail"); return; }
+  tofB.setAddress(0x32);
+  tofB.setDistanceMode(VL53L1X::Long);
+  tofB.startContinuous(33);
+}
+
+void leerToF() {
+  VL53L1X *dev[3] = {&tofL, &tofR, &tofB};
+  for (int i = 0; i < 3; i++) {
+    if (dev[i]->dataReady()) {
+      uint16_t mm = dev[i]->read(false);
+      uint8_t st = dev[i]->rangingData.range_status;
+      tofMm[i] = (st == 0) ? (int)mm : -1;
+    }
+  }
+}
+#endif
+
 // Vigilancia de la esquina de CRUCERO (caídas del lateral + latch de dirección
 // de aproximación) desde cero. Se llama al entrar/salir de CRUCERO.
 void resetVigilanciaEsquina() {
   contadorFront       = 0;
+  contadorGrFront     = 0;
   lateralWatchActivo  = false;
   lateralOpenStreak   = 0;
   lateralDropCount    = 0;
@@ -1475,28 +1727,9 @@ void entrarCrucero() {
 }
 
 void decidirManiobra(long distL, long distR) {
-  bool derAbierta = (distR > umbralPared);
-  bool izqAbierta = (distL > umbralPared);
-
-  // ── DIRECCIÓN de giro ── se decide en la 1ª esquina por la pared que ABRE y
-  //    se LATCHEA (primerGiro): todas las esquinas de la pista son del mismo
-  //    sentido, así que no se re-evalúa. Como CRUCERO ya exige paredAbierta para
-  //    disparar, aquí SIEMPRE llega con una abierta -> nunca se usa el fallback.
-  if (primerGiro) {
-    maniobraGirarDer = !direccionIzquierda;                 // ya latcheada
-  } else {
-    // 1ª esquina: la dirección sale de qué lado abrió. Prioridad al latch de la
-    // APROXIMACIÓN (leído cuando el lateral aún daba el hueco real, antes de que
-    // el cono de sonido se lockeara en un obstáculo cercano). Si no hay latch,
-    // se usa la lectura viva; y por último el fallback histórico.
-    if      (direccionAproxLatch == 1) maniobraGirarDer = false;  // abrió IZQUIERDA
-    else if (direccionAproxLatch == 2) maniobraGirarDer = true;   // abrió DERECHA
-    else if (derAbierta && !izqAbierta) maniobraGirarDer = true;
-    else if (izqAbierta && !derAbierta) maniobraGirarDer = false;
-    else                               maniobraGirarDer = (distR > distL);  // fallback (no debería pasar)
-    primerGiro = true;                                      // latcheado para el resto de la carrera
-  }
-  direccionIzquierda = !maniobraGirarDer;   // para el dir= del ACK
+  bool girarDer;
+  latchDireccionGiro(distL, distR, girarDer);
+  maniobraGirarDer = girarDer;
 
   // ── FWD vs REVERSE ── el MISMO modo que eligió la ventana frontal del preview
   //    (giroModoFwd, con memoria de la aproximación), no la lectura instantánea:
@@ -1761,6 +1994,9 @@ void arrancarSeguirPunta() {
   puntaErrPared     = 0.0f;
   puntaIntPared     = 0.0f;
   puntaIntMs        = millis();
+  puntaMuros        = 0;
+  puntaEnPoste      = false;
+  puntaHueco        = false;
   Serial.print("PUNTA fase 0: sigo pared ");
   Serial.print(puntaParedIzq ? "IZQUIERDA" : "DERECHA");
   Serial.print(" a "); Serial.print(PARK_PUNTA_PARED_CM, 0); Serial.println(" cm");
@@ -1781,12 +2017,14 @@ void iniciarEstacionandoPunta(bool retorno) {
   Serial.println(PARK_TEST_MANO ? " PRUEBA A MANO, motor apagado" : "");
   Serial.println("==================================================");
   if (retorno) {
-    motorCoast();
-    // Con avance previo arranca recto; sin él, la fase 20 espera a que llegue a tope.
-    escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (puntaParedIzq ? 160 : 30));
+    motorAdelante();
+    escribirServo(centroServo);
     puntaRumboGiro0 = anguloGyro;
+    puntaOdom0      = odomMm;
+    puntaServoU     = 0;
     puntaFase       = 20;
     puntaFaseMs     = millis();
+    Serial.println("PUNTA fase 20: U por encoder, sin reversa");
   } else {
     motorAdelante();
     escribirServo(centroServo);
@@ -1800,6 +2038,30 @@ void iniciarEstacionamiento(bool retorno) {
   if (PARK_MODO == PARK_PUNTA) iniciarEstacionandoPunta(retorno);
   else if (retorno)            iniciarEstacionandoRetorno();
   else                         iniciarParkBuscando();
+}
+
+// Tras la vuelta 12, en SIGUIENDO/CRUCERO. La naranja marca la esquina; mientras
+// esa esquina tenga una lata, la visión sigue esquivando. Sin naranja, solo un
+// frontal ya corto dispara la U, para no entrar a la pared del fondo.
+void vigilarUturn(long distF) {
+  if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO) return;
+  // La naranja de la vuelta 12 es la esquina que ACABAS de tomar. La de la
+  // U es la siguiente, después de recorrer la recta.
+  long recorrido = odomMm - parkUturnOdom0;
+  if (recorrido > 1200 && piEsquina && (millis() - lastPiMsgMs) < 500)
+    parkNaranjaVista = true;
+  bool ocupado = piPriority || (piMemoryFrames > 0);
+  if (ocupado) {
+    if (estado == CRUCERO) estado = SIGUIENDO;
+    return;
+  }
+  // Ya pasaste la lata de esta recta. Lo que falta de recta se usa para
+  // pegarse a la exterior; la U misma arranca en la fase 20.
+  bool lista = recorrido > 1000 && (parkNaranjaVista || distF > 50 || distF <= 0);
+  bool fondo = recorrido > 1000 && distF > 0 && distF <= 55;
+  if (!(lista || fondo)) return;
+  parkUturnPendiente = false;
+  iniciarEstacionandoPunta(true);
 }
 
 // Servo "recto" hacia un heading (gyro PD) para ESTACIONANDO_PUNTA. Convención
@@ -1840,21 +2102,15 @@ void iniciarTerminando() {
   Serial.println(" ms hacia el area de salida)");
 }
 
-// Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
-// (recta nueva desde 0) y vuelve a SIGUIENDO. Cuenta el giro.
-void finalizarManiobra() {
+// Cierre de MANIOBRA / GIRO_RAPIDO: bookkeeping compartido (sin coast/backoff/settle).
+void completarTurnoObstaculos() {
   motorAdelante();
   escribirServo(centroServo);
   setMotor(0);
   velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
-  // Residual real vs la recta nueva (NO zerar a ciegas): si el pivote sub/sobre-
-  // giró, la recuperación termina de cuadrarlo. anguloObjetivo=0 => errorGyro =
-  // -residual. Clamp por si una lectura loca. (ver MANIOBRA_RESIDUAL_MAX_DEG)
   if (esManiobra13() && MANIOBRA_13_CUADRAR_MS > 0) {
-    // MANIOBRA 13: la fase 4 terminó empujando con la cola plana contra la pared del
-    // lote -> el chasis ES perpendicular a ella. Referencia real, no el residual.
     Serial.print("MANIOBRA 13: cuadrado contra la pared, residual descartado=");
     Serial.println(anguloGyro - maniobraIdealRot, 1);
     anguloGyro = 0.0f;
@@ -1862,28 +2118,34 @@ void finalizarManiobra() {
     anguloGyro     = constrain(anguloGyro - maniobraIdealRot,
                                -MANIOBRA_RESIDUAL_MAX_DEG, MANIOBRA_RESIDUAL_MAX_DEG);
   }
-  // Recta nueva: en vez de apuntar a 0, apunta unos grados hacia la pared
-  // EXTERIOR del giro que se acaba de hacer (ver MANIOBRA_BIAS_AFUERA_DEG).
   anguloObjetivo   = maniobraGirarDer ? +MANIOBRA_BIAS_AFUERA_DEG
                                       : -MANIOBRA_BIAS_AFUERA_DEG;
   lastTurnTime     = millis();
   maniobraDecidida = false;
   maniobraFase     = -1;
   estado           = SIGUIENDO;
-  resetModoGiro();                 // la aproximación a la siguiente esquina empieza de cero
+  resetModoGiro();
   turnsCompleted++;
   if (MODO_CONTINUO) {
-    // Sin parada: ni estaciona ni termina, sigue corriendo vueltas.
   } else if (turnsCompleted >= TURNS_PER_RACE) {
-    if (PARK_MODO == PARK_NINGUNO)            iniciarTerminando();
-    else if (!PARK_MEDIA_VUELTA)              iniciarEstacionamiento(false);  // giro 12: de frente
-    else if (turnsCompleted > TURNS_PER_RACE) iniciarEstacionamiento(true);   // giro 13: media vuelta
-    // giro 12 con PARK_MEDIA_VUELTA: sigue la carrera normal (SIGUIENDO) hasta la esquina 13
+    if (PARK_MODO == PARK_NINGUNO) iniciarTerminando();
+    else if (!PARK_MEDIA_VUELTA)   iniciarEstacionamiento(false);
+    else {
+      parkUturnPendiente = true;
+      parkUturnOdom0     = odomMm;
+      parkNaranjaVista   = false;
+    }
   }
   Serial.print("MANIOBRA completada ");
   Serial.print(turnsCompleted);
   Serial.print("/");
   Serial.println(TURNS_PER_RACE);
+}
+
+// Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
+// (recta nueva desde 0) y vuelve a SIGUIENDO. Cuenta el giro.
+void finalizarManiobra() {
+  completarTurnoObstaculos();
 }
 
 // Entra a la fase 6 (SETTLE): coast + servo centro, y NO cierra la maniobra
@@ -1915,7 +2177,11 @@ void finalizarInicio() {
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
   anguloObjetivo = 0;
-  lastTurnTime   = millis();   // cooldown: sin giro-falso en la zona de salida
+  // No anclar lastTurnTime: el hueco de 6 s entre giros contaría desde aquí
+  // y la primera esquina (~4 s después, a mitad de recta) ya está a <40 cm
+  // cuando abre, así que el arco no dispara. La holgura corta de abajo cubre
+  // el eco falso al salir del cajón.
+  inicioFinMs    = millis();
   timeStart      = millis();   // el grace de arranque cuenta desde acá
   inicioFase     = -1;
   estado         = SIGUIENDO;
@@ -2017,6 +2283,7 @@ void actualizarGyro() {
   float gz = mpu.getGyroZ() / gyroScale;
   if (abs(gz) < 1.0) gz = 0;
   anguloGyro += gz * dt;
+  anguloTotal += gz * dt;
   gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
 }
 
@@ -2088,6 +2355,10 @@ void parsePiMessage(String line) {
 
     // park — etapa del cajón vista por la Pi en la recta final
     if (campoPi(line, "park=", v)) piPark = v.toInt();
+    if (campoPi(line, ",gr=", v))  piGr = v.toInt();
+    if (campoPi(line, ",gf=", v))  piGf = v.toInt();
+    piGv           = campoPi(line, ",gv=", v) && v.toInt() != 0;
+    piEsquina      = campoPi(line, ",es=", v)    && v.toInt() != 0;
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
@@ -2103,7 +2374,7 @@ void parsePiMessage(String line) {
     // ESTACIONANDO -> "E" (la Pi queda en stand-down mientras el ESP ejecuta la reversa).
     // TERMINANDO -> "T".
     Serial2.print(estado == INICIO ? "I"
-                  : (estado == GIRANDO || estado == MANIOBRA) ? "G"
+                  : (estado == GIRANDO || estado == MANIOBRA || estado == GIRO_RAPIDO) ? "G"
                   : (estado == RECUPERANDO ? "R"
                      : (estado == CRUCERO ? "C"
                         : ((estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA) ? "E"
@@ -2188,6 +2459,19 @@ void parsePiMessage(String line) {
     //   vel  : velocidad de avance medida entre poste 1 y poste 2 (cm/s).
     //          0 = no se pudo medir -> la fase 1 usó el tiempo nominal.
     Serial2.print(",vel=");  Serial2.print(parkVelCmS, 1);
+    Serial2.print(",yaw=");  Serial2.print(anguloTotal, 2);
+    Serial2.print(",od=");   Serial2.print(odomMm);
+    Serial2.print(",px=");   Serial2.print(poseX);
+    Serial2.print(",py=");   Serial2.print(poseY);
+    Serial2.print(",enc=");  Serial2.print(FOX_ENCODER ? 1 : 0);
+#if FOX_TOF
+    Serial2.print(",tL=");   Serial2.print(tofMm[0]);
+    Serial2.print(",tR=");   Serial2.print(tofMm[1]);
+    Serial2.print(",tB=");   Serial2.print(tofMm[2]);
+#else
+    Serial2.print(",tL=-1,tR=-1,tB=-1");
+#endif
+    Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
     Serial2.println();
     return;
   }
@@ -2418,7 +2702,7 @@ void controlPID(long distL, long distR) {
       long distIntW = direccionIzquierda ? distL : distR;
       bool intAbierta = (distIntW <= 0 || distIntW > umbralPared);
       if (distExt > 0 && distExt <= umbralPared && intAbierta) {
-        float err  = (float)distExt - EXT_WALL_TARGET_CM;   // >0 = lejos del exterior
+        float err  = (float)distExt - extWallTargetCrucero();   // >0 = lejos del exterior
         float corr = constrain(err * EXT_WALL_GAIN, -EXT_WALL_MAX_DEG, EXT_WALL_MAX_DEG);
         extWallCorr = direccionIzquierda ? -corr : +corr;
       }
@@ -2535,6 +2819,8 @@ void setup() {
 
   pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
   digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
+  motorDirActual = 1;
+  motorDirMs     = millis();
 
   ledcAttach(PWMA,      freqMotor, resMotor);
   ledcAttach(SERVO_PIN, freqServo, resServo);
@@ -2549,6 +2835,21 @@ void setup() {
   lastGyroTime = millis();
   lastPiMsgMs  = 0;
   anguloObjetivo = 0;
+
+#if FOX_ENCODER && !defined(FOX_SIL)
+  pinMode(ENC_PIN_A, INPUT);
+  pinMode(ENC_PIN_B, INPUT);
+  encPrevAB = ((digitalRead(ENC_PIN_A) ? 1 : 0) << 1) | (digitalRead(ENC_PIN_B) ? 1 : 0);
+  attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), encIsr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_PIN_B), encIsr, CHANGE);
+#endif
+#if FOX_ENCODER && defined(FOX_SIL)
+  encCountPrev = sil_encoder_count();
+#endif
+#if FOX_TOF && !defined(FOX_SIL)
+  Wire.setClock(400000);
+  initToF();
+#endif
 
   // Esperar READY de la Pi (igual que Controller_PI.ino). Bloquea SIN timeout:
   // loop() siempre arranca con piReadyReceived = true.
@@ -2576,6 +2877,16 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+  mpu.update();
+  actualizarGyro();
+#if FOX_TOF
+#if defined(FOX_SIL)
+  for (int _ti = 0; _ti < 3; _ti++) tofMm[_ti] = sil_tof_mm(_ti);
+#else
+  leerToF();
+#endif
+#endif
+
   readPiSerial();
 
   // READY llegó PERO todavía no el primer V2 -> NO rodar. Si no, controlPID()
@@ -2914,6 +3225,10 @@ void loop() {
     }
 
     case SIGUIENDO: {
+      if (parkUturnPendiente) {
+        vigilarUturn(distF);
+        if (estado != SIGUIENDO) break;
+      }
       velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
       if (parkBuscando) velocidadMotor = PARK_APPROACH_PWM;
 
@@ -3125,6 +3440,10 @@ void loop() {
     // vuelve a SIGUIENDO para esquivarlo.
     // ═══════════════════════════════════════════════════════════════════════════
     case CRUCERO: {
+      if (parkUturnPendiente) {
+        vigilarUturn(distF);
+        if (estado != CRUCERO) break;
+      }
       velocidadMotor = MOTOR_MAX;
       piPasado = false;   // pulso viejo/rezagado: CRUCERO ya mantiene heading
       // Cerca de la pared -> pura gyro+wall (controlPID lo enruta con cruceroCerca).
@@ -3311,10 +3630,50 @@ void loop() {
       // disparar antes, es fantasma (run 2026-09-07). NO gatea cruceroLargo.
       bool gapOk = (millis() - lastTurnTime) > MANIOBRA_MIN_GAP_MS;
 
+      // La Pi puede pedir girar ANTES de la última fila; no después.
+      int grUmbral = GR_FRONT_CM;
+      if (piGf > grUmbral) grUmbral = piGf;
+      int grMin    = max(GR_MIN_FRONT_CM, grUmbral - GR_VENTANA_CM);
+      bool enLaParedGr = false;
+      if (giroRapidoPermitido()) {
+        // Recto según la IMU y ya pasada la última fila (+5 cm): no hace falta
+        // la naranja ni que el lateral se abra.
+        bool _recto = fabs(anguloGyro) <= GR_RECTO_DEG;
+        bool _piEsquina = piEsquina && (millis() - lastPiMsgMs) < GR_PI_ESQUINA_MS;
+        enLaParedGr = (distF > 0 && distF <= grUmbral && distF >= grMin
+                       && !_hayLataMia
+                       && (_recto || paredAbierta || giroSucioArmado || _laAprox
+                           || _muyCerca || _piEsquina));
+      }
+      if (enLaParedGr) contadorGrFront++;
+      else             contadorGrFront = 0;
+
+      // lastTurnTime queda en 0 hasta la primera vuelta: si no, los 6 s
+      // cuentan desde el arranque y la esquina 1 (≈4.5 s) nunca entra.
+      bool gapGr = (lastTurnTime == 0) || ((millis() - lastTurnTime) > GR_GAP_MS);
+      bool holguraInicio = (inicioFinMs == 0)
+                           || ((millis() - inicioFinMs) > INICIO_HOLGURA_GIRO_MS);
+      if (!parkUturnPendiente
+          && giroRapidoPermitido() && gapGr && holguraInicio
+          && contadorGrFront >= CRUCERO_PARED_DEBOUNCE) {
+        bool _fueSucioGr = giroSucioArmado;
+        entrarGiroRapido(distL, distR);
+        resetVigilanciaEsquina();
+        if (_fueSucioGr) Serial.println(" GIRO_RAPIDO SUCIO");
+        break;
+      }
+      // Pegado a la exterior (que es como llega el giro rápido) la MANIOBRA de
+      // frente abre su ventana a ~75 cm y le ganaba al arco antes de los 50: con
+      // giro rápido, MANIOBRA solo entra si ya se pasó su ventana sin confirmar.
+      bool _grPendiente = giroRapidoPermitido() && distF > grMin;
+
       if (enLaPared) contadorFront++;
       else           contadorFront = 0;
 
-      if ((contadorFront >= debounceNecesario && gapOk) || cruceroLargo) {
+      // Ida normal con giro rápido: la esquina es el arco de frente. No hay
+      // reversa de acomodo (MANIOBRA) ni por timeout.
+      if (!giroRapidoPermitido()
+          && ((contadorFront >= debounceNecesario && gapOk && !_grPendiente) || cruceroLargo)) {
         bool _fueSucio = giroSucioArmado;
         decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada (usa direccionAproxLatch)
         resetVigilanciaEsquina();        // latch consumido; la próxima esquina lo re-latchea
@@ -3327,6 +3686,40 @@ void loop() {
         Serial.print(" distF=");   Serial.print(distF);
         Serial.print(_fueSucio ? " SUCIO" : "");
         Serial.println(cruceroLargo ? " TIMEOUT" : "");
+      }
+      break;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GIRO_RAPIDO — pivote adelante en lazo cerrado (sin coast/backoff/settle).
+    // ═══════════════════════════════════════════════════════════════════════════
+    case GIRO_RAPIDO: {
+      maniobraGirarDer = maniobraGirarDerGr;
+      float err = grObjetivo - anguloGyro;
+      int pwmGr = (fabs(err) > 20.0f) ? GR_PWM : GR_PWM_FIN;
+      motorAdelante();
+      int servoGr = constrain(centroServo + (int)(GR_KP * err - GR_KD * gyroRate), 30, 160);
+      // Giro a la derecha + verde adelante: el lado de paso es la izquierda
+      // (exterior). El servo no baja del piso, así el arco no se mete en la lata.
+      bool verdeAdelante = piGv && (millis() - lastPiMsgMs < 500);
+      if (verdeAdelante && maniobraGirarDerGr) {
+        int piso = centroServo - GR_VERDE_ABRE;
+        if (servoGr < piso) servoGr = piso;
+      }
+      escribirServo(servoGr);
+      setMotor(pwmGr);
+
+      if (fabs(err) <= GR_TOL_DEG) grHold++;
+      else                         grHold = 0;
+
+      bool grTimeout = (millis() - grEntryMs) >= GR_TIMEOUT_MS;
+      if (grHold >= GR_HOLD_N || grTimeout) {
+        maniobraIdealRot = grObjetivo;
+        maniobraGirarDer  = maniobraGirarDerGr;
+        completarTurnoObstaculos();
+        Serial.print("GIRO_RAPIDO completada");
+        if (grTimeout) Serial.print(" TIMEOUT");
+        Serial.println();
       }
       break;
     }
@@ -4319,8 +4712,13 @@ void loop() {
     // ═══════════════════════════════════════════════════════════════════════════
     case ESTACIONANDO_PUNTA: {
       long  extRaw     = puntaParedIzq ? distL_raw : distR_raw;
-      float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared"
-      int   servoTope  = puntaParedIzq ? 160 : 30;       // servo a tope hacia la pared
+      float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared" del regreso
+      int   servoTope  = puntaParedIzq ? 160 : 30;       // servo a tope hacia la pared del regreso
+      // La U gira al lado contrario: hacia la pared que traes en la recta de salida.
+      bool  uturnIzq   = !puntaParedIzq;
+      float haciaAhora = uturnIzq ? 1.0f : -1.0f;
+      int   servoU     = uturnIzq ? 160 : 30;
+      long  extAhora   = uturnIzq ? distL_raw : distR_raw;
       puntaExtRaw = extRaw;
       if (piPark >= 1) puntaRosaVisto = true;
 
@@ -4412,17 +4810,25 @@ void loop() {
           Serial.println(")");
         }
 
-        if (lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N && armada) {
-          puntaCaidaLectura = extRaw;
-          puntaRumboRef     = anguloGyro;
-          Serial.print("PUNTA: BAJADA base="); Serial.print(puntaBase, 1);
-          Serial.print(" lectura="); Serial.print(extRaw);
-          Serial.print(" ang="); Serial.print(anguloGyro, 1);
-          Serial.print(" rosa="); Serial.println(puntaRosaVisto ? 1 : 0);
+        if (puntaEnPoste && !lecturaBaja) {
+          puntaEnPoste = false;
+          puntaHueco   = true;
+          puntaOdom0   = odomMm;
+          Serial.println("PUNTA: hueco, avanzo por encoder");
+        }
+        // El hueco es el cajón. A los N mm se mete; si aparece el poste de
+        // adelante antes, se mete ya para no estrellarlo.
+        bool enHueco = puntaHueco && armada && (odomMm - puntaOdom0) >= PARK_PUNTA_HUECO_MM;
+        bool posteLejano = puntaHueco && armada && !puntaEnPoste
+                           && lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N;
+        if (enHueco || posteLejano) {
+          puntaRumboRef = anguloGyro;
+          Serial.print(posteLejano ? "PUNTA: poste lejano, me meto ext="
+                                   : "PUNTA: dentro del hueco mm=");
+          Serial.println(posteLejano ? extRaw : (odomMm - puntaOdom0));
           if (PARK_TEST_MANO) {
             puntaRumboArco0 = anguloGyro;
             puntaFase       = 10;
-            Serial.println("PUNTA MANO: servo a tope -> empuja el carro por el arco");
           } else {
             motorCoast();
             escribirServo(centroServo);
@@ -4430,6 +4836,12 @@ void loop() {
           }
           puntaFaseMs = millis();
           break;
+        }
+        if (lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N && !puntaEnPoste && puntaMuros == 0) {
+          puntaMuros    = 1;
+          puntaEnPoste  = true;
+          puntaCaidaCnt = 0;
+          Serial.print("PUNTA: primera pared lectura="); Serial.println(extRaw);
         }
 
         if (PARK_TEST_MANO) {
@@ -4473,14 +4885,10 @@ void loop() {
         escribirServo(centroServo);
         if (millis() - puntaFaseMs >= PARK_PUNTA_FRENO_MS) {
           puntaFaseMs = millis();
-          if (PARK_PUNTA_AJUSTE_MS > 0) {
+          if (PARK_PUNTA_AJUSTE_MM > 0) {
             motorAdelante();
-            puntaFase = 2;
-          } else if (PARK_PUNTA_AJUSTE_MS < 0) {
-            motorReversa();
-            integralRev   = 0; prevErrorRev = 0;
-            lastRevHoldMs = millis();
-            puntaFase     = 2;
+            puntaOdom0  = odomMm;
+            puntaFase   = 2;
           } else {
             puntaFase = 3;
           }
@@ -4490,18 +4898,15 @@ void loop() {
 
       // ── Fase 2: AJUSTE — recto adelante (+) o en reversa (-) ────────────────
       if (puntaFase == 2) {
-        if (PARK_PUNTA_AJUSTE_MS > 0) {
-          motorAdelante();
-          servoRumboPunta(puntaRumboRef);
-        } else {
-          motorReversa();
-          aplicarReversaHold(puntaRumboRef);
-        }
+        motorAdelante();
+        servoRumboPunta(puntaRumboRef);
         setMotor(PARK_PUNTA_AJUSTE_PWM);
-        if (millis() - puntaFaseMs >= (unsigned long)labs(PARK_PUNTA_AJUSTE_MS)) {
+        if ((odomMm - puntaOdom0) >= PARK_PUNTA_AJUSTE_MM) {
           motorCoast();
           puntaFase   = 3;
           puntaFaseMs = millis();
+          Serial.print("PUNTA fase 3: avance "); Serial.print(odomMm - puntaOdom0);
+          Serial.println(" mm");
         }
         break;
       }
@@ -4511,9 +4916,7 @@ void loop() {
         motorCoast();
         escribirServo(servoTope);
         // Tras la reversa también cuenta como coast antes de volver a adelante.
-        unsigned long espera = (PARK_PUNTA_AJUSTE_MS < 0)
-                               ? max(PARK_PUNTA_SERVO_MS, MANIOBRA_FRENO_MS)
-                               : PARK_PUNTA_SERVO_MS;
+        unsigned long espera = PARK_PUNTA_SERVO_MS;
         if (millis() - puntaFaseMs >= espera) {
           motorAdelante();
           puntaRumboArco0 = (puntaRetorno && PARK_PUNTA_ARCO_ABSOLUTO && MANIOBRA_13_CUADRAR_MS > 0)
@@ -4540,9 +4943,10 @@ void loop() {
         if (puntaDfCnt >= PARK_PUNTA_DF_N)      { finalizarPunta("ARCO: dF tope");  break; }
         if (tA >= PARK_PUNTA_ARCO_TIMEOUT_MS)   { finalizarPunta("ARCO: timeout");  break; }
         if (girado >= (float)(PARK_PUNTA_ARCO_DEG - PARK_PUNTA_OVERSHOOT_DEG)) {
-          if (PARK_PUNTA_ENTRA_MS == 0) { finalizarPunta("ARCO: angulo"); break; }
+          if (PARK_PUNTA_ENTRA_MM == 0) { finalizarPunta("ARCO: angulo"); break; }
           puntaFase   = 5;
           puntaFaseMs = millis();
+          puntaOdom0  = odomMm;
           Serial.print("PUNTA fase 5: ENTRA girado="); Serial.println(girado, 1);
           break;
         }
@@ -4558,7 +4962,10 @@ void loop() {
         setMotor(PARK_PUNTA_ENTRA_PWM);
         puntaDfCnt = (distF_med > 0 && distF_med <= PARK_PUNTA_DF_STOP_CM) ? puntaDfCnt + 1 : 0;
         if (puntaDfCnt >= PARK_PUNTA_DF_N)                 { finalizarPunta("ENTRA: dF tope"); break; }
-        if (millis() - puntaFaseMs >= PARK_PUNTA_ENTRA_MS) { finalizarPunta("ENTRA: tiempo");  break; }
+        if (PARK_PUNTA_ENTRA_MM > 0 && (odomMm - puntaOdom0) >= PARK_PUNTA_ENTRA_MM) {
+          finalizarPunta("ENTRA: distancia");
+          break;
+        }
         Serial.print(" | PUNTA f=5 dF="); Serial.print(distF_med);
         break;
       }
@@ -4580,35 +4987,29 @@ void loop() {
       // ── Fase 20: MEDIA VUELTA — 90° extra hacia adelante, hacia la pared ────
       if (puntaFase == 20) {
         unsigned long t = millis() - puntaFaseMs;
-        // Sin avance previo el carro arranca parado -> espera a que el servo llegue a
-        // tope. Con avance previo ya va rodando y el servo llega en movimiento.
-        unsigned long tArranque = (PARK_RETORNO_AVANCE_MS > 0) ? 0UL : PARK_PUNTA_SERVO_MS;
-        unsigned long tMov = (t > tArranque) ? (t - tArranque) : 0UL;
-        int vel = rampaPWM(tMov, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
-
-        // 1) Avance RECTO antes de girar: la media vuelta termina más lejos de la
-        //    pared del lote (orillas898 quedó a 17-19 cm y el seguidor no alcanzó a
-        //    salir a 30 antes del 1er poste).
-        if (t < PARK_RETORNO_AVANCE_MS) {
-          motorAdelante();
-          servoRumboPunta(puntaRumboGiro0);   // recto con gyro sobre el rumbo actual
-          setMotor(vel);
-          Serial.print(" | PUNTA f=20 avance t="); Serial.print(t);
-          break;
+        int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
+        // Un solo arco. El radio sale de la distancia a la exterior: 2R es
+        // lo que el eje se corre hacia esa pared. Tope = radio mínimo (~95 mm);
+        // más abierto si vas por el centro, para no volver encima de las latas.
+        if (puntaServoU == 0) {
+          int gapMm = (extAhora > 5 && extAhora < 150) ? (int)extAhora * 10 : 700;
+          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
+          if (shift < 200) shift = 200;
+          float radio = shift / 2.0f;
+          float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
+          // 70 ticks (servo 160) = 46.32° de rueda, cota del CAD.
+          int ticks = constrain((int)(delta / 46.32f * 70.0f), 28, 70);
+          puntaServoU = uturnIzq ? centroServo + ticks : centroServo - ticks;
+          Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
+          Serial.print(" ext="); Serial.println(extAhora);
         }
-
-        // 2) Giro: servo a tope hacia la pared del regreso.
-        escribirServo(servoTope);
-        if (t < tArranque) {                     // (solo sin avance) espera al servo parado
-          motorCoast();
-          break;
-        }
+        escribirServo(puntaServoU);
         motorAdelante();
         setMotor(vel);
 
-        float girado = (anguloGyro - puntaRumboGiro0) * haciaPared;   // >0 = hacia la pared del regreso
-        bool  listo  = girado >= (float)(90 - PARK_RETORNO_OVERSHOOT_DEG);
-        bool  tout   = tMov >= PARK_RETORNO_AVANCE_MS + PARK_RETORNO_TIMEOUT_MS;
+        float girado = (anguloGyro - puntaRumboGiro0) * haciaAhora;   // >0 = hacia la pared actual
+        bool  listo  = girado >= (float)PARK_UTURN_DEG;
+        bool  tout   = t >= PARK_RETORNO_TIMEOUT_MS;
         if (listo || tout) {
           motorCoast();
           escribirServo(centroServo);
@@ -4616,7 +5017,7 @@ void loop() {
           puntaFaseMs       = millis();
           puntaSettleSampMs = millis();
           puntaSettleQuieto = 0;
-          Serial.print("PUNTA fase 21: media vuelta girado="); Serial.print(girado, 1);
+          Serial.print("PUNTA fase 21: U girado="); Serial.print(girado, 1);
           Serial.println(tout ? " (TIMEOUT)" : "");
           break;
         }
@@ -4636,21 +5037,11 @@ void loop() {
         unsigned long tS = nowMs - puntaFaseMs;
         bool quieto = (puntaSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N) && (tS >= MANIOBRA_FRENO_MS);
         if (quieto || tS >= PARK_RETORNO_SETTLE_MAX_MS) {
-          // 0° = recta de REGRESO ideal. Antes de la media vuelta 0° era la recta
-          // ideal que dejó finalizarManiobra(); la media vuelta suma 90° hacia la pared.
-          anguloGyro -= haciaPared * 90.0f;
+          // 0° = recta de REGRESO. La U sumó 180° hacia la pared que traíamos.
+          anguloGyro -= haciaAhora * 180.0f;
           Serial.print("PUNTA: rumbo de regreso ang="); Serial.println(anguloGyro, 1);
-          unsigned long revMs = puntaParedIzq ? PARK_RETORNO_REV_CCW_MS : PARK_RETORNO_REV_CW_MS;
-          if (revMs > 0) {
-            motorReversa();
-            integralRev   = 0; prevErrorRev = 0;
-            lastRevHoldMs = millis();
-            puntaFase     = 22;
-            puntaFaseMs   = millis();
-          } else {
-            motorAdelante();
-            arrancarSeguirPunta();
-          }
+          motorAdelante();
+          arrancarSeguirPunta();
         }
         break;
       }
@@ -4685,12 +5076,15 @@ void loop() {
     }
   }
 
+  actualizarOdometria();
+
   // ── Log periódico ─────────────────────────────────────────────────────────
   Serial.print(" | Estado:");
   if      (estado == GIRANDO)      Serial.print("GIRANDO");
   else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
   else if (estado == CRUCERO)      Serial.print("CRUCERO");
   else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
+  else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
   else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
   else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
   else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");

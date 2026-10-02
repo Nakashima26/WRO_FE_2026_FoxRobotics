@@ -24,9 +24,12 @@ BEV_W      = 400          # píxeles de ancho
 BEV_H      = 400          # píxeles de alto
 MM_PER_PX  = 2.0          # escala: 1px = 2 mm  →  400px = 800 mm de cobertura
 
-# Posición del robot en la imagen BEV (eje trasero, centro horizontal)
+# Posición del robot en la imagen BEV (centro horizontal). Es el origen de
+# CALIB_REAL_MM, que se mide desde el EJE DELANTERO: el eje trasero queda
+# BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM más atrás, fuera de la imagen.
 ROBOT_BEV_X = BEV_W // 2   # 200
 ROBOT_BEV_Y = BEV_H - 20   # 380
+BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0   # = batalla
 
 # ─── Puntos de calibración en el suelo (mm, relativo a eje delantero del robot) ──
 # x_mm: lateral  (+ = derecha del robot)
@@ -204,6 +207,9 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 # suficiente para esquivar sin dar el volantazo. En grados de steer (pre-norm).
 # 2026-08-28: bajado 12->6 al pasar el pipeline de ~7fps a ~14fps (mismo °/s).
 PP_STEER_SLEW_DEG = 6.0
+# 0 = apagado. En recta sin lata cerca, tope de |steer| para no seguir el
+# zigzag del path. Lo prende el preset del twin; el carro real queda en 0.
+PP_OPEN_STEER_CAP_DEG = 0.0
 
 # Lookahead variable — derivado de la escala de urgencia
 # NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
@@ -1176,3 +1182,30 @@ CAM_BLACK_FRAMES    = 15     # desarmado: frames negros seguidos -> cámara caí
 CAM_REOPEN_WAIT_S   = 4.0    # espera tras soltar la cámara antes de reabrir (igual que stop + sleep 4 + start)
 CAM_REOPEN_JOIN_S   = 35.0   # espera a que el hilo salga de un cap.read() colgado (~30 s); si no, el
                              # proceso sale con código 3 y systemd (Restart=always) lo relanza
+
+# ─── Aviso de esquina al ESP32 (es= en el V2) — solo lo usa GIRO_RAPIDO ──────
+# La naranja vista hace poco = la esquina existe aunque un cono de la recta que
+# sigue tape el sonar del lado del giro. El momento del giro lo sigue poniendo
+# el frontal del ESP (ventana GR_FRONT_CM). En horario la naranja pasa bajo el
+# carro ~35 cm antes del disparo; en antihorario sigue enfrente al disparar.
+CORNER_HINT_TO_ESP = False   # False: el V2 sale igual que siempre
+CORNER_HINT_NEAR_Y = 120.0   # px BEV: naranja a menos de ~520 mm del eje delantero
+CORNER_HINT_HOLD_S = 1.5
+
+# ─── Mapa de pista (track_map / map_view) — runtime_nuevo.py ─────────────────
+# SHADOW: odometría + localizer + SignMap + log [MAP] + panel HUD; sin tocar V2 ni control.
+# ENABLED: además inyecta señales en BEV, gr/gf al V2, opc. classify/pasado.
+TRACK_MAP_SHADOW = True
+TRACK_MAP_ENABLED = False
+MAP_VIEW_IN_HUD = True
+TRACK_MAP_CLASSIFY = False
+TRACK_MAP_PASADO = False
+GR_PI_LAP1 = 0
+GR_GF_DEFAULT_CM = 50
+GR_GF_INNER_CM = 60
+GR_GF_OUTER_CM = 35
+# Centro del cajón en coords app (w); x_campo sur ≈ 1500 - w
+PARK_LOT_CENTER_W_MM = 1177.0
+MAP_OBS_DEDUP_PX = 60.0
+MAP_YAW_RATE_SKIP_DEG_S = 120.0
+MAP_LOG_COST_EVERY_N = 60
