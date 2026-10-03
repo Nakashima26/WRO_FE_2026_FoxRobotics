@@ -49,6 +49,7 @@ from .centerline import (
     bend_line_above, detect_centerline, draw_bev_debug,
     map_obstacle_to_bev, seen_above_obstacles,
 )
+from .digital_map import DigitalMap
 from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_pass
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
@@ -130,6 +131,8 @@ class FrameResult:
     map_localizer: Localizer | None = None
     # Desplazamiento para dibujar el BEV ancho. El cálculo sigue en 400 px.
     bev_shift: tuple = (0, 0)
+    # Mapa que el carro cree: medidas sí, latas solo las que ya vio.
+    dig_map: np.ndarray | None = None
 
 def _shift_line_info(info: dict, dx: int, dy: int) -> dict:
     """La naranja se calculó en la hoja de 400 px. El dibujo va en la ancha."""
@@ -301,6 +304,8 @@ class PPRuntime:
         self.mid_turn   = MidTurnObstacleDetector()
         # Corrección de color por el piso (otra iluminación), ver color_corr.py
         self.color_corr = FloorColorCorrector()
+        self.digital = DigitalMap()
+        self._dig_img = None
 
         # Estado de la memoria rodante
         self._last_heading: float | None = None
@@ -1423,6 +1428,7 @@ class PPRuntime:
         lookahead_eff = float(C.LOOKAHEAD_MAX_PX)   # diag: lookahead PP usado este frame
         line_info     = {"Orange": {"seen": False, "near_y": None}}
         new_obstacles = []
+        serial_ack = getattr(self, "_prev_ack", None)
         new_obs_h     = []
         bev_obstacles_beyond = []
         interior      = False
@@ -1833,7 +1839,15 @@ class PPRuntime:
                             self._turn_delay_frames = getattr(
                                 C, "RECUP_CORNER_TURN_DELAY_FRAMES", 8)
 
+                feet = list(new_obstacles)
+                if self.bev.is_calibrated and not self._is_turning:
+                    feet.extend(seen_above_obstacles(self.bev, positions))
+                self.digital.update(serial_ack, feet, line_info.get("Orange"))
                 if len(path_points) >= C.MIN_PATH_PTS:
+                    if getattr(C, "DIGITAL_MAP_STEER", False) and not self._is_turning:
+                        mapped = self.digital.line_bev()
+                        if len(mapped) >= C.MIN_PATH_PTS:
+                            path_points = mapped
                     # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
                     # una lata cerca -> la geometría pure-pursuit exige un
                     # steer más cerrado para el mismo path -> esquiva de
@@ -1946,6 +1960,11 @@ class PPRuntime:
                 f"pasado(medido) NO suprimido cerca esquina (oy={_oy:.0f})")
         if armed and self._track_map_controls() and self._map_try_pasado():
             self._pasado_hold = max(self._pasado_hold, C.PASADO_HOLD_FRAMES)
+        # Verde de la recta siguiente: no soltar "pasado" todavía. Si no,
+        # RECUPERANDO endereza y el giro rápido corta por debajo del verde.
+        if self.digital.hold_pasado() and self._pasado_hold > 0:
+            self._pasado_hold = 0
+            self._pasado_from_measured = False
         pasado = self._pasado_hold > 0
         if self._pasado_hold > 0:
             self._pasado_hold -= 1
@@ -1982,7 +2001,8 @@ class PPRuntime:
                 and not pasado and self._prev_estado != "R"):
             self._turn_delay_frames -= 1
             _turn_hold = True
-        _turn_block = (self._ext_corner_block > 0) or _turn_hold
+        _turn_block = ((self._ext_corner_block > 0) or _turn_hold
+                       or self.digital.blocks_turn() or self.digital.needs_line())
 
         serial_msg = self._build_serial_message(
             obs_norm, state, len(bev_obstacles), pasado, interior,
@@ -1997,6 +2017,7 @@ class PPRuntime:
             serial_ack = self.serial_link.try_readline()
         else:
             serial_ack = None   # desarmado: pipeline corre, carro quieto
+        self._prev_ack = serial_ack
 
         heading = _parse_heading(serial_ack)
         if heading is not None:
@@ -2123,6 +2144,7 @@ class PPRuntime:
 
         shown = bev_frame
         shift = (0, 0)
+        self._dig_img = self.digital.render()
         warp_wide = getattr(self.bev, "warp_wide", None)
         if warp_wide is not None and processed_frame is not None:
             shown = warp_wide(processed_frame)
@@ -2162,6 +2184,7 @@ class PPRuntime:
             map_signmap=self._map_signmap,
             map_localizer=self._map_localizer,
             bev_shift=shift,
+            dig_map=self._dig_img,
         )
 
     # ── Loop principal ────────────────────────────────────────────────────────

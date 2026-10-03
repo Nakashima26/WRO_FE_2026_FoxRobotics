@@ -143,6 +143,7 @@ def _view_window(frame_q, key_q) -> None:
     pose = None
     bev = None
     cam = None
+    dig = None
     cv2.namedWindow("Fox", cv2.WINDOW_NORMAL)
     while True:
         try:
@@ -159,6 +160,7 @@ def _view_window(frame_q, key_q) -> None:
             pose = None
             bev = None
             cam = None
+            dig = None
         elif msg[0] == "frame":
             pose = msg[1]
             trail.append(msg[1]["xy"])
@@ -166,13 +168,15 @@ def _view_window(frame_q, key_q) -> None:
                 bev = msg[1]["bev"]
             if msg[1].get("cam") is not None:
                 cam = msg[1]["cam"]
+            if msg[1].get("dig") is not None:
+                dig = msg[1]["dig"]
         if field is None:
             k = cv2.waitKey(1) & 0xFF
             name = _key_name(k)
             if name:
                 key_q.put(name)
             continue
-        img = _paint(field, trail, pose, bev, cam)
+        img = _paint(field, trail, pose, bev, cam, dig)
         cv2.imshow("Fox", img)
         k = cv2.waitKey(1) & 0xFF
         name = _key_name(k)
@@ -194,7 +198,7 @@ def _key_name(k: int) -> str | None:
     }.get(k)
 
 
-def _paint(field, trail, pose, bev, cam=None):
+def _paint(field, trail, pose, bev, cam=None, dig=None):
     import cv2
     world = np.full((_VIEW, _VIEW, 3), (180, 196, 215), np.uint8)
     def poly(pts, color, fill=False, thick=1):
@@ -226,12 +230,15 @@ def _paint(field, trail, pose, bev, cam=None):
             cv2.putText(world, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                         (20, 20, 20), 1, cv2.LINE_AA)
             y += 18
+    cv2.putText(world, "mapa real", (10, _VIEW - 12), cv2.FONT_HERSHEY_SIMPLEX,
+                0.5, (20, 20, 20), 1, cv2.LINE_AA)
     if bev is None:
         side = _fit_panel(None, _VIEW, "BEV")
     else:
         side = _fit_panel(bev, _VIEW, "BEV")
     mid = _fit_panel(cam, _VIEW, "camara, antes del BEV")
-    return np.hstack([world, mid, side])
+    know = _fit_panel(dig, _VIEW, "mapa del carro")
+    return np.hstack([world, know, mid, side])
 
 
 _STATE_COLORS = {
@@ -477,6 +484,7 @@ def _run_once(args, seed: int, interactive: bool):
                 "t": view.t,
                 "bev": bev_dbg,
                 "cam": None if fr.processed_frame is None else fr.processed_frame.copy(),
+                "dig": None if fr.dig_map is None else fr.dig_map.copy(),
                 "hud": _hud(est, view.t, ack, "pausa" if keys["pause"] else "corriendo"),
             }))
             dt = 0.0 if prev_t is None else max(0.0, view.t - prev_t)

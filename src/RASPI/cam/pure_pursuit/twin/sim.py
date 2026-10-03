@@ -71,6 +71,8 @@ PRESETS: dict[str, dict[str, Any]] = {
             # La línea se cortaba en BEV_H/3 (~49 cm) aunque la pared de la
             # esquina ya estaba dibujada arriba. Muestrea hasta ~70 cm.
             "CENTERLINE_TOP_Y": 30,
+            # La línea la arma el mapa (lado de paso), no el BEV.
+            "DIGITAL_MAP_STEER": True,
         },
         "start": "cajon",
     },
@@ -233,6 +235,13 @@ class Sim:
                 setattr(C, k, v)
         rng = np.random.default_rng(self.seed)
         field = randomize(self.seed, start=self.start)
+        for k, v in (
+            ("DIGITAL_MAP_PARKING", field.parking_section),
+            ("DIGITAL_MAP_DIRECTION", field.direction),
+        ):
+            if k not in saved_cfg and hasattr(C, k):
+                saved_cfg[k] = getattr(C, k)
+            setattr(C, k, v)
         world = World(field)
         veh = Vehicle(
             self.params,

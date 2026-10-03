@@ -758,6 +758,13 @@ FAR_LINE_MIN_FWD_MM  = 200.0
 FAR_LINE_MAX_FWD_MM  = 2200.0
 FAR_LINE_MAX_LAT_MM  = 1400.0
 
+# Mapa digital: asientos vacíos, cajón conocido, altura por sonar frontal
+# y ToF trasero. La cámara solo vota el asiento. El volante lo usa si
+# DIGITAL_MAP_STEER está prendido.
+DIGITAL_MAP_STEER = False
+DIGITAL_MAP_PARKING = "W"
+DIGITAL_MAP_DIRECTION = "CW"
+
 FAR_HINT_ENABLED     = True
 FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)
 FAR_HINT_MAX_STEER   = 12.0     # grados máx que puede aportar el hint (<< MAX_STEER_DEG)

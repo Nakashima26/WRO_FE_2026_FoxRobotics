@@ -1,0 +1,744 @@
+"""
+Mapa digital vacío del tapete.
+
+El carro sabe el cajón y el sentido. La altura en la recta sale del sonar
+frontal (pared de adelante) y del ToF de atrás (pared de atrás, solo cuando
+está cerca: la pared negra se apaga a ~25 cm). Entre medias se arrastra con
+la odometría del ACK.
+
+La cámara no dibuja la línea. Solo vota en cuál de los 6 asientos de la
+recta (T1 T2 T3 T4 X1 X2) cayó la lata. Una recta solo puede quedar como
+una carta del sorteo WRO. Confirmado el asiento, la lata se queda en ese punto. Solo salta a otro
+de los 6 si la vista cae mucho más cerca de ese. La línea es el centro del
+carril corrido al lado de paso: verde a la izquierda, rojo a la derecha.
+"""
+
+from __future__ import annotations
+
+import math
+
+import cv2
+import numpy as np
+
+from . import config as C
+from .wro_field import (
+    CARDS,
+    INNER_HALF_MM,
+    OUTER_HALF_MM,
+    PARK_BARRIER_INTO_MM,
+    PARK_BARRIER_THICK_MM,
+    PARK_GAP_MM,
+    PARKING_FORBIDDEN_SEATS,
+    SEATS,
+    SECTIONS_CW,
+    _LEFT,
+    _barrier_corners,
+    _heading,
+    section_to_world,
+)
+
+_LANE_MM = 1000.0
+_SPAN_MM = OUTER_HALF_MM * 2.0          # pared a pared, 3000
+_FRONT_MOUNT_MM = 140.0                 # sonar frontal, desde el eje trasero
+_REAR_MOUNT_MM = 28.0                   # ToF trasero, detrás del eje
+_REAR_WALL_MAX_MM = 250.0               # pared negra, el ToF no ve más lejos
+_CLEAR_MM = 130.0                       # del centro de la lata al centro del carro
+_LAT_CAP_MM = 220.0
+_SEAT_GATE_MM = 160.0
+_VOTES = 4
+_STEP_MM = 80.0
+_COL = {"T4": "L", "T2": "L", "X2": "M", "X1": "M", "T3": "R", "T1": "R"}
+# Cada carta ocupa uno de estos conjuntos. Ninguna mezcla dos asientos de
+# la misma columna, ni tres latas, ni X1/X2 con otra lata.
+_CARD_SEAT_SETS = list({frozenset(s for s, _c in card) for card in CARDS})
+# Hay que ver la lata mucho más cerca del otro asiento para soltar el actual.
+_JUMP_MM = 120.0
+
+
+def _ack_num(ack: str | None, key: str) -> float | None:
+    if not ack:
+        return None
+    idx = ack.find(key + "=")
+    if idx < 0:
+        return None
+    try:
+        return float(ack[idx + len(key) + 1:].split(",")[0])
+    except ValueError:
+        return None
+
+
+def _lane_pose(section: str, direction: str, along_mm: float, lat_mm: float) -> tuple[float, float, float]:
+    """along: mm desde la pared de atrás. lat: + a la derecha del sentido."""
+    h = _heading(section, direction)
+    rad = math.radians(h)
+    fx, fy = math.sin(rad), math.cos(rad)
+    rx, ry = math.cos(rad), -math.sin(rad)
+    # Centro del carril en la pared de atrás.
+    centers = {"N": (0.0, _LANE_MM), "E": (_LANE_MM, 0.0),
+               "S": (0.0, -_LANE_MM), "W": (-_LANE_MM, 0.0)}
+    cx, cy = centers[section]
+    ox, oy = cx - fx * OUTER_HALF_MM, cy - fy * OUTER_HALF_MM
+    x = ox + fx * along_mm + rx * lat_mm
+    y = oy + fy * along_mm + ry * lat_mm
+    return x, y, h
+
+
+def _seat_world(section: str) -> list[tuple[str, float, float]]:
+    return [(sid, *section_to_world(section, h, w)) for sid, (h, w) in SEATS.items()]
+
+
+class DigitalMap:
+    def __init__(self) -> None:
+        self.direction = str(getattr(C, "DIGITAL_MAP_DIRECTION", "CW"))
+        self.parking = str(getattr(C, "DIGITAL_MAP_PARKING", "W"))
+        self.section = self.parking
+        self.along_mm = self._stall_along()
+        self.lat_mm = 0.0
+        self.heading = _heading(self.section, self.direction)
+        self.in_stall = True
+        self._od: float | None = None
+        self._tc = 0
+        self._votes: dict[tuple[str, str], dict[str, int]] = {}
+        self.confirmed: dict[tuple[str, str], str] = {}
+        self._best: dict[tuple[str, str], float] = {}
+        self.pose_xy = self._stall_xy()
+        self.line_world: list[tuple[float, float]] = []
+        self._view_heading = self.heading
+        self._aligned = False
+        self._line_shifts: list[float] = []
+        self._odom0: tuple[float, float, float, float] | None = None
+        self._at_corner = False
+        self._orange_y: float | None = None
+        self._has_pass = False
+        self._latched: dict[str, tuple[float, float]] = {}
+
+    def _stall_along(self) -> float:
+        # El cajón está fuera de la pared, del lado de atrás del w de la recta.
+        # along negativo = todavía no entró al carril.
+        return -200.0
+
+    def _stall_xy(self) -> tuple[float, float]:
+        # Misma cifra que el arranque en cajón: costado a 12 mm de la pared,
+        # cola a 5 mm de la madera de atrás. No lee la pose real.
+        half_len = 90.0
+        h_center = 65.0 + 12.0
+        rear_face = _LEFT + PARK_BARRIER_THICK_MM
+        if self.direction == "CW":
+            w_center = (rear_face + 5.0) + half_len
+        else:
+            front_face = rear_face + PARK_GAP_MM
+            w_center = (front_face - 5.0) - half_len
+        x, y = section_to_world(self.parking, h_center, w_center)
+        return x, y
+
+    def section_of(self, turns: int) -> str:
+        i = SECTIONS_CW.index(self.parking)
+        step = 1 if self.direction == "CW" else -1
+        return SECTIONS_CW[(i + step * turns) % 4]
+
+    def update(self, ack: str | None, feet: list[tuple[float, float, str]],
+               orange: dict | None = None) -> None:
+        """feet: (bev_x, bev_y, color). orange: la cinta, para saber que la recta se acaba."""
+        tc = _ack_num(ack, "tc")
+        est = None
+        if ack and "est=" in ack:
+            est = ack.split("est=", 1)[1][:1]
+        turns = int(tc) if tc is not None else self._tc
+        if turns != self._tc:
+            self._tc = turns
+            self.section = self.section_of(turns)
+            self.in_stall = False
+            self.lat_mm = 0.0
+        if est in ("S", "C", "R") and self.in_stall:
+            self.in_stall = False
+            self.section = self.section_of(turns)
+
+        self._pose_from_ack(ack)
+        self._note_orange(orange)
+        if not self.in_stall:
+            self.along_mm, self.lat_mm = self._section_frame(
+                self.pose_xy[0], self.pose_xy[1], self.section)
+        self._aligned = (not self.in_stall) and self._odom0 is not None
+
+        self._vote(feet)
+        if not self.in_stall:
+            self.along_mm, self.lat_mm = self._section_frame(
+                self.pose_xy[0], self.pose_xy[1], self.section)
+        self.line_world = self._build_line()
+
+    def _pose_from_ack(self, ack: str | None) -> None:
+        """Uniciclo: px/py ya integran ds del odómetro con el yaw de la IMU.
+
+        px crece hacia adelante del arranque y py a la izquierda. En el cajón
+        eso es norte y oeste. El rumbo del twin es el opuesto del yaw (CW).
+        """
+        px = _ack_num(ack, "px")
+        py = _ack_num(ack, "py")
+        yaw = _ack_num(ack, "yaw")
+        if px is None or py is None or yaw is None:
+            return
+        if self._odom0 is None:
+            sx, sy = self._stall_xy()
+            self._odom0 = (px, py, sx, sy)
+        ox, oy, sx, sy = self._odom0
+        self.pose_xy = (sx - (py - oy), sy + (px - ox))
+        self._view_heading = -yaw
+        self.heading = self._view_heading
+
+    def _note_orange(self, orange: dict | None) -> None:
+        self._orange_y = None
+        self._at_corner = False
+        if not orange or not orange.get("seen"):
+            return
+        ny = orange.get("near_y")
+        if ny is None:
+            return
+        self._orange_y = float(ny)
+        fwd = (C.ROBOT_BEV_Y - float(ny)) * C.MM_PER_PX
+        # La cinta pegada al carro es el final de esta recta: toca girar.
+        self._at_corner = fwd < 350.0
+
+    def _along_of(self, x: float, y: float, section: str) -> float:
+        x0, y0, h = _lane_pose(section, self.direction, 0.0, 0.0)
+        dx, dy = x - x0, y - y0
+        rad = math.radians(h)
+        return dx * math.sin(rad) + dy * math.cos(rad)
+
+    def _section_frame(self, x: float, y: float, section: str) -> tuple[float, float]:
+        """(along desde la pared de atrás, derecha del sentido)."""
+        x0, y0, h = _lane_pose(section, self.direction, 0.0, 0.0)
+        dx, dy = x - x0, y - y0
+        rad = math.radians(h)
+        along = dx * math.sin(rad) + dy * math.cos(rad)
+        right = dx * math.cos(rad) - dy * math.sin(rad)
+        return along, right
+
+    def _vote(self, feet: list[tuple[float, float, str]]) -> None:
+        self._live = []
+        if not feet:
+            return
+        px, py = self.pose_xy
+        h = math.radians(self._view_heading)
+        sections = [self.section]
+        if not self.in_stall:
+            sections.append(self.section_of(self._tc + 1))
+        catalog: list[tuple[str, str, float, float]] = []
+        for sec in sections:
+            for sid, x, y in _seat_world(sec):
+                along, right = self._section_frame(x, y, sec)
+                catalog.append((sec, sid, along, right))
+        for bx, by, color in feet:
+            if color not in ("Red", "Green"):
+                continue
+            lat = (bx - C.ROBOT_BEV_X) * C.MM_PER_PX
+            fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX
+            if fwd < 80.0 or fwd > 2200.0 or abs(lat) > 1400.0:
+                continue
+            wx = px + fwd * math.sin(h) + lat * math.cos(h)
+            wy = py + fwd * math.cos(h) - lat * math.sin(h)
+            # Delante de la naranja sigue esta recta. Pasada la cinta, es la siguiente.
+            past = self._orange_y is not None and by < self._orange_y - 12.0
+            ranked = []
+            for sec, sid, sa, sr in catalog:
+                if past and sec == self.section:
+                    continue
+                if self._orange_y is not None and not past and sec != self.section:
+                    continue
+                fa, fr = self._section_frame(wx, wy, sec)
+                ranked.append((math.hypot(fa - sa, fr - sr), sec, sid, fr, sr, fa, sa))
+            if not ranked:
+                continue
+            ranked.sort(key=lambda t: t[0])
+            near = [
+                c for c in ranked
+                if c[0] <= 320.0 and self._seat_ok(c[1], c[2], color, wx, wy)
+            ]
+            if not near:
+                continue
+            dist, sec, sid, fr, sr, fa, sa = near[0]
+            if len(near) > 1 and near[1][0] - dist < 80.0:
+                a, b = near[0], near[1]
+                pick = a if abs(a[4] - a[3]) <= abs(b[4] - b[3]) else b
+                dist, sec, sid, fr, sr, fa, sa = pick
+            stuck = self._stick_seat(sec, sid, color, wx, wy)
+            if stuck != sid:
+                sid = stuck
+                sx, sy = self._seat_xy(sec, sid)
+                dist = math.hypot(wx - sx, wy - sy)
+                sa, sr = self._section_frame(sx, sy, sec)
+                fr = sr
+            if dist < 260.0 and abs(fr - sr) < 110.0:
+                side = sr + 200.0 if color == "Red" else sr - 200.0
+                side = max(-260.0, min(260.0, side))
+                self._live.append((sec, sa, side))
+            if dist < 100.0 and (sec, sid) in self.confirmed and sec == self.section:
+                self._pull_pose(wx, wy, sec, sid)
+            key = (sec, sid)
+            self._best[key] = min(self._best.get(key, 9999.0), dist)
+            bucket = self._votes.setdefault(key, {"Red": 0, "Green": 0})
+            bucket[color] += 1
+            other = "Red" if color == "Green" else "Green"
+            if (bucket[color] >= 3 and self._best[key] <= 160.0
+                    and bucket[color] >= bucket[other] + 2
+                    and self._seat_ok(sec, sid, color, wx, wy)):
+                self._keep_closer_row(sec, sid, color)
+        for sec, sa, side in self._live:
+            if side >= -40.0:
+                continue
+            prev = self._latched.get(sec)
+            if prev is None:
+                self._latched[sec] = (sa, side)
+            elif side < prev[1]:
+                self._latched[sec] = (prev[0], side)
+
+    def _keep_closer_row(self, sec: str, sid: str, color: str) -> None:
+        """T1 y T3 son la misma altura, solo cambia la fila. Se queda la más cercana."""
+        col = _COL[sid]
+        mine = self._best.get((sec, sid), 9999.0)
+        for other, ocol in _COL.items():
+            if other == sid or ocol != col:
+                continue
+            rival = (sec, other)
+            theirs = self._best.get(rival, 9999.0)
+            if theirs + 80.0 < mine:
+                return
+            if mine + 80.0 < theirs:
+                self.confirmed.pop(rival, None)
+            elif rival in self.confirmed:
+                return
+        key = (sec, sid)
+        if self.confirmed.get(key) != color:
+            self.confirmed[key] = color
+            print(f"[DMAP] {sec}/{sid} {color}", flush=True)
+
+    def _seat_xy(self, sec: str, sid: str) -> tuple[float, float]:
+        return next((x, y) for name, x, y in _seat_world(sec) if name == sid)
+
+    def _xy_of(self, sec: str, sid: str) -> tuple[float, float]:
+        return self._seat_xy(sec, sid)
+
+    def _stick_seat(self, sec: str, sid: str, color: str, wx: float, wy: float) -> str:
+        """La lata no sale de su asiento. Solo salta a otro si queda mucho más cerca."""
+        sx, sy = self._seat_xy(sec, sid)
+        d_new = math.hypot(wx - sx, wy - sy)
+        best_old: str | None = None
+        best_d = 1e9
+        for osid in _COL:
+            if osid == sid:
+                continue
+            key = (sec, osid)
+            if key not in self._votes and key not in self.confirmed:
+                continue
+            if self.confirmed.get(key) not in (None, color):
+                continue
+            ox, oy = self._seat_xy(sec, osid)
+            d = math.hypot(wx - ox, wy - oy)
+            if d < best_d:
+                best_d, best_old = d, osid
+        if best_old is None:
+            return sid
+        if best_d > d_new + 250.0:
+            return sid
+        if d_new + _JUMP_MM < best_d:
+            self._move_seat((sec, best_old), (sec, sid), color)
+            return sid
+        return best_old
+
+    def _move_seat(self, old: tuple[str, str], new: tuple[str, str], color: str) -> None:
+        if old == new or new in self.confirmed:
+            return
+        for store in (self._votes, self._best):
+            if old in store and new not in store:
+                store[new] = store.pop(old)
+            else:
+                store.pop(old, None)
+        was = self.confirmed.pop(old, None)
+        if was is not None:
+            self.confirmed[new] = color
+            print(f"[DMAP] {old[0]}/{old[1]} -> {new[0]}/{new[1]} {color}", flush=True)
+
+    def _allows(self, sec: str, seats: set[str]) -> bool:
+        """El conjunto cabe en alguna carta. En el cajón, solo la fila interior."""
+        if not seats:
+            return True
+        if sec == self.parking and seats & set(PARKING_FORBIDDEN_SEATS):
+            return False
+        frozen = frozenset(seats)
+        return any(frozen <= legal for legal in _CARD_SEAT_SETS)
+
+    def _x2_taken(self, color: str, sec: str) -> bool:
+        """Las cartas 9 y 10 son únicas: un solo X2 de cada color en el tapete."""
+        for (s, sid), col in self.confirmed.items():
+            if sid == "X2" and col == color and s != sec:
+                return True
+        return False
+
+    def _seat_ok(self, sec: str, sid: str, color: str, wx: float, wy: float) -> bool:
+        """Este asiento no rompe la carta de la recta."""
+        if sec == self.parking and sid in PARKING_FORBIDDEN_SEATS:
+            return False
+        if sid == "X2" and self._x2_taken(color, sec):
+            return False
+        have = {s for (sc, s) in self.confirmed if sc == sec}
+        if sid in have:
+            return True
+        rivals = {s for s in have if _COL[s] == _COL[sid]}
+        if not self._allows(sec, (have - rivals) | {sid}):
+            return False
+        if not rivals:
+            return True
+        sx, sy = self._seat_xy(sec, sid)
+        rx, ry = self._seat_xy(sec, next(iter(rivals)))
+        return math.hypot(wx - sx, wy - sy) + 50.0 < math.hypot(wx - rx, wy - ry)
+
+    def _pull_pose(self, wx: float, wy: float, sec: str, sid: str) -> None:
+        """La lata conocida corrige el odómetro. Solo con el carro ya derecho."""
+        if self._odom0 is None:
+            return
+        sec_h = _heading(sec, self.direction)
+        err = (self._view_heading - sec_h + 180.0) % 360.0 - 180.0
+        if abs(err) > 25.0:
+            return
+        sx, sy = next((x, y) for name, x, y in _seat_world(sec) if name == sid)
+        ex, ey = (sx - wx) * 0.3, (sy - wy) * 0.3
+        mag = math.hypot(ex, ey)
+        if mag < 4.0:
+            return
+        if mag > 35.0:
+            ex, ey = ex * 35.0 / mag, ey * 35.0 / mag
+        ox, oy, bx, by = self._odom0
+        self._odom0 = (ox - ey, oy + ex, bx, by)
+        self.pose_xy = (self.pose_xy[0] + ex, self.pose_xy[1] + ey)
+
+    def _next_section(self, sec: str) -> str:
+        i = SECTIONS_CW.index(sec)
+        step = 1 if self.direction == "CW" else -1
+        return SECTIONS_CW[(i + step) % 4]
+
+    def _cans_on(self, sec: str, along0: float, along1: float, latch: bool = True) -> list[tuple[float, float]]:
+        """(altura, lado de paso) de las latas confirmadas en ese tramo."""
+        out = []
+        for (s, sid), color in self.confirmed.items():
+            if s != sec:
+                continue
+            sx, sy = self._xy_of(sec, sid)
+            sa, sr = self._section_frame(sx, sy, sec)
+            if sa < along0 - 80.0 or sa > along1 + 40.0:
+                continue
+            side = sr + 200.0 if color == "Red" else sr - 200.0
+            for osid, ox, oy in _seat_world(sec):
+                if osid == sid or _COL.get(osid) != _COL.get(sid):
+                    continue
+                _, osr = self._section_frame(ox, oy, sec)
+                if abs(osr - side) < 130.0:
+                    side = osr + 90.0 if color == "Red" else osr - 90.0
+            side = max(-320.0, min(320.0, side))
+            out.append((sa, side))
+        if latch:
+            latched = self._latched.get(sec)
+            if latched is not None and not any(abs(latched[0] - c[0]) < 250.0 for c in out):
+                out.append(latched)
+        taken = [c[0] for c in out]
+        for lsec, sa, side in getattr(self, "_live", ()):
+            if lsec != sec or sa < along0 - 80.0 or sa > along1 + 40.0:
+                continue
+            if any(abs(sa - csa) < 200.0 for csa in taken):
+                continue
+            out.append((sa, side))
+        out.sort()
+        return out
+
+    def _put(self, pts, shifts, sec: str, along: float, shift: float) -> None:
+        x, y, _ = _lane_pose(sec, self.direction, along, shift)
+        x = max(-1320.0, min(1320.0, x))
+        y = max(-1320.0, min(1320.0, y))
+        if pts and abs(pts[-1][0] - x) < 20.0 and abs(pts[-1][1] - y) < 20.0:
+            return
+        pts.append((x, y))
+        shifts.append(shift)
+
+    def _ease(self, sec: str, along: float) -> float:
+        """Lado de paso de la lata que toca. Verde a la izquierda, rojo a la derecha."""
+        cans = self._cans_on(sec, 0.0, 3200.0)
+        if not cans:
+            return 0.0
+
+        def smooth(u: float) -> float:
+            u = max(0.0, min(1.0, u))
+            return u * u * (3.0 - 2.0 * u)
+
+        def onto(sa: float, side: float) -> float:
+            enter, done = sa - 1100.0, sa - 80.0
+            if along <= enter:
+                return 0.0
+            if along >= done:
+                return side
+            return side * smooth((along - enter) / (done - enter))
+
+        if along <= cans[0][0]:
+            return onto(cans[0][0], cans[0][1])
+        if along >= cans[-1][0]:
+            side = cans[-1][1]
+            # Verde: se queda a la izquierda el resto de la recta. Volver al
+            # centro mete la línea en el siguiente verde, que todavía no se vio.
+            if side < -40.0:
+                return side
+            back = cans[-1][0] + 120.0
+            if along <= back:
+                return side
+            u = smooth((along - back) / 480.0)
+            return side + (0.0 - side) * u
+        prev = cans[0]
+        nxt = cans[-1]
+        for can in cans:
+            if can[0] <= along:
+                prev = can
+            else:
+                nxt = can
+                break
+        span = nxt[0] - prev[0]
+        hold, arrive = prev[0] + span * 0.25, prev[0] + span * 0.7
+        if along <= hold:
+            return prev[1]
+        if along >= arrive:
+            return nxt[1]
+        return prev[1] + (nxt[1] - prev[1]) * smooth((along - hold) / (arrive - hold))
+
+    def _left_pass(self, sec: str) -> tuple[float, float] | None:
+        """Primera lata de la recta si se pasa por la izquierda (verde)."""
+        cans = self._cans_on(sec, 0.0, 3200.0, latch=False)
+        if not cans or cans[0][1] >= -40.0:
+            return None
+        return cans[0]
+
+    def _green_ahead(self) -> tuple[float, float] | None:
+        """(cuánto falta, lado) hasta el lado izquierdo del verde siguiente."""
+        if not getattr(C, "DIGITAL_MAP_STEER", False) or self.in_stall or not self._aligned:
+            return None
+        nxt = self._next_section(self.section)
+        lead = self._left_pass(nxt)
+        if lead is None:
+            return None
+        corner = _lane_pose(self.section, self.direction, 2500.0, 0.0)
+        na, _ = self._section_frame(corner[0], corner[1], nxt)
+        hx, hy, _ = _lane_pose(nxt, self.direction, na, lead[1])
+        against_wall = max(abs(hx), abs(hy)) > 1250.0
+        hx = max(-1100.0, min(1100.0, hx))
+        hy = max(-1100.0, min(1100.0, hy))
+        dx, dy = hx - self.pose_xy[0], hy - self.pose_xy[1]
+        h = math.radians(self.heading)
+        fwd = dx * math.sin(h) + dy * math.cos(h)
+        return fwd, against_wall
+
+    def blocks_turn(self) -> bool:
+        """Sigue bloqueado hasta que el arco del giro cabe a la izquierda del verde."""
+        ahead = self._green_ahead()
+        if ahead is None:
+            return False
+        # Ya en la esquina y del lado de afuera: el giro tiene que salir,
+        # el verde de la recta siguiente no está en el arco.
+        if self.along_mm > 1900.0 and self.lat_mm < -80.0:
+            return False
+        return ahead[0] > (480.0 if ahead[1] else 260.0)
+
+    def needs_line(self) -> bool:
+        """El carro va a la derecha de un verde. El gyro lo deja irse derecho."""
+        if not getattr(C, "DIGITAL_MAP_STEER", False) or self.in_stall or not self._aligned:
+            return False
+        target = self._ease(self.section, self.along_mm + 180.0)
+        if target > -40.0:
+            return False
+        return self.lat_mm > target + 70.0
+
+    def hold_pasado(self) -> bool:
+        """No enderezar: RECUPERANDO se iría derecho y el giro cortaría el verde."""
+        ahead = self._green_ahead()
+        if ahead is None:
+            return False
+        nxt = self._next_section(self.section)
+        along, lat = self._section_frame(self.pose_xy[0], self.pose_xy[1], nxt)
+        lead = self._left_pass(nxt)
+        if lead is None:
+            return False
+        on_left = lat <= lead[1] + 80.0
+        past = along >= lead[0] - 40.0
+        return not (on_left and past)
+
+    def _build_line(self) -> list[tuple[float, float]]:
+        """Entra al lado de paso y a la esquina con una curva, no con un escalón."""
+        if self.in_stall:
+            self._line_shifts = []
+            self._has_pass = False
+            self._steer_ok = False
+            return []
+        join = 2500.0
+        sec = self.section
+        along = self.along_mm
+        if along > join + 40.0:
+            sec = self._next_section(sec)
+            along, _ = self._section_frame(self.pose_xy[0], self.pose_xy[1], sec)
+        along = min(max(along, 0.0), join - 40.0)
+        step = 50.0
+        pts: list[tuple[float, float]] = []
+        shifts: list[float] = []
+        _, car_lat = self._section_frame(self.pose_xy[0], self.pose_xy[1], sec)
+        corner = _lane_pose(sec, self.direction, join, 0.0)
+        nxt = self._next_section(sec)
+        na, _ = self._section_frame(corner[0], corner[1], nxt)
+        # Ya pasada la zona de esta recta: si la siguiente abre con verde,
+        # no se vuelve al centro (eso deja la línea del lado contrario).
+        # Se aguanta el lado de esta recta y la curva sube a la izquierda
+        # del verde antes de doblar.
+        lead = self._left_pass(nxt)
+        mine = self._cans_on(sec, 0.0, 3200.0)
+        end = join - 420.0
+        a = along
+        while a < end:
+            target = self._ease(sec, a)
+            if lead is not None and mine and a >= mine[-1][0]:
+                # No regresar al rojo: la línea de adelante se queda del lado
+                # del carro para poder subir a la izquierda del verde.
+                target = car_lat
+            u = min(1.0, max(0.0, (a - along) / 280.0))
+            u = u * u * (3.0 - 2.0 * u)
+            self._put(pts, shifts, sec, a, car_lat + (target - car_lat) * u)
+            a += step
+        sh0 = car_lat if lead is not None else self._ease(sec, max(a - 40.0, along))
+        p0 = _lane_pose(sec, self.direction, max(a - 40.0, along), sh0)
+        hrad = math.radians(_heading(sec, self.direction))
+        rx, ry = math.cos(hrad), -math.sin(hrad)
+        if lead is not None:
+            sh2 = max(lead[1], -160.0)
+            p2 = _lane_pose(nxt, self.direction, na + 220.0, sh2)
+            fx, fy = -ry, rx
+            left_xy = _lane_pose(nxt, self.direction, na, sh2)
+            fwd = max(0.0, (left_xy[0] - p0[0]) * fx + (left_xy[1] - p0[1]) * fy)
+            bow = (p0[0] + fx * min(fwd, 280.0), p0[1] + fy * min(fwd, 280.0))
+            bow = (max(-1100.0, min(1100.0, bow[0])), max(-1100.0, min(1100.0, bow[1])))
+            p2 = (max(-1150.0, min(1150.0, p2[0])), max(-1150.0, min(1150.0, p2[1])))
+        else:
+            sh2 = self._ease(nxt, na + 700.0)
+            p2 = _lane_pose(nxt, self.direction, na + 700.0, sh2)
+            right_amt = max(0.0, (p2[0] - p0[0]) * rx + (p2[1] - p0[1]) * ry)
+            bow = (p0[0] + rx * right_amt, p0[1] + ry * right_amt)
+        for i in range(1, 13):
+            t = i / 12.0
+            u = 1.0 - t
+            x = u * u * p0[0] + 2 * u * t * bow[0] + t * t * p2[0]
+            y = u * u * p0[1] + 2 * u * t * bow[1] + t * t * p2[1]
+            if pts and abs(pts[-1][0] - x) < 12 and abs(pts[-1][1] - y) < 12:
+                continue
+            x = max(-1320.0, min(1320.0, x))
+            y = max(-1320.0, min(1320.0, y))
+            pts.append((x, y))
+            shifts.append(max(abs(sh0), abs(sh2)) * math.sin(t * math.pi))
+        b = na + (280.0 if lead is not None else 700.0)
+        while b < na + 1100.0:
+            if lead is not None and b < lead[0] + 220.0:
+                sh = lead[1]
+            else:
+                sh = self._ease(nxt, b)
+            self._put(pts, shifts, nxt, b, sh)
+            b += step
+        self._line_shifts = shifts
+        self._has_pass = any(abs(s) > 12.0 for s in shifts)
+        nxt = self._next_section(sec)
+        self._steer_ok = any(s == sec or s == nxt for (s, _sid) in self.confirmed)
+        return pts
+
+    def _target_lat(self) -> float:
+        """Lado de paso del asiento confirmado más cercano por delante."""
+        best = None
+        h = math.radians(self.heading)
+        fx, fy = math.sin(h), math.cos(h)
+        rx, ry = math.cos(h), -math.sin(h)
+        px, py = self.pose_xy
+        for (sec, sid), color in self.confirmed.items():
+            if sec != self.section:
+                continue
+            sx, sy = self._xy_of(sec, sid)
+            dx, dy = sx - px, sy - py
+            fwd = dx * fx + dy * fy
+            if fwd < 0.0:
+                continue
+            lat = dx * rx + dy * ry
+            if best is None or fwd < best[0]:
+                best = (fwd, lat, color)
+        if best is None:
+            return 0.0
+        _, lat, color = best
+        shift = lat + _CLEAR_MM if color == "Red" else lat - _CLEAR_MM
+        return float(max(-_LAT_CAP_MM, min(_LAT_CAP_MM, shift)))
+
+    def line_bev(self) -> list[tuple[int, int]]:
+        """La línea del mapa, en la hoja de 400 px. Vacía si no hay nada que seguir."""
+        if not self._aligned or not self._steer_ok or len(self.line_world) < 4:
+            return []
+        px, py = self.pose_xy
+        h = math.radians(self.heading)
+        out = []
+        for wx, wy in self.line_world:
+            dx, dy = wx - px, wy - py
+            fwd = dx * math.sin(h) + dy * math.cos(h)
+            right = dx * math.cos(h) - dy * math.sin(h)
+            bx = int(round(C.ROBOT_BEV_X + right / C.MM_PER_PX))
+            by = int(round(C.ROBOT_BEV_Y - fwd / C.MM_PER_PX))
+            if fwd < -80.0 or fwd > 900.0:
+                continue
+            if -160 <= bx < C.BEV_W + 160 and -40 <= by <= C.ROBOT_BEV_Y + 20:
+                out.append((max(0, min(C.BEV_W - 1, bx)), max(0, min(C.ROBOT_BEV_Y - 1, by))))
+        return out
+
+    def render(self, size: int = 520) -> np.ndarray:
+        img = np.full((size, size, 3), (232, 224, 208), np.uint8)
+        scale = (size - 24) / _SPAN_MM
+
+        def px(x: float, y: float) -> tuple[int, int]:
+            return (int(round(size / 2 + x * scale)), int(round(size / 2 - y * scale)))
+
+        def poly(pts, color, thick=1):
+            p = np.array([px(a, b) for a, b in pts], np.int32)
+            cv2.polylines(img, [p], True, color, thick, cv2.LINE_AA)
+
+        half_o, half_i = OUTER_HALF_MM, INNER_HALF_MM
+        outer = [(half_o, -half_o), (half_o, half_o), (-half_o, half_o), (-half_o, -half_o)]
+        inner = [(half_i, -half_i), (half_i, half_i), (-half_i, half_i), (-half_i, -half_i)]
+        poly(outer, (40, 40, 40), 2)
+        poly(inner, (40, 40, 40), 2)
+        for box in _barrier_corners(self.parking):
+            poly(box, (180, 0, 180), 2)
+
+        for sec in SECTIONS_CW:
+            for sid, x, y in _seat_world(sec):
+                col = self.confirmed.get((sec, sid))
+                votes = self._votes.get((sec, sid))
+                if col is None and votes:
+                    col = "Red" if votes["Red"] > votes["Green"] else "Green"
+                    if max(votes.values()) <= 0:
+                        col = None
+                if col == "Red":
+                    solid = (sec, sid) in self.confirmed
+                    cv2.circle(img, px(x, y), 5, (0, 0, 220), -1 if solid else 1, cv2.LINE_AA)
+                elif col == "Green":
+                    solid = (sec, sid) in self.confirmed
+                    cv2.circle(img, px(x, y), 5, (0, 170, 0), -1 if solid else 1, cv2.LINE_AA)
+                else:
+                    cv2.circle(img, px(x, y), 4, (150, 150, 150), 1, cv2.LINE_AA)
+
+        if len(self.line_world) >= 2:
+            pts = np.array([px(x, y) for x, y in self.line_world], np.int32)
+            cv2.polylines(img, [pts], False, (0, 180, 220), 2, cv2.LINE_AA)
+
+        cx, cy = self.pose_xy
+        rad = math.radians(self.heading)
+        tip = px(cx + 80 * math.sin(rad), cy + 80 * math.cos(rad))
+        cv2.circle(img, px(cx, cy), 5, (30, 30, 30), -1, cv2.LINE_AA)
+        cv2.arrowedLine(img, px(cx, cy), tip, (30, 30, 30), 1, tipLength=0.4)
+        cv2.putText(
+            img, f"{self.section}  {self.along_mm:.0f}mm",
+            (8, size - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (40, 40, 40), 1, cv2.LINE_AA,
+        )
+        if not self.confirmed:
+            cv2.putText(img, "sin latas", (8, 22), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (80, 80, 80), 1, cv2.LINE_AA)
+        return img
