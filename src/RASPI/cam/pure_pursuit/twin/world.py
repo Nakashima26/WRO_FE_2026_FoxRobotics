@@ -262,18 +262,21 @@ def collision(
     length_mm: float,
     width_mm: float,
     rear_overhang_mm: float,
+    ignore: tuple[str, ...] = (),
 ) -> str | None:
+    """Primera causa de contacto, saltando las de `ignore` (p. ej. "pared exterior")."""
     corners = body_corners(x, y, heading_deg, length_mm, width_mm, rear_overhang_mm)
     corner_list = [tuple(c) for c in corners]
     for cx, cy in corner_list:
-        if _point_outside_field(cx, cy):
+        if _point_outside_field(cx, cy) and "pared exterior" not in ignore:
             return "pared exterior"
         if _point_in_island(cx, cy):
             return "isla"
     edges = list(zip(corner_list, corner_list[1:] + corner_list[:1]))
     track = world.field
-    for poly in (track.outer, track.inner):
-        wall = [(float(p[0]), float(p[1])) for p in poly]
+    polys = (track.inner,) if "pared exterior" in ignore else (track.outer, track.inner)
+    for poly in polys:
+        wall =[(float(p[0]), float(p[1])) for p in poly]
         wall_edges = list(zip(wall, wall[1:] + wall[:1]))
         for a, b in edges:
             for c, d in wall_edges:

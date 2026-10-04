@@ -21,7 +21,7 @@ from pure_pursuit.twin.params import TwinParams, max_wheel_deg
 from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
 from pure_pursuit.twin.vehicle import Vehicle
-from pure_pursuit.twin.world import World, collision
+from pure_pursuit.twin.world import OUTER_HALF_MM, World, body_corners, collision
 from pure_pursuit.wro_field import randomize
 from vision import Vision
 
@@ -223,10 +223,14 @@ class Sim:
         speed_scale: float = 1.0,
         field: Any = None,
         fw_params: dict[str, float] | None = None,
+        ignore_collisions: tuple[str, ...] = (),
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
         self.knock_signs = knock_signs
+        # Causas que no detienen la corrida (p. ej. "pared exterior" en el
+        # harness de estacionamiento); se registran en metrics["ignored_contacts"].
+        self.ignore_collisions = tuple(ignore_collisions)
         # Escenario armado a mano (p. ej. twin/prepark.py) en vez del sorteo, y
         # parámetros SIL de arranque (sil_set_param) para el firmware.
         self.field_override = field
@@ -334,6 +338,7 @@ class Sim:
         collision_cause: str | None = None
         collision_t: float | None = None
         sign_contacts: list[dict[str, Any]] = []
+        ignored_contacts: dict[str, dict[str, Any]] = {}
         stop_reason = "max_time"
         armed_t: float | None = None
         fw_debug = ""
@@ -397,7 +402,23 @@ class Sim:
                         self.params.vehicle.length_mm,
                         self.params.vehicle.width_mm,
                         self.params.vehicle.rear_overhang_mm,
+                        ignore=self.ignore_collisions,
                     )
+                    if self.ignore_collisions and collision_cause is None:
+                        for cause in self.ignore_collisions:
+                            if cause not in ignored_contacts and collision(
+                                    world, veh.x, veh.y, veh.heading_deg,
+                                    self.params.vehicle.length_mm, self.params.vehicle.width_mm,
+                                    self.params.vehicle.rear_overhang_mm,
+                                    ignore=tuple(c for c in self.ignore_collisions if c != cause),
+                            ) == cause:
+                                ignored_contacts[cause] = {"t": round(t, 3), "cause": cause}
+                        if "pared exterior" in ignored_contacts:
+                            pen = max(max(abs(cx), abs(cy)) - OUTER_HALF_MM for cx, cy in body_corners(
+                                veh.x, veh.y, veh.heading_deg, self.params.vehicle.length_mm,
+                                self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm))
+                            c = ignored_contacts["pared exterior"]
+                            c["max_mm"] = round(max(c.get("max_mm", 0.0), pen), 1)
                     if hit and collision_cause is None:
                         touched = _sign_from_hit(field, hit) if self.knock_signs else None
                         if touched is not None:
@@ -588,6 +609,7 @@ class Sim:
         )
         metrics["sign_contacts"] = sign_contacts
         metrics["signs_touched"] = len(sign_contacts)
+        metrics["ignored_contacts"] = list(ignored_contacts.values())
         metrics["sim_loops"] = loops
         wall = time.perf_counter() - t_wall0
         # Timing breakdown: accumulate over the whole simulation

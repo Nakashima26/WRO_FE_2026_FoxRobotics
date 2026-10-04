@@ -34,7 +34,7 @@ HARNESS_FW = {"PARK_TEST_RECTA_COMPLETA": "true"}
 
 
 def run_one(args):
-    sc, out, fw_over, period, max_time, par = args
+    sc, out, fw_over, period, max_time, par, ignore = args
     from pure_pursuit.twin import sim as S
     from pure_pursuit.twin.firmware import fw as F
     d = Path(out) / sc.name
@@ -56,7 +56,8 @@ def run_one(args):
     field, params = PP.build(sc)
     params.update(par)
     sim = S.Sim(0, preset="hw_nuevo", log_dir=d, fw_overrides={**HARNESS_FW, **fw_over},
-                pi_period_s=period, max_time_s=max_time, field=field, fw_params=params)
+                pi_period_s=period, max_time_s=max_time, field=field, fw_params=params,
+                ignore_collisions=ignore)
     try:
         r = sim.run()
     finally:
@@ -81,6 +82,8 @@ def run_one(args):
     res = {"name": sc.name, "dir": sc.direction, "card": sc.card, "pert": sc.pert,
            "stop": r.stop_reason, "contacto": cz, "t": r.metrics.get("total_time_s"),
            "motivo": motivo, **pm}
+    pared = [c for c in r.metrics.get("ignored_contacts", []) if c["cause"] == "pared exterior"]
+    res["pared"] = f"{pared[0]['max_mm']}mm@{pared[0]['t']}" if pared else ""
     res["limpio"] = (not cz and r.stop_reason in ("race_finished", "terminado")
                      and pm["fuera_mm"] <= 5.0 and pm["paralelo"])
     return res
@@ -97,7 +100,10 @@ def main():
     ap.add_argument("--par", default="")
     ap.add_argument("--period", type=float, default=None)
     ap.add_argument("--max-time", type=float, default=45.0)
+    ap.add_argument("--solo-cajon", action="store_true",
+                    help="tocar la pared exterior no detiene la corrida (columna 'pared': mm metidos@t)")
     a = ap.parse_args()
+    ignore = ("pared exterior",) if a.solo_cajon else ()
     perts = [p for p in a.perts.split(",") if p] or None
     cards = tuple(int(c) for c in a.cards.split(",") if c) or PP.STALL_CARDS
     fw_over = dict(kv.split("=", 1) for kv in a.fw.split(",") if kv)
@@ -112,16 +118,17 @@ def main():
     B.build(overrides=cfg["fw_overrides"], defines=cfg.get("fw_defines"), source=cfg["fw_source"])
     # maxtasksperchild=1: proceso nuevo por escenario (pop_debug parcheado, config de la Pi).
     with mp.Pool(a.jobs, maxtasksperchild=1) as pool:
-        rows = pool.map(run_one, [(s, str(out), fw_over, a.period, a.max_time, par) for s in scs], chunksize=1)
+        rows = pool.map(run_one, [(s, str(out), fw_over, a.period, a.max_time, par, ignore) for s in scs], chunksize=1)
     (out / "summary.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
-    print("| escenario | stop | contacto | fuera_mm | rumbo_err | ruedas_dif | t | motivo |")
-    print("|---|---|---|---|---|---|---|---|")
+    print("| escenario | stop | contacto | pared | fuera_mm | rumbo_err | ruedas_dif | t | motivo |")
+    print("|---|---|---|---|---|---|---|---|---|")
     for r in rows:
-        print(f"| {r['name']} | {r['stop']} | {r['contacto'] or '-'} | {r['fuera_mm']} | {r['rumbo_err_deg']} | "
+        print(f"| {r['name']} | {r['stop']} | {r['contacto'] or '-'} | {r['pared'] or '-'} | {r['fuera_mm']} | {r['rumbo_err_deg']} | "
               f"{r['ruedas_dif_mm']} | {r['t']} | {r['motivo']}{' OK' if r['limpio'] else ''} |")
     n = len(rows)
     print(f"limpios={sum(r['limpio'] for r in rows)}/{n} sin_contacto={sum(not r['contacto'] for r in rows)}/{n} "
-          f"fuera<=5={sum(r['fuera_mm'] <= 5 for r in rows)}/{n} paralelo={sum(r['paralelo'] for r in rows)}/{n}")
+          f"fuera<=5={sum(r['fuera_mm'] <= 5 for r in rows)}/{n} paralelo={sum(r['paralelo'] for r in rows)}/{n} "
+          f"roce_pared={sum(bool(r['pared']) for r in rows)}/{n}")
 
 
 if __name__ == "__main__":

@@ -273,3 +273,8 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
 - Lógica: `PARK_ATRAS_FINAL_CM` (PARK_AJ, 2.5) = corte trasero solo de la fase 13 (con `ATRAS_MIN` la reversa final se cortaba al arrancar); `ATRAS PEGADO` en la fase 13 ahora cicla a la fase 9 en vez de terminar.
 - `prepark.py` con defaults: `limpios=91/100` (antes 11/100 con la mejor config). De las 9 fallas, 7 son roce con la pared exterior (permitido) y 2 tocan el cajón (`CW_c2_p4`, `CW_c3_p4`: entrada −30 mm / +5°). `RADIO_CM=18` (recto proporcional) da 89/100: no adoptado. `ENDEREZA_TOL` no influye.
 - Herramientas: `chassis_twin.py --par` (con `--prepark`, PARK_AJ vía sil_param) y `twin/tools/park_viz.py` (vista cenital del carro en cada cambio de fase).
+
+### T15b — criterio "solo cajón" (2026-10-04, rama t15b2)
+- `prepark.py --solo-cajon`: `collision(..., ignore=("pared exterior",))` (world.py) vía `Sim(ignore_collisions=...)`; el roce con la pared exterior no termina la corrida y queda en `metrics["ignored_contacts"]` (`max_mm` de penetración) y en la columna `pared` / total `roce_pared`. Criterio del usuario: tocar la pared exterior está permitido, tocar el cajón no.
+- Con defaults: 98/100. Los 2 restantes (`CW_c2_p4`, `CW_c3_p4`) chocan con el poste 2 en la fase 8 (phi −45…−50, esquina delantera sin ToF). `CW_c1..c4_p4` llegan con valores de firmware idénticos (`base=25.7 ang=-4.8 avance=46mm`) y solo difiere el swing (54.3 falla, 55.7 ok, 56.4 falla, 58.3 ok): no hay firma de sensor para corregir; holgura total de la S única ≈12 mm vs ~5 mm de jitter entre cartas.
+- Siguiente: modo `PARK_PARALELO_REV` (reversa a tope hasta perpendicular, recto por ToF trasero, a tope hasta paralelo): `runs/geo4.py` da ventana x0 de 30–50 mm con holgura 5 mm.
