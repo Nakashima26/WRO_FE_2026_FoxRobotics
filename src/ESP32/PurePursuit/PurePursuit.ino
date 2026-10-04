@@ -797,7 +797,7 @@ const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
-PARK_AJ int           PARK_ANG_IN_DEG          = 60;    // tope del ángulo de entrada (ver PARK_RADIO_CM)
+PARK_AJ int           PARK_ANG_IN_DEG          = 63;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66
 PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
 // La inercia de la reversa a tope vale ~9°, no 3. Con 3 la maniobra entregaba
@@ -945,10 +945,10 @@ const bool          PARK_RECTO_ENABLED        = true;
 // Ojo: las corridas 1014/1016 daban 24.7 y ~31 — hay dispersión porque la
 // contravuelta se corta en distintos ángulos. 30 es el mejor ajuste con lo que
 // hay hoy, no un número cerrado.
-PARK_AJ float         PARK_RADIO_CM             = 25.0f;
+PARK_AJ float         PARK_RADIO_CM             = 14.0f;
 // Distancia final a la pared exterior que se busca (misma lectura que parkBase).
 // 7 cm es lo que midió la corrida buena (21:38).
-PARK_AJ float         PARK_FINAL_CM             = 7.0f;
+PARK_AJ float         PARK_FINAL_CM             = 0.0f;
 PARK_AJ float         PARK_RECTO_D0_CM          = PARK_FINAL_CM + PARK_RADIO_CM;
 // 2026-09-15: ya NO hace falta medirlo a mano. Ajustando final = pnb - 2R(1-cos a)
 // a los 4 intentos de la noche sale R = 23.6 / 24.9 / 27.0 / 25.0 cm (media 25.1),
@@ -970,9 +970,9 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 // mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
 // arriba quedan para el carro sin encoder y como timeouts de seguridad.
 const bool          PARK_POR_ENCODER          = true;
-PARK_AJ float         PARK_POSTE2_MM            = 133.0f; // avance tras el poste 2 (= 580 ms a 23 cm/s)
+PARK_AJ float         PARK_POSTE2_MM            = 40.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
-PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14 (= 500 ms a 22 cm/s)
+PARK_AJ float         PARK_RECTO_MAX_MM         = 100.0f; // tope de la fase 14; 2026-10-04: 110 -> 100
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
 const float         PARK_WIGGLE_INT_MM        = 0.0f;
 const float         PARK_WIGGLE_EXT_MM        = 0.0f;
@@ -989,7 +989,13 @@ const int           PARK_PEGADO_CM            = 2;
 // 13 (reversa de acomodo final) también lo usa junto con el corte por dF que
 // ya tenía (ver PARK_CICLOS_MAX: ahí decide si vuelve a corregir o termina).
 // Inerte sin FOX_TOF: distB_filtrada se queda en -1 y esto nunca da true.
-PARK_AJ float         PARK_ATRAS_MIN_CM         = 5.0f;
+PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta la contravuelta (fase 8) como el plan del mapa
+// Corte trasero SOLO de la fase 13 (reversa de acomodo final). Separado de
+// PARK_ATRAS_MIN_CM porque esa reversa termina más pegada: la maniobra
+// planeada con el mapa (runs/geo2.py) corta la contravuelta con ToF atrás ~6 cm
+// y endereza en la fase 13 hasta ~2.5 cm. Con un solo umbral la fase 13 se
+// cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
+PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
 // timeout con dF todavía en 8 cm, dejando al carro 15.9° chueco. Ahora manda la
@@ -1012,7 +1018,7 @@ PARK_AJ float         PARK_FINAL_TOL_DEG        = 5.0f;
 const bool          PARK_REV_FINAL            = true;
 // dF al que se detiene la reversa de acomodo final. Cada cm extra vale ~2.3° de
 // enderezado, y también ~1 cm menos de aire con la pared TRASERA (sin sensor).
-PARK_AJ int           PARK_REV_FINAL_DF_CM      = 8;
+PARK_AJ int           PARK_REV_FINAL_DF_CM      = 100;  // 2026-10-04: 8 -> 100 = sin corte por dF; corta alineado / PARK_ATRAS_FINAL_CM
 // Tope de seguridad. De dF~3 a dF=8 son ~5 cm = ~250 ms; 900 deja 3x de margen
 // sin convertir un eco perdido en una embestida a ciegas contra la pared trasera.
 const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
@@ -1032,7 +1038,7 @@ const int           PARK_CICLOS_MAX           = 3;
 // centrado de diseño (5 cm al frente, ~6 atrás).
 // De paso 6 cm está lejos del piso de ~2 cm del HC-SR04, donde las lecturas se
 // caen a 0 y el corte por distancia no dispararía.
-PARK_AJ int           PARK_CENTER_HI_CM         = 6;
+PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (plan del mapa: ToF frente ~45 mm)
 // La fase 11 es la que fija la POSICIÓN LONGITUDINAL final: avanza hasta que el
 // frontal baje de PARK_CENTER_HI_CM y ahí se planta. Medido en 1154 vs 1155: el
 // frontal NUNCA llegó a <=6 en ninguna muestra del ACK y aun así las dos fases
@@ -2042,7 +2048,7 @@ void silPreParkSeed() {
   PARK_RECTO_D0_CM = PARK_FINAL_CM + PARK_RADIO_CM;
   SIL_AJ(PARK_POSTE2_MM); SIL_AJ(PARK_RECTO_MAX_MM); SIL_AJ(PARK_ENDEREZA_TOL_DEG);
   SIL_AJ(PARK_FINAL_TOL_DEG); SIL_AJ(PARK_REV_FINAL_DF_CM); SIL_AJ(PARK_CENTER_HI_CM);
-  SIL_AJ(PARK_ATRAS_MIN_CM);
+  SIL_AJ(PARK_ATRAS_MIN_CM); SIL_AJ(PARK_ATRAS_FINAL_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -4951,7 +4957,7 @@ void loop() {
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
         bool  pegado   = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
-        bool  atrasPegado = parkAtrasPegado();
+        bool  atrasPegado = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
         bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
         if (frenteOk || alineado || pegado || atrasPegado || timeout) {
           Serial.print("PARK fase 13 fin: dif="); Serial.print(dif, 1);
@@ -4959,10 +4965,11 @@ void loop() {
           Serial.print(" ext="); Serial.print(extRaw);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
           // Ciclo adelante/atrás: si todavía no quedó derecho y no fue por
-          // "pegado" (de lado o de atrás — seguridad: ahí no insistas),
-          // vuelve a la fase 9 para otra pasada en vez de terminar aquí,
-          // hasta PARK_CICLOS_MAX veces (ver constante).
-          if (!alineado && !pegado && !atrasPegado && parkCiclos < PARK_CICLOS_MAX) {
+          // "pegado" de lado, vuelve a la fase 9 para otra pasada en vez de
+          // terminar aquí, hasta PARK_CICLOS_MAX veces (ver constante).
+          // ATRAS PEGADO también cicla: la fase 9 va hacia ENFRENTE, que es
+          // justo alejarse de lo que tiene atrás (igual que en las fases 3/14/4/8).
+          if (!alineado && !pegado && parkCiclos < PARK_CICLOS_MAX) {
             parkCiclos++;
             motorCoast(); escribirServo(centroServo);
             Serial.print("PARK ciclo "); Serial.print(parkCiclos);

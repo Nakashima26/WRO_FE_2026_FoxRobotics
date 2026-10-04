@@ -399,6 +399,7 @@ def _run_once(args, seed: int, interactive: bool):
         from pure_pursuit.twin.tools.prepark import HARNESS_FW
         d, c, p = args.prepark.split("_")
         pre_field, pre_params = PP.build(PP.Scenario(d, int(c.lstrip("c")), p))
+        pre_params.update({k: float(v) for k, v in (kv.split("=", 1) for kv in args.par.split(",") if kv)})
         fw_overrides = {**HARNESS_FW, **fw_overrides}
 
     sim = Sim(
@@ -648,6 +649,8 @@ def main():
     ap.add_argument("--log-dir", type=str, default="")
     ap.add_argument("--prepark", type=str, default="",
                     help="escenario del harness de estacionamiento, p. ej. CW_c1_p0 (usar --preset hw_nuevo)")
+    ap.add_argument("--par", type=str, default="",
+                    help="con --prepark: constantes PARK_AJ vía sil_param, p. ej. PARK_RADIO_CM=14,PARK_ATRAS_MIN_CM=11")
     args = ap.parse_args()
     if args.log_dir:
         args.log_dir = Path(args.log_dir)
