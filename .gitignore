@@ -12,6 +12,7 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+.venv-sim/
 
 # GitHub token (NUNCA subir el token real)
 deploy/.github-token

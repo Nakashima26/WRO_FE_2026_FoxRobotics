@@ -399,6 +399,11 @@ const unsigned long GR_TIMEOUT_MS = 2500;
 // mete el arco por dentro de esa lata. Mientras gv=1, no cerrar más que esto.
 const int GR_VERDE_ABRE          = 32;
 const int GR_ABORT_CM            = 12;
+// Giro hecho por la Pi (la línea del mapa dobla sola con prio=1, p. ej. verde
+// en la boca de la recta siguiente: hay que girar tarde, por debajo de la
+// ventana del giro rápido). En SIGUIENDO con prio, si el gyro ya rotó esto hacia
+// el lado de la pista, se cuenta como esquina. 0 = off (carro real).
+const float GIRO_PI_CUENTA_DEG   = 0.0f;
 
 // ── Odometría (Pi) ────────────────────────────────────────────────────────────
 const float ODOM_PWM_K           = 3.5f;
@@ -3274,6 +3279,21 @@ void loop() {
 
       controlPID(distL, distR);
 
+      // La Pi dobló la esquina con su línea (prio=1 todo el arco): contarla.
+      // Sin esto turnsCompleted no sube y el mapa/estacionamiento se desfasan.
+      if (GIRO_PI_CUENTA_DEG > 0.0f && rondaObstaculos && primerGiro
+          && !parkBuscando && !parkUturnPendiente && piPriority
+          && (lastTurnTime == 0 || (millis() - lastTurnTime) > GR_GAP_MS)) {
+        float sgPi = direccionIzquierda ? 1.0f : -1.0f;
+        if (anguloGyro * sgPi >= GIRO_PI_CUENTA_DEG) {
+          maniobraGirarDer = !direccionIzquierda;
+          maniobraIdealRot = sgPi * (float)AngGiro;
+          Serial.print("-> GIRO PI contado ang="); Serial.println(anguloGyro, 1);
+          completarTurnoObstaculos();
+          break;
+        }
+      }
+
       // No girar si hay obstáculo activo en Pi.  (El gate de heading ya no
       // hace falta aquí — mientras el chasis sigue desalineado, ese trabajo
       // lo hace el estado RECUPERANDO, que ni siquiera llega a evaluar
@@ -3672,7 +3692,11 @@ void loop() {
 
       // Ida normal con giro rápido: la esquina es el arco de frente. No hay
       // reversa de acomodo (MANIOBRA) ni por timeout.
-      if (!giroRapidoPermitido()
+      // Con giro rápido y la ventana ya pasada (la Pi soltó tarde, dF < grMin):
+      // sin esto el carro seguía de frente hasta la pared. Cae a la MANIOBRA.
+      bool _grPerdido = giroRapidoPermitido() && distF > 0 && distF < grMin
+                        && contadorFront >= debounceNecesario && gapOk;
+      if ((!giroRapidoPermitido() || _grPerdido)
           && ((contadorFront >= debounceNecesario && gapOk && !_grPendiente) || cruceroLargo)) {
         bool _fueSucio = giroSucioArmado;
         decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada (usa direccionAproxLatch)

@@ -177,7 +177,7 @@ class CameraParams:
     # Soporte fijo de la foto: el lente mira para adelante, ~45° bajo el horizonte.
     tilt_deg: float = 45.0
     # Lente por encima del techo. Rueda 43 mm; no está medido con regla.
-    height_mm: float = 90.0
+    height_mm: float = 97.0
     # En el morro, a la altura del sonar frontal. El lente de la foto queda ahí.
     forward_from_rear_axle_mm: float = 140.0
     right_mm: float = 0.0

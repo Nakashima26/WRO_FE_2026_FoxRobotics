@@ -145,39 +145,43 @@ def _view_window(frame_q, key_q) -> None:
     cam = None
     dig = None
     cv2.namedWindow("Fox", cv2.WINDOW_NORMAL)
-    while True:
+    stop = False
+    while not stop:
+        # Sin mensaje nuevo no se repinta: antes se pintaba (~20 ms) cada
+        # 30 ms aunque no cambiara nada y la ventana se comía un núcleo.
+        dirty = False
+        msgs = []
         try:
-            msg = frame_q.get(timeout=0.03)
+            msgs.append(frame_q.get(timeout=0.03))
+            while True:
+                msgs.append(frame_q.get_nowait())
         except Empty:
-            msg = None
-        if msg is None:
             pass
-        elif msg[0] == "stop":
+        for msg in msgs:
+            if msg[0] == "stop":
+                stop = True
+                break
+            if msg[0] == "field":
+                field = msg[1]
+                trail = []
+                pose = None
+                bev = None
+                cam = None
+                dig = None
+            elif msg[0] == "frame":
+                pose = msg[1]
+                trail.append(msg[1]["xy"])
+                if msg[1]["bev"] is not None:
+                    bev = msg[1]["bev"]
+                if msg[1].get("cam") is not None:
+                    cam = msg[1]["cam"]
+                if msg[1].get("dig") is not None:
+                    dig = msg[1]["dig"]
+            dirty = True
+        if stop:
             break
-        elif msg[0] == "field":
-            field = msg[1]
-            trail = []
-            pose = None
-            bev = None
-            cam = None
-            dig = None
-        elif msg[0] == "frame":
-            pose = msg[1]
-            trail.append(msg[1]["xy"])
-            if msg[1]["bev"] is not None:
-                bev = msg[1]["bev"]
-            if msg[1].get("cam") is not None:
-                cam = msg[1]["cam"]
-            if msg[1].get("dig") is not None:
-                dig = msg[1]["dig"]
-        if field is None:
-            k = cv2.waitKey(1) & 0xFF
-            name = _key_name(k)
-            if name:
-                key_q.put(name)
-            continue
-        img = _paint(field, trail, pose, bev, cam, dig)
-        cv2.imshow("Fox", img)
+        if field is not None and dirty:
+            cv2.imshow("Fox", _paint(field, trail, pose, bev, cam, dig))
         k = cv2.waitKey(1) & 0xFF
         name = _key_name(k)
         if name:
@@ -198,7 +202,39 @@ def _key_name(k: int) -> str | None:
     }.get(k)
 
 
+_STATIC: dict = {"field": None, "img": None}
+
+
 def _paint(field, trail, pose, bev, cam=None, dig=None):
+    import cv2
+    # La pista no cambia entre frames: se pinta una vez por mapa.
+    if _STATIC["field"] is not field:
+        _STATIC["field"] = field
+        _STATIC["img"] = _paint_static(field)
+    world = _STATIC["img"].copy()
+
+    def poly(pts, color, fill=False, thick=1):
+        p = np.array([_to_px(x, y) for x, y in pts], np.int32)
+        if fill:
+            cv2.fillPoly(world, [p], color)
+        cv2.polylines(world, [p], True, (0, 0, 0) if fill else color, thick, cv2.LINE_AA)
+    if len(trail) > 1:
+        pts = np.array([_to_px(x, y) for x, y in trail], np.int32)
+        cv2.polylines(world, [pts], False, (140, 140, 140), 1, cv2.LINE_AA)
+    if pose is not None:
+        poly(pose["car"], (30, 30, 30), fill=True)
+        y = 22
+        for line in (pose.get("hud") or f"t={pose['t']:.1f}s {pose['est']}").split("\n"):
+            cv2.putText(world, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (20, 20, 20), 1, cv2.LINE_AA)
+            y += 18
+    side = _fit_panel(bev, _VIEW, "BEV")
+    mid = _fit_panel(cam, _VIEW, "camara, antes del BEV")
+    know = _fit_panel(dig, _VIEW, "mapa del carro")
+    return np.hstack([world, know, mid, side])
+
+
+def _paint_static(field):
     import cv2
     world = np.full((_VIEW, _VIEW, 3), (180, 196, 215), np.uint8)
     def poly(pts, color, fill=False, thick=1):
@@ -220,25 +256,9 @@ def _paint(field, trail, pose, bev, cam=None, dig=None):
         poly(box, (0, 0, 255) if color == "Red" else (0, 200, 0), fill=True)
     for box in field["barriers"]:
         poly(box, (255, 0, 255), fill=True)
-    if len(trail) > 1:
-        pts = np.array([_to_px(x, y) for x, y in trail], np.int32)
-        cv2.polylines(world, [pts], False, (140, 140, 140), 1, cv2.LINE_AA)
-    if pose is not None:
-        poly(pose["car"], (30, 30, 30), fill=True)
-        y = 22
-        for line in (pose.get("hud") or f"t={pose['t']:.1f}s {pose['est']}").split("\n"):
-            cv2.putText(world, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                        (20, 20, 20), 1, cv2.LINE_AA)
-            y += 18
     cv2.putText(world, "mapa real", (10, _VIEW - 12), cv2.FONT_HERSHEY_SIMPLEX,
                 0.5, (20, 20, 20), 1, cv2.LINE_AA)
-    if bev is None:
-        side = _fit_panel(None, _VIEW, "BEV")
-    else:
-        side = _fit_panel(bev, _VIEW, "BEV")
-    mid = _fit_panel(cam, _VIEW, "camara, antes del BEV")
-    know = _fit_panel(dig, _VIEW, "mapa del carro")
-    return np.hstack([world, know, mid, side])
+    return world
 
 
 _STATE_COLORS = {
@@ -404,7 +424,7 @@ def _run_once(args, seed: int, interactive: bool):
     n_signs = -1
     field_sent = False
     speed = {"v": float(args.speed)}
-    prev_t = None
+
 
     def _hud(est, t, ack, extra) -> str:
         def g(k):
@@ -418,13 +438,30 @@ def _run_once(args, seed: int, interactive: bool):
             "r reinicia   n semilla   esc sale",
         ])
 
-    def _pace(dt) -> bool:
-        budget = min(0.05, max(0.0, dt / max(speed["v"], 0.1)))
-        end = time.perf_counter() + budget
-        while time.perf_counter() < end:
+    # Reloj de reproducción: t_sim avanza a lo más speed veces el reloj real.
+    # Antes se dormía dt/speed en cada frame aunque la sim ya fuera más lenta
+    # que eso (sumaba ~13 ms por frame a speed=5 sin necesidad).
+    pace = {"wall0": None, "sim0": 0.0, "v": None}
+
+    def _pace_reset(t_sim: float) -> None:
+        pace["wall0"] = time.perf_counter()
+        pace["sim0"] = t_sim
+        pace["v"] = speed["v"]
+
+    def _pace(t_sim) -> bool:
+        if pace["wall0"] is None or pace["v"] != speed["v"]:
+            _pace_reset(t_sim)
+            return _poll_keys()
+        target = pace["wall0"] + (t_sim - pace["sim0"]) / max(speed["v"], 0.1)
+        now = time.perf_counter()
+        if now - target > 0.25:
+            # Atrasados (sim lenta): no acumular deuda para luego correr de golpe.
+            _pace_reset(t_sim)
+        while now < target:
             if not _poll_keys():
                 return False
-            time.sleep(0.005)
+            time.sleep(min(0.005, target - now))
+            now = time.perf_counter()
         return True
 
     def _poll_keys() -> bool:
@@ -449,14 +486,17 @@ def _run_once(args, seed: int, interactive: bool):
             return True
 
     def on_frame(view: SimFrameView) -> bool:
-        nonlocal frame_i, n_signs, field_sent, prev_t
+        nonlocal frame_i, n_signs, field_sent
         frame_i += 1
         if not _poll_keys():
             return False
+        paused = keys["pause"]
         while keys["pause"]:
             time.sleep(0.05)
             if not _poll_keys():
                 return False
+        if paused:
+            pace["wall0"] = None
         fr = view.frame_result
         est = view.est or "?"
         show_cam = frame_i % args.render_every == 0
@@ -483,13 +523,15 @@ def _run_once(args, seed: int, interactive: bool):
                 "est": est,
                 "t": view.t,
                 "bev": bev_dbg,
-                "cam": None if fr.processed_frame is None else fr.processed_frame.copy(),
-                "dig": None if fr.dig_map is None else fr.dig_map.copy(),
+                # Imágenes solo cada render_every: copiar y picklear ~2 MB por
+                # frame hacia el proceso de la ventana costaba ~5 ms por frame.
+                "cam": None if not show_cam or fr.processed_frame is None
+                else fr.processed_frame.copy(),
+                "dig": None if not show_cam or fr.dig_map is None
+                else fr.dig_map.copy(),
                 "hud": _hud(est, view.t, ack, "pausa" if keys["pause"] else "corriendo"),
             }))
-            dt = 0.0 if prev_t is None else max(0.0, view.t - prev_t)
-            prev_t = view.t
-            return _pace(dt)
+            return _pace(view.t)
         if fig is None:
             return True
         trail.append((view.vehicle.x, view.vehicle.y))

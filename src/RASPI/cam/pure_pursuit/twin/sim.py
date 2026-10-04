@@ -51,6 +51,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         "fw_overrides": {
             "TURNS_PER_RACE": "12",
             "GIRO_RAPIDO_MODO": "1",
+            # La línea del mapa dobla sola (verde en la boca): el ESP la cuenta.
+            "GIRO_PI_CUENTA_DEG": "70.0f",
         },
         "pi_overrides": {
             "CORNER_HINT_TO_ESP": True,
@@ -73,6 +75,11 @@ PRESETS: dict[str, dict[str, Any]] = {
             "CENTERLINE_TOP_Y": 30,
             # La línea la arma el mapa (lado de paso), no el BEV.
             "DIGITAL_MAP_STEER": True,
+            # El giro rápido a 95 cm sale pegado a la isla (semillas 1 y 6).
+            "DIGITAL_MAP_TURN_HOLD_CM": 65.0,
+            "DIGITAL_MAP_TURN_HOLD_INNER_CM": 80.0,
+            # Verde en la boca: la esquina la dobla el PP (el ESP la cuenta).
+            "DIGITAL_MAP_PP_TURN_CM": 75.0,
         },
         "start": "cajon",
     },

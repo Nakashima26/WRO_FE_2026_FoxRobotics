@@ -79,6 +79,21 @@ def _build_hash(
     return h.hexdigest()[:16]
 
 
+def _cxx() -> list[str]:
+    """FOX_CXX > c++ del PATH > zig (pip install ziglang) en Windows."""
+    env = os.environ.get("FOX_CXX")
+    if env:
+        return env.split()
+    if shutil.which("c++"):
+        return ["c++"]
+    try:
+        import ziglang  # noqa: F401
+    except ImportError:
+        raise RuntimeError("sin compilador C++: instala uno o `pip install ziglang`")
+    import sys
+    return [sys.executable, "-m", "ziglang", "c++"]
+
+
 def build(
     overrides: dict[str, str] | None = None,
     defines: dict[str, str] | None = None,
@@ -90,7 +105,8 @@ def build(
 
     ino_text = load_ino_text(source)
     digest = _build_hash(ino_text, source, overrides, defines)
-    ext = ".dylib" if platform.system() == "Darwin" else ".so"
+    system = platform.system()
+    ext = {"Darwin": ".dylib", "Windows": ".dll"}.get(system, ".so")
     out = _BUILD / f"libfw_{digest}{ext}"
 
     if out.is_file() and not force:
@@ -100,14 +116,14 @@ def build(
     patched = _apply_overrides(ino_text, overrides)
     # Varios procesos (batch en paralelo) pueden compilar a la vez: fuente por
     # hash escrita de forma atómica y salida temporal por proceso.
-    sil_cpp = _BUILD / f"PurePursuit_sil_{digest}.cpp"
-    tmp_cpp = _BUILD / f"PurePursuit_sil_{digest}.{os.getpid()}.tmp"
-    tmp_cpp.write_text('#include "Arduino.h"\n' + patched, encoding="utf-8")
-    os.replace(tmp_cpp, sil_cpp)
+    # En Windows os.replace falla (WinError 5) si otro proceso tiene abierto
+    # el destino: cada proceso compila su propia copia de la fuente.
+    sil_cpp = _BUILD / f"PurePursuit_sil_{digest}.{os.getpid()}.cpp"
+    sil_cpp.write_text('#include "Arduino.h"\n' + patched, encoding="utf-8")
     tmp_out = _BUILD / f"libfw_{digest}.{os.getpid()}.tmp{ext}"
 
     cmd = [
-        "c++",
+        *_cxx(),
         "-std=c++17",
         "-O1",
         "-g",
@@ -117,13 +133,23 @@ def build(
         f"-I{_SIL}",
         "-DFOX_SIL=1",
     ]
+    if system == "Windows":
+        # lld-link no exporta nada sin __declspec; ctypes necesita los sil_*.
+        cmd.extend(["-target", "x86_64-windows-gnu", "-Wl,--export-all-symbols"])
     for k, v in defines.items():
         cmd.append(f"-D{k}={v}")
     cmd.extend([str(_SIL / "sil_core.cpp"), str(sil_cpp), "-o", str(tmp_out)])
 
     try:
-        subprocess.run(cmd, check=True)
-        os.replace(tmp_out, out)
+        # stdin cerrado: en Windows zig se colgaba heredando el stdin de la terminal.
+        subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
+        try:
+            os.replace(tmp_out, out)
+        except PermissionError:
+            # Otro proceso ya dejó la misma .dll (mismo hash) y la tiene cargada.
+            if not out.is_file():
+                raise
     finally:
         tmp_out.unlink(missing_ok=True)
+        sil_cpp.unlink(missing_ok=True)
     return out

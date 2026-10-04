@@ -764,6 +764,16 @@ FAR_LINE_MAX_LAT_MM  = 1400.0
 DIGITAL_MAP_STEER = False
 DIGITAL_MAP_PARKING = "W"
 DIGITAL_MAP_DIRECTION = "CW"
+# Con DIGITAL_MAP_STEER: aguanta el giro rápido (prio=1) hasta que el sonar
+# frontal lea esto (cm), para que el arco salga al centro del carril de la
+# recta siguiente y no pegado a la isla. No aplica si la primera lata de la
+# recta siguiente se pasa por dentro (ahí conviene girar temprano). 0 = off.
+DIGITAL_MAP_TURN_HOLD_CM = 0.0
+DIGITAL_MAP_TURN_HOLD_INNER_CM = 0.0   # ídem si la 1a lata siguiente va por dentro
+# Verde en la boca de la recta siguiente y el giro sigue bloqueado con el
+# frontal ya por debajo de esto (cm): la esquina la dobla la línea del mapa
+# (prio=1) y el ESP la cuenta por el gyro (GIRO_PI_CUENTA_DEG). 0 = off.
+DIGITAL_MAP_PP_TURN_CM = 0.0
 
 FAR_HINT_ENABLED     = True
 FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)

@@ -1354,6 +1354,9 @@ class PPRuntime:
         self._turn_delay_frames = 0
         self._corner_hint_until = 0.0
         self._reset_map_state()
+        # Mapa digital limpio en GO: lo votado desarmado (carro en la mano,
+        # otra pose) no vale, y el ancla del odómetro es el primer ACK armado.
+        self.digital = DigitalMap()
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
         return ready_ack
 
@@ -1842,7 +1845,8 @@ class PPRuntime:
                 feet = list(new_obstacles)
                 if self.bev.is_calibrated and not self._is_turning:
                     feet.extend(seen_above_obstacles(self.bev, positions))
-                self.digital.update(serial_ack, feet, line_info.get("Orange"))
+                if armed:
+                    self.digital.update(serial_ack, feet, line_info.get("Orange"))
                 if len(path_points) >= C.MIN_PATH_PTS:
                     if getattr(C, "DIGITAL_MAP_STEER", False) and not self._is_turning:
                         mapped = self.digital.line_bev()
@@ -2001,8 +2005,11 @@ class PPRuntime:
                 and not pasado and self._prev_estado != "R"):
             self._turn_delay_frames -= 1
             _turn_hold = True
+        # El bloqueo del mapa digital va aparte para que salga en [DIR].
+        self._dmap_block = (int(self.digital.blocks_turn()), int(self.digital.needs_line()),
+                            int(self.digital.holds_for_center()))
         _turn_block = ((self._ext_corner_block > 0) or _turn_hold
-                       or self.digital.blocks_turn() or self.digital.needs_line())
+                       or any(self._dmap_block))
 
         serial_msg = self._build_serial_message(
             obs_norm, state, len(bev_obstacles), pasado, interior,
@@ -2113,7 +2120,8 @@ class PPRuntime:
               f"vy={_vy} interior={interior} "
               f"ext_corner_hold={int(self._ext_corner_hold)} "
               f"turn_block={self._ext_corner_block} "
-              f"turn_delay={self._turn_delay_frames}", flush=True)
+              f"turn_delay={self._turn_delay_frames} "
+              f"dmap_block={getattr(self, '_dmap_block', (0, 0, 0))}", flush=True)
         # Vuelca el estado interno de la memoria rodante a stdout (antes
         # solo iba al HUD de pantalla vía _annotate). Permite medir en
         # journalctl cuántos frames se arrastra un obstáculo (falta=+Npx

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -34,7 +35,10 @@ class FirmwareSIL:
             force=force_rebuild,
             source=source,
         )
+        # Copia propia por instancia: cada Sim arranca con los globals del .ino
+        # en cero. En Windows hay que cerrar el handle antes de LoadLibrary.
         self._tmp = tempfile.NamedTemporaryFile(suffix=lib_path.suffix, delete=False)
+        self._tmp.close()
         shutil.copy2(lib_path, self._tmp.name)
         self._lib = ctypes.CDLL(self._tmp.name)
 
@@ -193,7 +197,16 @@ class FirmwareSIL:
 
     def close(self) -> None:
         self._tmp.close()
-        Path(self._tmp.name).unlink(missing_ok=True)
+        lib = getattr(self, "_lib", None)
+        if lib is not None and sys.platform == "win32":
+            # Windows no deja borrar una DLL cargada.
+            ctypes.windll.kernel32.FreeLibrary.argtypes = [ctypes.c_void_p]
+            ctypes.windll.kernel32.FreeLibrary(ctypes.c_void_p(lib._handle))
+            self._lib = None
+        try:
+            Path(self._tmp.name).unlink(missing_ok=True)
+        except PermissionError:
+            pass
 
     def __del__(self) -> None:
         try:
