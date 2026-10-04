@@ -1063,7 +1063,16 @@ class DigitalMap:
         cx, cy = self.pose_xy
         rad = math.radians(self.heading)
         tip = px(cx + 80 * math.sin(rad), cy + 80 * math.cos(rad))
-        cv2.circle(img, px(cx, cy), 5, (30, 30, 30), -1, cv2.LINE_AA)
+        # Chasis a escala: pose_xy es el eje trasero.
+        fx, fy = math.sin(rad), math.cos(rad)
+        rx, ry = fy, -fx
+        hw = C.ROBOT_WIDTH_MM / 2.0
+        body = [(cx + a * fx + b * rx, cy + a * fy + b * ry)
+                for a, b in ((-C.REAR_OVERHANG_MM, -hw), (-C.REAR_OVERHANG_MM, hw),
+                             (C.ROBOT_LENGTH_MM - C.REAR_OVERHANG_MM, hw),
+                             (C.ROBOT_LENGTH_MM - C.REAR_OVERHANG_MM, -hw))]
+        poly(body, (30, 30, 30), 1)
+        cv2.circle(img, px(cx, cy), 3, (30, 30, 30), -1, cv2.LINE_AA)
         cv2.arrowedLine(img, px(cx, cy), tip, (30, 30, 30), 1, tipLength=0.4)
         cv2.putText(
             img, f"{self.section}  {self.along_mm:.0f}mm",
