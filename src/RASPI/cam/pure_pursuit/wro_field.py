@@ -235,6 +235,28 @@ def _rear_axle_at_center(section: str, direction: str, h: float, w: float) -> tu
     return section_to_world(section, h, w - dw)
 
 
+# Arranque en el cajón (así lo pone el equipo): el costado del carro al ras del
+# borde INTERIOR del cajón (las puntas de las maderas, del lado del carril por
+# donde sale), 2 mm adentro; la cola a 5 mm de la madera de atrás. Antes iba a
+# 12 mm de la pared exterior.
+STALL_SIDE_GAP_MM = 2.0
+STALL_TAIL_GAP_MM = 5.0
+
+
+def stall_start_xy(section: str, direction: str) -> tuple[float, float]:
+    """Eje trasero del arranque en el cajón. Fuente única: el twin (randomize
+    start="cajon") y el ancla del mapa digital (digital_map._stall_xy)."""
+    half_len = _C.ROBOT_LENGTH_MM / 2.0
+    h_center = PARK_BARRIER_INTO_MM - STALL_SIDE_GAP_MM - _C.ROBOT_WIDTH_MM / 2.0
+    rear_face = _LEFT + PARK_BARRIER_THICK_MM
+    front_face = rear_face + PARK_GAP_MM
+    if direction == "CW":
+        w_center = (rear_face + STALL_TAIL_GAP_MM) + half_len
+    else:
+        w_center = (front_face - STALL_TAIL_GAP_MM) - half_len
+    return _rear_axle_at_center(section, direction, h_center, w_center)
+
+
 def _start_of(section: str) -> tuple[float, float]:
     return {
         "N": (0.0, 1000.0),
@@ -380,19 +402,7 @@ def randomize(seed: int | None = None, start: str = "centro") -> Field:
         sx, sy = _start_of(parking)
         mode = "centro"
     elif start == "cajon":
-        # Hueco: 200 mm de fondo, 270 mm de largo (1.5 × 180). La cola queda a
-        # 5 mm de la madera de atrás. El costado va a 12 mm de la pared: el
-        # voladizo corto (33.5 mm) cabe en el swing; a 5 mm la cola roza.
-        half_len = 90.0
-        half_w = 65.0
-        h_center = half_w + 12.0
-        rear_face = _LEFT + PARK_BARRIER_THICK_MM
-        front_face = rear_face + PARK_GAP_MM
-        if direction == "CW":
-            w_center = (rear_face + 5.0) + half_len
-        else:
-            w_center = (front_face - 5.0) - half_len
-        sx, sy = _rear_axle_at_center(parking, direction, h_center, w_center)
+        sx, sy = stall_start_xy(parking, direction)
         mode = "cajon"
     elif start in ("zona", "Z3", "Z4"):
         zone = start if start != "zona" else rng.choice(_valid_zones(cards[parking], direction))

@@ -167,3 +167,33 @@ Herramientas scratch nuevas (sin trackear): `runs/all.sh <tag>` corre `drive.py`
 Fase 0 (HEAD 5bce711, `runs/base`): 0/21 limpios, suma tc 85. Las 7 CCW (5, 7, 9, 11, 12, 17, 19) chocan `cajón magenta` a t=0.6 s: `[INICIO] rosa avg=0.22 umbral=0.28 n=15 -> arranque normal` (CW: `rosa avg=0.29 … MANIOBRA DE SALIDA`). Sin INICIO el ESP sale en SIGUIENDO directo contra la madera.
 
 Cambio 1 (bug del twin, sin flag) — `twin/camera.py` `render_camera`: el pintor ordenaba cada pared entera (quad de 3 m) por su profundidad media; la pared exterior quedaba "delante" de la madera del cajón pegada a ella y la tapaba (solo en CCW, la madera queda del lado donde la media de la pared cae más cerca). Ahora la pared va en tramos de 100 mm con cortes también en los cantos de las maderas. Rosa al arranque: CW 0.294→0.293, CCW 0.218→0.293 (simétrico). Render ~12→18 ms/frame. Resultado (`runs/c1`): suma tc 85→114, 0/21 limpios; las CCW ya hacen INICIO (7 y 19 llegan a 12 giros).
+
+Cambio 2 (corrección del escenario, pedida por el usuario; sin flag) — arranque en el cajón: el costado del carro va al ras del borde INTERIOR del cajón (puntas de las maderas, 2 mm adentro: `h_center = PARK_BARRIER_INTO_MM - 2 - ROBOT_WIDTH_MM/2` = 133 mm), no a 12 mm de la pared exterior. Cola a 5 mm de la madera (igual que antes). Fuente única `wro_field.stall_start_xy()` (lee dims de config.py); `digital_map._stall_xy()` la usa, así el ancla del mapa no puede divergir del spawn. **Cambia el ancla del mapa en el robot real** (es como el equipo coloca el carro). Resultado (`runs/c2`, = baseline nuevo): suma tc 114→107, 2/21 terminan (2 y 3170839) pero quedan 41–43 mm fuera de la caja; las CCW 5, 11, 12 chocan el verde T2 justo a la salida del cajón a t≈6.8 s.
+
+Baseline Fase 0 definitivo (`runs/c2`, HEAD + cambios 1-2):
+
+| seed | dir/park | stop | tc | choque | categoría |
+|---|---|---|---|---|---|
+| 1 | CW/S | collision | 11 | señal Red S/T2 | lata (pose) |
+| 2 | CW/E | race_finished | 12 | - | estaciona, 43 mm fuera |
+| 3 | CW/E | collision | 4 | isla | pose (err 198) |
+| 4 | CW/N | collision | 5 | isla | pose (err 274) |
+| 5 | CCW/N | collision | 0 | señal Green N/T2 | salida CCW, verde en la boca del cajón |
+| 6 | CW/E | collision | 2 | pared | pose (err 166) |
+| 7 | CCW/N | collision | 8 | señal Red N/T2 | pose (err 256) |
+| 8 | CW/S | collision | 3 | cajón magenta | cajón en carrera |
+| 9 | CCW/S | collision | 4 | cajón magenta | cajón en carrera / pose (268) |
+| 10 | CW/S | collision | 1 | señal Green W/T3 | lata |
+| 11 | CCW/W | collision | 0 | señal Green W/T2 | salida CCW |
+| 12 | CCW/N | collision | 0 | señal Green N/T2 | salida CCW |
+| 13 | CW/W | collision | 4 | señal Red S/T1 | pose (err 353) |
+| 14 | CW/E | collision | 9 | pared | pose (158) |
+| 15 | CW/E | collision | 8 | señal Red E/T2 | pose (182) |
+| 16 | CW/S | collision | 3 | cajón magenta | cajón en carrera |
+| 17 | CCW/W | collision | 2 | pared exterior | salida CCW / pared |
+| 18 | CW/S | collision | 8 | señal Red S/T1 | pose (200) |
+| 19 | CCW/W | collision | 4 | cajón magenta | pose (258) |
+| 20 | CW/W | collision | 7 | señal Green S/T2 | pose (388) |
+| 3170839 | CW/W | race_finished | 12 | - | estaciona, 41 mm fuera |
+
+0/21 limpios, suma tc 107. Categorías: pose del mapa a la deriva (err 150–390 mm al chocar) 10; salida CCW con verde T2 en la boca 3 (+17); cajón tocado en carrera 3; estacionamiento no limpio 2; otra lata 1. La deriva no es del encoder sino del rumbo: el yaw del ACK (gyro con error de escala ~1 %) acumula hasta ±12° en 3 vueltas (`runs/hderr.py`: seed 3 `0:+3 1:+5 2:+7 3:+9 4:+11 5:+12`).

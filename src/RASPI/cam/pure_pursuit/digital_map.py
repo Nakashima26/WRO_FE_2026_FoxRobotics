@@ -25,17 +25,13 @@ from .wro_field import (
     CARDS,
     INNER_HALF_MM,
     OUTER_HALF_MM,
-    PARK_BARRIER_INTO_MM,
-    PARK_BARRIER_THICK_MM,
-    PARK_GAP_MM,
     PARKING_FORBIDDEN_SEATS,
     SEATS,
     SECTIONS_CW,
-    _LEFT,
     _barrier_corners,
     _heading,
-    _rear_axle_at_center,
     section_to_world,
+    stall_start_xy,
 )
 
 _LANE_MM = 1000.0
@@ -134,19 +130,9 @@ class DigitalMap:
         return -200.0
 
     def _stall_xy(self) -> tuple[float, float]:
-        # Misma cifra que el arranque en cajón: costado a 12 mm de la pared,
-        # cola a 5 mm de la madera de atrás. No lee la pose real.
-        # Es el EJE TRASERO (lo que integra el odómetro), no el centro del
-        # chasis: antes quedaba 56 mm corrido hacia adelante del arranque.
-        half_len = 90.0
-        h_center = 65.0 + 12.0
-        rear_face = _LEFT + PARK_BARRIER_THICK_MM
-        if self.direction == "CW":
-            w_center = (rear_face + 5.0) + half_len
-        else:
-            front_face = rear_face + PARK_GAP_MM
-            w_center = (front_face - 5.0) - half_len
-        return _rear_axle_at_center(self.parking, self.direction, h_center, w_center)
+        # Misma cifra que el arranque en cajón (wro_field.stall_start_xy): no
+        # lee la pose real. Es el EJE TRASERO (lo que integra el odómetro).
+        return stall_start_xy(self.parking, self.direction)
 
     def section_of(self, turns: int) -> str:
         i = SECTIONS_CW.index(self.parking)
