@@ -15,7 +15,7 @@ sys.path.insert(0, str(cam_dir))
 from pure_pursuit.twin.sim import Sim
 
 
-_TIMING_KEYS = ("pi_frame_ms", "wall_time_s", "wall_per_sim_s", "mean_pi_frame_ms")
+_TIMING_KEYS = ("pi_frame_ms", "wall_time_s", "wall_per_sim_s", "mean_pi_frame_ms", "render_s", "pi_s", "other_s")
 
 
 def _strip_timing(x):
