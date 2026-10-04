@@ -9,14 +9,27 @@ from pathlib import Path
 from hashlib import sha256
 
 # Agregar el package root para importar pure_pursuit
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+cam_dir = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(cam_dir))
 
-from twin.sim import Sim
+from pure_pursuit.twin.sim import Sim
+
+
+_TIMING_KEYS = ("pi_frame_ms", "wall_time_s", "wall_per_sim_s", "mean_pi_frame_ms")
+
+
+def _strip_timing(x):
+    # pi_frame_ms y similares son perf_counter (reloj real): cambian en cada corrida.
+    if isinstance(x, dict):
+        return {k: _strip_timing(v) for k, v in x.items() if k not in _TIMING_KEYS}
+    if isinstance(x, (list, tuple)):
+        return [_strip_timing(v) for v in x]
+    return x
 
 
 def compute_fingerprint(sim_result):
-    """Generar SHA256 de la traza (determinístico)."""
-    trace_data = json.dumps(sim_result.trace, default=str, sort_keys=True)
+    """Generar SHA256 de la traza sin campos de reloj real."""
+    trace_data = json.dumps(_strip_timing(sim_result.trace), default=str, sort_keys=True)
     return sha256(trace_data.encode()).hexdigest()
 
 
