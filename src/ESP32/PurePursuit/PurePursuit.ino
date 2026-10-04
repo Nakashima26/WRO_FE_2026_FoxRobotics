@@ -80,7 +80,7 @@ const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 
 //   true  = sigue hasta la MANIOBRA 13, media vuelta y estaciona REGRESANDO
 //   false = estaciona de frente justo tras el giro 12
 enum ModoPark { PARK_NINGUNO, PARK_PUNTA, PARK_PARALELO };
-const ModoPark PARK_MODO         = PARK_PUNTA;
+const ModoPark PARK_MODO         = PARK_PARALELO;
 const bool     PARK_MEDIA_VUELTA = true;
 
 
