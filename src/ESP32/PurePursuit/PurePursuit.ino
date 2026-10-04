@@ -1027,7 +1027,10 @@ PARK_AJ float         PARK_REV_AJUSTE_MM        = 0.0f;   // avance(+)/retroceso
 const unsigned long PARK_REV_AJUSTE_MAX_MS    = 1200;    // tope de seguridad de la fase 30 (sin encoder o atorado)
 PARK_AJ float         PARK_REV_SWING_OVERSHOOT_DEG = 9.0f; // corte anticipado de los swings A y C (igual idea que PARK_OVERSHOOT_DEG)
 PARK_AJ float         PARK_REV_B_CM             = 0.0f;   // objetivo de distB_filtrada al fondo del cajón al cerrar la fase B (0 = sin tramo recto)
-const float         PARK_REV_B_MAX_MM         = 150.0f;  // tope de la fase B si no hay ToF trasero o no llega al objetivo
+// t15b2: 150mm (sin ToF) deja la fase B comerse casi todo el margen al fondo
+// antes del swing C -> "ATRAS PEGADO" casi de inmediato; 30mm (barrido Mac,
+// --solo-cajon) sube fuera<=5 de 0/100 a 69/100 (sigue sin limpiar el cajón).
+PARK_AJ float         PARK_REV_B_MAX_MM         = 30.0f;  // tope de la fase B si no hay ToF trasero o no llega al objetivo
 const unsigned long PARK_REV_B_MAX_MS         = 1200;    // tope de tiempo de la fase B
 PARK_AJ float         PARK_REV_FINAL_TOL_DEG    = 3.0f;    // ±2-3° de parkRumboRef+180 para terminar (fases 36/38)
 PARK_AJ int           PARK_REV_CENTER_HI_CM     = 5;       // corte de la fase 36 (ACOMODO ADELANTE) por distF_filtrada
@@ -2097,7 +2100,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_ATRAS_MIN_CM); SIL_AJ(PARK_ATRAS_FINAL_CM);
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
-  SIL_AJ(PARK_REV_ATRAS_MIN_CM);
+  SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
