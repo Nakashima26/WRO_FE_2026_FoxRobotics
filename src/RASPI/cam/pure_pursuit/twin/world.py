@@ -138,6 +138,8 @@ class World:
         origins = np.asarray(origins, dtype=np.float64)
         dirs = np.asarray(dirs, dtype=np.float64)
         n_rays = origins.shape[0]
+        n_segs = len(self.segments)
+
         best_t = np.full(n_rays, np.inf, dtype=np.float64)
         best_mat = np.full(n_rays, -1, dtype=np.int32)
         best_n = np.zeros((n_rays, 2), dtype=np.float64)
@@ -145,29 +147,55 @@ class World:
 
         mat_to_i = {"wall": 0, "magenta": 1, "sign": 2}
 
-        for si in range(len(self.segments)):
-            a = self._a[si]
-            b = self._b[si]
-            v2 = b - a
-            v3 = np.array([-dirs[:, 1], dirs[:, 0]], dtype=np.float64).T  # perpendicular to dir
-            denom = v2[0] * v3[:, 0] + v2[1] * v3[:, 1]
-            v1 = origins - a
-            cross = v2[0] * v1[:, 1] - v2[1] * v1[:, 0]
-            with np.errstate(divide="ignore", invalid="ignore"):
-                t1 = np.where(np.abs(denom) > 1e-12, cross / denom, np.inf)
-                dot_v1_v3 = v1[:, 0] * v3[:, 0] + v1[:, 1] * v3[:, 1]
-                t2 = np.where(np.abs(denom) > 1e-12, dot_v1_v3 / denom, np.inf)
-            hit = (t1 >= 0.0) & (t1 <= max_range) & (t2 >= 0.0) & (t2 <= 1.0)
-            t_hit = np.where(hit, t1, np.inf)
-            closer = t_hit < best_t
-            if np.any(closer):
-                best_t = np.where(closer, t_hit, best_t)
-                mat_name = self._materials[si]
-                mi = mat_to_i.get(mat_name, 0)
-                best_mat = np.where(closer, mi, best_mat)
-                best_obj = np.where(closer, self._obj_idx[si], best_obj)
-                n = self._normals[si]
-                best_n[closer] = n
+        # Vectorized: shape (n_segs, 2) for segment endpoints
+        a_all = self._a  # (n_segs, 2)
+        b_all = self._b  # (n_segs, 2)
+        v2_all = b_all - a_all  # (n_segs, 2)
+
+        # Perpendicular to each ray direction: (n_rays, 2)
+        v3 = np.stack([-dirs[:, 1], dirs[:, 0]], axis=1)  # (n_rays, 2)
+
+        # Vectorize over all rays and segments: (n_rays, n_segs)
+        # denom[ray, seg] = v2[seg] . v3[ray]
+        denom = np.dot(v2_all, v3.T)  # (n_segs, n_rays) -> transpose to (n_rays, n_segs)
+        denom = denom.T  # Now (n_rays, n_segs)
+
+        # v1[ray, seg] = origins[ray] - a[seg]
+        # Broadcasting: origins (n_rays, 2), a_all (n_segs, 2)
+        # Reshape for broadcasting: origins (n_rays, 1, 2) - a_all (1, n_segs, 2) = (n_rays, n_segs, 2)
+        v1 = origins[:, np.newaxis, :] - a_all[np.newaxis, :, :]  # (n_rays, n_segs, 2)
+
+        # cross[ray, seg] = v2[seg] x v1[ray, seg]
+        cross = v2_all[np.newaxis, :, 0] * v1[:, :, 1] - v2_all[np.newaxis, :, 1] * v1[:, :, 0]  # (n_rays, n_segs)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t1 = np.where(np.abs(denom) > 1e-12, cross / denom, np.inf)  # (n_rays, n_segs)
+            # dot_v1_v3[ray, seg] = v1[ray, seg] . v3[ray]
+            dot_v1_v3 = v1[:, :, 0] * v3[:, np.newaxis, 0] + v1[:, :, 1] * v3[:, np.newaxis, 1]  # (n_rays, n_segs)
+            t2 = np.where(np.abs(denom) > 1e-12, dot_v1_v3 / denom, np.inf)  # (n_rays, n_segs)
+
+        # hit[ray, seg]: whether this ray hits this segment
+        hit = (t1 >= 0.0) & (t1 <= max_range) & (t2 >= 0.0) & (t2 <= 1.0)  # (n_rays, n_segs)
+        t_hit = np.where(hit, t1, np.inf)  # (n_rays, n_segs)
+
+        # For each ray, find closest segment
+        closest_seg = np.argmin(t_hit, axis=1)  # (n_rays,) - first on ties
+        closest_t = t_hit[np.arange(n_rays), closest_seg]  # (n_rays,)
+
+        # Update best values where hit
+        closer = closest_t < best_t
+        best_t = np.where(closer, closest_t, best_t)
+
+        # Material index, object index, normal for closest segment
+        mat_names = np.array(self._materials)  # (n_segs,)
+        best_mat_vals = np.array([mat_to_i.get(m, 0) for m in mat_names])  # (n_segs,) -> int
+        best_mat = np.where(closer, best_mat_vals[closest_seg], best_mat)
+
+        best_obj = np.where(closer, self._obj_idx[closest_seg], best_obj)
+
+        # Normal from closest segment
+        closest_normals = self._normals[closest_seg]  # (n_rays, 2)
+        best_n[closer] = closest_normals[closer]
 
         dist = np.where(np.isfinite(best_t), best_t, max_range)
         no_hit = best_mat < 0

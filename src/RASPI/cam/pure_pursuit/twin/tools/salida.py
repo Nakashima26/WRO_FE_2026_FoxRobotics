@@ -251,10 +251,10 @@ def main() -> None:
     if mode == "summ":
         d = Path(sys.argv[2]); scns = sys.argv[3:] or default_scenarios()
         summarize(d, scns); return
-    tag = sys.argv[2]; jobs = int(sys.argv[3]) if len(sys.argv) > 3 else 11
+    tag = sys.argv[2]; jobs = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     scns = sys.argv[4:] or default_scenarios()
     d = Path("runs") / tag; d.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, PYTHONUTF8="1", PYTHONPATH=".")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONPATH=".", OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
     t0 = time.time()
 
     def job(scn):
