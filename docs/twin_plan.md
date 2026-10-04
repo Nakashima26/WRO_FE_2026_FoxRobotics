@@ -147,3 +147,16 @@ Hallazgo principal (bloqueo fuera de alcance): la odometría del ESP (modelo PWM
 - OJO: subir cámara 90→97 mm cambia mucho los resultados (seed 2: tc 2→10, seed 6: 1→4) → el twin es caótico; evaluar con más seeds, no 6.
 - Real: recalibrar `bev_calib.npz` tras mover la cámara (~7 % de escala). Medir: PPR encoder, pull-ups GPIO34/39, GPIO15 libre, VL53L0X vs VL53L1X (firmware usa L1X), montajes.
 - Pendiente: MAX_STEER_DEG=60 vs 46.32; BEV_ORIGIN 100 vs batalla 113.
+
+### Estado tras merge (commit 0698d87, 2026-10-03)
+- Mergeado T8a (commit 1c4a478, WIP detenido por el usuario) + T9. Tests: 66 ok, 1 falla preexistente (test_corner_hint gv=0).
+- Perfilado (detenido): dejó cambios en chassis_twin.py (visor); el usuario reporta que ya corría bien.
+- Worktree `C:/Users/jbanda/Documents/GitHub/wt_base` = 60e0356 (base sin cambios) para comparar.
+
+### Lecciones (para cualquier agente nuevo)
+1. El twin es caótico: un cambio de 7 mm en la cámara cambia seeds enteras. Evaluar SIEMPRE en ≥20 seeds y contra la base con la misma config; nunca declarar mejora con 6.
+2. Evitar "whack-a-mole" de heurísticas por seed: T8a iteró 12 veces y mejoraba unas seeds rompiendo otras. Buscar causa raíz común (pose/odometría, proyección, footprint) antes de tunear umbrales.
+3. Con odometría PWM la deriva (50-100 mm por giro) era el bloqueo. Con encoder (hw_nuevo) el error medio baja a 55 mm. Trabajar sobre `hw_nuevo`.
+4. ToF contra pared negra solo válidos 15-29 % de frames; US + naranja pesan más para localizar.
+5. Correr siempre `--no-show` y `< /dev/null` (no abrir ventanas al usuario); PYTHONUTF8=1.
+6. No editar archivos de otro agente en paralelo; un agente por área.
