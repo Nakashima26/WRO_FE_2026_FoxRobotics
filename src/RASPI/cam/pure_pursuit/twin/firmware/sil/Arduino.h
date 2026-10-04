@@ -215,6 +215,8 @@ void sil_register_sonar(uint8_t trig_pin, uint8_t echo_pin, int id);
 
 int32_t sil_encoder_count(void);
 int sil_tof_mm(int idx);
+// Parámetro de arranque puesto desde Python (FirmwareSIL.set_param); def si no está.
+double sil_param(const char *name, double def);
 
 #ifdef __cplusplus
 }
