@@ -1015,8 +1015,14 @@ PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
 //   35 coast -> 36 ADELANTE acomodo (rumbo = parkRumboRef+180) -> 37 coast ->
 //   38 REV final de enderezado, cicla a la 35 hasta PARK_REV_CICLOS_MAX.
 // Mismo patrón de seguridad que las fases 3/14/4/8: si distB_filtrada se pega
-// (PARK_ATRAS_MIN_CM) durante el swing A o C, salta a la 35 (pasadas) en vez
-// de seguir metiendo la cola contra el fondo del cajón.
+// MUCHO durante el swing A o C, salta a la 35 (pasadas) en vez de seguir
+// metiendo la cola contra el fondo del cajón. OJO: NO reutiliza
+// PARK_ATRAS_MIN_CM (6 cm) — con el carro girando 90-180° el ToF trasero deja
+// de apuntar al fondo bastante antes de llegar ahí (apunta de refilón a la
+// pared/poste lateral) y 6 cm disparaba el corte casi al arrancar el swing
+// (medido: swing cortado en pleno giro, nunca llega ni a la fase B). Un
+// umbral propio y más chico es el "de verdad ya va a topar", no "se acercó".
+PARK_AJ float         PARK_REV_ATRAS_MIN_CM     = 2.0f;   // corte de seguridad propio de los swings A/C (ver nota arriba)
 PARK_AJ float         PARK_REV_AJUSTE_MM        = 0.0f;   // avance(+)/retroceso(-) tras poste 2, antes del swing A
 const unsigned long PARK_REV_AJUSTE_MAX_MS    = 1200;    // tope de seguridad de la fase 30 (sin encoder o atorado)
 PARK_AJ float         PARK_REV_SWING_OVERSHOOT_DEG = 9.0f; // corte anticipado de los swings A y C (igual idea que PARK_OVERSHOOT_DEG)
@@ -1994,6 +2000,13 @@ bool parkAtrasPegado() {
   return distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_MIN_CM;
 }
 
+// Red de seguridad propia de los swings A/C del PARK_PARALELO_REV (ver
+// PARK_REV_ATRAS_MIN_CM): umbral más chico que parkAtrasPegado() porque el
+// ToF trasero gira CON el carro y a medio swing ya no mira al fondo.
+bool parkRevAtrasPegado() {
+  return distB_filtrada > 0.0f && distB_filtrada <= PARK_REV_ATRAS_MIN_CM;
+}
+
 // Ruta A (T15b): ¿las fases de distancia van por encoder? y cuánto lleva la fase.
 bool parkUsaEncoder() { return FOX_ENCODER && PARK_POR_ENCODER; }
 float parkRecorridoMm() { return fabsf((float)(odomMm - parkOdom0)); }
@@ -2084,6 +2097,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_ATRAS_MIN_CM); SIL_AJ(PARK_ATRAS_FINAL_CM);
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
+  SIL_AJ(PARK_REV_ATRAS_MIN_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2248,7 +2262,15 @@ void vigilarUturn(long distF) {
   bool fondo = recorrido > 1000 && distF > 0 && distF <= 55;
   if (!(lista || fondo)) return;
   parkUturnPendiente = false;
-  iniciarEstacionandoPunta(true);
+  // Antes llamaba a iniciarEstacionandoPunta(true) directo, sin consultar
+  // PARK_MODO: con PARK_MEDIA_VUELTA=true la carrera completa SIEMPRE
+  // terminaba estacionando DE PUNTA, sin importar PARK_PARALELO/_REV (bug
+  // encontrado en otra verificación; prepark no lo veía porque entra por
+  // iniciarEstacionamiento(), no por aquí). El despacho único ya vive en
+  // iniciarEstacionamiento(): con PARALELO/PARALELO_REV cae en
+  // iniciarEstacionandoRetorno() (fase 20 de ESTACIONANDO); con PUNTA queda
+  // igual que antes.
+  iniciarEstacionamiento(true);
 }
 
 // Servo "recto" hacia un heading (gyro PD) para ESTACIONANDO_PUNTA. Convención
@@ -4792,7 +4814,7 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
-        if (parkAtrasPegado()) {
+        if (parkRevAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
           Serial.print("PARK fase 32: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
           Serial.println(") -> fase 35");
@@ -4821,7 +4843,7 @@ void loop() {
         motorReversa();
         escribirServo(centroServo);
         setMotor(PARK_REV_PWM);
-        if (parkAtrasPegado()) {
+        if (parkRevAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
           Serial.print("PARK fase 33: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
           Serial.println(") -> fase 35");
@@ -4849,7 +4871,7 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
-        if (parkAtrasPegado()) {
+        if (parkRevAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
           Serial.print("PARK fase 34: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
           Serial.println(") -> fase 35");
