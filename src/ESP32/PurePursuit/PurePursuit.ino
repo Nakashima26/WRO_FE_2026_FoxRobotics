@@ -716,6 +716,22 @@ const unsigned long INICIO_REV_RECTO_MIN_MS = 500; // fase 8: reversa recta mín
 const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
                                               // (si el cajón deja lectura ambigua, no se arriesga el
                                               //  latch global: la 1ª esquina real decide como siempre)
+// Arranque nuevo (2026-10): el carro sale con el costado al ras de la PUNTA de las
+// maderas (borde interior del cajón), no pegado a la pared exterior. La reversa
+// "colchón" lo metía detrás de la fila T2 (el rojo T2 en CW ya no se podía pasar
+// por la derecha); ahora la "S" termina por distancia lateral (odometría) y no
+// retrocede. La Pi manda isal= con el lado de paso de la 1ª señal adelante
+// (salida_cajon.py): 2 = ADENTRO (cruzar al carril interior: rojo en CW / verde en
+// CCW) -> la S se abre a ~90° (una "caja") hasta pasar la fila interior.
+const bool INICIO_REVERSA              = false; // true = fases 4-8 de antes (reversa colchón)
+const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
+const float INICIO_LAT_AFUERA_MM       = 200.0f; // desplazamiento lateral final, salida normal (centro a ~33 cm de la pared)
+const float INICIO_LAT_ADENTRO_MM      = 620.0f; // ídem con isal=2 (centro a ~75 cm: más allá de la fila interior a 60 cm)
+const float INICIO_R_CONTRA_MM         = 130.0f; // radio efectivo de la contravuelta (predice el lateral que falta)
+const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto (red de seguridad)
+const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
+const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
+const int  INICIO_CONTRA_FIN_DEG       = 6;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
 
 
 // Estado interno de INICIO
@@ -726,6 +742,9 @@ int  inicioFase     = -1;      // -1 init | 1 swing | 2 recto | 3 contra | 4 coa
 bool inicioGirarDer = false;   // lado de salida del cajón (servo full hacia ahí en la fase 1)
 unsigned long inicioRevMs = 0; // inicio de la reversa (fase 5): base del presupuesto INICIO_REV_MS
 float inicioAngPico = 0.0f;    // máx |anguloGyro| alcanzado en las fases 1-3 (ref. de la contravuelta)
+int   piSalida      = 0;       // isal= de la Pi: 0 sin dato | 1 afuera | 2 adentro (sticky, ver arriba)
+bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
+float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
 float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample de la fase 6
 unsigned long inicioSettleSampMs  = 0;
@@ -2380,6 +2399,8 @@ void parsePiMessage(String line) {
     // -> maniobra de salida (case INICIO). Debe venir ya en el PRIMER V2. SOLO se
     // setea a true (sticky); el one-shot de loop() lo consume una sola vez.
     if (campoPi(line, "inicio=", v) && v.toInt() != 0) piInicioEstacionamiento = true;
+    // isal — lado de paso de la 1ª señal adelante del cajón (solo durante INICIO)
+    if (campoPi(line, ",isal=", v) && v.toInt() != 0) piSalida = v.toInt();
 
     // park — etapa del cajón vista por la Pi en la recta final
     if (campoPi(line, "park=", v)) piPark = v.toInt();
@@ -3088,7 +3109,14 @@ void loop() {
         inicioFaseMs   = millis();
         inicioFase     = 1;
         inicioAngPico  = 0.0f;
+        inicioAdentro  = false;
+        inicioY0       = poseYf;
+        inicioOdom0    = odomMmF;
         motorAdelante();
+        // El servo llega a tope ANTES de rodar (una sola vez: con delay en cada
+        // loop el chequeo de ángulo corría cada ~100 ms y la fase 1 se pasaba ~25°).
+        escribirServo(inicioGirarDer ? 30 : 160);
+        delay(100);
         Serial.print("INICIO fase 1 SWING salida=");
         Serial.print(inicioGirarDer ? "DER" : "IZQ");
         Serial.print(" dL="); Serial.print(dL0);
@@ -3104,29 +3132,62 @@ void loop() {
       if (inicioFase <= 3 && deltaIni > inicioAngPico) inicioAngPico = deltaIni;   // pico (incluye la inercia)
 
       // ── Fase 1: SWING — saca la nariz hacia el interior ────────────────────
+      // isal=2 llega a medio swing (la Pi asienta la lata a ~28°): la S se abre.
+      if (inicioFase <= 2 && piSalida == 2 && !inicioAdentro) {
+        inicioAdentro = true;
+        Serial.print("INICIO isal=2 (adentro) en fase "); Serial.print(inicioFase);
+        Serial.print(" ang="); Serial.println(anguloGyro, 1);
+        if (inicioFase == 2 && deltaIni < (float)(INICIO_ANG_ADENTRO_DEG - INICIO_OVERSHOOT_DEG)) {
+          inicioFase   = 1;                       // vuelve a tope hasta ~90°
+          inicioFaseMs = millis() - INICIO_RAMP_MS;
+        }
+      }
+
       if (inicioFase == 1) {
         int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM);
         motorAdelante();
         escribirServo(inicioGirarDer ? 30 : 160);   // full hacia el lado de salida
-        delay(100);
         setMotor(vel);
-        bool swingListo   = (deltaIni >= (float)(INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG));
+        int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
+        bool swingListo   = (deltaIni >= (float)(angSwing - INICIO_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
         if (swingListo || swingTimeout) {
           escribirServo(centroServo);
-          inicioFase   = 2;
-          inicioFaseMs = millis();
+          inicioFase      = 2;
+          inicioFaseMs    = millis();
+          inicioOdomRecto = odomMmF;
           if (swingTimeout) Serial.println("INICIO fase 1: timeout de swing");
         }
         break;
       }
 
-      // ── Fase 2: RECTO — avanza de frente un tramo corto ────────────────────
+      // ── Fase 2: RECTO — avanza hasta que el lateral (odometría) más el de la
+      //   contravuelta, R·(1-cos ang), llegue al objetivo. Sin reversa ya no hace
+      //   falta el tramo fijo de antes (INICIO_MID_MS queda solo para INICIO_REVERSA).
       if (inicioFase == 2) {
         motorAdelante();
         escribirServo(centroServo);
         setMotor(INICIO_PWM);
-        if (millis() - inicioFaseMs >= INICIO_MID_MS) {
+        bool fin;
+        if (INICIO_REVERSA) {
+          fin = (millis() - inicioFaseMs >= INICIO_MID_MS);
+        } else {
+          float lat     = fabs(poseYf - inicioY0);
+          float latPred = lat + INICIO_R_CONTRA_MM * (1.0f - cosf(deltaIni * PI / 180.0f));
+          float objetivo = inicioAdentro ? INICIO_LAT_ADENTRO_MM : INICIO_LAT_AFUERA_MM;
+          bool tope = (odomMmF - inicioOdomRecto >= INICIO_RECTO_MAX_MM)
+                      || (millis() - inicioFaseMs >= INICIO_RECTO_TIMEOUT_MS)
+                      || (inicioAdentro && distF > 0 && distF < INICIO_RECTO_DF_MIN_CM);
+          fin = (latPred >= objetivo) || tope;
+          if (fin) {
+            Serial.print("INICIO fase 2 fin: lat="); Serial.print(lat, 0);
+            Serial.print(" pred="); Serial.print(latPred, 0);
+            Serial.print(" obj="); Serial.print(objetivo, 0);
+            Serial.print(" ang="); Serial.print(anguloGyro, 1);
+            Serial.print(" dF="); Serial.println(distF);
+          }
+        }
+        if (fin) {
           inicioFase   = 3;
           inicioFaseMs = millis();
         }
@@ -3140,17 +3201,28 @@ void loop() {
         setMotor(INICIO_PWM);
         // Corrige solo INICIO_CONTRA_CORRIGE_DEG desde el pico (o llega al piso de
         // margen si el pico fue chico); el residuo lo cierra la reversa (fase 5).
-        float angFin  = max((float)INICIO_ENDEREZA_MARGEN_DEG,
-                            inicioAngPico - (float)INICIO_CONTRA_CORRIGE_DEG);
+        // Sin reversa la contravuelta cierra sola hasta ~0 (INICIO_CONTRA_FIN_DEG).
+        float angFin  = INICIO_REVERSA
+                        ? max((float)INICIO_ENDEREZA_MARGEN_DEG,
+                              inicioAngPico - (float)INICIO_CONTRA_CORRIGE_DEG)
+                        : (float)INICIO_CONTRA_FIN_DEG;
         bool alineado = (deltaIni <= angFin);
         bool timeout  = (millis() - inicioFaseMs >= INICIO_CONTRA_TIMEOUT_MS);
         if (alineado || timeout) {
           Serial.print("INICIO fase 3 fin: pico="); Serial.print(inicioAngPico, 1);
-          Serial.print(" ang="); Serial.println(anguloGyro, 1);
+          Serial.print(" ang="); Serial.print(anguloGyro, 1);
+          Serial.print(" lat="); Serial.println(fabs(poseYf - inicioY0), 0);
           escribirServo(centroServo);
           motorCoast();
-          inicioFase   = 4;
           inicioFaseMs = millis();
+          if (INICIO_REVERSA) {
+            inicioFase = 4;
+          } else {
+            inicioFase          = 6;              // settle y a SIGUIENDO
+            inicioSettleAngPrev = anguloGyro;
+            inicioSettleSampMs  = millis();
+            inicioSettleQuieto  = 0;
+          }
           if (timeout) Serial.println("INICIO fase 3: timeout de contravuelta");
         }
         break;
