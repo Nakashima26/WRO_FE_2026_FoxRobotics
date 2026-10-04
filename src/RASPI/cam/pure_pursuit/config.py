@@ -16,6 +16,33 @@ luego corre calibrate.py para generar bev_calib.npz.
 import numpy as np
 from pathlib import Path
 
+# ─── Frecuencia del pipeline ─────────────────────────────────────────────────
+# Las ventanas de tiempo en FRAMES, los pasos por frame (slew, decay) y las EMA
+# por frame se afinaron a ~14 fps (Pi 4). PI_FPS = fps reales del pipeline; con
+# PI_FPS == FPS_NOMINAL fr()/per_frame()/ema_per_frame() devuelven el valor tal
+# cual. Pi 5 (~28 fps): subir PI_FPS y las ventanas conservan su duración.
+FPS_NOMINAL = 14.0
+PI_FPS = 14.0
+
+
+def fr(n):
+    """Cuenta de frames afinada a FPS_NOMINAL -> misma duración a PI_FPS."""
+    if n <= 0 or PI_FPS == FPS_NOMINAL:
+        return n
+    return max(1, int(round(n * PI_FPS / FPS_NOMINAL)))
+
+
+def per_frame(x):
+    """Paso por frame (grados/frame, conf/frame) -> mismo ritmo por segundo."""
+    return x if PI_FPS == FPS_NOMINAL else x * FPS_NOMINAL / PI_FPS
+
+
+def ema_per_frame(a):
+    """Peso de EMA aplicado una vez por frame -> misma constante de tiempo."""
+    if PI_FPS == FPS_NOMINAL or not 0.0 < a < 1.0:
+        return a
+    return 1.0 - (1.0 - a) ** (FPS_NOMINAL / PI_FPS)
+
 # ─── Rutas ────────────────────────────────────────────────────────────────────
 CALIB_FILE = Path(__file__).parent / "bev_calib.npz"
 

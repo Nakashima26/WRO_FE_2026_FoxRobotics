@@ -39,7 +39,7 @@ class FloorColorCorrector:
         self.enabled   = bool(getattr(C, "COLOR_CORR_ENABLED", True))
         self.ref       = np.array(getattr(C, "COLOR_CORR_FLOOR_REF_BGR", (175.0, 198.0, 213.0)),
                                   dtype=np.float32)
-        self.every_n   = max(1, int(getattr(C, "COLOR_CORR_EVERY_N", 5)))
+        self.every_n   = max(1, C.fr(int(getattr(C, "COLOR_CORR_EVERY_N", 5))))
         self.alpha     = float(getattr(C, "COLOR_CORR_ALPHA", 0.3))
         self.roi_top   = float(getattr(C, "COLOR_CORR_ROI_TOP", 0.70))
         self.s_max     = int(getattr(C, "COLOR_CORR_FLOOR_S_MAX", 90))

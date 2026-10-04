@@ -10,9 +10,11 @@ from . import config as C
 class FarHintPD:
     """Controlador P (o PD) stateful para el hint de centrado anticipado."""
 
-    def __init__(self, kp: float = C.FAR_HINT_KP, kd: float = C.FAR_HINT_KD):
-        self.kp = kp
-        self.kd = kd
+    def __init__(self, kp: float | None = None, kd: float | None = None):
+        self.kp = C.FAR_HINT_KP if kp is None else kp
+        # La derivada es la diferencia entre frames (sin /dt): a más fps sale
+        # más chica para el mismo movimiento.
+        self.kd = (C.FAR_HINT_KD if kd is None else kd) * C.PI_FPS / C.FPS_NOMINAL
         self._prev_error = 0.0
         self._has_prev = False
 

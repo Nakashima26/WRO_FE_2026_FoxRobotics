@@ -268,7 +268,7 @@ class ObstacleMemory:
         self.last_reappear_rejects = []
         # Decaer todos primero; los que se re-vean recuperan confianza al fusionar.
         for o in self._obs:
-            o.conf -= C.OBS_MEM_DECAY
+            o.conf -= C.per_frame(C.OBS_MEM_DECAY)
 
         fresh_ids: set[int] = set()   # _Obs tocados por una detección este frame
 
@@ -790,8 +790,9 @@ class ObstacleMemory:
         # pista, run5: lata y=293->378 en 0.5s mientras el carro solo giraba).
         # Escala ds_px hacia abajo segun |dheading| de este frame: giro suave
         # (recta) -> 1.0 intacto; latiguazo -> hasta OBS_MEM_TURN_SCALE_MIN.
-        dz = getattr(C, "OBS_MEM_TURN_DEADZONE_DEG", 4.0)
-        fl = getattr(C, "OBS_MEM_TURN_FLOOR_DEG", 12.0)
+        # Umbrales en grados POR FRAME: a más fps el mismo latigazo da menos.
+        dz = C.per_frame(getattr(C, "OBS_MEM_TURN_DEADZONE_DEG", 4.0))
+        fl = C.per_frame(getattr(C, "OBS_MEM_TURN_FLOOR_DEG", 12.0))
         mn = getattr(C, "OBS_MEM_TURN_SCALE_MIN", 0.3)
         if fl > dz:
             frac = min(1.0, max(0.0, abs(dheading) - dz) / (fl - dz))
@@ -820,7 +821,7 @@ class ObstacleMemory:
         # 36° de giro cuando físicamente seguía 120px adelante -> RECUPERANDO
         # prematuro -> choque). El min() la mantiene honesta en el pivote.
         steer_rad = abs(math.radians(steer_deg))
-        if abs(dheading) > 0.3 and steer_rad > math.radians(3.0):
+        if abs(dheading) > C.per_frame(0.3) and steer_rad > math.radians(3.0):
             steer_rad = min(steer_rad, math.radians(C.MAX_STEER_DEG))
             R_px = C.WHEELBASE_PX / math.tan(steer_rad)
             ds_arc = R_px * abs(math.radians(dheading))
@@ -935,7 +936,7 @@ class ObstacleMemory:
         beyond: list[tuple[float, float, str]] = []
         mine_conf: list[float] = []
         self.last_prov_blocked = []
-        _prov_max_age = int(getattr(C, "LINE_PROVISIONAL_MAX_AGE", 0))
+        _prov_max_age = C.fr(int(getattr(C, "LINE_PROVISIONAL_MAX_AGE", 0)))
         for o in self._obs:
             result = classify_fn(o.x, o.y)   # True=mía, False=más allá, None=sin dato
             if (provisional and result is False and o.beyond is not True
@@ -971,11 +972,11 @@ class ObstacleMemory:
                         # PRIMER veredicto: rápido en ambos sentidos. Antes "mío"
                         # era instantáneo y "siguiente recta" tardaba 12 frames
                         # -> se esquivaba un obstáculo de la recta que sigue.
-                        need = getattr(C, "LINE_CLASSIFY_FRAMES_FIRST", 4)
+                        need = C.fr(getattr(C, "LINE_CLASSIFY_FRAMES_FIRST", 4))
                     elif want_beyond:
-                        need = C.LINE_CLASSIFY_FRAMES_TO_BEYOND
+                        need = C.fr(C.LINE_CLASSIFY_FRAMES_TO_BEYOND)
                     else:
-                        need = C.LINE_CLASSIFY_FRAMES_TO_MINE
+                        need = C.fr(C.LINE_CLASSIFY_FRAMES_TO_MINE)
                     if o._cls_votes >= need:
                         o.beyond = want_beyond
                         o._cls_vote = None

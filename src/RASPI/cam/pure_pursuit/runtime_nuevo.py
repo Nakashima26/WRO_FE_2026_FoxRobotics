@@ -952,7 +952,7 @@ class PPRuntime:
         else:
             self._recup_arm_streak = 0
             self._recup_can_arm = True
-        if (self._recup_arm_streak >= getattr(C, "RECUP_MEAS_ARM_FRAMES", 3)
+        if (self._recup_arm_streak >= C.fr(getattr(C, "RECUP_MEAS_ARM_FRAMES", 3))
                 and not self._dodge_armed
                 and getattr(self, "_recup_can_arm", True)):
             self._dodge_armed = True
@@ -1028,7 +1028,7 @@ class PPRuntime:
         else:
             self._recup_noghost_streak = 0
         ghost_stale = (self._recup_noghost_streak
-                       >= getattr(C, "RECUP_MEAS_GHOST_CLEAR_FRAMES", 3))
+                       >= C.fr(getattr(C, "RECUP_MEAS_GHOST_CLEAR_FRAMES", 3)))
         # Respaldo: si el planner tampoco rodea nada junto al eje, está despejado
         # aunque la memoria aún cargue la lata en algún lado raro.
         path_clear = (not blocking) or (max_w_near <= C.RECUP_MEAS_CLEAR_W) or ghost_stale
@@ -1062,8 +1062,8 @@ class PPRuntime:
         # en el frame en que cruza HEADING_DEG. Antes se desarmaba a la primera
         # de |herr|<HEADING_DEG con el path despejado y perdía el latiguazo que
         # aún no llegaba a 25° (visto en sim con la traza de la red de orillas412).
-        _clear_req = (getattr(C, "RECUP_MEAS_CLEAR_FRAMES_CORNER", 1)
-                      if corner_soon else C.RECUP_MEAS_CLEAR_FRAMES)
+        _clear_req = C.fr(getattr(C, "RECUP_MEAS_CLEAR_FRAMES_CORNER", 1)
+                          if corner_soon else C.RECUP_MEAS_CLEAR_FRAMES)
         if (self._recup_clear_count >= _clear_req
                 and abs(heading_err) >= C.RECUP_MEAS_HEADING_DEG):
             self._last_recup_reason = (
@@ -1082,7 +1082,7 @@ class PPRuntime:
         # rodearla (si no, un cono que se queda pegado al eje trasero, giro~0,
         # re-detectado, mantiene prio=1 y el steer oscilando -- visto lap 3
         # orillas420: R en y~321 falta+24 por decenas de frames).
-        if self._recup_clear_count >= getattr(C, "RECUP_MEAS_GENTLE_FRAMES", 10):
+        if self._recup_clear_count >= C.fr(getattr(C, "RECUP_MEAS_GENTLE_FRAMES", 10)):
             self._last_recup_reason = f"esquiva-suave-ok herr={heading_err:+.0f}"
             self._dodge_armed = False
             self._recup_can_arm = True
@@ -1320,10 +1320,10 @@ class PPRuntime:
                 self._park_lost_frames += 1
                 # Solo declaramos que el carro lo rebasó si antes estuvo REALMENTE CERCA
                 # (max_y >= 370 px, junto al parachoques frontal) y ahora se perdió por rebase lateral.
-                if self._park_frames_seen >= 4 and self._park_max_y_seen >= 370 and self._park_lost_frames >= 3:
+                if self._park_frames_seen >= C.fr(4) and self._park_max_y_seen >= 370 and self._park_lost_frames >= C.fr(3):
                     self._park_state = 2
                     print(f"[PARK] Cajon rebasado por el lado (seen={self._park_frames_seen}, max_y={self._park_max_y_seen}, lost={self._park_lost_frames}) -> PARK=2!", flush=True)
-                elif self._park_lost_frames > 25:
+                elif self._park_lost_frames > C.fr(25):
                     # Se perdió estando lejos (ej. tapado temporalmente por un cono o maniobra):
                     # resetear para re-detectar cuando vuelva a verse más adelante.
                     print(f"[PARK] Cajon perdido a lo lejos (max_y={self._park_max_y_seen}), reseteando busqueda...", flush=True)
@@ -1525,7 +1525,7 @@ class PPRuntime:
                     # (tras detect_centerline), ya OR-eado con el medido.
                     if self.memory.last_passed:
                         self._pasado_hold = max(self._pasado_hold,
-                                                C.PASADO_HOLD_FRAMES)
+                                                C.fr(C.PASADO_HOLD_FRAMES))
                 _t3 = time.perf_counter()
                 bev_timing["mem"] = (_t3 - _t2) * 1000.0
 
@@ -1821,7 +1821,7 @@ class PPRuntime:
                     )
                     if measured_pass:
                         self._pasado_hold = max(self._pasado_hold,
-                                                C.PASADO_HOLD_FRAMES)
+                                                C.fr(C.PASADO_HOLD_FRAMES))
                         self._pasado_from_measured = True
                         # Olvida el cono YA: la centerline del PRÓXIMO
                         # frame deja de rodearlo -> el carro sale del
@@ -1840,8 +1840,8 @@ class PPRuntime:
                         _ny_m = orange_info.get("near_y")
                         if (_ny_m is not None and _ny_m >=
                                 getattr(C, "RECUP_SUPPRESS_NEAR_ORANGE_Y", 285.0)):
-                            self._turn_delay_frames = getattr(
-                                C, "RECUP_CORNER_TURN_DELAY_FRAMES", 8)
+                            self._turn_delay_frames = C.fr(getattr(
+                                C, "RECUP_CORNER_TURN_DELAY_FRAMES", 8))
 
                 feet = list(new_obstacles)
                 if self.bev.is_calibrated and not self._is_turning:
@@ -1964,7 +1964,7 @@ class PPRuntime:
             self._last_recup_reason = (
                 f"pasado(medido) NO suprimido cerca esquina (oy={_oy:.0f})")
         if armed and self._track_map_controls() and self._map_try_pasado():
-            self._pasado_hold = max(self._pasado_hold, C.PASADO_HOLD_FRAMES)
+            self._pasado_hold = max(self._pasado_hold, C.fr(C.PASADO_HOLD_FRAMES))
         # Verde de la recta siguiente: no soltar "pasado" todavía. Si no,
         # RECUPERANDO endereza y el giro rápido corta por debajo del verde.
         if self.digital.hold_pasado() and self._pasado_hold > 0:
@@ -1990,8 +1990,8 @@ class PPRuntime:
         # verdad atrás, no por el arrastre de memoria que lo poda como
         # "PASADO" antes de tiempo.
         if self._ext_corner_hold:
-            self._ext_corner_block = getattr(
-                C, "CORNER_EXT_PASS_TURN_BLOCK_FRAMES", 10)
+            self._ext_corner_block = C.fr(getattr(
+                C, "CORNER_EXT_PASS_TURN_BLOCK_FRAMES", 10))
         elif self._ext_corner_block > 0:
             self._ext_corner_block -= 1
 
@@ -2072,7 +2072,7 @@ class PPRuntime:
                 self._heading_ref = None
             else:
                 self._g_streak = 0
-            g_confirmed = self._g_streak >= C.TURN_EST_G_CONFIRM_FRAMES
+            g_confirmed = self._g_streak >= C.fr(C.TURN_EST_G_CONFIRM_FRAMES)
 
             if g_confirmed and not self._is_turning:
                 # Empieza el giro físico -> vaciar YA y apagar la memoria.
@@ -2092,7 +2092,7 @@ class PPRuntime:
                 # Terminó el giro -> la memoria ya está vacía (no se tocó), arranca
                 # limpia con las detecciones frescas de este frame.
                 self._is_turning = False
-                self._turn_recovery_frames = C.TURN_RECOVERY_FRAMES
+                self._turn_recovery_frames = C.fr(C.TURN_RECOVERY_FRAMES)
                 self._heading_ref = None   # ref fresca para la esquiva de la recta nueva
                 print("[MEM] Giro terminado — memoria de obstáculos reactivada.", flush=True)
                 _mt_last = self.mid_turn.last_sighting

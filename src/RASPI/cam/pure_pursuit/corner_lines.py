@@ -476,16 +476,18 @@ class OrangeLineTracker:
     frames antes de soltarla, para absorber dropouts cortos de la máscara.
     """
 
-    def __init__(self, persist_frames: int = C.LINE_TRACK_PERSIST_FRAMES,
+    def __init__(self, persist_frames: int | None = None,
                  tolerance_px: float = C.LINE_TRACK_TOLERANCE_PX,
-                 hold_frames: int = C.LINE_TRACK_HOLD_FRAMES,
-                 near_y_ema: float = C.LINE_TRACK_NEAR_Y_EMA,
-                 line_ema: float = C.LINE_TRACK_LINE_EMA):
-        self.persist_frames = persist_frames
+                 hold_frames: int | None = None,
+                 near_y_ema: float | None = None,
+                 line_ema: float | None = None):
+        # Se leen aquí (no como default del def): el twin cambia C.PI_FPS antes
+        # de construir el runtime y las ventanas en frames escalan con él.
+        self.persist_frames = C.fr(C.LINE_TRACK_PERSIST_FRAMES if persist_frames is None else persist_frames)
         self.tolerance_px = tolerance_px
-        self.hold_frames = hold_frames
-        self.near_y_ema = near_y_ema
-        self.line_ema = line_ema
+        self.hold_frames = C.fr(C.LINE_TRACK_HOLD_FRAMES if hold_frames is None else hold_frames)
+        self.near_y_ema = C.ema_per_frame(C.LINE_TRACK_NEAR_Y_EMA if near_y_ema is None else near_y_ema)
+        self.line_ema = C.ema_per_frame(C.LINE_TRACK_LINE_EMA if line_ema is None else line_ema)
         self.stable: dict = {"seen": False, "near_y": None, "line": None}
         self._candidate: dict | None = None
         self._candidate_count = 0
@@ -520,7 +522,7 @@ class OrangeLineTracker:
         self._dr_latched = False
         # Cooldown post-giro: la línea que se ve recién girado suele ser la que
         # se acaba de pasar (o su residual) -> no clasificar contra ella.
-        self._post_turn_cd = int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20))
+        self._post_turn_cd = C.fr(int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20)))
         self._out = self.stable
         self._curve = None
         self._prov = None
@@ -535,7 +537,7 @@ class OrangeLineTracker:
         línea latcheaba (near_y >= ORANGE_DR_LATCH_Y) toda la recta nueva."""
         self._post_turn_cd = max(
             self._post_turn_cd,
-            int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20)))
+            C.fr(int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20))))
 
     def _matches_candidate(self, raw: dict) -> bool:
         if self._candidate is None or raw["seen"] != self._candidate["seen"]:
@@ -591,7 +593,7 @@ class OrangeLineTracker:
 
         # self.stable es SIEMPRE la lectura real del tracker (nunca la estimada).
         dr_min_y = float(getattr(C, "ORANGE_DR_MIN_ANCHOR_Y", 240.0))
-        dr_max_f = int(getattr(C, "ORANGE_DR_MAX_FRAMES", 8))
+        dr_max_f = C.fr(int(getattr(C, "ORANGE_DR_MAX_FRAMES", 8)))
         dr_latch_y = float(getattr(C, "ORANGE_DR_LATCH_Y", 290.0))
         if self.stable["seen"]:
             ny = self.stable["near_y"]
@@ -656,7 +658,7 @@ class OrangeLineTracker:
             # Y-BEV crece hacia el robot: near_y creciente => el corredor se
             # acerca (dato para frenar/clasificar) => seguir rápido. Si se
             # aleja, suele ser ruido / salto a un segmento más lejano => lento.
-            a = 0.7 if raw_ny > prev_ny else self.near_y_ema
+            a = C.ema_per_frame(0.7) if raw_ny > prev_ny else self.near_y_ema
             new_ny = a * raw_ny + (1.0 - a) * prev_ny
         else:
             new_ny = raw_ny

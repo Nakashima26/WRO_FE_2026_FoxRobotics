@@ -606,9 +606,10 @@ class DigitalMap:
                 if rej and self._dr_s - rej[-1][0] > 150.0:
                     rej.clear()
                 rej.append((self._dr_s, l_meas - l))
-                if len(rej) >= 6:
-                    inn = [r[1] for r in rej[-6:]]
-                    mu = sum(inn) / 6.0
+                n_rej = C.fr(6)
+                if len(rej) >= n_rej:
+                    inn = [r[1] for r in rej[-n_rej:]]
+                    mu = sum(inn) / float(n_rej)
                     if max(inn) - min(inn) < 50.0 and abs(mu) < 450.0:
                         meas.append(l + mu)
                         strong = True

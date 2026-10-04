@@ -105,11 +105,15 @@ PRESETS["hw_nuevo"] = {
     "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1"},
     # IMU nueva: BNO085 (yaw fusionado en el chip), no el MPU6050.
     "imu": "bno085",
+    # Pi 5 (~2x Pi 4): ~28 fps (supuesto, medir fps reales; la cámara está
+    # topada a 30 fps en vision.py). PI_FPS escala las ventanas en frames.
+    "pi_period_s": 0.035,
     "pi_overrides": {
         **PRESETS["giro_rapido"]["pi_overrides"],
         # La pose del mapa derivaba 150–430 mm (encoder + gyro) sin latas
         # confirmadas que la corrigieran: sonares contra paredes conocidas.
         "DIGITAL_MAP_WALL_FIX": True,
+        "PI_FPS": 1.0 / 0.035,
     },
 }
 
@@ -242,7 +246,9 @@ class Sim:
             self.params.motor.k_mm_s_per_pwm *= speed_scale
             self.params.motor.k_rev_mm_s_per_pwm *= speed_scale
         self.max_time_s = max_time_s
-        self.pi_period_s = pi_period_s if pi_period_s is not None else self.params.timing.pi_proc_s
+        if pi_period_s is None:
+            pi_period_s = cfg.get("pi_period_s", self.params.timing.pi_proc_s)
+        self.pi_period_s = pi_period_s
         self.cam_latency_s = cam_latency_s if cam_latency_s is not None else self.params.timing.cam_latency_s
         self.log_dir = Path(log_dir) if log_dir else None
         self.calib_npz = None if calib_npz is None else Path(calib_npz)

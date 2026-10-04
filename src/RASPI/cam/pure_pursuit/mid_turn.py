@@ -66,8 +66,8 @@ class MidTurnObstacleDetector:
     """
 
     def __init__(self):
-        self.window       = int(getattr(C, "MIDTURN_WINDOW", 4))
-        self.confirm_n    = int(getattr(C, "MIDTURN_CONFIRM_FRAMES", 3))
+        self.window       = C.fr(int(getattr(C, "MIDTURN_WINDOW", 4)))
+        self.confirm_n    = C.fr(int(getattr(C, "MIDTURN_CONFIRM_FRAMES", 3)))
         self.roi_max_mm   = float(getattr(C, "MIDTURN_ROI_MAX_MM", 280.0))
         self.roi_half_deg = float(getattr(C, "MIDTURN_ROI_HALF_ANGLE_DEG", 45.0))
         self.pos_tol_px   = float(getattr(C, "MIDTURN_POS_TOL_PX", 50.0))

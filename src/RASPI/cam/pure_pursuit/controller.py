@@ -163,7 +163,7 @@ class PurePursuitController:
         # ── Límite de slew: capa el cambio de steer entre frames procesados ──
         # Evita el latigazo (+0.56 -> +0.20 -> +0.79 -> -0.28 norm. visto en
         # pista). PP_STEER_SLEW_DEG <= 0 lo desactiva.
-        slew = getattr(C, "PP_STEER_SLEW_DEG", 0.0)
+        slew = C.per_frame(getattr(C, "PP_STEER_SLEW_DEG", 0.0))
         if slew > 0.0:
             lo = self._prev_steer_deg - slew
             hi = self._prev_steer_deg + slew
