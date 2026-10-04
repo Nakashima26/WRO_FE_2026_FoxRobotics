@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .params import EncoderParams, GyroParams, ToFParams, UltrasonicParams, max_wheel_deg
+from .params import BnoParams, EncoderParams, GyroParams, ToFParams, UltrasonicParams, max_wheel_deg
 from .world import World, robot_to_world
 
 
@@ -212,3 +212,54 @@ class Gyro:
         noisy = true_rate_ccw_dps * self._scale + self._bias
         noisy += float(self.rng.normal(0.0, p.white_noise_dps))
         return noisy
+
+
+class Bno085Heading:
+    """BNO085 visto por el firmware actual, que integra una velocidad (gz·dt).
+
+    El chip da el yaw absoluto; aquí se devuelve la velocidad que hace que la
+    integración del .ino (dt en ms enteros, zona muerta |gz| < 1 °/s) siga ese
+    yaw. El firmware real necesitará el driver SH-2 (pendiente T14).
+    """
+
+    def __init__(self, params: BnoParams, rng: np.random.Generator) -> None:
+        self.params = params
+        self.rng = rng
+        self._scale = 1.0 + float(rng.normal(0.0, params.scale_error_sigma))
+        self._walk = 0.0
+        self._gm = 0.0
+        self._yaw_true: float | None = None   # CCW, sin envolver
+        self._head_prev: float | None = None
+        self._sample: float | None = None
+        self._sample_t = -1e9
+        self._out = 0.0                       # lo que ya integró el firmware
+        self._last_ms: int | None = None
+
+    def read(self, heading_deg: float, t: float) -> float:
+        p = self.params
+        if self._head_prev is None:
+            self._yaw_true = 0.0
+        else:
+            d = (heading_deg - self._head_prev + 180.0) % 360.0 - 180.0
+            self._yaw_true -= d
+        self._head_prev = heading_deg
+        if t - self._sample_t >= 1.0 / p.update_hz - 1e-9:
+            dt = 0.0 if self._sample is None else t - self._sample_t
+            if dt > 0.0:
+                self._walk += float(self.rng.normal(0.0, p.drift_walk_deg_per_sqrt_s * math.sqrt(dt)))
+                a = math.exp(-dt / p.noise_tau_s)
+                self._gm = a * self._gm + float(self.rng.normal(0.0, p.noise_deg * math.sqrt(1.0 - a * a)))
+            self._sample = self._yaw_true * self._scale + self._walk + self._gm
+            self._sample_t = t
+        ms = int(t * 1000.0)
+        if self._last_ms is None:
+            self._last_ms = ms
+            return 0.0
+        dt_fw = (ms - self._last_ms) / 1000.0
+        self._last_ms = ms
+        if dt_fw <= 0.0:
+            return 0.0
+        rate = (self._sample - self._out) / dt_fw
+        if abs(rate) >= 1.0:
+            self._out += rate * dt_fw
+        return rate

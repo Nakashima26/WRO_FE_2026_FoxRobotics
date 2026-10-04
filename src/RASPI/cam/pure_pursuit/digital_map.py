@@ -616,7 +616,8 @@ class DigitalMap:
         if meas:
             lw = sum(meas) / len(meas)
             dl = (lw - l) * (0.6 if strong else _WALL_GAIN)
-            self._yaw_from_wall(lw)
+            if getattr(C, "DIGITAL_MAP_WALL_YAW", True):
+                self._yaw_from_wall(lw)
         # ── Longitudinal ──
         d = _ack_num(ack, "dF")
         if d is not None and 5.0 < d < 110.0 and abs(e) <= 8.0:

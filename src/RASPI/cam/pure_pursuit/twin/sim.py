@@ -19,7 +19,7 @@ from pure_pursuit.twin.firmware.fw import FirmwareSIL, FirmwareSetupError
 from pure_pursuit.twin.metrics import compute_metrics, _parse_ack_field, _parse_est
 from pure_pursuit.twin.params import TwinParams, max_wheel_deg
 from pure_pursuit.twin.pi_link import SimSerialLink
-from pure_pursuit.twin.sensors import Encoder, Gyro, Pose, ToF, Ultrasonic
+from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
 from pure_pursuit.twin.vehicle import Vehicle
 from pure_pursuit.twin.world import World, collision
 from pure_pursuit.wro_field import randomize
@@ -103,6 +103,8 @@ PRESETS["hw_nuevo"] = {
     **PRESETS["giro_rapido"],
     "fw_overrides": dict(PRESETS["giro_rapido"]["fw_overrides"]),
     "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1"},
+    # IMU nueva: BNO085 (yaw fusionado en el chip), no el MPU6050.
+    "imu": "bno085",
     "pi_overrides": {
         **PRESETS["giro_rapido"]["pi_overrides"],
         # La pose del mapa derivaba 150–430 mm (encoder + gyro) sin latas
@@ -233,6 +235,7 @@ class Sim:
         self.fw_overrides = dict(cfg.get("fw_overrides", {}))
         self.fw_defines = dict(cfg.get("fw_defines", {}))
         self.pi_overrides = dict(cfg.get("pi_overrides", {}))
+        self.imu = cfg.get("imu", "mpu6050")
         self.params = params or TwinParams()
         self.speed_scale = speed_scale
         if speed_scale != 1.0:
@@ -274,6 +277,7 @@ class Sim:
         )
         enc = Encoder(self.params.encoder, rng)
         gyro = Gyro(self.params.gyro, rng)
+        bno = Bno085Heading(self.params.bno, rng) if self.imu == "bno085" else None
         sonar = Ultrasonic(self.params.ultrasonic, rng)
         tof = ToF(self.params.tof, rng)
         w_max = max_wheel_deg(self.params.steering)
@@ -400,7 +404,8 @@ class Sim:
             sonar=lambda sid: sonar.echo_us(
                 sid, world, Pose(veh.x, veh.y, veh.heading_deg)
             ),
-            gyro=lambda: gyro.read(last_yaw_rate, _t_s()),
+            gyro=(lambda: bno.read(veh.heading_deg, _t_s())) if bno is not None
+            else (lambda: gyro.read(last_yaw_rate, _t_s())),
             encoder=lambda: enc.count,
             tof=lambda idx: tof.read_mm(
                 idx, world, Pose(veh.x, veh.y, veh.heading_deg), _t_s()

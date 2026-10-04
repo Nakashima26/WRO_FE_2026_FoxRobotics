@@ -116,6 +116,23 @@ class GyroParams:
 
 
 @dataclass
+class BnoParams:
+    """IMU del hardware nuevo: BNO085, Game Rotation Vector (sin magnetómetro).
+
+    El yaw ya viene fusionado en el chip: casi sin error de escala y con una
+    deriva lenta (~0.5°/min, caminata). La salida se refresca a update_hz.
+    """
+    scale_error_sigma: float = 0.001
+    drift_walk_deg_per_sqrt_s: float = 0.065   # ~0.5° de desvío en 1 min
+    noise_deg: float = 0.15                    # Gauss-Markov lento (no ruido blanco)
+    noise_tau_s: float = 0.5
+    update_hz: float = 200.0
+
+    def __post_init__(self) -> None:
+        _prov("imu.bno085", "supuesto", "datasheet BNO08x (Game Rotation Vector), medir en pista")
+
+
+@dataclass
 class UltrasonicMount:
     right_mm: float
     forward_mm: float
@@ -230,6 +247,7 @@ class TwinParams:
     motor: MotorParams = field(default_factory=MotorParams)
     encoder: EncoderParams = field(default_factory=EncoderParams)
     gyro: GyroParams = field(default_factory=GyroParams)
+    bno: BnoParams = field(default_factory=BnoParams)
     ultrasonic: UltrasonicParams = field(default_factory=UltrasonicParams)
     tof: ToFParams = field(default_factory=ToFParams)
     camera: CameraParams = field(default_factory=CameraParams)
