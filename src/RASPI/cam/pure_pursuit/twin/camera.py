@@ -26,6 +26,9 @@ from .world import robot_to_world
 
 # Paleta id: 0 cielo, 1 piso, 2 pared, 3 rojo, 4 verde, 5 magenta
 
+# Largo de cada tramo de pared para el orden del pintor (ver render_camera).
+_WALL_TILE_MM = 100.0
+
 
 def _hsv_bgr(h, s, v):
     pix = np.uint8([[[h, s, v]]])
@@ -219,10 +222,25 @@ class CameraModel:
             self._fill_face(img, self._ribbon_to_cam(seg, half_line, ox, oy, oz, sh, ch), color)
 
         faces = []
-        for plane in self._wall_quads():
-            corners = self._quad_corners(*plane)
-            cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-            faces.append((float(np.mean(cam[:, 2])), cam, WALL_BGR))
+        # Pared en tramos: con el quad entero (3 m) la profundidad media del
+        # pintor quedaba por delante de la madera del cajón pegada a ella y la
+        # tapaba (CCW: el rosa del INICIO caía de 0.29 a 0.22). Los cortes caen
+        # también en los cantos de las maderas, si no el tramo que las cruza
+        # sigue tapando una esquina.
+        for axis, value, a0, a1, b0, b1 in self._wall_quads():
+            n = max(1, int(math.ceil((a1 - a0) / _WALL_TILE_MM)))
+            cuts = {a0 + k * (a1 - a0) / n for k in range(n + 1)}
+            for box in track.barriers:
+                for pt in box:
+                    if a0 < pt[1 - axis] < a1:
+                        cuts.add(pt[1 - axis])
+            cuts = sorted(cuts)
+            for c0, c1 in zip(cuts[:-1], cuts[1:]):
+                corners = self._quad_corners(axis, value, c0, c1, b0, b1)
+                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
+                if np.all(cam[:, 2] < 8.0):
+                    continue
+                faces.append((float(np.mean(cam[:, 2])), cam, WALL_BGR))
         half = SIGN_MM / 2.0
         for sign in track.signs:
             color = RED_BGR if sign.color == "Red" else GREEN_BGR

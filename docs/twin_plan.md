@@ -160,3 +160,10 @@ Hallazgo principal (bloqueo fuera de alcance): la odometría del ESP (modelo PWM
 4. ToF contra pared negra solo válidos 15-29 % de frames; US + naranja pesan más para localizar.
 5. Correr siempre `--no-show` y `< /dev/null` (no abrir ventanas al usuario); PYTHONUTF8=1.
 6. No editar archivos de otro agente en paralelo; un agente por área.
+
+### T13 — hw_nuevo: 3 vueltas + estacionar (agente 2026-10-03)
+Herramientas scratch nuevas (sin trackear): `runs/all.sh <tag>` corre `drive.py` con `hw_nuevo` en seeds 1-20 + 3170839 (logs completos por seed en `runs/<tag>/s<N>`) y `runs/summ3.py` resume (stop, tc, choque, `fuera_mm` = cuánto sale la huella final de la caja del cajón; limpio = terminado sin choque y fuera ≤ 5 mm).
+
+Fase 0 (HEAD 5bce711, `runs/base`): 0/21 limpios, suma tc 85. Las 7 CCW (5, 7, 9, 11, 12, 17, 19) chocan `cajón magenta` a t=0.6 s: `[INICIO] rosa avg=0.22 umbral=0.28 n=15 -> arranque normal` (CW: `rosa avg=0.29 … MANIOBRA DE SALIDA`). Sin INICIO el ESP sale en SIGUIENDO directo contra la madera.
+
+Cambio 1 (bug del twin, sin flag) — `twin/camera.py` `render_camera`: el pintor ordenaba cada pared entera (quad de 3 m) por su profundidad media; la pared exterior quedaba "delante" de la madera del cajón pegada a ella y la tapaba (solo en CCW, la madera queda del lado donde la media de la pared cae más cerca). Ahora la pared va en tramos de 100 mm con cortes también en los cantos de las maderas. Rosa al arranque: CW 0.294→0.293, CCW 0.218→0.293 (simétrico). Render ~12→18 ms/frame. Resultado (`runs/c1`): suma tc 85→114, 0/21 limpios; las CCW ya hacen INICIO (7 y 19 llegan a 12 giros).
