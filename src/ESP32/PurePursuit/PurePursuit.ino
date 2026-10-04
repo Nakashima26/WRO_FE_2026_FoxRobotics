@@ -982,6 +982,14 @@ float               parkRectoMm               = 0.0f;   // largo de la fase 14 (
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
 PARK_AJ float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
 const int           PARK_PEGADO_CM            = 2;
+// 2026-10-04 (hw_nuevo, FOX_TOF): corte de seguridad para las reversas de
+// ENTRADA (fases 3/14/4/8) con el ToF trasero — "pegado" de atrás, igual que
+// PARK_PEGADO_CM pero del otro lado. Al cortar por esto van a la fase 9
+// (acomodo ENFRENTE) en vez de seguir con la maniobra de entrada, y la fase
+// 13 (reversa de acomodo final) también lo usa junto con el corte por dF que
+// ya tenía (ver PARK_CICLOS_MAX: ahí decide si vuelve a corregir o termina).
+// Inerte sin FOX_TOF: distB_filtrada se queda en -1 y esto nunca da true.
+PARK_AJ float         PARK_ATRAS_MIN_CM         = 5.0f;
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
 // timeout con dF todavía en 8 cm, dejando al carro 15.9° chueco. Ahora manda la
@@ -1008,6 +1016,14 @@ PARK_AJ int           PARK_REV_FINAL_DF_CM      = 8;
 // Tope de seguridad. De dF~3 a dF=8 son ~5 cm = ~250 ms; 900 deja 3x de margen
 // sin convertir un eco perdido en una embestida a ciegas contra la pared trasera.
 const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
+// 2026-10-04 (hw_nuevo, FOX_TOF): ciclo adelante/atrás (fase 9/11 <-> 12/13)
+// mientras el rumbo siga a más de PARK_FINAL_TOL_DEG, hasta PARK_CICLOS_MAX
+// repeticiones. Antes la fase 13 reverseaba UNA sola vez y terminaba aunque
+// no hubiera alcanzado PARK_FINAL_TOL_DEG (sea por dF, por tope de la pared
+// lateral o por timeout); ahora, si quedan ciclos, en vez de terminar vuelve
+// a la fase 9 (acomodo ENFRENTE) para otra pasada. "pegado" (lado) sigue
+// terminando directo, por seguridad.
+const int           PARK_CICLOS_MAX           = 3;
 // Distancia a la pared/poste de ENFRENTE a la que se detiene el avance final.
 // 2026-09-16 (run 1016): con 3 el corte por distancia SÍ funcionó — la traza va
 // dF = 9,8,6,5,4,3 y ahí dispara — pero entre la granularidad del sonar y el
@@ -1135,6 +1151,8 @@ unsigned long parkBuscandoEntryMs   = 0;
 int           parkFase              = -1;
 unsigned long parkFaseMs            = 0;
 bool          parkParedEsIzquierda  = false;
+// Ciclo adelante/atrás (fases 9/11 <-> 12/13) del paralelo: ver PARK_CICLOS_MAX.
+int           parkCiclos            = 0;
 
 unsigned long parkEntryMs           = 0;
 int           parkScanSubFase       = 0;
@@ -1471,6 +1489,9 @@ float distL_filtrada = 0;
 float distR_filtrada = 0;
 float distF_filtrada = 0;   // sensor frontal (solo ronda de obstáculos)
 // (Los laterales NO tienen mediana, solo el EMA: ver LATERAL_OPEN_DEBOUNCE.)
+// ToF trasero (hw_nuevo, FOX_TOF): red de seguridad de las reversas del
+// estacionamiento paralelo (ver PARK_ATRAS_MIN_CM). -1 = sin lectura.
+float distB_filtrada = -1;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Actuadores
@@ -1928,6 +1949,12 @@ bool parkAtoroDetecta(unsigned long faseMs) {
   return (ahora - parkAtoroMs >= PARK_ATORO_MS);
 }
 
+// Red de seguridad trasera de las reversas del paralelo (ver PARK_ATRAS_MIN_CM).
+// Sin FOX_TOF, distB_filtrada se queda en -1 y esto siempre da false (inerte).
+bool parkAtrasPegado() {
+  return distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_MIN_CM;
+}
+
 // Ruta A (T15b): ¿las fases de distancia van por encoder? y cuánto lleva la fase.
 bool parkUsaEncoder() { return FOX_ENCODER && PARK_POR_ENCODER; }
 float parkRecorridoMm() { return fabsf((float)(odomMm - parkOdom0)); }
@@ -1975,6 +2002,7 @@ void resetParkScan() {
   parkFase             = 0;
   parkFaseMs           = millis(); parkOdom0 = odomMm;
   parkEntryMs          = millis();
+  parkCiclos           = 0;
   parkScanSubFase      = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
@@ -2014,6 +2042,7 @@ void silPreParkSeed() {
   PARK_RECTO_D0_CM = PARK_FINAL_CM + PARK_RADIO_CM;
   SIL_AJ(PARK_POSTE2_MM); SIL_AJ(PARK_RECTO_MAX_MM); SIL_AJ(PARK_ENDEREZA_TOL_DEG);
   SIL_AJ(PARK_FINAL_TOL_DEG); SIL_AJ(PARK_REV_FINAL_DF_CM); SIL_AJ(PARK_CENTER_HI_CM);
+  SIL_AJ(PARK_ATRAS_MIN_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -3007,6 +3036,9 @@ void loop() {
 #else
   leerToF();
 #endif
+  // Trasero (índice 2) en cm, EMA igual que los HC-SR04 (ver distB_filtrada).
+  if (tofMm[2] > 0)
+    distB_filtrada = filtroEMA(tofMm[2] / 10.0f, distB_filtrada < 0 ? tofMm[2] / 10.0f : distB_filtrada);
 #endif
 
   readPiSerial();
@@ -4684,6 +4716,15 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
+        // Red de seguridad trasera (ver PARK_ATRAS_MIN_CM): corta la entrada
+        // YA y pasa a corregir hacia ENFRENTE (fase 9), no a terminar.
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 3: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 9");
+          parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
         float swingMag    = fabs(anguloGyro - parkRumboRef);
         bool  swingListo  = (swingMag >= (parkAngObjetivo - (float)PARK_OVERSHOOT_DEG));
         bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
@@ -4728,6 +4769,13 @@ void loop() {
         motorReversa();
         escribirServo(centroServo);
         setMotor(PARK_REV_PWM);
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 14: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 9");
+          parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
         if (parkFinTramo(parkRectoMm, parkRectoMs)) {
           escribirServo(servoHaciaPared);
           parkFase   = 4;
@@ -4742,6 +4790,13 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 4: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 9");
+          parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
         bool meneoInt = parkUsaEncoder() ? (PARK_WIGGLE_INT_MM > 0.0f) : (PARK_WIGGLE_INT_MS > 0);
         bool meneoExt = parkUsaEncoder() ? (PARK_WIGGLE_EXT_MM > 0.0f) : (PARK_WIGGLE_EXT_MS > 0);
         if (parkFinTramo(PARK_REV_EXT_HOLD_MM, PARK_REV_EXT_HOLD_MS)) {
@@ -4794,7 +4849,8 @@ void loop() {
         // Topó contra algo (casi siempre la pared de atrás): el gyro se congela y
         // seguir reverseando solo empuja. Cortar YA en vez de esperar el timeout.
         bool  atorado    = parkAtoroDetecta(parkFaseMs);
-        if (alineado || pegado || timeout || atorado) {
+        bool  atrasPegado = parkAtrasPegado();
+        if (alineado || pegado || timeout || atorado || atrasPegado) {
           motorCoast();
           escribirServo(centroServo);
           parkAtoroDisparo = atorado;
@@ -4806,6 +4862,7 @@ void loop() {
           if (alineado) Serial.print(" ALINEADO");
           if (pegado)   Serial.print(" PEGADO");
           if (atorado)  Serial.print(" ATORADO");
+          if (atrasPegado) { Serial.print(" ATRAS PEGADO distB="); Serial.print(distB_filtrada, 1); }
           Serial.println(timeout ? " TIMEOUT)" : ")");
         }
         break;
@@ -4894,15 +4951,31 @@ void loop() {
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
         bool  pegado   = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
+        bool  atrasPegado = parkAtrasPegado();
         bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
-        if (frenteOk || alineado || pegado || timeout) {
+        if (frenteOk || alineado || pegado || atrasPegado || timeout) {
           Serial.print("PARK fase 13 fin: dif="); Serial.print(dif, 1);
           Serial.print(" dF="); Serial.print(distF_filtrada);
-          Serial.print(" ext="); Serial.println(extRaw);
-          finalizarPark(frenteOk ? "REV FINAL: dF objetivo"
-                      : alineado ? "REV FINAL: ya alineado"
-                      : pegado   ? "REV FINAL: pegado de lado"
-                                 : "REV FINAL: TIMEOUT");
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          // Ciclo adelante/atrás: si todavía no quedó derecho y no fue por
+          // "pegado" (de lado o de atrás — seguridad: ahí no insistas),
+          // vuelve a la fase 9 para otra pasada en vez de terminar aquí,
+          // hasta PARK_CICLOS_MAX veces (ver constante).
+          if (!alineado && !pegado && !atrasPegado && parkCiclos < PARK_CICLOS_MAX) {
+            parkCiclos++;
+            motorCoast(); escribirServo(centroServo);
+            Serial.print("PARK ciclo "); Serial.print(parkCiclos);
+            Serial.println(": no derecho todavia -> fase 9 (ENFRENTE) de nuevo");
+            parkFase   = 9;
+            parkFaseMs = millis(); parkOdom0 = odomMm;
+          } else {
+            finalizarPark(frenteOk    ? "REV FINAL: dF objetivo"
+                        : alineado    ? "REV FINAL: ya alineado"
+                        : pegado      ? "REV FINAL: pegado de lado"
+                        : atrasPegado ? "REV FINAL: pegado atras"
+                                      : "REV FINAL: TIMEOUT (ciclos agotados)");
+          }
         }
         break;
       }
