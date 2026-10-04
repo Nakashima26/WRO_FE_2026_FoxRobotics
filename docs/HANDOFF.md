@@ -46,6 +46,13 @@ Dos worktrees en `.claude/worktrees/` (ver `git worktree list`):
   rojo S/T3); caso rojo por DENTRO que retrasa el giro en la vuelta 1 (seed 3170839, esquina S→W);
   línea del mapa sin validar contra la lata viva (runtime_nuevo.py ~1847 `path_points = mapped`);
   hitbox del carro en el mapa (hoy es un punto); seeds 1,3,4,15 chocan rojo T2 de la recta del cajón.
+Ambos agentes se detuvieron; todo lo que tenían quedó commiteado en sus ramas (nada sin commitear):
+- `worktree-agent-a6501da593f9e5146`: `ae1e3ed` (harness pre_park tc=12 + paralelo ruta A por encoder,
+  completo) y `203d36c` WIP (estaba metiendo: empate de media vuelta, hook SIL tc=11, modo "curva" del
+  harness — incompleto, sin validar).
+- `t15c-esquinas`: `9cbc6ad` WIP (digital_map/config: lata en la boca para ambos sentidos, `huella.py`
+  hitbox, harness `twin/tools/esquina.py` + `esq_cmp.py` — incompleto, sin validar; estaba por lanzar
+  la validación). Sin entrada T15c en twin_plan.md todavía.
 Para cada uno: ver `git -C <worktree> log` y `diff --stat`; si hay commits útiles, fusionar a
 `digital-twin` (conflictos esperables en PurePursuit.ino/runtime_nuevo.py/twin_plan.md), correr tests,
 validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
