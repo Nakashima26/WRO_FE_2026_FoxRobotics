@@ -25,7 +25,7 @@ _SHIM_SOURCES = (
 )
 
 _CONST_RE = re.compile(
-    r"^(const\s+[\w\s]+?\s+)(?P<name>[A-Za-z_]\w*)(\s*=\s*)(?P<val>[^;]+)(;)",
+    r"^((?:const|PARK_AJ)\s+[\w\s]+?\s+)(?P<name>[A-Za-z_]\w*)(\s*=\s*)(?P<val>[^;]+)(;)",
     re.MULTILINE,
 )
 
