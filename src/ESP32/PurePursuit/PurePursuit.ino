@@ -1310,6 +1310,17 @@ const int           PARK_UTURN_DEG             = 170;    // 180 menos el oversho
 const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
 const int           PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
+// Umbral de recorrido (mm, desde la vuelta 12) para disparar la U — ver vigilarUturn().
+// Verificado con el twin (t15b2_uturn, runs/t15b_uturn2): en CW el disparo con 1000 mm
+// cae en w~1840-2030 de la recta (bien pasado el cajón, w=1000-1310). En CCW, con el
+// MISMO umbral, cae en w~1075-1180 — DENTRO de la franja del cajón — y el barrido de
+// la U (que en el primer tramo se abre ~90-100mm hacia w decreciente antes de cerrar)
+// le pega a la madera. w0 al completar la vuelta 12 en CCW fue 2083-2699 en las
+// semillas revisadas, así que 650 mm deja el disparo en w>=1410 (margen > 100mm sobre
+// el borde w=1310 del cajón) en el peor caso visto. Si en pista no alcanza a
+// estabilizarse tras la vuelta 12, subir con cuidado — revisar contra el cajón de nuevo.
+PARK_AJ long         PARK_UTURN_RECORRIDO_MM     = 1000;
+PARK_AJ long         PARK_UTURN_RECORRIDO_CCW_MM = 650;
 // T15b2: con PARK_MODO == PARK_PARALELO/_REV y retorno, usar la U de 180° de
 // PUNTA (fases 24-25 de ESTACIONANDO, reusa el arco de PARK_UTURN_*) en vez de
 // la media vuelta de 90° + reversa (fases 20-23). Al cerrar la U entrega
@@ -2109,6 +2120,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
+  SIL_AJ(PARK_UTURN_RECORRIDO_MM); SIL_AJ(PARK_UTURN_RECORRIDO_CCW_MM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2292,8 +2304,12 @@ void vigilarUturn(long distF) {
   }
   // Ya pasaste la lata de esta recta. Lo que falta de recta se usa para
   // pegarse a la exterior; la U misma arranca en la fase 20.
-  bool lista = recorrido > 1000 && (parkNaranjaVista || distF > 50 || distF <= 0);
-  bool fondo = recorrido > 1000 && distF > 0 && distF <= 55;
+  // Umbral por sentido: en CCW el cajón queda mucho antes en el recorrido desde
+  // la vuelta 12 (ver PARK_UTURN_RECORRIDO_CCW_MM arriba) — con el mismo valor
+  // de CW la U se disparaba encima del cajón y el barrido le pegaba.
+  long recorridoMinUturn = direccionIzquierda ? PARK_UTURN_RECORRIDO_CCW_MM : PARK_UTURN_RECORRIDO_MM;
+  bool lista = recorrido > recorridoMinUturn && (parkNaranjaVista || distF > 50 || distF <= 0);
+  bool fondo = recorrido > recorridoMinUturn && distF > 0 && distF <= 55;
   if (!(lista || fondo)) return;
   parkUturnPendiente = false;
   // Antes llamaba a iniciarEstacionandoPunta(true) directo, sin consultar
