@@ -50,6 +50,7 @@ from .centerline import (
     map_obstacle_to_bev, seen_above_obstacles,
 )
 from .digital_map import DigitalMap
+from .salida_cajon import SalidaCajon
 from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_pass
 from .controller import PurePursuitController
 from .obstacle_memory import ObstacleMemory
@@ -305,6 +306,8 @@ class PPRuntime:
         # Corrección de color por el piso (otra iluminación), ver color_corr.py
         self.color_corr = FloorColorCorrector()
         self.digital = DigitalMap()
+        # Lado de paso de la 1ª lata al salir del cajón (isal=, ver salida_cajon.py)
+        self.salida = SalidaCajon()
         self._dig_img = None
 
         # Estado de la memoria rodante
@@ -1358,6 +1361,7 @@ class PPRuntime:
         # Mapa digital limpio en GO: lo votado desarmado (carro en la mano,
         # otra pose) no vale, y el ancla del odómetro es el primer ACK armado.
         self.digital = DigitalMap()
+        self.salida = SalidaCajon()
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
         return ready_ack
 
@@ -1848,6 +1852,7 @@ class PPRuntime:
                     feet.extend(seen_above_obstacles(self.bev, positions))
                 if armed:
                     self.digital.update(serial_ack, feet, line_info.get("Orange"))
+                    self.salida.update(serial_ack, feet)
                 if len(path_points) >= C.MIN_PATH_PTS:
                     if getattr(C, "DIGITAL_MAP_STEER", False) and not self._is_turning:
                         mapped = self.digital.line_bev()
@@ -2020,6 +2025,8 @@ class PPRuntime:
         if getattr(C, "CORNER_HINT_TO_ESP", False):
             serial_msg += f",es={int(self._corner_hint(line_info, now))}"
         serial_msg += f",gv={int(self._green_ahead(new_obstacles))}"
+        if self.salida.side and self._esp_inicio:
+            serial_msg += f",isal={self.salida.side}"
         if armed:
             self.serial_link.send_line(serial_msg)
             serial_ack = self.serial_link.try_readline()
