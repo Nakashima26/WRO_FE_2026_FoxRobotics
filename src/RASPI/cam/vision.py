@@ -5,7 +5,8 @@ import numpy as np
 
 
 cv2.setUseOptimized(True)
-cv2.setNumThreads(min(4, os.cpu_count() or 1))
+fox_cv_threads = int(os.environ.get("FOX_CV_THREADS", str(min(4, os.cpu_count() or 1))))
+cv2.setNumThreads(fox_cv_threads)
 
 
 def open_camera(cam_index=0):

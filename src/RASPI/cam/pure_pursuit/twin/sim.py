@@ -452,14 +452,20 @@ class Sim:
                 unarmed_left = _UNARMED_FRAMES
                 max_us = int(self.max_time_s * 1e6) + fw.now_us
                 loops = 0
+                # Timing breakdown
+                render_s = 0.0
+                pi_s = 0.0
+                other_s = 0.0
 
                 while fw.now_us < max_us and stop_reason == "max_time":
                     if collision_cause:
                         break
+                    t_loop_start = time.perf_counter()
                     fw.loop()
                     link.drain_tx()
                     loops += 1
                     sim_t = _t_s()
+                    t_loop_end = time.perf_counter()
 
                     if sim_t - progress_anchor_t >= _STUCK_WINDOW_S and armed:
                         dx = veh.x - progress_anchor_xy[0]
@@ -509,10 +515,13 @@ class Sim:
                         link.set_now_us(int(t_end * 1e6))
                         t_cam = max(0.0, t_k - self.cam_latency_s)
                         px, py, ph = _pose_at(history, t_cam)
+                        t_render0 = time.perf_counter()
                         frame = cam.render_camera(field, px, py, ph)
+                        render_s += time.perf_counter() - t_render0
                         t_proc0 = time.perf_counter()
                         result = runtime.process_frame(frame, now=t_end, armed=armed)
                         pi_ms = (time.perf_counter() - t_proc0) * 1000.0
+                        pi_s += pi_ms / 1000.0
                         ack = link.try_readline()
                         if ack:
                             result.serial_ack = ack
@@ -581,6 +590,10 @@ class Sim:
         metrics["signs_touched"] = len(sign_contacts)
         metrics["sim_loops"] = loops
         wall = time.perf_counter() - t_wall0
+        # Timing breakdown: accumulate over the whole simulation
+        metrics["render_s"] = round(render_s, 3)
+        metrics["pi_s"] = round(pi_s, 3)
+        metrics["other_s"] = round(max(0.0, wall - render_s - pi_s), 3)
         metrics["wall_time_s"] = round(wall, 3)
         if armed_t is not None and metrics["total_time_s"] > 0:
             metrics["wall_per_sim_s"] = round(wall / metrics["total_time_s"], 3)
