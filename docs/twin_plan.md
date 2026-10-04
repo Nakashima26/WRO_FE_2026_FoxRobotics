@@ -251,3 +251,10 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
 2. Perfilar (cProfile) render + process_frame + loop de física/ctypes; optimizar sin cambiar resultados (métricas idénticas por seed).
 3. Pasos de física 1 ms -> 2-5 ms solo si las métricas no cambian de forma relevante.
 4. Herramientas que resumen (no leer logs completos).
+
+### T16 — resultados (2026-10-04, rama t16-perf)
+- El "~7 s/s" era medición con cProfile + CPU compartida. Real: ~1.8 s/s una seed sola; 10 concurrentes ~2.2 s/s cada una (10 seeds × 20 s sim = 47 s de pared). Con --no-show no hay ritmo por reloj real: el sim ya es cálculo puro y determinista.
+- `World.cast` vectorizado (idéntico; 11 rayos 1.11 → 0.09 ms). `twin/tools/detcheck.py --save/--compare` = huella SHA256 de la traza sin campos de reloj real (IDENTICO = refactor exacto).
+- Métricas nuevas `render_s`/`pi_s`/`other_s` (reloj real, fuera de la huella). 10 concurrentes, 20 s sim: render ~15.7 s, Pi ~15 s, resto (física 1 ms + firmware SIL) ~12 s — reparto parejo, no hay un cuello único.
+- `FOX_CV_THREADS` (default min(4,cpu)) en vision.py/detect_orillas.py. Medido en lote de 10: 4 hilos 43.3 s vs 1 hilo 48.2 s por corrida (pi_s 15 → 22 s) → los lotes NO lo fuerzan a 1. all.sh/salida.py: 10 jobs, OMP/OPENBLAS/MKL=1.
+- Oráculo (rama t16-oracle) descartado: 1.87 s/s vs 1.77 con visión (mean_pi_frame_ms 39.5 vs 16.9) y diverge (seed 6 choca pared exterior en 83.9 porque `_check_parking_search` usa processed_frame). La palanca real para iterar son los harness cortos (prepark/salida) + lotes paralelos.
