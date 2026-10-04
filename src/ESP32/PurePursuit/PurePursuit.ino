@@ -3059,11 +3059,14 @@ void loop() {
     //               dirección de giro de TODA la pista (el cajón siempre está en
     //               la pared exterior). anguloGyro := 0 = referencia de la recta.
     //    1 SWING  : servo full hacia el lado de salida, avanza (rampa de PWM)
-    //               hasta |anguloGyro| >= INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG.
-    //    2 RECTO  : servo centro, avanza de frente INICIO_MID_MS.
-    //    3 CONTRA : servo full al lado CONTRARIO, avanza SOLO hasta corregir
-    //               INICIO_CONTRA_CORRIGE_DEG desde el pico de la fase 1; el
-    //               residuo lo cierra la reversa (fase 5).
+    //               hasta |anguloGyro| >= INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG
+    //               (INICIO_ANG_ADENTRO_DEG si la Pi mandó isal=2).
+    //    2 RECTO  : servo centro, avanza hasta que lateral + R·(1-cos ang) llegue a
+    //               INICIO_LAT_AFUERA_MM / INICIO_LAT_ADENTRO_MM (con
+    //               INICIO_REVERSA: tramo fijo INICIO_MID_MS). isal=2 aquí -> fase 1.
+    //    3 CONTRA : servo full al lado CONTRARIO hasta |ang| <= INICIO_CONTRA_FIN_DEG
+    //               y a la fase 6. Con INICIO_REVERSA: solo corrige
+    //               INICIO_CONTRA_CORRIGE_DEG y el residuo lo cierra la reversa (4-8).
     //    4 COAST  : motorCoast + servo centro, MANIOBRA_FRENO_MS (antes de reversa).
     //    5 REV-CORRIGE: reversa con hold a 0 y servo saturado, hasta |ang| <=
     //               INICIO_REV_CORR_TOL_DEG (o timeout).
