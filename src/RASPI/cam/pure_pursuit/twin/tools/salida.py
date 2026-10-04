@@ -254,7 +254,7 @@ def main() -> None:
     tag = sys.argv[2]; jobs = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     scns = sys.argv[4:] or default_scenarios()
     d = Path("runs") / tag; d.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, PYTHONUTF8="1", PYTHONPATH=".", OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", FOX_CV_THREADS="1")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONPATH=".", OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
     t0 = time.time()
 
     def job(scn):
