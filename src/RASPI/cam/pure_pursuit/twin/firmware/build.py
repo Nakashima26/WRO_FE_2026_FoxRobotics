@@ -94,6 +94,17 @@ def _cxx() -> list[str]:
     return [sys.executable, "-m", "ziglang", "c++"]
 
 
+def _replace_or_keep(src: Path, dst: Path) -> None:
+    """os.replace; en Windows falla (WinError 5) si otro proceso del batch tiene
+    dst abierto. El nombre va por hash: si dst ya existe, es el mismo contenido."""
+    try:
+        os.replace(src, dst)
+    except PermissionError:
+        if not dst.is_file():
+            raise
+        src.unlink(missing_ok=True)
+
+
 def build(
     overrides: dict[str, str] | None = None,
     defines: dict[str, str] | None = None,
@@ -114,9 +125,7 @@ def build(
 
     _BUILD.mkdir(parents=True, exist_ok=True)
     patched = _apply_overrides(ino_text, overrides)
-    # Varios procesos (batch en paralelo) pueden compilar a la vez: fuente por
-    # hash escrita de forma atómica y salida temporal por proceso.
-    # En Windows os.replace falla (WinError 5) si otro proceso tiene abierto
+    # Varios procesos (batch en paralelo) pueden compilar a la vez. En Windows os.replace falla (WinError 5) si otro proceso tiene abierto
     # el destino: cada proceso compila su propia copia de la fuente.
     sil_cpp = _BUILD / f"PurePursuit_sil_{digest}.{os.getpid()}.cpp"
     sil_cpp.write_text('#include "Arduino.h"\n' + patched, encoding="utf-8")
@@ -143,12 +152,7 @@ def build(
     try:
         # stdin cerrado: en Windows zig se colgaba heredando el stdin de la terminal.
         subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
-        try:
-            os.replace(tmp_out, out)
-        except PermissionError:
-            # Otro proceso ya dejó la misma .dll (mismo hash) y la tiene cargada.
-            if not out.is_file():
-                raise
+        _replace_or_keep(tmp_out, out)
     finally:
         tmp_out.unlink(missing_ok=True)
         sil_cpp.unlink(missing_ok=True)

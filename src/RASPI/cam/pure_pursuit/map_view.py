@@ -20,8 +20,9 @@ from .track_map import (
 from .wro_field import OUTER_HALF_MM
 
 MM_PER_PX = getattr(C, "MM_PER_PX", 2.0)
-ROBOT_LEN_MM = getattr(C, "ROBOT_LENGTH_MM", 210.0)
-ROBOT_WID_MM = getattr(C, "ROBOT_WIDTH_MM", 140.0)
+# Fuente única: config.py (los 210x140 del README están obsoletos).
+ROBOT_LEN_MM = C.ROBOT_LENGTH_MM
+ROBOT_WID_MM = C.ROBOT_WIDTH_MM
 CAM_FOV_DEG = getattr(C, "CAM_FOV_DEG", 62.0)
 BEV_W = getattr(C, "BEV_W", 400)
 BEV_H = getattr(C, "BEV_H", 400)

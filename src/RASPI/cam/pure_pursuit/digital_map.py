@@ -40,11 +40,11 @@ from .wro_field import (
 
 _LANE_MM = 1000.0
 _SPAN_MM = OUTER_HALF_MM * 2.0          # pared a pared, 3000
-_FRONT_MOUNT_MM = 140.0                 # sonar frontal, desde el eje trasero
-_REAR_MOUNT_MM = 28.0                   # ToF trasero, detrás del eje
+_FRONT_MOUNT_MM = C.SENSOR_MOUNTS["us_front"][1]    # sonar frontal, desde el eje trasero
+_REAR_MOUNT_MM = -C.SENSOR_MOUNTS["tof_rear"][1]    # ToF trasero, detrás del eje
 # La hoja BEV nace en el eje delantero; la pose del mapa es el eje trasero.
 _BEV_AHEAD_MM = float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
-_CAM_AHEAD_MM = 140.0                   # cámara, desde el eje trasero
+_CAM_AHEAD_MM = float(getattr(C, "CAMERA_FWD_MM", 140.0))  # cámara, desde el eje trasero
 # El pie de la lata es la cara que mira a la cámara; el centro queda detrás.
 _FOOT_TO_CENTER_MM = float(getattr(C, "SIGN_FOOT_TO_CENTER_MM", 25.0))
 _REAR_WALL_MAX_MM = 250.0               # pared negra, el ToF no ve más lejos

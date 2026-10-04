@@ -95,8 +95,10 @@ class ToF:
     def __init__(self, params: ToFParams, rng: np.random.Generator) -> None:
         self.params = params
         self.rng = rng
-        self._last_sample_t = -1e9
-        self._held_mm = -1
+        # Estado POR sensor: el firmware lee los 4 en el mismo instante; con un
+        # solo reloj compartido, 1..3 devolvían la lectura retenida del 0.
+        self._last_sample_t: dict[int, float] = {}
+        self._held_mm: dict[int, int] = {}
         self._valid_threshold = self._calibrate_threshold()
 
     def _calibrate_threshold(self) -> float:
@@ -107,9 +109,12 @@ class ToF:
 
     def read_mm(self, sensor_id: int, world: World, pose: Pose, t: float) -> int:
         p = self.params
-        if t - self._last_sample_t < p.sample_period_s - 1e-9:
-            return self._held_mm
-        self._last_sample_t = t
+        if t - self._last_sample_t.get(sensor_id, -1e9) < p.sample_period_s - 1e-9:
+            return self._held_mm.get(sensor_id, -1)
+        self._last_sample_t[sensor_id] = t
+        if not 0 <= sensor_id < len(p.mounts):
+            self._held_mm[sensor_id] = -1
+            return -1
         mount = p.mounts[sensor_id]
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)
         origin = np.array([ox, oy], dtype=np.float64)
@@ -149,7 +154,7 @@ class ToF:
             clusters.setdefault(key, []).append((d, signal))
 
         if not clusters:
-            self._held_mm = -1
+            self._held_mm[sensor_id] = -1
             return -1
 
         best_key = max(clusters, key=lambda k: sum(s for _, s in clusters[k]))
@@ -159,13 +164,13 @@ class ToF:
         norm_sig = total_sig / len(pts)
 
         if norm_sig < self._valid_threshold or mean_d > p.max_range_mm:
-            self._held_mm = -1
+            self._held_mm[sensor_id] = -1
             return -1
 
         noise = self.rng.normal(0.0, p.noise_sigma_mm)
         out = mean_d * (1.0 + self.rng.normal(0.0, p.noise_rel)) + noise
-        self._held_mm = int(round(max(0.0, out)))
-        return self._held_mm
+        self._held_mm[sensor_id] = int(round(max(0.0, out)))
+        return self._held_mm[sensor_id]
 
 
 class Encoder:

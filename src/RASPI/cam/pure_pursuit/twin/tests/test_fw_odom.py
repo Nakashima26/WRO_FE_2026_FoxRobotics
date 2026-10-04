@@ -59,6 +59,7 @@ def test_defaults_ack_odom_fields():
     assert ",py=" in ack
     assert ",enc=0" in ack
     assert ",tL=-1" in ack
+    assert ",tF=" not in ack  # FOX_TOF=0: ACK igual al del carro actual
 
 
 def test_pwm_odom_and_yaw_integration():
@@ -149,7 +150,7 @@ def test_tof_ack():
     fw = FirmwareSIL(defines={"FOX_TOF": "1"}, force_rebuild=True)
 
     def tof(idx: int) -> int:
-        return (100, 200, 300)[idx]
+        return (100, 200, 300, 400)[idx]
 
     fw.set_callbacks(
         advance=lambda _us: None,
@@ -168,3 +169,34 @@ def test_tof_ack():
     assert ",tL=100" in ack
     assert ",tR=200" in ack
     assert ",tB=300" in ack
+    assert ",tF=400" in ack
+
+
+def test_encoder_odom_sub_mm_ticks_accumulate():
+    """Ticks de <0.5 mm: con lroundf por tick od/px se quedaban en 0."""
+    counts_per_mm = 20.73
+    fw = FirmwareSIL(defines={"FOX_ENCODER": "1"})
+    fw.set_param("loop_overhead_us", 20000)
+    fw.set_param("mpu_update_us", 0)
+    enc = [0]
+    fw.set_callbacks(
+        advance=lambda _us: None,
+        sonar=lambda _i: SONAR_50CM_US,
+        gyro=lambda: 0.0,
+        encoder=lambda: enc[0],
+    )
+    fw.push_serial2("READY")
+    fw.setup()
+    fw.push_serial2(V2_PP)
+    for _ in range(400):
+        enc[0] += 6  # 0.29 mm por loop
+        fw.push_serial2(V2_PP)
+        fw.loop()
+    ack = _latest_ack(fw)
+    fw.close()
+    assert ack is not None
+    od = int(re.search(r",od=(-?\d+)", ack).group(1))
+    px = int(re.search(r",px=(-?\d+)", ack).group(1))
+    expect = enc[0] / counts_per_mm
+    assert abs(od - expect) <= 2.0
+    assert abs(px - expect) <= 2.0

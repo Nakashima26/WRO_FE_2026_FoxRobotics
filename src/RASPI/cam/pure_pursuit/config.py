@@ -29,7 +29,62 @@ MM_PER_PX  = 2.0          # escala: 1px = 2 mm  →  400px = 800 mm de cobertura
 # BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM más atrás, fuera de la imagen.
 ROBOT_BEV_X = BEV_W // 2   # 200
 ROBOT_BEV_Y = BEV_H - 20   # 380
-BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0   # = batalla
+# OJO: el comentario original decía "= batalla", pero la batalla es 113 mm
+# (WHEELBASE_MM) y twin/camera.py pone el eje delantero a WHEELBASE_MM. Se
+# deja 100 hasta medir; pendiente medir/decidir.
+BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0
+
+# ─── GEOMETRÍA DEL VEHÍCULO — FUENTE ÚNICA ─────────────────────────────────────
+# Todo lo que necesite medidas del carro las lee de aquí: track_map, digital_map,
+# wro_field, map_view y el twin (twin/params.py). Va en config.py porque la Pi
+# NO puede importar twin/ y el twin sí puede importar config.
+# Marco: mm desde el EJE TRASERO; right + = derecha; fwd + = adelante;
+# dir 0 = adelante, +90 = derecha, 180 = atrás, 270 (= -90) = izquierda.
+ROBOT_LENGTH_MM      = 180.0    # confirmado por usuario (aprox), 2026-10-03
+ROBOT_WIDTH_MM       = 130.0    # confirmado por usuario (aprox), 2026-10-03
+WHEELBASE_MM         = 113.0    # confirmado por usuario
+REAR_OVERHANG_MM     = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 33.5 derivado, pendiente medir
+FRONT_OVERHANG_MM    = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 33.5 derivado, pendiente medir
+TRACK_MM             = 110.0    # supuesto (solo dibujo); pendiente medir
+WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
+# Ángulo máximo de RUEDA (servo 30/160). OJO: MAX_STEER_DEG (pure pursuit) = 60
+# no coincide con esto; lo maneja otra tarea, no se cambia aquí.
+MAX_WHEEL_STEER_DEG  = 46.32    # confirmado por usuario (CAD de la mangueta)
+# Cámara (NoIR ancho)
+CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
+CAMERA_HEIGHT_MM     = 97.0     # supuesto: 90 + 7 mm (LiPo 3S ~24 mm acostada vs Pi4 ~17 mm); medir con regla
+CAMERA_FWD_MM        = 140.0    # supuesto: en el morro, a la altura del sonar frontal; pendiente medir
+CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
+# Montajes de sensores: (right_mm, fwd_mm, dir_deg). Todos pendiente medir.
+# Laterales a 15 mm hacia adentro del costado (130/2 - 15 = 50).
+SENSOR_MOUNTS = {
+    "us_left":   (-50.0,  50.0, 270.0),
+    "us_right":  ( 50.0,  50.0,  90.0),
+    "us_front":  (  0.0, 140.0,   0.0),
+    "tof_left":  (-50.0,  80.0, 270.0),
+    "tof_right": ( 50.0,  80.0,  90.0),
+    # 5.5 mm adentro de la defensa trasera (-33.5)
+    "tof_rear":  (  0.0, -28.0, 180.0),
+    # NUEVO (hardware siguiente): espejo del trasero, 5.5 mm adentro de la
+    # defensa delantera (113 + 33.5 - 5.5). Supuesto, pendiente medir.
+    "tof_front": (  0.0, 141.0,   0.0),
+}
+# Procedencia, para el twin (describe()) y para quien mida.
+VEHICLE_DIMS_PROVENANCE = {
+    "ROBOT_LENGTH_MM": "confirmado por usuario (aprox)",
+    "ROBOT_WIDTH_MM": "confirmado por usuario (aprox)",
+    "WHEELBASE_MM": "confirmado por usuario",
+    "REAR_OVERHANG_MM": "derivado (180-113)/2, pendiente medir",
+    "FRONT_OVERHANG_MM": "derivado (180-113)/2, pendiente medir",
+    "TRACK_MM": "supuesto, pendiente medir",
+    "WHEEL_DIAMETER_MM": "README llanta 43 mm",
+    "MAX_WHEEL_STEER_DEG": "confirmado por usuario (aprox)",
+    "CAMERA_TILT_DEG": "confirmado por usuario",
+    "CAMERA_HEIGHT_MM": "supuesto: +7 mm LiPo vs Pi4, medir con regla",
+    "CAMERA_FWD_MM": "supuesto, pendiente medir",
+    "SENSOR_MOUNTS": "supuesto, pendiente medir (tof_front nuevo)",
+    "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
+}
 
 # ─── Puntos de calibración en el suelo (mm, relativo a eje delantero del robot) ──
 # x_mm: lateral  (+ = derecha del robot)
@@ -197,7 +252,7 @@ OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MI
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
-WHEELBASE_PX   = 56.5    # batalla del vehículo en px BEV   (= 113 mm)
+WHEELBASE_PX   = WHEELBASE_MM / MM_PER_PX   # batalla en px BEV (113 mm -> 56.5)
 MAX_STEER_DEG  = 60.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
@@ -631,7 +686,7 @@ MIDTURN_SIDE_DEADBAND_PX  = 24.0   # |bev_x - eje| bajo esto -> lado '?' (indeci
 # CLEAR_PX = medio ancho del chasis + inflado de la lata. Si el centro de la
 # lata está a >= esto del eje de avance, el borde del carro libra el borde
 # inflado de la lata yendo recto.
-ROBOT_HALF_WIDTH_PX      = round(130.0 / 2.0 / MM_PER_PX)        # chasis 130mm -> 32 px
+ROBOT_HALF_WIDTH_PX      = round(ROBOT_WIDTH_MM / 2.0 / MM_PER_PX)  # chasis 130mm -> 32 px
 OBS_MEM_GEOM_CLEAR_PX    = ROBOT_HALF_WIDTH_PX + OBS_INFLATE_R   # 35 + 36 = 71 px
 # ── Perillas de AJUSTE FINO (mover solo estas en pista) ─────────────────────
 # AHEAD_MARGIN_PX: cuánto puede seguir ADELANTE la lata (marco actual) y aún
