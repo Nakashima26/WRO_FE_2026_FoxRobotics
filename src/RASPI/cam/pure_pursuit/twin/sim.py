@@ -87,6 +87,17 @@ PRESETS: dict[str, dict[str, Any]] = {
         "start": "centro",
     },
 }
+# Hardware siguiente: encoder de cuadratura en el motor + 4 ToF (L, R, atrás,
+# frente). Igual que giro_rapido; el .ino real sigue con FOX_ENCODER/FOX_TOF = 0.
+# La Pi no necesita overrides: px/py del ACK ya son la pose (Odometry
+# "esp_pose", digital_map) y tL/tR/tB/tF entran al Localizer de track_map
+# (TRACK_MAP_SHADOW=True por defecto).
+PRESETS["hw_nuevo"] = {
+    **PRESETS["giro_rapido"],
+    "fw_overrides": dict(PRESETS["giro_rapido"]["fw_overrides"]),
+    "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1"},
+    "pi_overrides": dict(PRESETS["giro_rapido"]["pi_overrides"]),
+}
 
 
 @dataclass

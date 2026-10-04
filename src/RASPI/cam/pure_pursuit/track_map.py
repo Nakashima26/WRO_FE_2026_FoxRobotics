@@ -366,15 +366,11 @@ class _WallCaster:
         return best
 
 
-# Montajes por defecto (mm desde el eje trasero; dir 0 = adelante, +90 = derecha),
-# los mismos de twin/params.py. Medirlos en el carro.
+# Montajes (mm desde el eje trasero; dir 0 = adelante, +90 = derecha). Fuente
+# única: config.SENSOR_MOUNTS (el twin lee lo mismo). Medirlos en el carro.
 DEFAULT_MOUNTS = {
-    "us_left": SensorMount(-70.0, 50.0, 270.0),
-    "us_right": SensorMount(70.0, 50.0, 90.0),
-    "us_front": SensorMount(0.0, 155.0, 0.0),
-    "tof_left": SensorMount(-70.0, 80.0, 270.0),
-    "tof_right": SensorMount(70.0, 80.0, 90.0),
-    "tof_rear": SensorMount(0.0, -55.0, 180.0),
+    name: SensorMount(float(r), float(f), float(d))
+    for name, (r, f, d) in C.SENSOR_MOUNTS.items()
 }
 _SIDE_DEFAULT = {
     "left": ("us_left", "us"),

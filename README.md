@@ -46,7 +46,7 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 
 | Parameter | Value |
 |---|---|
-| Dimensions | 210 × 140 × 80 mm |
+| Dimensions | ~180 × 130 mm footprint, 113 mm wheelbase (height not re-measured; source of truth: `src/RASPI/cam/pure_pursuit/config.py`) |
 | Weight | 564 g |
 | Drive type | Rear-wheel drive (RWD) |
 | Steering | Ackermann rack-and-pinion, SG90 servo |

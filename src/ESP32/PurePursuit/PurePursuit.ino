@@ -48,6 +48,8 @@ MPU6050 mpu(Wire);
 #endif
 
 #if FOX_ENCODER && !defined(FOX_SIL)
+// Encoder de cuadratura del N20 (hardware nuevo). 34/39 son solo-entrada y SIN
+// pull-up interno: el encoder debe traer pull-ups (o ponerlos en la PCB).
 #define ENC_PIN_A   34
 #define ENC_PIN_B   39
 #endif
@@ -57,7 +59,11 @@ MPU6050 mpu(Wire);
 #define TOF_XSHUT_L 25
 #define TOF_XSHUT_R 4
 #define TOF_XSHUT_B 5
+// Frontal (hardware nuevo). GPIO15 es strapping con pull-up por defecto: el
+// pull-up del XSHUT del módulo VL53 no cambia el arranque. Confirmar con la PCB.
+#define TOF_XSHUT_F 15
 #endif
+#define TOF_N 4   // 0=L 1=R 2=trasero 3=frontal (mismo orden en el ACK y en el SIL)
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
@@ -251,6 +257,13 @@ Estado estado = SIGUIENDO;
 long  odomMm   = 0;
 long  poseX    = 0;
 long  poseY    = 0;
+// Acumuladores en float (camino FOX_ENCODER): redondear ds*cos/ds*sin en cada tick (~5 mm) tiraba el
+// desplazamiento lateral (|ds*sin| < 0.5 -> 0) y sesgaba odomMm. Los long de
+// arriba son solo lroundf() de estos (lo que sale en el ACK y usa el parking).
+float odomMmF  = 0.0f;
+float poseXf   = 0.0f;
+float poseYf   = 0.0f;
+float odomYawPrevDeg = 0.0f;
 float odomVfilt = 0.0f;
 int   pwmActual = 0;
 #if FOX_ENCODER
@@ -273,9 +286,9 @@ void IRAM_ATTR encIsr() {
 #endif
 #endif
 #if FOX_TOF
-int tofMm[3] = {-1, -1, -1};   // 0=L 1=R 2=traseira
+int tofMm[TOF_N] = {-1, -1, -1, -1};   // 0=L 1=R 2=trasero 3=frontal
 #if !defined(FOX_SIL)
-VL53L1X tofL, tofR, tofB;
+VL53L1X tofL, tofR, tofB, tofF;
 #endif
 #endif
 
@@ -1632,6 +1645,7 @@ void actualizarOdometria() {
   cnt = encCount;
   portEXIT_CRITICAL(&encMux);
 #endif
+  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/20.73 = 0.0482 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
   encCountPrev = cnt;
 #else
@@ -1654,47 +1668,56 @@ void actualizarOdometria() {
   odomVfilt += (v_cmd - odomVfilt) * alpha;
   ds = odomVfilt * dt;
 #endif
+#if FOX_ENCODER
+  // Rumbo medio del tick (punto medio): menos error que el rumbo final en curva.
+  float yawMidRad = 0.5f * (anguloTotal + odomYawPrevDeg) * PI / 180.0f;
+  odomYawPrevDeg = anguloTotal;
+  odomMmF += ds;
+  poseXf  += ds * cosf(yawMidRad);
+  poseYf  += ds * sinf(yawMidRad);
+  odomMm = (long)lroundf(odomMmF);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+#else
+  // Carro actual (modelo PWM): se deja idéntico a propósito mientras T8 afina
+  // esquinas/parking sobre este comportamiento. Pierde el lateral de cada tick;
+  // pasar a los acumuladores float de arriba cuando T8 cierre.
   odomMm += (long)lroundf(ds);
   float yawRad = anguloTotal * PI / 180.0f;
   poseX += (long)lroundf(ds * cos(yawRad));
   poseY += (long)lroundf(ds * sin(yawRad));
+#endif
 }
 
 #if FOX_TOF && !defined(FOX_SIL)
+// Varios VL53 en el mismo I2C: todos en reset (XSHUT bajo) y se despiertan de a
+// uno para darle a cada uno su dirección antes de despertar el siguiente.
+static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre) {
+  digitalWrite(xshut, HIGH);
+  delay(10);
+  dev.setTimeout(500);
+  if (!dev.init()) { Serial.print("ToF "); Serial.print(nombre); Serial.println(" fail"); return false; }
+  dev.setAddress(addr);
+  dev.setDistanceMode(VL53L1X::Long);
+  dev.startContinuous(33);
+  return true;
+}
+
 void initToF() {
-  pinMode(TOF_XSHUT_L, OUTPUT);
-  pinMode(TOF_XSHUT_R, OUTPUT);
-  pinMode(TOF_XSHUT_B, OUTPUT);
-  digitalWrite(TOF_XSHUT_L, LOW);
-  digitalWrite(TOF_XSHUT_R, LOW);
-  digitalWrite(TOF_XSHUT_B, LOW);
+  const int xs[TOF_N] = {TOF_XSHUT_L, TOF_XSHUT_R, TOF_XSHUT_B, TOF_XSHUT_F};
+  for (int i = 0; i < TOF_N; i++) { pinMode(xs[i], OUTPUT); digitalWrite(xs[i], LOW); }
   delay(10);
-  digitalWrite(TOF_XSHUT_L, HIGH);
-  delay(10);
-  tofL.setTimeout(500);
-  if (!tofL.init()) { Serial.println("ToF L fail"); return; }
-  tofL.setAddress(0x30);
-  tofL.setDistanceMode(VL53L1X::Long);
-  tofL.startContinuous(33);
-  digitalWrite(TOF_XSHUT_R, HIGH);
-  delay(10);
-  tofR.setTimeout(500);
-  if (!tofR.init()) { Serial.println("ToF R fail"); return; }
-  tofR.setAddress(0x31);
-  tofR.setDistanceMode(VL53L1X::Long);
-  tofR.startContinuous(33);
-  digitalWrite(TOF_XSHUT_B, HIGH);
-  delay(10);
-  tofB.setTimeout(500);
-  if (!tofB.init()) { Serial.println("ToF B fail"); return; }
-  tofB.setAddress(0x32);
-  tofB.setDistanceMode(VL53L1X::Long);
-  tofB.startContinuous(33);
+  // Si uno falla se sigue con los demás (antes un fallo dejaba a los siguientes
+  // en reset); el que falló queda en -1.
+  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L");
+  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R");
+  initUnToF(tofB, TOF_XSHUT_B, 0x32, "B");
+  initUnToF(tofF, TOF_XSHUT_F, 0x33, "F");
 }
 
 void leerToF() {
-  VL53L1X *dev[3] = {&tofL, &tofR, &tofB};
-  for (int i = 0; i < 3; i++) {
+  VL53L1X *dev[TOF_N] = {&tofL, &tofR, &tofB, &tofF};
+  for (int i = 0; i < TOF_N; i++) {
     if (dev[i]->dataReady()) {
       uint16_t mm = dev[i]->read(false);
       uint8_t st = dev[i]->rangingData.range_status;
@@ -2468,7 +2491,10 @@ void parsePiMessage(String line) {
     Serial2.print(",tL=");   Serial2.print(tofMm[0]);
     Serial2.print(",tR=");   Serial2.print(tofMm[1]);
     Serial2.print(",tB=");   Serial2.print(tofMm[2]);
+    Serial2.print(",tF=");   Serial2.print(tofMm[3]);
 #else
+    // Sin tF a propósito: el ACK del carro actual queda byte a byte igual (el
+    // largo del ACK mueve los tiempos de UART). La Pi trata tF ausente = sin lectura.
     Serial2.print(",tL=-1,tR=-1,tB=-1");
 #endif
     Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
@@ -2881,7 +2907,7 @@ void loop() {
   actualizarGyro();
 #if FOX_TOF
 #if defined(FOX_SIL)
-  for (int _ti = 0; _ti < 3; _ti++) tofMm[_ti] = sil_tof_mm(_ti);
+  for (int _ti = 0; _ti < TOF_N; _ti++) tofMm[_ti] = sil_tof_mm(_ti);
 #else
   leerToF();
 #endif

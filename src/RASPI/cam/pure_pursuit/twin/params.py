@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+# Fuente única de dimensiones del carro: config.py (la Pi no puede importar twin/).
+from .. import config as C
+
 Provenance = tuple[Literal["medido", "supuesto"], str]
+
+_M = C.SENSOR_MOUNTS
 
 # Campo -> (procedencia, nota breve en español)
 PROVENANCE: dict[str, Provenance] = {}
@@ -17,20 +22,20 @@ def _prov(key: str, kind: Literal["medido", "supuesto"], note: str) -> None:
 
 @dataclass
 class VehicleParams:
-    length_mm: float = 180.0
-    width_mm: float = 130.0
-    wheelbase_mm: float = 113.0
-    rear_overhang_mm: float = 33.5
-    front_overhang_mm: float = 33.5
-    track_mm: float = 110.0
-    wheel_diameter_mm: float = 43.0
+    length_mm: float = C.ROBOT_LENGTH_MM
+    width_mm: float = C.ROBOT_WIDTH_MM
+    wheelbase_mm: float = C.WHEELBASE_MM
+    rear_overhang_mm: float = C.REAR_OVERHANG_MM
+    front_overhang_mm: float = C.FRONT_OVERHANG_MM
+    track_mm: float = C.TRACK_MM
+    wheel_diameter_mm: float = C.WHEEL_DIAMETER_MM
 
     def __post_init__(self) -> None:
-        _prov("vehicle.length_mm", "medido", "chasis 180 mm")
-        _prov("vehicle.width_mm", "medido", "chasis 130 mm")
-        _prov("vehicle.wheelbase_mm", "medido", "batalla 113 mm")
-        _prov("vehicle.rear_overhang_mm", "supuesto", "voladizo simétrico: (180-113)/2")
-        _prov("vehicle.front_overhang_mm", "supuesto", "voladizo simétrico: (180-113)/2")
+        _prov("vehicle.length_mm", "medido", "180 mm, confirmado por usuario (aprox) — config.py")
+        _prov("vehicle.width_mm", "medido", "130 mm, confirmado por usuario (aprox) — config.py")
+        _prov("vehicle.wheelbase_mm", "medido", "batalla 113 mm, confirmada por usuario — config.py")
+        _prov("vehicle.rear_overhang_mm", "supuesto", "derivado (180-113)/2, pendiente medir")
+        _prov("vehicle.front_overhang_mm", "supuesto", "derivado (180-113)/2, pendiente medir")
         _prov("vehicle.track_mm", "supuesto", "solo dibujo; no entra al modelo bicicleta")
         _prov("vehicle.wheel_diameter_mm", "medido", "README llanta 43 mm")
 
@@ -39,8 +44,8 @@ class VehicleParams:
 class SteeringParams:
     # Grados de rueda por 90° de comando de servo. Topes del .ino: 30 y 160.
     # El CAD de la mangueta mide 46.32° en ese recorrido (antes el twin usaba 50°).
-    gain_left: float = 59.5542857143   # servo 160 (70° de comando) → 46.32° de rueda
-    gain_right: float = 69.48           # servo 30 (60° de comando) → 46.32° de rueda
+    gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / 70.0   # servo 160 (70° de comando) → 46.32°
+    gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / 60.0  # servo 30 (60° de comando) → 46.32°
     servo_center_deg: float = 90.0
     servo_min_deg: float = 30.0
     servo_max_deg: float = 160.0
@@ -51,7 +56,7 @@ class SteeringParams:
         _prov(
             "steering.gain_left/right",
             "medido",
-            "CAD de la mangueta: servo 30/160 = ±46.32° de rueda",
+            "servo 30/160 = ±46.32° de rueda (CAD; confirmado por usuario aprox) — config.py",
         )
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")
@@ -93,7 +98,8 @@ class EncoderParams:
         _prov(
             "encoder.counts_per_mm",
             "supuesto",
-            "7 PPR×4×50×2 / (π×43) — encoder planeado, no instalado",
+            "7 PPR×4 (cuadratura x4)×50 (N20)×2 (LEGO) / (π×43) = 20.73 cuentas/mm "
+            "(0.0482 mm/cuenta) — encoder del hardware nuevo; recalibrar en pista",
         )
         _prov("encoder.slip_*", "supuesto", "deriva multiplicativa por acel/scrub")
 
@@ -125,12 +131,11 @@ class UltrasonicParams:
     noise_sigma_mm: float = 3.0
     noise_rel: float = 0.005
     sound_mm_per_us: float = 0.343
-    mounts: tuple[UltrasonicMount, ...] = (
-        # A 15 mm del costado (chasis 130). Si el transductor queda a <1 cm de
-        # la pared, leerDistancia trunca a 0 cm y lo convierte en 200.
-        UltrasonicMount(-50.0, 50.0, -90.0),
-        UltrasonicMount(50.0, 50.0, 90.0),
-        UltrasonicMount(0.0, 140.0, 0.0),
+    # Orden = id del sonar en el SIL (0=L 1=R 2=F). Fuente: config.SENSOR_MOUNTS.
+    # A 15 mm del costado (chasis 130). Si el transductor queda a <1 cm de la
+    # pared, leerDistancia trunca a 0 cm y lo convierte en 200.
+    mounts: tuple[UltrasonicMount, ...] = tuple(
+        UltrasonicMount(*_M[k]) for k in ("us_left", "us_right", "us_front")
     )
 
     def __post_init__(self) -> None:
@@ -157,15 +162,16 @@ class ToFParams:
     reflectivity: dict[str, float] = field(
         default_factory=lambda: {"wall": 0.04, "magenta": 0.6, "sign": 0.5}
     )
-    mounts: tuple[ToFMount, ...] = (
-        ToFMount(-50.0, 80.0, -90.0),
-        ToFMount(50.0, 80.0, 90.0),
-        ToFMount(0.0, -28.0, 180.0),
+    # Orden = índice de tofMm[] en el firmware (0=L 1=R 2=atrás 3=frente).
+    # Fuente: config.SENSOR_MOUNTS. El frontal es del hardware nuevo.
+    mounts: tuple[ToFMount, ...] = tuple(
+        ToFMount(*_M[k]) for k in ("tof_left", "tof_right", "tof_rear", "tof_front")
     )
 
     def __post_init__(self) -> None:
         _prov("tof.reflectivity", "supuesto", "VL53 en pared negra vs magenta vs señal")
         _prov("tof.black_wall_max_mm", "medido", "README VL53L0X fuera de rango ~300 mm negro")
+        _prov("tof.mounts", "supuesto", "L/R/atrás/frente; frente nuevo, espejo del trasero; pendiente medir")
 
 
 @dataclass
@@ -175,12 +181,13 @@ class CameraParams:
     # Lente NoIR ancho del carro (README), no el pinhole que el PnP inventaba (~73°).
     hfov_deg: float = 120.0
     # Soporte fijo de la foto: el lente mira para adelante, ~45° bajo el horizonte.
-    tilt_deg: float = 45.0
-    # Lente por encima del techo. Rueda 43 mm; no está medido con regla.
-    height_mm: float = 90.0
+    tilt_deg: float = C.CAMERA_TILT_DEG
+    # Lente por encima del techo. 90 + 7 mm: la LiPo 3S (~24 mm acostada)
+    # reemplaza a la Pi 4 (~17 mm) en el centro. No está medido con regla.
+    height_mm: float = C.CAMERA_HEIGHT_MM
     # En el morro, a la altura del sonar frontal. El lente de la foto queda ahí.
-    forward_from_rear_axle_mm: float = 140.0
-    right_mm: float = 0.0
+    forward_from_rear_axle_mm: float = C.CAMERA_FWD_MM
+    right_mm: float = C.CAMERA_RIGHT_MM
     # Rotación cámara -> robot (derecha, adelante, arriba) de una calibración
     # real. Si es None se arma solo con tilt_deg (sin roll ni yaw).
     rotation_cam_to_robot: tuple | None = None
@@ -196,8 +203,8 @@ class CameraParams:
 
     def __post_init__(self) -> None:
         _prov("camera.hfov", "medido", "NoIR ancho ~120° (README); el PnP del .npz no se usa")
-        _prov("camera.tilt_deg", "medido", "soporte fijo de la foto, ~45° hacia el piso")
-        _prov("camera.height_mm", "supuesto", "lente ~90 mm; rueda 43 mm, sin regla")
+        _prov("camera.tilt_deg", "medido", "45° hacia el piso, confirmado por usuario")
+        _prov("camera.height_mm", "supuesto", "97 mm = 90 + 7 (LiPo vs Pi4), medir con regla")
         _prov(
             "camera.forward_from_rear_axle_mm",
             "supuesto",

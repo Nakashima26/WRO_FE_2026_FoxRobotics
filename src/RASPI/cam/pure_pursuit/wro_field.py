@@ -47,6 +47,8 @@ import math
 import random
 from dataclasses import dataclass, field
 
+from . import config as _C
+
 # Tapete, origen en el centro. +x este, +y norte. Milímetros.
 MAT_MM = 3000.0
 OUTER_HALF_MM = MAT_MM / 2.0          # 1500, borde interior de la pared exterior
@@ -210,7 +212,8 @@ def _heading(section: str, direction: str) -> float:
 
 
 # Centro del chasis respecto al eje trasero (180 de largo, 33.5 de voladizo).
-_CAR_CENTER_AHEAD_OF_REAR_MM = 56.5
+# Fuente única: config.py (56.5 con las medidas actuales).
+_CAR_CENTER_AHEAD_OF_REAR_MM = _C.ROBOT_LENGTH_MM / 2.0 - _C.REAR_OVERHANG_MM
 
 # Zonas de salida del programa oficial, (h0, w0, h1, w1) en la recta norte.
 START_ZONES = {

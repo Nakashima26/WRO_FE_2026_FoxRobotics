@@ -495,7 +495,8 @@ class PPRuntime:
         if dF is not None:
             out.append(SensorReading(
                 "us_front", "us", DEFAULT_MOUNTS["us_front"], US_HALF_ANGLE_DEG, dF * 10.0))
-        for key, name in (("tL", "tof_left"), ("tR", "tof_right"), ("tB", "tof_rear")):
+        for key, name in (("tL", "tof_left"), ("tR", "tof_right"), ("tB", "tof_rear"),
+                          ("tF", "tof_front")):
             mm = self._tof_mm_from_fields(fields, key)
             if mm is not None:
                 out.append(SensorReading(
