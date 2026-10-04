@@ -829,6 +829,9 @@ DIGITAL_MAP_TURN_HOLD_INNER_CM = 0.0   # ídem si la 1a lata siguiente va por de
 # frontal ya por debajo de esto (cm): la esquina la dobla la línea del mapa
 # (prio=1) y el ESP la cuenta por el gyro (GIRO_PI_CUENTA_DEG). 0 = off.
 DIGITAL_MAP_PP_TURN_CM = 0.0
+# Corrige la pose del mapa con los sonares (L/R contra la pared exterior y la
+# isla, frontal contra la pared del fondo). Ver digital_map._wall_fix.
+DIGITAL_MAP_WALL_FIX = False
 
 FAR_HINT_ENABLED     = True
 FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)

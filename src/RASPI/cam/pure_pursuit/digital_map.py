@@ -43,6 +43,20 @@ _BEV_AHEAD_MM = float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
 _CAM_AHEAD_MM = float(getattr(C, "CAMERA_FWD_MM", 140.0))  # cámara, desde el eje trasero
 # El pie de la lata es la cara que mira a la cámara; el centro queda detrás.
 _FOOT_TO_CENTER_MM = float(getattr(C, "SIGN_FOOT_TO_CENTER_MM", 25.0))
+# Sonar lateral derecho (der, adelante) desde el eje trasero; el izquierdo es espejo.
+_US_SIDE_MOUNT = (abs(C.SENSOR_MOUNTS["us_right"][0]), C.SENSOR_MOUNTS["us_right"][1])
+# La isla ocupa este tramo del along de cada recta (pared de atrás = 0).
+_ISLAND_A0 = OUTER_HALF_MM - INNER_HALF_MM
+_ISLAND_A1 = OUTER_HALF_MM + INNER_HALF_MM
+# _wall_fix: rumbo máx. contra la recta, compuerta, ganancia y tope por frame.
+_WALL_FIX_MAX_DEG = 12.0
+_WALL_GATE_MM = 150.0
+_WALL_GAIN = 0.3
+_WALL_STEP_MM = 20.0
+# Rumbo por pendiente de pared: tramo mínimo, ganancia y tope por ventana.
+_YAW_WIN_MM = 400.0
+_YAW_GAIN = 0.6
+_YAW_STEP_DEG = 3.0
 _REAR_WALL_MAX_MM = 250.0               # pared negra, el ToF no ve más lejos
 _CLEAR_MM = 130.0                       # del centro de la lata al centro del carro
 _LAT_CAP_MM = 220.0
@@ -115,6 +129,17 @@ class DigitalMap:
         self._odom0: tuple[float, float] | None = None
         # Corrección acumulada por latas conocidas (mundo, mm).
         self._pose_fix = (0.0, 0.0)
+        # Corrección de rumbo (grados, + horario) por la pendiente de la pared.
+        self._yaw_fix = 0.0
+        self._odom_last = (0.0, 0.0)
+        self._dr_xy = (0.0, 0.0)
+        self._dr_step = (0.0, 0.0)
+        # Ventana de muestras (recorrido, lateral a estima, lateral por pared).
+        self._wall_win: list[tuple[float, float, float]] = []
+        self._wall_win_sec: str | None = None
+        self._wall_rej: list[tuple[float, float]] = []
+        self._dr_s = 0.0
+        self._dr_lat = 0.0
         self._yaw_step = 0.0
         self._at_corner = False
         self._orange_y: float | None = None
@@ -161,6 +186,16 @@ class DigitalMap:
         if tpr is not None:
             self._tpr = int(tpr)
         self._pose_from_ack(ack)
+        if getattr(C, "DIGITAL_MAP_WALL_FIX", False) and not self.in_stall:
+            h = math.radians(_heading(self.section, self.direction))
+            wx, wy = self._dr_step
+            self._dr_s += abs(wx * math.sin(h) + wy * math.cos(h))
+            self._dr_lat += wx * math.cos(h) - wy * math.sin(h)
+            if self._wall_win_sec != self.section:
+                self._wall_win, self._wall_win_sec = [], self.section
+                self._dr_lat = 0.0
+            if est in ("S", "C", "R"):
+                self._wall_fix(ack)
         self._note_orange(orange)
         if not self.in_stall:
             self.along_mm, self.lat_mm = self._section_frame(
@@ -188,16 +223,25 @@ class DigitalMap:
             return
         if self._odom0 is None:
             self._odom0 = (px, py)
-        ox, oy = self._odom0
-        sx, sy = self._stall_xy()
+            self._odom_last = (px, py)
+            self._dr_xy = self._stall_xy()
         h0 = _heading(self.parking, self.direction)
         r0 = math.radians(h0)
         fx, fy = math.sin(r0), math.cos(r0)       # adelante del arranque
         lx, ly = -math.cos(r0), math.sin(r0)      # izquierda del arranque
-        dpx, dpy = px - ox, py - oy
-        self.pose_xy = (sx + fx * dpx + lx * dpy + self._pose_fix[0],
-                        sy + fy * dpx + ly * dpy + self._pose_fix[1])
-        new_h = (h0 - yaw) % 360.0
+        dpx, dpy = px - self._odom_last[0], py - self._odom_last[1]
+        self._odom_last = (px, py)
+        # Incremental: cada tramo del odómetro se gira con la corrección de
+        # rumbo vigente (_yaw_fix, 0 sin DIGITAL_MAP_WALL_FIX = igual que antes).
+        wx, wy = fx * dpx + lx * dpy, fy * dpx + ly * dpy
+        if self._yaw_fix:
+            c, s_ = math.cos(math.radians(self._yaw_fix)), math.sin(math.radians(self._yaw_fix))
+            wx, wy = wx * c + wy * s_, wy * c - wx * s_
+        self._dr_xy = (self._dr_xy[0] + wx, self._dr_xy[1] + wy)
+        self._dr_step = (wx, wy)
+        self.pose_xy = (self._dr_xy[0] + self._pose_fix[0],
+                        self._dr_xy[1] + self._pose_fix[1])
+        new_h = (h0 - yaw + self._yaw_fix) % 360.0
         self._yaw_step = abs((new_h - self._view_heading + 180.0) % 360.0 - 180.0)
         self._view_heading = new_h
         self.heading = self._view_heading
@@ -458,6 +502,151 @@ class DigitalMap:
             return
         if mag > 35.0:
             ex, ey = ex * 35.0 / mag, ey * 35.0 / mag
+        self._pose_fix = (self._pose_fix[0] + ex, self._pose_fix[1] + ey)
+        self.pose_xy = (self.pose_xy[0] + ex, self.pose_xy[1] + ey)
+
+    def _occupied(self) -> list[tuple[str, float, float]]:
+        """Asientos con lata (confirmada o con votos): (recta, x, y)."""
+        keys = set(self.confirmed) | {k for k, v in self._votes.items() if v["Red"] or v["Green"]}
+        return [(sec, *self._seat_xy(sec, sid)) for sec, sid in keys]
+
+    def _yaw_from_wall(self, lw: float) -> None:
+        """Rumbo por la pendiente: si a estima el lateral cambia distinto que
+        contra la pared, el gyro trae un sesgo (escala ~1 %: ~10° en 3 vueltas)."""
+        win = self._wall_win
+        if win and self._dr_s - win[-1][0] > 250.0:
+            win.clear()
+        win.append((self._dr_s, self._dr_lat, lw))
+        if win[-1][0] - win[0][0] < _YAW_WIN_MM:
+            return
+        n = len(win)
+        ms = sum(w[0] for w in win) / n
+        mr = sum(w[1] - w[2] for w in win) / n
+        sxx = sum((w[0] - ms) ** 2 for w in win)
+        if n < 6 or sxx < 1.0:
+            win.clear()
+            return
+        b = sum((w[0] - ms) * (w[1] - w[2] - mr) for w in win) / sxx
+        win.clear()
+        step = math.degrees(math.atan(b)) * _YAW_GAIN
+        step = max(-_YAW_STEP_DEG, min(_YAW_STEP_DEG, step))
+        self._yaw_fix -= step
+
+    def _wall_fix(self, ack: str | None) -> None:
+        """Corrige la pose con los sonares contra las paredes conocidas.
+
+        Lateral: el lateral del lado de afuera siempre ve la pared exterior;
+        el de adentro solo frente a la isla. Longitudinal: el frontal contra la
+        pared del fondo de la recta. Solo con el carro casi derecho, sin lata
+        conocida entre el sonar y la pared, y si la lectura cae cerca de lo
+        esperado (si no, lo que vio es una lata o la punta de la isla). Con
+        encoder la deriva es de ~50–100 mm por giro y ninguna lata la corregía
+        en las rectas sin latas confirmadas (semillas 13, 20: 350–430 mm).
+        """
+        if self._yaw_step > 3.0:
+            return
+        sec = self.section
+        e = (self._view_heading - _heading(sec, self.direction) + 180.0) % 360.0 - 180.0
+        if abs(e) > _WALL_FIX_MAX_DEG:
+            return
+        er = math.radians(e)
+        ce, se = math.cos(er), math.sin(er)
+        a, l = self._section_frame(self.pose_xy[0], self.pose_xy[1], sec)
+        occ = []
+        for osec, x, y in self._occupied():
+            sa, sl = self._section_frame(x, y, sec)
+            occ.append((sa, sl))
+        outer_right = self.direction == "CCW"
+        da = dl = 0.0
+        # ── Lateral ──
+        meas = []
+        strong = False
+        mr, mf = _US_SIDE_MOUNT
+        # Los dos sonares suman el ancho del carril frente a la isla: es pared a
+        # pared (una lata no da esa suma) y vale aunque la deriva pase la compuerta.
+        dLw, dRw = _ack_num(ack, "dL"), _ack_num(ack, "dR")
+        s_al0 = a + mf * ce
+        if (dLw is not None and dRw is not None and 2.0 < dLw < 110.0 and 2.0 < dRw < 110.0
+                and _ISLAND_A0 + 150.0 <= s_al0 <= _ISLAND_A1 - 150.0
+                and abs(10.0 * (dLw + dRw) + 2.0 * mr * ce - _LANE_MM) < 40.0):
+            l_both = 0.5 * ((-_LANE_MM / 2.0 + 10.0 * dLw + mr * ce)
+                            + (_LANE_MM / 2.0 - 10.0 * dRw - mr * ce)) - mf * se
+            if abs(l_both - l) < 2.0 * _LANE_MM / 5.0:
+                meas.append(l_both)
+                strong = abs(l_both - l) >= _WALL_GATE_MM
+                self._wall_rej.clear()
+        for key, side in (("dL", -1.0), ("dR", 1.0)):
+            if meas:
+                break
+            d = _ack_num(ack, key)
+            if d is None or d <= 2.0 or d >= 110.0:
+                continue
+            d *= 10.0
+            s_lat = l + side * mr * ce + mf * se
+            s_al = a + mf * ce - side * mr * se
+            is_outer = (side > 0) == outer_right
+            if not is_outer and not (_ISLAND_A0 + 150.0 <= s_al <= _ISLAND_A1 - 150.0):
+                continue
+            if not (300.0 <= s_al <= _SPAN_MM - 300.0):
+                continue
+            wall = side * _LANE_MM / 2.0
+            if any(abs(sa - s_al) < 160.0 and min(s_lat, wall) - 30.0 < sl < max(s_lat, wall) + 30.0
+                   for sa, sl in occ):
+                continue
+            # El cono toma la distancia perpendicular (|e| < medio cono).
+            l_meas = wall - side * (d + mr * ce) - mf * se
+            if abs(l_meas - l) < _WALL_GATE_MM:
+                meas.append(l_meas)
+                if is_outer:
+                    self._wall_rej.clear()
+            elif is_outer:
+                # Fuera de la compuerta: si la pared exterior insiste con la misma
+                # cifra varios frames seguidos, la deriva es real (no una lata).
+                rej = self._wall_rej
+                if rej and self._dr_s - rej[-1][0] > 150.0:
+                    rej.clear()
+                rej.append((self._dr_s, l_meas - l))
+                if len(rej) >= 6:
+                    inn = [r[1] for r in rej[-6:]]
+                    mu = sum(inn) / 6.0
+                    if max(inn) - min(inn) < 50.0 and abs(mu) < 450.0:
+                        meas.append(l + mu)
+                        strong = True
+                        rej.clear()
+        if meas:
+            lw = sum(meas) / len(meas)
+            dl = (lw - l) * (0.6 if strong else _WALL_GAIN)
+            self._yaw_from_wall(lw)
+        # ── Longitudinal ──
+        d = _ack_num(ack, "dF")
+        if d is not None and 5.0 < d < 110.0 and abs(e) <= 8.0:
+            d *= 10.0
+            s_al = a + _FRONT_MOUNT_MM * ce
+            s_lat = l + _FRONT_MOUNT_MM * se
+            reach = _SPAN_MM - s_al
+            cone = math.tan(math.radians(17.0))
+            blocked = any(s_al < sa < _SPAN_MM and abs(sl - s_lat) < 60.0 + (sa - s_al) * cone
+                          for sa, sl in occ)
+            # La punta de la isla (along 2000) también cae en el cono.
+            inner = 1.0 if not outer_right else -1.0
+            if s_al < _ISLAND_A1:
+                gap = _LANE_MM / 2.0 - inner * s_lat
+                if gap < 40.0 + (_ISLAND_A1 - s_al) * cone:
+                    blocked = True
+            # La siguiente recta no tiene latas en este tramo; su fila exterior
+            # sí puede caer en el cono si va pegado a la isla (ya en occ).
+            if not blocked:
+                a_meas = _SPAN_MM - d - _FRONT_MOUNT_MM * ce
+                if abs(a_meas - a) < _WALL_GATE_MM and reach > 0.0:
+                    da = (a_meas - a) * _WALL_GAIN
+        if not da and not dl:
+            return
+        da = max(-_WALL_STEP_MM, min(_WALL_STEP_MM, da))
+        if not strong:
+            dl = max(-_WALL_STEP_MM, min(_WALL_STEP_MM, dl))
+        h = math.radians(_heading(sec, self.direction))
+        ex = da * math.sin(h) + dl * math.cos(h)
+        ey = da * math.cos(h) - dl * math.sin(h)
         self._pose_fix = (self._pose_fix[0] + ex, self._pose_fix[1] + ey)
         self.pose_xy = (self.pose_xy[0] + ex, self.pose_xy[1] + ey)
 

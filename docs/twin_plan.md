@@ -197,3 +197,9 @@ Baseline Fase 0 definitivo (`runs/c2`, HEAD + cambios 1-2):
 | 3170839 | CW/W | race_finished | 12 | - | estaciona, 41 mm fuera |
 
 0/21 limpios, suma tc 107. Categorías: pose del mapa a la deriva (err 150–390 mm al chocar) 10; salida CCW con verde T2 en la boca 3 (+17); cajón tocado en carrera 3; estacionamiento no limpio 2; otra lata 1. La deriva no es del encoder sino del rumbo: el yaw del ACK (gyro con error de escala ~1 %) acumula hasta ±12° en 3 vueltas (`runs/hderr.py`: seed 3 `0:+3 1:+5 2:+7 3:+9 4:+11 5:+12`).
+
+Cambio 3 (flag `DIGITAL_MAP_WALL_FIX`, default False, prendido en `hw_nuevo`) — `digital_map._wall_fix` / `_yaw_from_wall`: la pose del mapa ahora se integra por incrementos del odómetro (con `_yaw_fix`=0 es idéntica a la de antes) y se corrige con los sonares:
+- lateral: sonar del lado exterior contra la pared exterior (toda la recta), el interior solo frente a la isla; descarta si una lata conocida/votada queda entre sonar y pared; compuerta 150 mm. Si L+R suman el ancho del carril (±40 mm) es pared a pared y se acepta aunque pase la compuerta; si la pared exterior repite la misma innovación 6 frames (dispersión < 50 mm) también (la deriva ya pasó la compuerta: seed 13 en E, `dL=15` con `l=-145` mapa vs −300 real).
+- longitudinal: frontal contra la pared del fondo, sin lata ni punta de isla en el cono (±17°).
+- rumbo: ajuste lineal de (lateral a estima − lateral por pared) contra el recorrido en ventanas de 400 mm → sesgo del gyro → `_yaw_fix` (ganancia 0.6, tope 3°/ventana).
+Resultado (`runs/c4`): suma tc 107→151; 9 seeds llegan a 12 giros (antes 2); error de rumbo del mapa típico ≤ ±3° (antes hasta ±12°) y de posición < 100 mm. Limpios 0/21: ahora la categoría grande es el estacionamiento (2, 6, 7, 19, 20 tocan `cajón magenta`, 16/18 una lata y 9 la isla, todos con tc 11–12).

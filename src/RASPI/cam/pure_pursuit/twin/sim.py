@@ -103,7 +103,12 @@ PRESETS["hw_nuevo"] = {
     **PRESETS["giro_rapido"],
     "fw_overrides": dict(PRESETS["giro_rapido"]["fw_overrides"]),
     "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1"},
-    "pi_overrides": dict(PRESETS["giro_rapido"]["pi_overrides"]),
+    "pi_overrides": {
+        **PRESETS["giro_rapido"]["pi_overrides"],
+        # La pose del mapa derivaba 150–430 mm (encoder + gyro) sin latas
+        # confirmadas que la corrigieran: sonares contra paredes conocidas.
+        "DIGITAL_MAP_WALL_FIX": True,
+    },
 }
 
 
