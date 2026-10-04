@@ -47,3 +47,4 @@ build/
 # Generated backups and archives
 **/*-backups/*.zip
 **/*-backups/*.bak
+src/RASPI/cam/runs/

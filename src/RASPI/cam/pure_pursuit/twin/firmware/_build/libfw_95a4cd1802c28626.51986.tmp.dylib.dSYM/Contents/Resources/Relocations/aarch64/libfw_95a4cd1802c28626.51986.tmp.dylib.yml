@@ -1,5 +1,0 @@
----
-triple:          'arm64-apple-darwin'
-binary-path:     '/Users/jesse/Documents/GitHub/FoxRobotics/src/RASPI/cam/pure_pursuit/twin/firmware/_build/libfw_95a4cd1802c28626.51986.tmp.dylib'
-relocations:     []
-...
