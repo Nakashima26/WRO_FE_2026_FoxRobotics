@@ -278,6 +278,8 @@ int32_t sil_encoder_count(void) {
   return g_encoder_cb ? g_encoder_cb() : 0;
 }
 
+double sil_param(const char *name, double def) { return param_get(name, def); }
+
 int sil_tof_mm(int idx) {
   if (g_tof_cb) return g_tof_cb(idx);
   return -1;

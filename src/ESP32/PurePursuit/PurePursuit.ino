@@ -765,6 +765,13 @@ int           inicioSettleQuieto  = 0;
 //   9, 11 : coast y acomodo hacia adelante hasta PARK_CENTER_HI_CM
 //   12,13 : reversa final opcional (PARK_REV_FINAL)
 //   10    : prueba a mano (PARK_TEST_MANO)
+// PARK_AJ: en el carro es `const`; en el twin (SIL) son variables para que el
+// harness de estacionamiento (twin/tools/prepark.py --par) las barra sin recompilar.
+#if defined(FOX_SIL)
+#define PARK_AJ
+#else
+#define PARK_AJ const
+#endif
 // Pruebas de estacionamiento (valen para el PARK_MODO elegido arriba):
 const bool          PARK_TEST_DIRECTO        = false; // (solo paralelo) inicia INMEDIATO en reversa (pon el carro AL LADO del cajón)
 const bool          PARK_TEST_RECTA_COMPLETA = false; // true = inicia en recta final (pon el carro AL INICIO de la recta)
@@ -790,21 +797,21 @@ const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
-const int           PARK_ANG_IN_DEG          = 60;    // tope del ángulo de entrada (ver PARK_RADIO_CM)
-const int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
+PARK_AJ int           PARK_ANG_IN_DEG          = 60;    // tope del ángulo de entrada (ver PARK_RADIO_CM)
+PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
 // La inercia de la reversa a tope vale ~9°, no 3. Con 3 la maniobra entregaba
 // 24-29 cm de corrimiento cuando sólo cabían 18-19 -> el carro se encajaba en la
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
-const int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
+PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
 const int           PARK_REV_PWM             = 85;    // PWM de marcha atrás — suave para control preciso
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
 
 // Paralelo 10 pts — scan poste1/hueco/poste2 + maniobra en reversa (wiggle)
-const float         PARK_PARED_CM             = 28.0f;
+PARK_AJ float         PARK_PARED_CM             = 28.0f;
 const float         PARK_KPOS                 = 0.5f;
 const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
@@ -938,11 +945,11 @@ const bool          PARK_RECTO_ENABLED        = true;
 // Ojo: las corridas 1014/1016 daban 24.7 y ~31 — hay dispersión porque la
 // contravuelta se corta en distintos ángulos. 30 es el mejor ajuste con lo que
 // hay hoy, no un número cerrado.
-const float         PARK_RADIO_CM             = 25.0f;
+PARK_AJ float         PARK_RADIO_CM             = 25.0f;
 // Distancia final a la pared exterior que se busca (misma lectura que parkBase).
 // 7 cm es lo que midió la corrida buena (21:38).
-const float         PARK_FINAL_CM             = 7.0f;
-const float         PARK_RECTO_D0_CM          = PARK_FINAL_CM + PARK_RADIO_CM;
+PARK_AJ float         PARK_FINAL_CM             = 7.0f;
+PARK_AJ float         PARK_RECTO_D0_CM          = PARK_FINAL_CM + PARK_RADIO_CM;
 // 2026-09-15: ya NO hace falta medirlo a mano. Ajustando final = pnb - 2R(1-cos a)
 // a los 4 intentos de la noche sale R = 23.6 / 24.9 / 27.0 / 25.0 cm (media 25.1),
 // y con la fase 4 girando a ~49 deg/s => v = R*w = 25.1 * 0.86 = 21.6 cm/s.
@@ -957,8 +964,23 @@ const unsigned long PARK_RECTO_MAX_MS         = 500;
 // Eran ciegos, ~8 cm de reversa en total, y el usuario no los quiere.
 const unsigned long PARK_WIGGLE_INT_MS        = 0;      // reversa con volante al lado contrario
 const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante hacia la pared
+// ── Fases por DISTANCIA de encoder (T15b, ruta A; solo con FOX_ENCODER) ─────
+// Mismas fases y mismos ángulos que arriba: lo que era TIEMPO (avance tras el
+// poste 2, reversa recta de la fase 14, hold/meneo de las fases 4-6) ahora son
+// mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
+// arriba quedan para el carro sin encoder y como timeouts de seguridad.
+const bool          PARK_POR_ENCODER          = true;
+PARK_AJ float         PARK_POSTE2_MM            = 133.0f; // avance tras el poste 2 (= 580 ms a 23 cm/s)
+const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
+PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14 (= 500 ms a 22 cm/s)
+const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
+const float         PARK_WIGGLE_INT_MM        = 0.0f;
+const float         PARK_WIGGLE_EXT_MM        = 0.0f;
+const unsigned long PARK_FASE_DIST_TIMEOUT_MS = 3000;   // si el encoder no avanza (atorado)
+long                parkOdom0                 = 0;      // odomMm al entrar a la fase
+float               parkRectoMm               = 0.0f;   // largo de la fase 14 (encoder)
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
-const float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
+PARK_AJ float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
 const int           PARK_PEGADO_CM            = 2;
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
@@ -970,7 +992,7 @@ const int           PARK_PEGADO_CM            = 2;
 // con el corte ahora en 6 cm le toca la mitad de ese recorrido. 1200 deja ~2x de
 // margen sin convertir un eco perdido en 40 cm de embestida contra el poste.
 const unsigned long PARK_FWD_MS               = 1200;
-const float         PARK_FINAL_TOL_DEG        = 5.0f;
+PARK_AJ float         PARK_FINAL_TOL_DEG        = 5.0f;
 // Reversa final de enderezado DESPUÉS del acomodo hacia adelante (fases 12 y 13).
 // 2026-09-15: false = al terminar la fase 11 se acaba la maniobra ahí mismo. Con
 // true vuelve a reversear hasta quedar a PARK_FINAL_TOL_DEG, que es lo que estaba
@@ -982,7 +1004,7 @@ const float         PARK_FINAL_TOL_DEG        = 5.0f;
 const bool          PARK_REV_FINAL            = true;
 // dF al que se detiene la reversa de acomodo final. Cada cm extra vale ~2.3° de
 // enderezado, y también ~1 cm menos de aire con la pared TRASERA (sin sensor).
-const int           PARK_REV_FINAL_DF_CM      = 8;
+PARK_AJ int           PARK_REV_FINAL_DF_CM      = 8;
 // Tope de seguridad. De dF~3 a dF=8 son ~5 cm = ~250 ms; 900 deja 3x de margen
 // sin convertir un eco perdido en una embestida a ciegas contra la pared trasera.
 const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
@@ -994,7 +1016,7 @@ const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
 // centrado de diseño (5 cm al frente, ~6 atrás).
 // De paso 6 cm está lejos del piso de ~2 cm del HC-SR04, donde las lecturas se
 // caen a 0 y el corte por distancia no dispararía.
-const int           PARK_CENTER_HI_CM         = 6;
+PARK_AJ int           PARK_CENTER_HI_CM         = 6;
 // La fase 11 es la que fija la POSICIÓN LONGITUDINAL final: avanza hasta que el
 // frontal baje de PARK_CENTER_HI_CM y ahí se planta. Medido en 1154 vs 1155: el
 // frontal NUNCA llegó a <=6 en ninguna muestra del ACK y aun así las dos fases
@@ -1906,6 +1928,16 @@ bool parkAtoroDetecta(unsigned long faseMs) {
   return (ahora - parkAtoroMs >= PARK_ATORO_MS);
 }
 
+// Ruta A (T15b): ¿las fases de distancia van por encoder? y cuánto lleva la fase.
+bool parkUsaEncoder() { return FOX_ENCODER && PARK_POR_ENCODER; }
+float parkRecorridoMm() { return fabsf((float)(odomMm - parkOdom0)); }
+// Fin de una fase de distancia: mm del encoder (con timeout) o el tiempo de antes.
+bool parkFinTramo(float mm, unsigned long ms) {
+  if (parkUsaEncoder())
+    return parkRecorridoMm() >= mm || (millis() - parkFaseMs >= PARK_FASE_DIST_TIMEOUT_MS);
+  return millis() - parkFaseMs >= ms;
+}
+
 // ── Cierre de ESTACIONANDO (apaga motor, centra servo y finaliza carrera) ─────
 void finalizarPark(const char *motivo) {
   motorCoast();
@@ -1930,6 +1962,10 @@ void finalizarPark(const char *motivo) {
 // contrario al giro; al regresar tras la media vuelta queda del OTRO lado, que es
 // justo hacia donde gira la media vuelta.
 bool paredCajonEsIzq(bool retorno) {
+#if defined(FOX_SIL)
+  // Harness del twin (twin/prepark.py): el escenario dice de qué lado está.
+  { double w = sil_param("pp_wall_left", -1.0); if (w >= 0.0) return retorno ? !(w > 0.5) : (w > 0.5); }
+#endif
   if (PARK_EN_PRUEBA) return PARK_TEST_PARED_IZQ;
   bool ida = cajonParedDetectada ? cajonParedEsIzquierda : !direccionIzquierda;
   return retorno ? !ida : ida;
@@ -1937,7 +1973,7 @@ bool paredCajonEsIzq(bool retorno) {
 
 void resetParkScan() {
   parkFase             = 0;
-  parkFaseMs           = millis();
+  parkFaseMs           = millis(); parkOdom0 = odomMm;
   parkEntryMs          = millis();
   parkScanSubFase      = 0;
   parkBase             = 0.0f;
@@ -1964,8 +2000,39 @@ void resetParkScan() {
   escribirServo(centroServo);
 }
 
+#if defined(FOX_SIL)
+// Harness del twin (twin/prepark.py, solo SIL): arranca a la salida de la
+// esquina 12 con la odometría que tendría el ESP tras 3 vueltas (marco del
+// arranque en el cajón: x hacia la salida, y a la izquierda, yaw continuo).
+void silPreParkSeed() {
+  static bool hecho = false;
+  if (hecho || sil_param("pp_on", 0.0) < 0.5) return;
+  hecho = true;
+#define SIL_AJ(n) n = (decltype(n))sil_param(#n, (double)n)
+  SIL_AJ(PARK_ANG_IN_DEG); SIL_AJ(PARK_ANG_MIN_IN_DEG); SIL_AJ(PARK_OVERSHOOT_DEG);
+  SIL_AJ(PARK_PARED_CM); SIL_AJ(PARK_RADIO_CM); SIL_AJ(PARK_FINAL_CM);
+  PARK_RECTO_D0_CM = PARK_FINAL_CM + PARK_RADIO_CM;
+  SIL_AJ(PARK_POSTE2_MM); SIL_AJ(PARK_RECTO_MAX_MM); SIL_AJ(PARK_ENDEREZA_TOL_DEG);
+  SIL_AJ(PARK_FINAL_TOL_DEG); SIL_AJ(PARK_REV_FINAL_DF_CM); SIL_AJ(PARK_CENTER_HI_CM);
+#undef SIL_AJ
+  anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
+  anguloGyro     = (float)sil_param("pp_ang", 0.0);
+  odomYawPrevDeg = anguloTotal;
+  poseXf = (float)sil_param("pp_x", 0.0);
+  poseYf = (float)sil_param("pp_y", 0.0);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+  Serial.print("SIL pre_park: pose=("); Serial.print(poseXf, 0); Serial.print(",");
+  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
+  Serial.print(" ang="); Serial.println(anguloGyro, 1);
+}
+#endif
+
 // ── Entrada a ESTACIONANDO ───────────────────────────────────────────────────
 void iniciarEstacionando() {
+#if defined(FOX_SIL)
+  silPreParkSeed();
+#endif
   estado       = ESTACIONANDO;
   parkBuscando = false;
   parkParedEsIzquierda = paredCajonEsIzq(false);
@@ -1976,7 +2043,7 @@ void iniciarEstacionando() {
     escribirServo(centroServo);
     parkRumboRef = anguloGyro;
     parkFase     = 2;
-    parkFaseMs   = millis();
+    parkFaseMs   = millis(); parkOdom0 = odomMm;
     Serial.println("-> TEST DIRECTO: Iniciando en posicion de lanzamiento para reversa");
   } else if (PARK_TEST_MANO) {
     motorCoast();
@@ -2000,7 +2067,7 @@ void iniciarEstacionandoRetorno() {
   parkSettleQuieto = 0;
   parkSettleSampMs = millis();
   parkFase         = 20;
-  parkFaseMs       = millis();
+  parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorCoast();
   escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? 160 : 30));
   Serial.println("==================================================");
@@ -2052,6 +2119,9 @@ void arrancarSeguirPunta() {
 // retorno=false: estaciona de frente tras el giro 12 (fase 0 directo).
 // retorno=true : tras la MANIOBRA 13, media vuelta (fase 20) y estaciona regresando.
 void iniciarEstacionandoPunta(bool retorno) {
+#if defined(FOX_SIL)
+  silPreParkSeed();
+#endif
   estado         = ESTACIONANDO_PUNTA;
   parkBuscando   = false;
   puntaRosaVisto = false;
@@ -4159,7 +4229,7 @@ void loop() {
           motorCoast();
           escribirServo(centroServo);
           parkFase         = 21;
-          parkFaseMs       = millis();
+          parkFaseMs       = millis(); parkOdom0 = odomMm;
           parkSettleSampMs = millis();
           parkSettleQuieto = 0;
           Serial.print("PARK fase 21: media vuelta girado="); Serial.print(girado, 1);
@@ -4187,7 +4257,7 @@ void loop() {
             integralRev   = 0; prevErrorRev = 0;
             lastRevHoldMs = millis();
             parkFase      = 22;
-            parkFaseMs    = millis();
+            parkFaseMs    = millis(); parkOdom0 = odomMm;
           } else {
             Serial.println("PARK: busco cajon en el regreso (paralelo)");
             resetParkScan();
@@ -4231,7 +4301,7 @@ void loop() {
           motorCoast();
           escribirServo(centroServo);
           parkFase   = 23;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
         }
         break;
       }
@@ -4461,7 +4531,7 @@ void loop() {
               Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
             } else {
               parkFase   = 1;
-              parkFaseMs = millis();
+              parkFaseMs = millis(); parkOdom0 = odomMm;
               Serial.println("PARK fase 1: avance extra tras el poste 2 (PARK_POSTE2_*)");
             }
             break;
@@ -4544,7 +4614,11 @@ void loop() {
         if (PARK_VEL_COMP && parkVelCmS > 0.0f)
           espera = (long)((float)espera * (PARK_VEL_REF_CM_S / parkVelCmS));
         espera = constrain(espera, (long)PARK_POSTE2_MIN_MS, (long)PARK_POSTE2_MAX_MS);
-        if (millis() - parkFaseMs >= (unsigned long)espera) {
+        float avanceMm = PARK_POSTE2_MM
+                       + ((parkBase > 5.0f) ? (parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MM_POR_CM : 0.0f);
+        if (parkFinTramo(avanceMm, (unsigned long)espera)) {
+          Serial.print("PARK fase 1 fin: avance="); Serial.print(parkRecorridoMm(), 0);
+          Serial.print("mm t="); Serial.println(millis() - parkFaseMs);
           motorCoast();
           escribirServo(servoHaciaPared);  // pre-coloca FULL EXTERNO
           // Altura lateral con la que el carro llegó al cajón: es lo que la
@@ -4570,7 +4644,7 @@ void loop() {
             }
           }
           parkFase   = 2;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 2: COAST (ext=");
           Serial.print(extRaw);
           Serial.print(" base="); Serial.print(parkBaseLlegada, 1);
@@ -4587,7 +4661,7 @@ void loop() {
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           motorReversa();
           parkFase   = 3;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 3: REV SWING FULL EXTERNO hasta 60deg / 1s (ref=");
           Serial.print(parkRumboRef, 1); Serial.println(")");
         }
@@ -4614,8 +4688,13 @@ void loop() {
           } else {
             parkRectoMs = 0;
           }
+          // Encoder: la misma reversa recta en mm (exceso lateral / sin 60°).
+          parkRectoMm = 0.0f;
+          if (PARK_RECTO_ENABLED && baseOk && exceso > 0.0f)
+            parkRectoMm = min(exceso * 10.0f / 0.866f, PARK_RECTO_MAX_MM);
+          if (parkUsaEncoder()) parkRectoMs = (parkRectoMm > 0.0f) ? 1 : 0;
           parkFase   = (parkRectoMs > 0) ? 14 : 4;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase "); Serial.print(parkFase);
           Serial.print(parkRectoMs > 0 ? ": RECTO a 60deg " : ": REV FULL EXTERNO (recto 0) ");
           Serial.print("(swing="); Serial.print(swingMag, 1);
@@ -4623,7 +4702,8 @@ void loop() {
           Serial.print(" d="); Serial.print(parkBaseLlegada, 1);
           Serial.print(" d0="); Serial.print(PARK_RECTO_D0_CM, 1);
           Serial.print(" tau="); Serial.print(parkRectoMs);
-          Serial.println("ms)");
+          Serial.print("ms recto="); Serial.print(parkRectoMm, 0);
+          Serial.println("mm)");
         }
         break;
       }
@@ -4637,10 +4717,10 @@ void loop() {
         motorReversa();
         escribirServo(centroServo);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= parkRectoMs) {
+        if (parkFinTramo(parkRectoMm, parkRectoMs)) {
           escribirServo(servoHaciaPared);
           parkFase   = 4;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 4: REV FULL EXTERNO (maniobra base)");
         }
         break;
@@ -4651,11 +4731,12 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= PARK_REV_EXT_HOLD_MS) {
-          // Sin meneo (PARK_WIGGLE_*_MS = 0) se salta directo a la contravuelta.
-          parkFase   = (PARK_WIGGLE_INT_MS > 0) ? 5
-                     : (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
-          parkFaseMs = millis();
+        bool meneoInt = parkUsaEncoder() ? (PARK_WIGGLE_INT_MM > 0.0f) : (PARK_WIGGLE_INT_MS > 0);
+        bool meneoExt = parkUsaEncoder() ? (PARK_WIGGLE_EXT_MM > 0.0f) : (PARK_WIGGLE_EXT_MS > 0);
+        if (parkFinTramo(PARK_REV_EXT_HOLD_MM, PARK_REV_EXT_HOLD_MS)) {
+          // Sin meneo (PARK_WIGGLE_* = 0) se salta directo a la contravuelta.
+          parkFase   = meneoInt ? 5 : meneoExt ? 6 : 8;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase "); Serial.print(parkFase);
           Serial.println(parkFase == 8 ? ": FULL INTERNO hasta heading recta ~ 0 (sin meneo)"
                                        : ": meneo");
@@ -4668,9 +4749,10 @@ void loop() {
         motorReversa();
         escribirServo(servoDesdePared);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= PARK_WIGGLE_INT_MS) {
-          parkFase   = (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
-          parkFaseMs = millis();
+        if (parkFinTramo(PARK_WIGGLE_INT_MM, PARK_WIGGLE_INT_MS)) {
+          bool meneoExt = parkUsaEncoder() ? (PARK_WIGGLE_EXT_MM > 0.0f) : (PARK_WIGGLE_EXT_MS > 0);
+          parkFase   = meneoExt ? 6 : 8;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase "); Serial.println(parkFase);
         }
         break;
@@ -4681,9 +4763,9 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= PARK_WIGGLE_EXT_MS) {
+        if (parkFinTramo(PARK_WIGGLE_EXT_MM, PARK_WIGGLE_EXT_MS)) {
           parkFase   = 8;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 8: FULL INTERNO hasta heading recta ~ 0");
         }
         break;
@@ -4706,7 +4788,7 @@ void loop() {
           escribirServo(centroServo);
           parkAtoroDisparo = atorado;
           parkFase   = 9;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
           Serial.print(difHeading, 1);
           Serial.print(" ext="); Serial.print(extRaw);
@@ -4726,7 +4808,7 @@ void loop() {
           motorAdelante();
           parkCenterCnt = 0;          // arma limpio el debounce de la fase 11
           parkFase   = 11;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 11: ACOMODO ENFRENTE");
         }
         break;
@@ -4751,7 +4833,7 @@ void loop() {
             finalizarPark(dfTope ? "ENFRENTE dF ya a 0" : "ENFRENTE tiempo ya a 0");
           } else {
             parkFase   = 12;
-            parkFaseMs = millis();
+            parkFaseMs = millis(); parkOdom0 = odomMm;
             Serial.print("PARK fase 12: COAST -> REV a 0 (dif=");
             Serial.print(dif, 1); Serial.println(")");
           }
@@ -4769,7 +4851,7 @@ void loop() {
           lastRevHoldMs = millis();
           motorReversa();
           parkFase   = 13;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 13: REV hasta heading 0");
         }
         break;

@@ -221,10 +221,16 @@ class Sim:
         log_dir: Path | str | None = None,
         knock_signs: bool = False,
         speed_scale: float = 1.0,
+        field: Any = None,
+        fw_params: dict[str, float] | None = None,
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
         self.knock_signs = knock_signs
+        # Escenario armado a mano (p. ej. twin/prepark.py) en vez del sorteo, y
+        # parámetros SIL de arranque (sil_set_param) para el firmware.
+        self.field_override = field
+        self.fw_params = dict(fw_params or {})
         cfg = resolve_preset(
             preset,
             fw_source=fw_source,
@@ -266,7 +272,7 @@ class Sim:
                 saved_cfg[k] = getattr(C, k)
                 setattr(C, k, v)
         rng = np.random.default_rng(self.seed)
-        field = randomize(self.seed, start=self.start)
+        field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start)
         for k, v in (
             ("DIGITAL_MAP_PARKING", field.parking_section),
             ("DIGITAL_MAP_DIRECTION", field.direction),
@@ -315,6 +321,8 @@ class Sim:
             defines=self.fw_defines,
             source=self.fw_source,
         )
+        for k, v in self.fw_params.items():
+            fw.set_param(k, float(v))
         link = SimSerialLink(fw)
 
         history: list[tuple[float, float, float, float]] = []
