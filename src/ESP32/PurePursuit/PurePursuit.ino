@@ -4620,7 +4620,17 @@ void loop() {
           Serial.print("PARK fase 1 fin: avance="); Serial.print(parkRecorridoMm(), 0);
           Serial.print("mm t="); Serial.println(millis() - parkFaseMs);
           motorCoast();
-          escribirServo(servoHaciaPared);  // pre-coloca FULL EXTERNO
+          // 2026-10-04: NO pre-colocar FULL EXTERNO aquí. El carro todavía
+          // trae inercia hacia adelante (coast, no frenado); con las ruedas
+          // ya a tope la trompa se abre hacia la pared MIENTRAS SIGUE
+          // avanzando (medido: Ang 0.0 -> 8.8° entre el fin de la fase 1 y
+          // el fin de la fase 2, antes de que arranque la reversa real), lo
+          // que come hueco del cajón y deja la cola mal orientada para el
+          // swing de la fase 3. Servo RECTO durante el coast; FULL EXTERNO
+          // se pone recién al entrar a la fase 3 (reversa de verdad), igual
+          // que el patrón COAST+centro de las demás maniobras (ver
+          // comentario de MANIOBRA_FRENO_MS).
+          escribirServo(centroServo);
           // Altura lateral con la que el carro llegó al cajón: es lo que la
           // fase 14 tiene que compensar. parkBase (EMA de la pared, no el
           // instantáneo) porque el sonar ya está viendo el poste 2.
@@ -4654,12 +4664,13 @@ void loop() {
         break;
       }
 
-      // ── Fase 2: COAST + servo FULL EXTERNO, luego REV SWING ──────────────
+      // ── Fase 2: COAST con servo RECTO (deja que pare), luego REV SWING ───
       if (parkFase == 2) {
         motorCoast();
-        escribirServo(servoHaciaPared);
+        escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           motorReversa();
+          escribirServo(servoHaciaPared);  // FULL EXTERNO recién con la reversa real
           parkFase   = 3;
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 3: REV SWING FULL EXTERNO hasta 60deg / 1s (ref=");
