@@ -392,6 +392,15 @@ def _run_once(args, seed: int, interactive: bool):
         k, v = _parse_kv(item)
         pi_overrides[k] = ast.literal_eval(v)
 
+    # --prepark CW_c1_p0: escenario del harness de estacionamiento (arranca en tc=12).
+    pre_field = pre_params = None
+    if args.prepark:
+        from pure_pursuit.twin import prepark as PP
+        from pure_pursuit.twin.tools.prepark import HARNESS_FW
+        d, c, p = args.prepark.split("_")
+        pre_field, pre_params = PP.build(PP.Scenario(d, int(c.lstrip("c")), p))
+        fw_overrides = {**HARNESS_FW, **fw_overrides}
+
     sim = Sim(
         seed,
         start=args.start or None,
@@ -401,6 +410,8 @@ def _run_once(args, seed: int, interactive: bool):
         calib_npz=calib,
         max_time_s=args.max_time,
         log_dir=args.log_dir,
+        field=pre_field,
+        fw_params=pre_params,
     )
     trail: list[tuple[float, float]] = []
     frames: list[np.ndarray] = []
@@ -555,7 +566,7 @@ def _run_once(args, seed: int, interactive: bool):
 
     go = True
     if interactive and view_q is not None:
-        preview = randomize(seed, start=sim.start)
+        preview = pre_field or randomize(seed, start=sim.start)
         view_q.put(("field", _field_payload(preview)))
         field_sent = True
         n_signs = len(preview.signs)
@@ -635,6 +646,8 @@ def main():
                     help="reproducción: 5 = la ventana va 5 veces más rápido que la carrera")
     ap.add_argument("--print-log", action="store_true")
     ap.add_argument("--log-dir", type=str, default="")
+    ap.add_argument("--prepark", type=str, default="",
+                    help="escenario del harness de estacionamiento, p. ej. CW_c1_p0 (usar --preset hw_nuevo)")
     args = ap.parse_args()
     if args.log_dir:
         args.log_dir = Path(args.log_dir)
