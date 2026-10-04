@@ -1241,6 +1241,7 @@ float         parkBaseLlegada       = 0.0f; // parkBase latcheada al parar junto
 unsigned long parkRectoMs           = 0;    // duración calculada del tramo recto de la fase 14
 float         parkAngObjetivo       = (float)PARK_ANG_IN_DEG; // ángulo de entrada calculado para esta llegada
 float         parkRumboGiro0        = 0.0f;
+int           parkServoU            = 0;    // servo latcheado de la U de 180° (PARK_PARALELO_USA_UTURN, fase 24)
 int           parkSettleQuieto      = 0;
 unsigned long parkSettleSampMs      = 0;
 unsigned long parkLogMs             = 0;
@@ -1309,6 +1310,13 @@ const int           PARK_UTURN_DEG             = 170;    // 180 menos el oversho
 const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
 const int           PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
+// T15b2: con PARK_MODO == PARK_PARALELO/_REV y retorno, usar la U de 180° de
+// PUNTA (fases 24-25 de ESTACIONANDO, reusa el arco de PARK_UTURN_*) en vez de
+// la media vuelta de 90° + reversa (fases 20-23). Al cerrar la U entrega
+// directo al escaneo paralelo (resetParkScan(), fase 0), sin la reversa recta.
+// false = comportamiento viejo (fases 20-23, probado y documentado en
+// twin_plan.md "T15b (ruta A)"); no se tocó ese camino.
+const bool          PARK_PARALELO_USA_UTURN    = true;
 const unsigned long PARK_RETORNO_TIMEOUT_MS    = 4000;
 const unsigned long PARK_RETORNO_SETTLE_MAX_MS = 670;    // tope de la espera a que deje de rotar (>= MANIOBRA_FRENO_MS)
 // Reversa recta tras la media vuelta, para tener carrera antes del 1er poste. En CCW
@@ -2163,6 +2171,28 @@ void iniciarEstacionandoRetorno() {
   Serial.println("==================================================");
 }
 
+// T15b2 (PARK_PARALELO_USA_UTURN): tras la vuelta 12, U de 180° EN LA RECTA
+// (igual que ESTACIONANDO_PUNTA fases 20-21, pegada a la pared exterior con
+// PARK_UTURN_*) pero sin salir de ESTACIONANDO: al cerrar la U entrega directo
+// al escaneo del paralelo (resetParkScan(), fase 0 de ESTACIONANDO), con
+// parkParedEsIzquierda ya fijada a la pared del regreso. Fases 24-25, no
+// pisan las 20-23 (media vuelta vieja).
+void iniciarEstacionandoParaleloUturn() {
+  estado       = ESTACIONANDO;
+  parkBuscando = false;
+  parkParedEsIzquierda = paredCajonEsIzq(true);
+  parkRumboGiro0   = anguloGyro;
+  parkServoU       = 0;
+  parkFase         = 24;
+  parkFaseMs       = millis(); parkOdom0 = odomMm;
+  motorAdelante();
+  escribirServo(centroServo);
+  Serial.println("==================================================");
+  Serial.print("-> MEDIA VUELTA (giro 13): U de 180 (de PUNTA), luego paralelo. Pared del regreso: ");
+  Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+  Serial.println("==================================================");
+}
+
 void iniciarParkBuscando() {
   // Sin espera a la Pi: a la fase 0 DIRECTO, sin pasar por SIGUIENDO. Así el
   // escaneo tiene toda la recta (y no se come el cooldownGiro de 3 s del gate de
@@ -2240,6 +2270,7 @@ void iniciarEstacionandoPunta(bool retorno) {
 // retorno=true: tras la MANIOBRA 13 (media vuelta y estaciona regresando).
 void iniciarEstacionamiento(bool retorno) {
   if (PARK_MODO == PARK_PUNTA) iniciarEstacionandoPunta(retorno);
+  else if (retorno && PARK_PARALELO_USA_UTURN) iniciarEstacionandoParaleloUturn();
   else if (retorno)            iniciarEstacionandoRetorno();
   else                         iniciarParkBuscando();
 }
@@ -4300,6 +4331,68 @@ void loop() {
       int   servoDesdePared = parkParedEsIzquierda ? 30 : 160;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
       if (piPark >= 1) parkRosaVisto = true;
+
+      // ── Fase 24: U DE 180° (PARK_PARALELO_USA_UTURN) — mismo arco que
+      // ESTACIONANDO_PUNTA fase 20, pegado a la pared EXTERIOR actual (la
+      // opuesta a parkParedEsIzquierda, que es la del regreso) ───────────────
+      if (parkFase == 24) {
+        unsigned long t = millis() - parkFaseMs;
+        int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
+        bool  uturnIzqP   = !parkParedEsIzquierda;
+        float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+        long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
+        if (parkServoU == 0) {
+          int gapMm = (extAhoraP > 5 && extAhoraP < 150) ? (int)extAhoraP * 10 : 700;
+          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
+          if (shift < 200) shift = 200;
+          float radio = shift / 2.0f;
+          float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
+          int ticks = constrain((int)(delta / 46.32f * 70.0f), 28, 70);
+          parkServoU = uturnIzqP ? centroServo + ticks : centroServo - ticks;
+          Serial.print("PARK U servo="); Serial.print(parkServoU);
+          Serial.print(" ext="); Serial.println(extAhoraP);
+        }
+        escribirServo(parkServoU);
+        motorAdelante();
+        setMotor(vel);
+        float girado = (anguloGyro - parkRumboGiro0) * haciaAhoraP;
+        bool  listo  = girado >= (float)PARK_UTURN_DEG;
+        bool  tout   = t >= PARK_RETORNO_TIMEOUT_MS;
+        if (listo || tout) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkFase         = 25;
+          parkFaseMs       = millis();
+          parkSettleSampMs = millis();
+          parkSettleQuieto = 0;
+          Serial.print("PARK fase 25: U girado="); Serial.print(girado, 1);
+          Serial.println(tout ? " (TIMEOUT)" : "");
+        }
+        break;
+      }
+
+      // ── Fase 25: SETTLE tras la U — al quedar quieto, entrega directo al
+      // escaneo del paralelo (resetParkScan, fase 0), sin reversa recta ──────
+      if (parkFase == 25) {
+        motorCoast();
+        escribirServo(centroServo);
+        unsigned long nowMs = millis();
+        if (nowMs - parkSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
+          parkSettleSampMs = nowMs;
+          parkSettleQuieto = (fabs(gyroRate) < MANIOBRA_SETTLE_RATE_DPS) ? parkSettleQuieto + 1 : 0;
+        }
+        unsigned long tS = nowMs - parkFaseMs;
+        bool quieto = (parkSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N) && (tS >= MANIOBRA_FRENO_MS);
+        if (quieto || tS >= PARK_RETORNO_SETTLE_MAX_MS) {
+          bool  uturnIzqP   = !parkParedEsIzquierda;
+          float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+          anguloGyro -= haciaAhoraP * 180.0f;
+          Serial.print("PARK: rumbo de regreso (U de 180) ang="); Serial.println(anguloGyro, 1);
+          Serial.println("PARK: busco cajon en el regreso (paralelo, via U)");
+          resetParkScan();
+        }
+        break;
+      }
 
       // ── Fase 20: MEDIA VUELTA — avance recto, luego 90° hacia la pared del regreso
       if (parkFase == 20) {
