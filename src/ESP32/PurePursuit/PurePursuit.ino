@@ -76,10 +76,16 @@ const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 
 //   PARK_NINGUNO  : tras la última vuelta, TERMINANDO (avanza un poco y frena)
 //   PARK_PUNTA    : de punta, 7 pts  (estado ESTACIONANDO_PUNTA)
 //   PARK_PARALELO : paralelo, 10 pts (estado ESTACIONANDO)
-// PARK_MEDIA_VUELTA aplica a los dos modos:
+//   PARK_PARALELO_REV : paralelo en reversa de un solo tramo (T15b2, estado
+//                   ESTACIONANDO, mismas fases 0/1 de escaneo; desde ahí fases
+//                   30+): swing a 90° hacia la pared, recto opcional al fondo
+//                   (ToF trasero), swing a 180° hacia la pared (queda paralelo
+//                   mirando al revés del sentido de marcha) y pasadas
+//                   adelante/atrás para enderezar contra rumboRef+180.
+// PARK_MEDIA_VUELTA aplica a los tres modos:
 //   true  = sigue hasta la MANIOBRA 13, media vuelta y estaciona REGRESANDO
 //   false = estaciona de frente justo tras el giro 12
-enum ModoPark { PARK_NINGUNO, PARK_PUNTA, PARK_PARALELO };
+enum ModoPark { PARK_NINGUNO, PARK_PUNTA, PARK_PARALELO, PARK_PARALELO_REV };
 const ModoPark PARK_MODO         = PARK_PARALELO;
 const bool     PARK_MEDIA_VUELTA = true;
 
@@ -996,6 +1002,33 @@ PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta l
 // y endereza en la fase 13 hasta ~2.5 cm. Con un solo umbral la fase 13 se
 // cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
 PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
+
+// ── PARK_PARALELO_REV (T15b2): un solo tramo en reversa ─────────────────────
+// Reutiliza la fase 0/1 del paralelo (escaneo, postes, parkRumboRef). Al
+// terminar la fase 1 (si PARK_MODO == PARK_PARALELO_REV) pasa a las fases
+// 30+ en vez de a la 2:
+//   30 ajuste en mm tras el poste 2 (puede ser negativo = retroceder)
+//   31 coast (MANIOBRA_FRENO_MS)
+//   32 (A) REV SWING FULL EXTERNO hasta 90° de parkRumboRef
+//   33 (B) REV recta (servo centro) hasta distB_filtrada <= PARK_REV_B_CM
+//   34 (C) REV SWING FULL EXTERNO hasta 180° de parkRumboRef
+//   35 coast -> 36 ADELANTE acomodo (rumbo = parkRumboRef+180) -> 37 coast ->
+//   38 REV final de enderezado, cicla a la 35 hasta PARK_REV_CICLOS_MAX.
+// Mismo patrón de seguridad que las fases 3/14/4/8: si distB_filtrada se pega
+// (PARK_ATRAS_MIN_CM) durante el swing A o C, salta a la 35 (pasadas) en vez
+// de seguir metiendo la cola contra el fondo del cajón.
+PARK_AJ float         PARK_REV_AJUSTE_MM        = 0.0f;   // avance(+)/retroceso(-) tras poste 2, antes del swing A
+const unsigned long PARK_REV_AJUSTE_MAX_MS    = 1200;    // tope de seguridad de la fase 30 (sin encoder o atorado)
+PARK_AJ float         PARK_REV_SWING_OVERSHOOT_DEG = 9.0f; // corte anticipado de los swings A y C (igual idea que PARK_OVERSHOOT_DEG)
+PARK_AJ float         PARK_REV_B_CM             = 0.0f;   // objetivo de distB_filtrada al fondo del cajón al cerrar la fase B (0 = sin tramo recto)
+const float         PARK_REV_B_MAX_MM         = 150.0f;  // tope de la fase B si no hay ToF trasero o no llega al objetivo
+const unsigned long PARK_REV_B_MAX_MS         = 1200;    // tope de tiempo de la fase B
+PARK_AJ float         PARK_REV_FINAL_TOL_DEG    = 3.0f;    // ±2-3° de parkRumboRef+180 para terminar (fases 36/38)
+PARK_AJ int           PARK_REV_CENTER_HI_CM     = 5;       // corte de la fase 36 (ACOMODO ADELANTE) por distF_filtrada
+const unsigned long PARK_REV_FWD_MS           = 1200;    // tope de tiempo de la fase 36
+PARK_AJ int           PARK_PR_FINAL_DF_CM       = 100;     // corte por distF_filtrada de la fase 38 (100 = sin efecto, como el paralelo)
+const int           PARK_REV_CICLOS_MAX       = 3;       // tope de ciclos 35<->38 (igual idea que PARK_CICLOS_MAX)
+
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
 // timeout con dF todavía en 8 cm, dejando al carro 15.9° chueco. Ahora manda la
@@ -2049,6 +2082,8 @@ void silPreParkSeed() {
   SIL_AJ(PARK_POSTE2_MM); SIL_AJ(PARK_RECTO_MAX_MM); SIL_AJ(PARK_ENDEREZA_TOL_DEG);
   SIL_AJ(PARK_FINAL_TOL_DEG); SIL_AJ(PARK_REV_FINAL_DF_CM); SIL_AJ(PARK_CENTER_HI_CM);
   SIL_AJ(PARK_ATRAS_MIN_CM); SIL_AJ(PARK_ATRAS_FINAL_CM);
+  SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
+  SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -4567,6 +4602,10 @@ void loop() {
             if (PARK_TEST_MANO) {
               parkFase = 10;
               Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
+            } else if (PARK_MODO == PARK_PARALELO_REV) {
+              parkFase   = 30;
+              parkFaseMs = millis(); parkOdom0 = odomMm;
+              Serial.println("PARK fase 30: ajuste tras el poste 2 (PARK_REV_AJUSTE_MM)");
             } else {
               parkFase   = 1;
               parkFaseMs = millis(); parkOdom0 = odomMm;
@@ -4698,6 +4737,230 @@ void loop() {
           Serial.print(" base="); Serial.print(parkBaseLlegada, 1);
           Serial.print(" ang="); Serial.print(anguloGyro, 1);
           Serial.println(") -> reversa FULL EXTERNO");
+        }
+        break;
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // PARK_PARALELO_REV (T15b2): fases 30-38, ver el comentario junto a
+      // PARK_REV_AJUSTE_MM. Solo se entra aquí si PARK_MODO ==
+      // PARK_PARALELO_REV (ver el branching al final de la fase 0).
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── Fase 30: ajuste en mm tras el poste 2 (puede ser negativo) ─────
+      if (parkFase == 30) {
+        bool avanza = (PARK_REV_AJUSTE_MM >= 0.0f);
+        if (avanza) motorAdelante(); else motorReversa();
+        escribirServo(centroServo);
+        setMotor(avanza ? PARK_PWM : PARK_REV_PWM);
+        if (!avanza && parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 30: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 31 ya");
+          parkFase   = 31;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        if (parkFinTramo(fabs(PARK_REV_AJUSTE_MM), PARK_REV_AJUSTE_MAX_MS)) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkFase   = 31;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 31: COAST tras ajuste ("); Serial.print(PARK_REV_AJUSTE_MM, 0);
+          Serial.println("mm)");
+        }
+        break;
+      }
+
+      // ── Fase 31: COAST (MANIOBRA_FRENO_MS), luego arranca el swing A ───
+      if (parkFase == 31) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          motorReversa();
+          escribirServo(servoHaciaPared);
+          parkFase   = 32;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 32: REV SWING A FULL EXTERNO hasta 90deg (ref=");
+          Serial.print(parkRumboRef, 1); Serial.println(")");
+        }
+        break;
+      }
+
+      // ── Fase 32: (A) REV SWING FULL EXTERNO hasta 90° de parkRumboRef ──
+      if (parkFase == 32) {
+        motorReversa();
+        escribirServo(servoHaciaPared);
+        setMotor(PARK_REV_PWM);
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 32: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 35");
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        float swingMag    = fabs(anguloGyro - parkRumboRef);
+        bool  swingListo  = (swingMag >= (90.0f - PARK_REV_SWING_OVERSHOOT_DEG));
+        bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
+        if (swingListo || swingTimeout) {
+          parkFase   = 33;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 33: REV recta hasta distB<="); Serial.print(PARK_REV_B_CM, 0);
+          Serial.print("cm (swing="); Serial.print(swingMag, 1);
+          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+        }
+        break;
+      }
+
+      // ── Fase 33: (B) REV recta (servo centro) hasta distB_filtrada objetivo ──
+      // PARK_REV_B_CM = 0 -> normalmente ya se cumple en el primer loop (0 mm
+      // de recto, como permite el plan). PARK_REV_B_MAX_MM/_MS son la red de
+      // seguridad si no hay ToF trasero (distB_filtrada queda en -1).
+      if (parkFase == 33) {
+        motorReversa();
+        escribirServo(centroServo);
+        setMotor(PARK_REV_PWM);
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 33: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 35");
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        bool tofListo = (distB_filtrada > 0.0f && distB_filtrada <= PARK_REV_B_CM);
+        bool mmTope   = parkUsaEncoder() && (parkRecorridoMm() >= PARK_REV_B_MAX_MM);
+        bool timeout  = (millis() - parkFaseMs >= PARK_REV_B_MAX_MS);
+        if (tofListo || mmTope || timeout) {
+          escribirServo(servoHaciaPared);
+          parkFase   = 34;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 34: REV SWING C FULL EXTERNO hasta 180deg (distB=");
+          Serial.print(distB_filtrada, 1);
+          Serial.println(tofListo ? ")" : mmTope ? " TOPE mm)" : " TIMEOUT)");
+        }
+        break;
+      }
+
+      // ── Fase 34: (C) REV SWING FULL EXTERNO hasta 180° de parkRumboRef ──
+      // El carro queda paralelo pero mirando al revés del sentido de marcha.
+      if (parkFase == 34) {
+        motorReversa();
+        escribirServo(servoHaciaPared);
+        setMotor(PARK_REV_PWM);
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 34: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 35");
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        float swingMag     = fabs(anguloGyro - parkRumboRef);
+        bool  swingListo   = (swingMag >= (180.0f - PARK_REV_SWING_OVERSHOOT_DEG));
+        bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
+        if (swingListo || swingTimeout) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkCenterCnt = 0;
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 35: COAST -> pasadas (swing="); Serial.print(swingMag, 1);
+          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+        }
+        break;
+      }
+
+      // ── Fase 35: COAST antes de las pasadas adelante/atrás ──────────────
+      if (parkFase == 35) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          motorAdelante();
+          parkCenterCnt = 0;
+          parkFase   = 36;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.println("PARK fase 36: ACOMODO ADELANTE (rumbo = parkRumboRef+180)");
+        }
+        break;
+      }
+
+      // ── Fase 36: ACOMODO ADELANTE contra parkRumboRef+180 ───────────────
+      if (parkFase == 36) {
+        float rumboObjRev = parkRumboRef + 180.0f;
+        motorAdelante();
+        servoRumboPark(rumboObjRev);
+        setMotor(PARK_CENTER_PWM_PAR);
+        bool dfCerca = (distF_filtrada > 0 && distF_filtrada <= PARK_REV_CENTER_HI_CM);
+        parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
+        bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
+        bool timeout = (millis() - parkFaseMs >= PARK_REV_FWD_MS);
+        if (dfTope || timeout) {
+          motorCoast();
+          escribirServo(centroServo);
+          float dif = fabs(anguloGyro - rumboObjRev);
+          if (dif <= PARK_REV_FINAL_TOL_DEG) {
+            finalizarPark(dfTope ? "REV ADELANTE dF ya a 0" : "REV ADELANTE tiempo ya a 0");
+          } else {
+            parkFase   = 37;
+            parkFaseMs = millis(); parkOdom0 = odomMm;
+            Serial.print("PARK fase 38: COAST -> REV final (dif="); Serial.print(dif, 1); Serial.println(")");
+          }
+        }
+        break;
+      }
+
+      // ── Fase 37: COAST antes de la reversa final de enderezado ──────────
+      if (parkFase == 37) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          integralRev   = 0;
+          prevErrorRev  = 0;
+          lastRevHoldMs = millis();
+          motorReversa();
+          parkFase   = 38;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.println("PARK fase 38: REV final (rumbo = parkRumboRef+180)");
+        }
+        break;
+      }
+
+      // ── Fase 38: REV final de enderezado contra parkRumboRef+180 ───────
+      // Mismo patrón que la fase 13 del paralelo (servoDesdePared, corte por
+      // dF/alineado/pegado/atrasPegado/timeout) pero contra el rumbo +180 y
+      // ciclando 35<->38 hasta PARK_REV_CICLOS_MAX.
+      if (parkFase == 38) {
+        float rumboObjRev = parkRumboRef + 180.0f;
+        motorReversa();
+        escribirServo(servoDesdePared);
+        setMotor(PARK_REV_PWM);
+        float dif         = fabs(anguloGyro - rumboObjRev);
+        bool  alineado    = (dif <= PARK_REV_FINAL_TOL_DEG);
+        bool  frenteOk     = (distF_filtrada > 0 && distF_filtrada >= PARK_PR_FINAL_DF_CM);
+        bool  pegado       = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
+        bool  atrasPegadoF = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
+        bool  timeout      = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
+        if (frenteOk || alineado || pegado || atrasPegadoF || timeout) {
+          Serial.print("PARK fase 38 fin: dif="); Serial.print(dif, 1);
+          Serial.print(" dF="); Serial.print(distF_filtrada);
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          if (!alineado && !pegado && parkCiclos < PARK_REV_CICLOS_MAX) {
+            parkCiclos++;
+            motorCoast(); escribirServo(centroServo);
+            Serial.print("PARK ciclo "); Serial.print(parkCiclos);
+            Serial.println(": no derecho todavia (REV) -> fase 35 de nuevo");
+            parkFase   = 35;
+            parkFaseMs = millis(); parkOdom0 = odomMm;
+          } else {
+            finalizarPark(frenteOk     ? "REV FINAL: dF objetivo"
+                        : alineado     ? "REV FINAL: ya alineado"
+                        : pegado       ? "REV FINAL: pegado de lado"
+                        : atrasPegadoF ? "REV FINAL: pegado atras"
+                                       : "REV FINAL: TIMEOUT (ciclos agotados)");
+          }
         }
         break;
       }
