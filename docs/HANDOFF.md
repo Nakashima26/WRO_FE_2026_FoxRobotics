@@ -160,10 +160,10 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
      lata (en lugar de `TURN_HOLD_INNER_CM=80`) + métrica de lado de paso.
    - `t16infra`: sentido CW/CCW de una sola fuente (ACK `dir=`, hoy `DigitalMap` toma `'CW'` de config y el
      twin le inyecta la verdad) + reporte de paridad twin↔carro (`GIRO_RAPIDO_MODO`, `FOX_*`, `TURNS_PER_RACE`…).
-   - `t16servo`: servo físico 0-180 del carro nuevo. Firmware sigue pensando en unidades lógicas 30..160
-     (= tope); `escribirServo` las mapea a físico 0..180 bajo un define del carro nuevo; el twin `hw_nuevo`
-     modela el físico 0-180 → ±46.32°. Validar equivalencia (21 seeds + prepark contra baseline) y luego
-     sensibilidad al slew. `t16u`/`t16gr` diseñan en unidades lógicas.
+   - `t16servo`: servo de dirección del carro nuevo = SG90 de 0-180. El firmware sigue pensando en unidades
+     internas 30..160 (= tope); `escribirServo` las mapea a valor de servo 0..180 bajo un define del carro
+     nuevo; el twin `hw_nuevo` modela 0-180 → ±46.32°. Validar equivalencia (21 seeds + prepark contra
+     baseline) y luego dinámica del SG90 (600°/s, deadband 10 µs). `t16u`/`t16gr` diseñan en unidades internas.
 1. ~~T16 rendimiento~~ hecho (t16-perf + 0e3f6f1); oráculo descartado.
 2. T15c esquinas (rama WIP `t15c-esquinas`) — evaluar si sirve al frente C.
 3. T12 escenarios explícitos por cartas (`--scenario`, `--noise-seed`, enumerador) y corregir
@@ -171,14 +171,18 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
 4. T11 mapa congelado tras vuelta 1 + ruta fija vueltas 2-3 (visión solo como sanity check).
 5. T14 driver BNO085 en el firmware real; recalibrar `bev_calib.npz` al mover la cámara.
 
-## Pendiente de medir en el carro real
+## Pendiente de medir en el carro nuevo
 Altura real del lente y grosor de la LiPo; montajes de US/ToF; PPR del encoder y pull-ups (GPIO 34/39);
 GPIO15 libre (XSHUT ToF frontal); VL53L0X vs VL53L1X; radio real de la contravuelta de la salida
-(`INICIO_R_CONTRA_MM`); fps reales en la Pi 5. **Servo del carro nuevo** — dato del usuario: recorre
-**0-180**. Los topes 30/160 del firmware vienen del carro viejo (fc2bc3e, 2026-09-18) y el twin supone que
-en ellos la rueda llega a 46.32° (ganancia 60°/70° de comando por lado, también herencia del carro viejo).
-Si 0/180 = ±46.32° lineal, comandar 30/160 da ~30.9°/36.0° de rueda (R≈189/155 mm, no 108).
-Falta medir: valor de servo con ruedas rectas (el firmware supone `centroServo=90`), ángulo de cada rueda
-en 0 y en 180 (Ackermann o paralelas) y **radio a tope por lado** (círculo del eje trasero en 0 y en 180):
-el twin usa bicicleta con 46.32° (R≈108); si 46.32° es la rueda interior, R≈163.
+(`INICIO_R_CONTRA_MM`); fps reales en la Pi 5. **Servo de dirección** — datos del usuario (2026-10-05):
+es el **SG90** del repo, recorre **0-180** y el modelo de SolidWorks da **46.32° de rueda a tope**.
+README §2.4 (piñón 14T, 2.5:1, ±43°, trim 80, clamp 20-150) está desactualizado: no usarlo.
+Los topes 30/160 del firmware vienen del carro viejo (fc2bc3e, 2026-09-18), igual que la ganancia
+60°/70° de comando por lado del twin. Si 0/180 = ±46.32° lineal, comandar 30/160 sin el shim de
+`t16servo` da ~30.9°/36.0° de rueda (R≈189/155 mm, no 108).
+Sin medir: valor de servo con ruedas rectas (se supone `centroServo=90`), linealidad, ángulo de cada
+rueda en 0 y en 180 (Ackermann o paralelas) y **radio a tope por lado** (círculo del eje trasero en 0 y
+en 180): el twin usa bicicleta con 46.32° (R≈108); si 46.32° es la rueda interior, R≈163 (caso pesimista).
+Dinámica del SG90 por datasheet: 0.1 s/60° @4.8 V → 600°/s de servo, deadband 10 µs ≈ 0.9°.
+El firmware manda 500-2500 µs y el nominal del SG90 es 1-2 ms: riesgo de tope mecánico en los extremos.
 Slew del servo y rodado en coast (hoy 'supuesto' en params.py).
