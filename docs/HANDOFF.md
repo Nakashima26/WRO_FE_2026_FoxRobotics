@@ -35,11 +35,14 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   Prohibido "subir el umbral hasta que el síntoma desaparezca" sin explicar por qué el valor viejo estaba mal.
 - **Auditoría**: todo fix que se vaya a commitear lo revisa otro subagente en contexto fresco (solo lectura)
   antes de aceptarlo. Las conclusiones de un subagente se verifican en la fuente antes de reportarlas.
-- **Ruido del twin**: la carrera NO es bit-reproducible entre procesos (seed 2 alterna `cajón magenta`/`isla`
-  con el mismo código; el agente de giros vio diferencias entre lote paralelo y serial). Sospecha no
-  verificada: algo depende del reloj real o de la carga de CPU (`pi_frame_ms`, hilos de OpenCV
-  `FOX_CV_THREADS`). Hasta aclararlo: toda seed que cambie de resultado se repite ×3 antes de atribuirlo
-  al fix; comparar siempre contra un baseline corrido en las mismas condiciones (mismo host, mismos jobs).
+- **Ruido del twin** (medido 2026-10-05, rama `t15ruido`): la carrera SÍ es bit-determinista dentro de un
+  mismo host — seed 2 en la Mac ×3 serie, ×3 en paralelo con carga (10 jobs) y ×2 sin fijar hilos dan el
+  mismo SHA256 de `trace.csv` sin `pi_frame_ms`; seed 3170839 ×3 igual. Mac (arm64) vs Windows (x86_64)
+  NO: divergen en t=21.99 s (fila 621, ACK `ang=3.12` vs `3.13`) por ULPs de punto flotante acumulados
+  en `anguloGyro += gz * dt` (PurePursuit.ino:2569). `millis()` del SIL es tiempo virtual; los
+  `perf_counter` de runtime_nuevo.py solo alimentan HUD/logs. La "alternancia" vieja de seed 2 casi seguro
+  mezclaba hosts o una caché `_build/` vieja. Regla: 1 corrida por escenario basta; comparar SIEMPRE
+  en el mismo host (baseline y fix); nunca Mac contra Windows.
 - **Métricas normalizadas**: contar eventos (REVERSA, choques) por esquina recorrida, no totales — una
   carrera que choca antes "tiene menos" de todo.
 - `prepark.py` NO ejercita la U ni la recta previa: 98/100 ahí no garantiza nada en carrera completa.
