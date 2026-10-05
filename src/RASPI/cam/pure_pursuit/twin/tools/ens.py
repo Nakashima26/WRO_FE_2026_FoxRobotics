@@ -1,6 +1,6 @@
 """Resumen de un ensamble de ruido de sensores (T16ens). Desde src/RASPI/cam:
 
-  python pure_pursuit/twin/tools/ens.py runs/<tag> [--all] [--power] [--delta 0.10]
+  python pure_pursuit/twin/tools/ens.py runs/<tag> [--all] [--power] [--delta 0.10] [--kmax K]
 
 El tipo sale del contenido de runs/<tag> (lo arma tools/ens.sh):
   carrera  s<seed>_n<k>/ + s<seed>_n<k>.out      (drive.py con TWIN_NOISE_SEED=k)
@@ -13,7 +13,8 @@ con IC 95% de Wilson, suma_tc media, REVERSA por esquina recorrida, holgura casc
 (carrera: holg_todas / holg_1a de tools/holg.py), escenarios robustos (K/K, 0/K) y
 monedas, y la diferencia mínima detectable (MDD) contra otro ensamble del mismo K
 (prueba de tools/ens_cmp.py). --power: potencia simulada de esa prueba para varios K.
-Comparar solo ensambles del mismo host.
+--kmax K: usa solo las réplicas k <= K (p. ej. si un lote que agrandaba el ensamble con
+K0=... se cortó y dejó réplicas a medias). Comparar solo ensambles del mismo host.
 """
 from __future__ import annotations
 
@@ -80,8 +81,9 @@ def _seed_key(s: str):
     return (0, int(s)) if s.isdigit() else (1, s)
 
 
-def load(d: Path):
-    """-> (tipo, {escenario: [corrida, ...]}); corrida = dict k, ok, end, tc, rev."""
+def load(d: Path, kmax: int | None = None):
+    """-> (tipo, {escenario: [corrida, ...]}); corrida = dict k, ok, end, tc, rev.
+    kmax: ignora las réplicas k > kmax."""
     d = Path(d)
     runs: dict[str, list[dict]] = defaultdict(list)
     race = [p for p in d.iterdir() if p.is_dir() and RACE_DIR.match(p.name)]
@@ -92,6 +94,8 @@ def load(d: Path):
         for p in race:
             mm = RACE_DIR.match(p.name)
             seed, k = mm.groups() if mm else (RACE_DIR1.match(p.name).group(1), "0")
+            if kmax is not None and int(k) > kmax:
+                continue
             r = summ3.run_row(str(p))
             try:
                 with open(p / "fw_debug.log", encoding="utf-8") as f:
@@ -111,6 +115,7 @@ def load(d: Path):
               if (m := PP_DIR.match(p.name)) and (p / "summary.json").is_file()]
         if not pp and (d / "summary.json").is_file():   # prepark.py suelto: k=0
             pp = [(0, d / "summary.json")]
+        pp = [(k, f) for k, f in pp if kmax is None or k <= kmax]
         for k, f in pp:
             for r in json.loads(f.read_text(encoding="utf-8")):
                 runs[r["name"]].append({"k": k, "ok": bool(r.get("limpio")),
@@ -304,8 +309,9 @@ def _fines(c: Counter) -> str:
     return " ".join(f"{k}×{v}" for k, v in sorted(c.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
-def report(d: Path, show_all: bool = False, do_power: bool = False, delta: float = 0.10, sims: int = 1000):
-    kind, runs = load(d)
+def report(d: Path, show_all: bool = False, do_power: bool = False, delta: float = 0.10, sims: int = 1000,
+           kmax: int | None = None):
+    kind, runs = load(d, kmax)
     rows = scen_stats(runs)
     N = len(rows)
     Ks = sorted({r["n"] for r in rows})
@@ -313,6 +319,9 @@ def report(d: Path, show_all: bool = False, do_power: bool = False, delta: float
     wall = Path(d) / "wall.txt"
     print(f"# {d} ({kind}): {N} escenarios, K={'/'.join(map(str, Ks))}"
           + (f", {wall.read_text().strip()}" if wall.is_file() else ""))
+    if len(Ks) > 1:
+        print(f"AVISO: K distinto entre escenarios ({'/'.join(map(str, Ks))}): réplicas a medias o "
+              f"corridas sin STOP; revisar o usar --kmax")
     race = kind == "carrera"
     if race:
         print("| seed | dir/park | éxito | tc medio | REVERSA/corrida | fines |")
@@ -395,10 +404,13 @@ def report(d: Path, show_all: bool = False, do_power: bool = False, delta: float
             for model in ("monedas", "uniforme", "robustas"):
                 q = shifted(p, model, delta)
                 eff = 100 * (q.sum() - p.sum()) / N
+                # p. ej. robustas sin escenarios 0/K: no hay mejora que simular y la fila
+                # mide la falsa alarma. Se simula igual para no cambiar la rng de las demás.
+                lbl = f"{model} (+{eff:.1f} pts)" if eff >= 0.05 else f"{model} (sin escenarios 0/K: +0 pts = falsa alarma)"
                 tests = ("pareada", "estratificada") if (tname, model) == ("tasas medidas", "monedas") else ("pareada",)
                 for test in tests:
                     cells = [f"{power(p, k, model, delta, sims, rng, test):.2f}" for k in Klist]
-                    print(f"| {tname} | {model} (+{eff:.1f} pts) | {test} | " + " | ".join(cells) + " |")
+                    print(f"| {tname} | {lbl} | {test} | " + " | ".join(cells) + " |")
         print("falsa alarma 'B mejor' con B = A (mismas tasas; nominal <= 0.025): "
               + " ".join(f"K={k}:{power(p_pl, k, 'monedas', 0.0, sims, rng):.3f}" for k in (3, 5, 10)))
         if wall.is_file():
@@ -432,8 +444,9 @@ def main():
     ap.add_argument("--power", action="store_true", help="potencia simulada de ens_cmp para varios K")
     ap.add_argument("--delta", type=float, default=0.10, help="mejora a detectar (fracción de tasa)")
     ap.add_argument("--sims", type=int, default=1000)
+    ap.add_argument("--kmax", type=int, default=None, help="usar solo las réplicas k <= KMAX")
     a = ap.parse_args()
-    report(Path(a.dir), a.all, a.power, a.delta, a.sims)
+    report(Path(a.dir), a.all, a.power, a.delta, a.sims, a.kmax)
 
 
 if __name__ == "__main__":

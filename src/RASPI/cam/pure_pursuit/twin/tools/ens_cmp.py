@@ -3,6 +3,7 @@
   python pure_pursuit/twin/tools/ens_cmp.py runs/<A> runs/<B>      (A = base, B = cambio)
   python pure_pursuit/twin/tools/ens_cmp.py runs/<A> --split       (falsa alarma: réplicas
                                                                     de A contra réplicas de A)
+  --kmax K: usa solo las réplicas k <= K en A y en B.
 
 Mismo tipo en ambos (carrera o prepark, ver ens.py), mismo host y las mismas réplicas k
 (TWIN_NOISE_SEED / --noise-seed 1..K) en ambos lados: la unidad es el par (escenario, k).
@@ -191,14 +192,15 @@ def main():
     ap.add_argument("A")
     ap.add_argument("B", nargs="?")
     ap.add_argument("--split", action="store_true", help="réplicas de A contra réplicas de A (sin B)")
+    ap.add_argument("--kmax", type=int, default=None, help="usar solo las réplicas k <= KMAX en A y B")
     a = ap.parse_args()
-    kind, A = E.load(Path(a.A))
+    kind, A = E.load(Path(a.A), a.kmax)
     if a.split:
         split_alarm(kind, A, a.A)
         return
     if not a.B:
         ap.error("falta B (o --split)")
-    kind_b, B = E.load(Path(a.B))
+    kind_b, B = E.load(Path(a.B), a.kmax)
     if kind_b != kind:
         raise SystemExit(f"tipos distintos: {kind} vs {kind_b}")
     compare(kind, A, B, a.A, a.B)

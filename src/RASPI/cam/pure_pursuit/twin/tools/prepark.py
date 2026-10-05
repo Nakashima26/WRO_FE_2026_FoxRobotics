@@ -39,6 +39,12 @@ from pure_pursuit.twin import prepark as PP  # noqa: E402
 HARNESS_FW = {"PARK_TEST_RECTA_COMPLETA": "true"}
 
 
+def noise_key(noise_seed: int | None, name: str) -> tuple[int, int] | None:
+    """Subcorriente de ruido del escenario `name` para la réplica `noise_seed` (T16ens).
+    None = sin --noise-seed (la rng de siempre, default_rng(0), compartida por todos)."""
+    return None if noise_seed is None else (int(noise_seed), zlib.crc32(name.encode()))
+
+
 def run_one(args):
     sc, out, fw_over, period, max_time, par, ignore, noise_seed = args
     from pure_pursuit.twin import sim as S
@@ -66,7 +72,7 @@ def run_one(args):
     # gyro) para todo el prepark, como siempre. Con --noise-seed k, cada escenario saca
     # su propia subcorriente spawn_key=(k, crc32(nombre)): las réplicas son
     # independientes entre escenarios y la misma k da el mismo ruido en A y en B.
-    nkey = None if noise_seed is None else (int(noise_seed), zlib.crc32(sc.name.encode()))
+    nkey = noise_key(noise_seed, sc.name)
     sim = S.Sim(0, preset="hw_nuevo", log_dir=d, fw_overrides={**HARNESS_FW, **fw_over},
                 pi_period_s=period, max_time_s=max_time, field=field, fw_params=params,
                 ignore_collisions=ignore, noise_seed=nkey)
