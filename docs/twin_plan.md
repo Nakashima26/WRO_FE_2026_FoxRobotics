@@ -457,3 +457,29 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Ningún choque viene de pasar por el lado equivocado.
 - **Ruido:** la carrera no es bit-reproducible entre procesos (la seed 2 alterna entre cajón e isla). Esto contradice la afirmación de T16 de que es "determinista"; está pendiente encontrar la causa.
 - Reglas de trabajo nuevas y el plan de tres frentes en `docs/HANDOFF.md` y `docs/PROMPT_SIGUIENTE.md`.
+
+### T16infra — sentido del mapa desde el ESP, verdad del twin apagable, `paridad.py` (2026-10-05, rama t16infra)
+- **Una sola fuente para el sentido:** el `dir=` del ACK (R = CW, L = CCW).
+  - `DigitalMap` arranca sin sentido (`config.DIGITAL_MAP_DIRECTION = None`; "CW"/"CCW" lo fuerza). `set_direction()` lo fija una vez.
+  - `runtime_nuevo._update_digital` guarda los `update()` mientras el ACK dice `dir=?` y los reproduce al fijarlo, así que el mapa queda igual que si hubiera arrancado con ese sentido (test `vars()` idéntico).
+  - Mientras no hay sentido, el mapa no se actualiza y sus consultas dan neutro (sigue en el cajón). Si `CORNER_TURN_DIR_OVERRIDE` está puesto, sigue mandando. El tracker de visión ya no decide el sentido del mapa.
+- **Cajón:** no hay fuente real; `DIGITAL_MAP_PARKING = "W"` es la convención del marco del mapa. El campo es simétrico por rotación de 90°, así que solo gira las coordenadas del mapa respecto a la verdad del twin.
+- **Twin:** `Sim(inject_map_truth=...)`, la variable de entorno `DIGITAL_MAP_INJECT_TRUTH` o la clave de preset `inject_map_truth`. Acepta `1`/`0`/`parking`/`direction`/`parking,direction`; el default sigue siendo inyectar las dos.
+- **Validación en la Mac:** 21 seeds `hw_nuevo` `SOLO_CAJON=1` con la inyección apagada contra `fox_base/runs/base`.
+  - `trace.csv` (sin columnas de tiempo) y `fw_debug.log` son idénticos en 21/21. `summ3` da lo mismo que la base: limpios 4/21 (6, 8, 18, 3170839), suma tc 177.
+  - El sentido que fija el mapa coincide con el del campo en 21/21. El ESP lo decide siempre en INICIO fase -1, a t=0.960-0.972 s, con |dL-dR| entre 31 y 73 cm (umbral 25). El mapa lo fija tras 6-7 updates en espera.
+  - El camino ambiguo (|dL-dR| < 25, se decide en el 1er giro) no lo ejerce ninguna seed; solo lo cubren los tests.
+  - Control con la inyección encendida (seeds 2 y 3170839): idéntico. La seed 2 dio el mismo trace en las tres corridas (base, off, on).
+- **`twin/tools/paridad.py [preset]`** (solo lee): tabla `.ino/config` contra el preset resuelto, más IMU, periodo de la Pi, verdad inyectada y servo. Cada diferencia necesita motivo en `ACEPTADAS`; da exit 1 si falta alguno y 2 si el preset nombra algo que no existe.
+  - `hw_nuevo`: 24 diferencias, todas aceptadas. Son 3 `fw_overrides`, 2 `fw_defines`, 13 `pi_overrides` (incluido `PI_FPS`), la IMU, `pi_period_s`, `inject_map_truth` y 3 del servo.
+  - Servo: topes 30..160 y centro 90 coinciden con `SteeringParams`. El 46.32° de las U del .ino (ino:4415, 5745) coincide con `MAX_WHEEL_STEER_DEG`.
+  - Pendiente (`servo.rueda_der`): las U del .ino suponen 70 ticks = 46.32° a los dos lados. El twin pone 46.32° en servo 30 (60 ticks) a la derecha, así que 70 ticks dan 54.04° (`gain_right` 69.48). No se ha medido cuál corresponde al carro real.
+  - Pendiente: el servo físico del carro nuevo es 0..180 y el twin modela 30..160. `FOX_SERVO_180` (frente t16servo) todavía no está en el .ino; la fila queda como hueco, y la tabla sigue al define cuando aparezca.
+  - Pendiente: `centroServo - ticks` llega a 20 en ino:4416 y 5746. `escribirServo` acota 0..180 y el twin acota a 30 (`vehicle.py`).
+  - El slew (600 °/s) es un supuesto sin medir.
+- **Auditoría en contexto fresco:** sin bloqueantes.
+  - Arreglado: tope de 1200 al buffer de updates en espera. Si el ESP no decide, se guardan los primeros (que fijan el ancla de odometría) y deja de guardar. En el twin el máximo observado fue 7, así que el tope no cambia nada: con el código final, las seeds 2, 7 y 11 (inyección apagada, Mac) repiten el mismo trace.
+  - Arreglado: las filas de ganancia del servo eran tautológicas; ahora se comparan contra la fórmula de ticks del .ino.
+  - Queda para t16gr: `holds_for_center` llama `_hold_cm()` antes de las guardas `in_stall`/`_aligned`. Hoy no falla, porque `confirmed` está vacío mientras no hay sentido.
+  - Preexistente: en `sim.run()`, una excepción entre la mutación de `C` y el `try` deja `C` modificado.
+- Nota: en Windows, `build.load_ino_text("head")` decodifica con cp1252 y falla con el .ino UTF-8 (`TODAVÍA`). Los tests que usan `fw_source=head` necesitan `PYTHONUTF8=1`. `paridad.py` lee HEAD como UTF-8.

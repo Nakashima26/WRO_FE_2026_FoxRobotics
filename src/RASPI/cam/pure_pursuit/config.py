@@ -846,8 +846,14 @@ FAR_LINE_MAX_LAT_MM  = 1400.0
 # y ToF trasero. La cámara solo vota el asiento. El volante lo usa si
 # DIGITAL_MAP_STEER está prendido.
 DIGITAL_MAP_STEER = False
+# Recta del cajón = marco del mapa (convención, no dato del campo: el tapete es
+# simétrico a 90°). El carro real no tiene de dónde leerla y no la necesita.
 DIGITAL_MAP_PARKING = "W"
-DIGITAL_MAP_DIRECTION = "CW"
+# Sentido de carrera del mapa. None = lo decide el ESP (dir= del ACK, fijado
+# una vez; runtime_nuevo._update_digital). "CW"/"CCW" lo fuerza desde el
+# arranque (solo pruebas; el twin inyecta la verdad salvo DIGITAL_MAP_INJECT_TRUTH=0).
+# Ojo: CORNER_TURN_DIR_OVERRIDE manda sobre el dir= del ESP.
+DIGITAL_MAP_DIRECTION = None
 # Con DIGITAL_MAP_STEER: aguanta el giro rápido (prio=1) hasta que el sonar
 # frontal lea esto (cm), para que el arco salga al centro del carril de la
 # recta siguiente y no pegado a la isla. No aplica si la primera lata de la

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -168,6 +169,35 @@ def resolve_preset(
     return base
 
 
+# Verdad del campo que el twin le puede inyectar al mapa digital (el carro real
+# no la tiene: el sentido sale del dir= del ACK y la recta del cajón es el
+# marco del mapa, ver config.DIGITAL_MAP_*).
+_MAP_TRUTH_KEYS = {
+    "parking": ("DIGITAL_MAP_PARKING", "parking_section"),
+    "direction": ("DIGITAL_MAP_DIRECTION", "direction"),
+}
+_OFF = ("", "0", "false", "no", "off", "none")
+_ON = ("1", "true", "yes", "on", "all")
+
+
+def map_truth_keys(spec: Any) -> tuple[str, ...]:
+    """Qué verdad se inyecta: True/False, o "0"/"1"/"parking,direction"."""
+    if spec is None or spec is True:
+        return tuple(_MAP_TRUTH_KEYS)
+    if spec is False:
+        return ()
+    s = str(spec).strip().lower()
+    if s in _OFF:
+        return ()
+    if s in _ON:
+        return tuple(_MAP_TRUTH_KEYS)
+    keys = tuple(k.strip() for k in s.split(",") if k.strip())
+    bad = [k for k in keys if k not in _MAP_TRUTH_KEYS]
+    if bad:
+        raise ValueError(f"DIGITAL_MAP_INJECT_TRUTH: claves desconocidas {bad}")
+    return keys
+
+
 def _sign_from_hit(field, hit: str):
     """Señal del campo que nombra world.collision ("señal Red S/T2"), o None."""
     if not hit.startswith("señal "):
@@ -232,6 +262,7 @@ class Sim:
         field: Any = None,
         fw_params: dict[str, float] | None = None,
         ignore_collisions: tuple[str, ...] = (),
+        inject_map_truth: Any = None,
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
@@ -258,6 +289,14 @@ class Sim:
         self.fw_defines = dict(cfg.get("fw_defines", {}))
         self.pi_overrides = dict(cfg.get("pi_overrides", {}))
         self.imu = cfg.get("imu", "mpu6050")
+        # Verdad inyectada al mapa digital: argumento > env
+        # DIGITAL_MAP_INJECT_TRUTH > preset "inject_map_truth" > todo (como antes).
+        spec = inject_map_truth
+        if spec is None:
+            spec = os.environ.get("DIGITAL_MAP_INJECT_TRUTH")
+        if spec is None:
+            spec = cfg.get("inject_map_truth", True)
+        self.inject_map_truth = map_truth_keys(spec)
         self.params = params or TwinParams()
         self.speed_scale = speed_scale
         if speed_scale != 1.0:
@@ -285,13 +324,14 @@ class Sim:
                 setattr(C, k, v)
         rng = np.random.default_rng(self.seed)
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start)
-        for k, v in (
-            ("DIGITAL_MAP_PARKING", field.parking_section),
-            ("DIGITAL_MAP_DIRECTION", field.direction),
-        ):
+        for key in self.inject_map_truth:
+            k, attr = _MAP_TRUTH_KEYS[key]
             if k not in saved_cfg and hasattr(C, k):
                 saved_cfg[k] = getattr(C, k)
-            setattr(C, k, v)
+            setattr(C, k, getattr(field, attr))
+        if len(self.inject_map_truth) < len(_MAP_TRUTH_KEYS):
+            print(f"[twin] mapa digital: verdad inyectada {self.inject_map_truth or 'ninguna'}"
+                  f" (campo {field.parking_section}/{field.direction})", flush=True)
         world = World(field)
         veh = Vehicle(
             self.params,
