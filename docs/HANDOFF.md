@@ -55,9 +55,7 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   sin `runs/` ni `_build/`. **Borrar `_build/` tras cada sync que cambie el .ino** (caché de `libfw_*.dylib`
   puede servir un binario viejo).
 - **CRLF**: el checkout de Windows tiene finales CRLF; un tar hecho desde Windows rompe los `.sh` en la
-  Mac (`xargs -P 10
-`). Tras cada sync: `find . -name '*.sh' -o -name '*.py' | xargs sed -i '' $'s/
-$//'`
+  Mac (`xargs -P 10\r`). Tras cada sync: `find . -name '*.sh' -o -name '*.py' | xargs sed -i '' $'s/\r$//'`
   (o empaquetar con `git archive`/`git ls-files` + `dos2unix`). El SHA del .ino cambia con eso: comparar
   SHAs siempre del lado Mac.
 - Python `~/Documents/GitHub/FoxRobotics/.venv/bin/python`, `PYTHONPATH=.`, desde `src/RASPI/cam`.
@@ -67,7 +65,7 @@ $//'`
 - `SOLO_CAJON=1 SEEDS="..." pure_pursuit/twin/tools/all.sh <tag> [jobs]` (en la Mac cambiar la ruta del
   python del script o llamar drive.py directo); `summ3.py runs/<tag> <seeds>` resume.
 
-## Estado (2026-10-04, rama `t15b2` HEAD 0e3f6f1, NO fusionada a `digital-twin`, NO pusheada)
+## Estado (2026-10-05, rama `t15b2` HEAD e2914de, NO fusionada a `digital-twin`, NO pusheada)
 Reglamento 9.23 (decisión del usuario): el cambio de sentido para estacionar se hace **dentro de la
 esquina 13**; luego solo se anda por esa esquina y la recta de salida. Criterio de parking: tocar la pared
 exterior está bien, tocar el cajón no.
