@@ -4,8 +4,17 @@ from pathlib import Path
 from pure_pursuit.twin import sim as S
 from pure_pursuit.twin.firmware import fw as F
 
-seed = int(sys.argv[1]); out = Path(sys.argv[2]); preset = sys.argv[3] if len(sys.argv) > 3 else "giro_rapido"
-extra = (json.loads(sys.argv[4]) if len(sys.argv) > 4 else None) or {}
+# --solo-cajon: igual que en prepark.py, un contacto con la pared exterior no
+# detiene la carrera (se registra en metrics["ignored_contacts"] en vez de
+# cortar en collisions); se aplica a toda la carrera, no solo al estacionamiento
+# (world.py/sim.py no tienen un gate por estado, y el criterio del usuario -
+# "si choca con la pared exterior no hay problema" - no distingue fase).
+_argv = sys.argv[1:]
+SOLO_CAJON = "--solo-cajon" in _argv
+if SOLO_CAJON:
+    _argv = [a for a in _argv if a != "--solo-cajon"]
+seed = int(_argv[0]); out = Path(_argv[1]); preset = _argv[2] if len(_argv) > 2 else "giro_rapido"
+extra = (json.loads(_argv[3]) if len(_argv) > 3 else None) or {}
 out.mkdir(parents=True, exist_ok=True)
 dbg = open(out / "fw_debug.log", "w", encoding="utf-8")
 _orig = F.FirmwareSIL.pop_debug
@@ -77,7 +86,8 @@ if os.environ.get("NO_OUTSIDE_RELEASE"):
             return False
         return ahead[0] > (480.0 if ahead[1] else 260.0)
     _bt = _bt_nr
-sim = S.Sim(seed, preset=preset, log_dir=out, pi_overrides=extra.get("pi"), fw_overrides=extra.get("fw"), fw_defines=extra.get("def"), pi_period_s=extra.get("period"))
+sim = S.Sim(seed, preset=preset, log_dir=out, pi_overrides=extra.get("pi"), fw_overrides=extra.get("fw"), fw_defines=extra.get("def"), pi_period_s=extra.get("period"),
+            ignore_collisions=("pared exterior",) if SOLO_CAJON else ())
 r = sim.run()
 dbg.close()
 if "dm" in _LAST:
