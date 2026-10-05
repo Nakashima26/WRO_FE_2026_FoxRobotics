@@ -1003,6 +1003,23 @@ PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta l
 // cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
 PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
 
+// T15b2 (t15b2_esquina13, "patrón 3"): fase 8 (FULL INTERNO) corta por
+// PARK_ATRAS_MIN_CM con el carro todavía girando fuerte (medido: ~80 deg/s,
+// seed 2 trace.csv 90.024-90.111: Ang 39.07 -> 32.22 en 87ms) y 25-30 grados
+// lejos de parkRumboRef; la fase 9 centra el servo de inmediato y la inercia
+// angular sigue sola ~100ms, barriendo la esquina delantera contra el cajón
+// antes de llegar a la fase 11 (seeds 2/14/20 del tag: el log se corta justo
+// ahí). Se probaron dos arreglos, los dos descartados:
+//   - Subir PARK_ATRAS_MIN_CM (cortar antes): prepark.py --solo-cajon
+//     98 -> 78/100 (sesión previa).
+//   - Fase intermedia de contra-volante para frenar el giro antes de
+//     entregar a la fase 9 (PARK_GIRO_FRENO_DPS): bajaba el gyroRate
+//     (57.4 -> 17.3 deg/s en CW_c25_p2) pero los ~74ms extra de frenado, con
+//     el carro todavía reverseando por inercia, lo acercan más al fondo del
+//     cajón. prepark.py --solo-cajon 98 -> 94/100 — revertido.
+// El límite real parece ser el colchón trasero (distB al cortar, ~5-6cm)
+// contra el swing completo, no solo la velocidad angular con que se corta.
+
 // ── PARK_PARALELO_REV (T15b2): un solo tramo en reversa ─────────────────────
 // Reutiliza la fase 0/1 del paralelo (escaneo, postes, parkRumboRef). Al
 // terminar la fase 1 (si PARK_MODO == PARK_PARALELO_REV) pasa a las fases
@@ -1325,6 +1342,13 @@ const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // seguridad: nada más saliendo de la esquina 12 el lateral puede leer
 // "abierto" un instante por la geometría de esa esquina misma.
 PARK_AJ long         PARK_UTURN_ARRANQUE_MM      = 300;
+// T15b2 (t15b2_esquina13, "patrón 2", seeds 7/19 CCW): tras la U (fase 25)
+// el carro puede quedar a ext 9-11 cm y la fase 0 (resetParkScan) separa con
+// el tope de rumbo PARK_PUNTA_ANG_MAX_CERCA_DEG=12 (pensado para arrancar a
+// 25-26 cm): ~2 cm cada 10 cm de avance, no llega a PARK_PARED_CM antes del
+// poste 1. Intento descartado: fase 26 "aleja de pared" con giro acotado por
+// gyro — el carro no giraba (f=26 ext=11 girado=0.1), disparaba sin filtro de
+// sentido y empeoraba la carrera (seed 6 pasaba a cajón).
 // T15b2: con PARK_MODO == PARK_PARALELO/_REV y retorno, usar la U de 180° de
 // PUNTA (fases 24-25 de ESTACIONANDO, reusa el arco de PARK_UTURN_*) en vez de
 // la media vuelta de 90° + reversa (fases 20-23). Al cerrar la U entrega
