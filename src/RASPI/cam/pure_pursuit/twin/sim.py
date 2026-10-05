@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -182,16 +183,22 @@ def _sign_from_hit(field, hit: str):
     return None
 
 
-def _pose_at(history: list[tuple[float, float, float, float]], t: float) -> tuple[float, float, float]:
+def _pose_at(history: "deque[tuple[float, float, float, float]]", t: float) -> tuple[float, float, float]:
     if not history:
         return 0.0, 0.0, 0.0
     if t <= history[0][0]:
         return history[0][1], history[0][2], history[0][3]
     if t >= history[-1][0]:
         return history[-1][1], history[-1][2], history[-1][3]
-    for i in range(1, len(history)):
-        t0, x0, y0, h0 = history[i - 1]
-        t1, x1, y1, h1 = history[i]
+    # t_cam = t_k - cam_latency_s cae a pocos ms del final de history (hasta
+    # 20 s de ventana): recorrer desde el final encuentra el intervalo en un
+    # puñado de pasos en vez de barrer miles de entradas viejas. Mismo
+    # resultado bit a bit (ver nota de empate en el PR): intervalos
+    # consecutivos comparten el punto en el límite, así que da igual desde
+    # qué lado se llegue.
+    t1, x1, y1, h1 = history[-1]
+    for i in range(len(history) - 2, -1, -1):
+        t0, x0, y0, h0 = history[i]
         if t0 <= t <= t1:
             u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
             return (
@@ -199,6 +206,7 @@ def _pose_at(history: list[tuple[float, float, float, float]], t: float) -> tupl
                 y0 + u * (y1 - y0),
                 h0 + u * (h1 - h0),
             )
+        t1, x1, y1, h1 = t0, x0, y0, h0
     return history[-1][1], history[-1][2], history[-1][3]
 
 
@@ -329,7 +337,11 @@ class Sim:
             fw.set_param(k, float(v))
         link = SimSerialLink(fw)
 
-        history: list[tuple[float, float, float, float]] = []
+        # deque(maxlen=...) descarta el extremo viejo en O(1); con list +
+        # pop(0) cada descarte movía hasta 20000 punteros (memmove) y era el
+        # mayor hotspot medido en profile (~31 s de 234 s con cProfile en una
+        # carrera de 89 s simulados: 549729 llamadas a list.pop).
+        history: "deque[tuple[float, float, float, float]]" = deque(maxlen=20000)
         last_yaw_rate = 0.0
         last_ds = 0.0
         last_coll_check = 0.0
@@ -390,8 +402,6 @@ class Sim:
                 enc.update(info.ds_true_mm, veh.wheel_deg, info.accel_mm_s2, w_max)
                 t = _t_s()
                 history.append((t, veh.x, veh.y, veh.heading_deg))
-                if len(history) > 20000:
-                    history.pop(0)
                 if t - last_coll_check >= _COLLISION_INTERVAL_S:
                     last_coll_check = t
                     hit = collision(
@@ -540,7 +550,10 @@ class Sim:
                         frame = cam.render_camera(field, px, py, ph)
                         render_s += time.perf_counter() - t_render0
                         t_proc0 = time.perf_counter()
-                        result = runtime.process_frame(frame, now=t_end, armed=armed)
+                        result = runtime.process_frame(
+                            frame, now=t_end, armed=armed,
+                            need_bev_frame=frame_callback is not None,
+                        )
                         pi_ms = (time.perf_counter() - t_proc0) * 1000.0
                         pi_s += pi_ms / 1000.0
                         ack = link.try_readline()

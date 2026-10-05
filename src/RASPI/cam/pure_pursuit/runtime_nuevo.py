@@ -1365,7 +1365,7 @@ class PPRuntime:
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
         return ready_ack
 
-    def process_frame(self, frame, now: float, armed: bool) -> FrameResult:
+    def process_frame(self, frame, now: float, armed: bool, need_bev_frame: bool = True) -> FrameResult:
         # FPS contador
         self._fps_count += 1
         if now - self._last_fps_time >= 1.0:
@@ -2161,7 +2161,14 @@ class PPRuntime:
         shown = bev_frame
         shift = (0, 0)
         self._dig_img = self.digital.render()
-        warp_wide = getattr(self.bev, "warp_wide", None)
+        # warp_wide es un cv2.warpPerspective a un lienzo ~2300x1320 SOLO
+        # para el HUD de depuración (bev_frame no realimenta el PP: ya se
+        # usó bev_frame/bev_hsv de arriba para todo el pipeline). Los
+        # llamadores sin ventana/VNC/grabación (p. ej. el twin en batch,
+        # sim.py) no leen result.bev_frame -- need_bev_frame=False se salta
+        # el warp. Medido en profile: ~18 s de 234 s (cProfile) en una
+        # carrera de 89 s simulados, 5164 llamadas a warpPerspective.
+        warp_wide = getattr(self.bev, "warp_wide", None) if need_bev_frame else None
         if warp_wide is not None and processed_frame is not None:
             shown = warp_wide(processed_frame)
             dx, dy = self.bev.wide_shift
