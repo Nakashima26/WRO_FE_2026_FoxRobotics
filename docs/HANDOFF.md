@@ -55,7 +55,9 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   sin `runs/` ni `_build/`. **Borrar `_build/` tras cada sync que cambie el .ino** (caché de `libfw_*.dylib`
   puede servir un binario viejo).
 - **CRLF**: el checkout de Windows tiene finales CRLF; un tar hecho desde Windows rompe los `.sh` en la
-  Mac (`xargs -P 10`). Tras cada sync: `find . -name '*.sh' -o -name '*.py' | xargs sed -i '' $'s/$//'`
+  Mac (`xargs -P 10
+`). Tras cada sync: `find . -name '*.sh' -o -name '*.py' | xargs sed -i '' $'s/
+$//'`
   (o empaquetar con `git archive`/`git ls-files` + `dos2unix`). El SHA del .ino cambia con eso: comparar
   SHAs siempre del lado Mac.
 - Python `~/Documents/GitHub/FoxRobotics/.venv/bin/python`, `PYTHONPATH=.`, desde `src/RASPI/cam`.
@@ -71,22 +73,32 @@ esquina 13**; luego solo se anda por esa esquina y la recta de salida. Criterio 
 exterior está bien, tocar el cajón no.
 
 - Estacionamiento: `PARK_MODO=PARK_PARALELO` + U de 180° (`PARK_PARALELO_USA_UTURN=true`) disparada por
-  `vigilarUturn(distL,distR,distF)` con la señal de esquina (`contadorEsquina13`, commit a6e29b3; verificado
-  11/11 dentro de la sección de esquina con trace.csv). Luego fase 0 (escaneo) → fases 1-13.
+  `vigilarUturn(distL,distR,distF)` con la señal de esquina (`contadorEsquina13`, commit a6e29b3). 10/11 en la
+  esquina 13; **s9 dispara en la esquina 12** (`85.257 MANIOBRA completada 12/12` → `86.456 PARK U servo=20 ext=9`;
+  piso `PARK_UTURN_ARRANQUE_MM=300`). Luego fase 0 (escaneo) → fases 1-13.
   - `prepark.py --solo-cajon`: **98/100** (fallan `CW_c2_p4`, `CW_c3_p4`: poste 2 en fase 8, holgura de la S ≈12 mm).
   - Carrera (11 seeds que llegan a tc=12, tag `t15b2_esquina13`): estacionan 6, 8, 18, 3170839; cajón en
     2, 7, 14, 19, 20; señal en 5, 9.
   - Patrón 2 (7, 19 CCW): tras la U queda pegado a la pared (ext 9-11) y no se separa a 28 cm antes del poste 1.
   - Patrón 3 (2, 14, 20 CW): entra a fase 9 aún girando ~80°/s, 25° fuera (`dif=25.7 ext=9 ATRAS PEGADO`).
+  - **Causa común de 2 y 3 (verificado 2026-10-05)**: la U de un solo arco (fase 24) satura cuando arranca con
+    ext 30-34 cm (`PARK U servo=160/20`) y termina a ext ≈ ext0 − 22 cm (7-11 cm): 5 de 6 chocan el cajón.
+    Con ext0 67-71 (s8, s18, s3170839) el servo queda proporcional (144-150), termina a 38-40 cm y estaciona 3/3.
+    Además: en CCW la fase 24 escribe servo 20 (bajo el tope 30; ticks ×70 a ambos lados) y el rumbo del ESP
+    llega a la U con ~6-7° de error (s14: heading real 186.5° vs `Ang:-0.14`).
+  - prepark arranca con la pose de tc=12 sin la U (h=370/460): mide una entrada que la carrera no produce.
 - `PARK_PARALELO_REV` (estacionar en reversa, fases 30-38): 0/100 limpios con el mejor valor
   (`PARK_REV_B_MAX_MM=30`); el costado roza el poste a Ang≈150-165° del swing C con servo fijo. Ver
   twin_plan "barrido PARK_REV_*".
 - Carrera completa 21 seeds (baseline Mac, `~/Projects/fox_man/.../runs/baseline`): terminan 4/21; **12/21
   chocan con una señal** (7 en SIGUIENDO con esquive activo pero sin margen, 2 en GIRO_RAPIDO, 2 en
-  ESTACIONANDO, 1 SIG-GYRO; siempre la PRIMERA señal, ninguna por lado equivocado).
+  ESTACIONANDO, 1 SIG-GYRO; siempre la PRIMERA señal). "Ninguna por lado equivocado" NO está medido:
+  `metrics.py:219` solo cuenta un cruce si `along` salta >50 mm entre filas (~12 mm/fila) — casi nunca.
 - Giros con REVERSA ("corre raro"): 23 en el baseline, todos con `distExt` 36-81 cm (el firmware reversea
-  cuando está LEJOS de la exterior; adelante solo si `<= HUG_CM=20`). No se sabe por qué llega tan
-  separado de la exterior a esas esquinas.
+  cuando está LEJOS de la exterior; adelante solo si `<= HUG_CM=20`). Causa verificada en s20: entra a
+  CRUCERO torcido (`13.473 F:52 Ang:-20.25`), un `prio:1` lo regresa a SIGUIENDO y vuelve a CRUCERO con
+  `F:38` < `grMin=max(20,95-55)=40` → sin giro rápido → `14.342 REVERSA distExt=61 distF=25`. La hipótesis
+  "piGr=0 → objetivo 50 cm" es falsa en el twin (`GIRO_RAPIDO_MODO=1` en el preset).
 - Perf: commit 0e3f6f1 (×1.14, bit-idéntico). Ideas no hechas: vectorizar `collision()` (~8%), cachear
   paredes en `camera.py`, C/numba (requiere instalar; pedir permiso).
 
@@ -131,9 +143,13 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
 `t16-perf` ya está en t15b2; `t16-oracle` descartado.)
 
 ## Siguiente (en orden)
-0. Sesión 2026-10-05: tres frentes en paralelo (prompt en `docs/PROMPT_SIGUIENTE.md`):
-   A) PARALELO 100/100 (prepark + carrera), B) PARK_PARALELO_REV, C) todas las seeds a 12 esquinas
-   (señales, giros con REVERSA, ruido del twin) sin tocar parking.
+0. Sesión 2026-10-05 (ola T16, reemplaza A/B/C): B (REV) cerrado sin solución robusta (fc0d6db).
+   - `t16u`: U geométrica en la esquina 13 (arco a tope → recta perpendicular cerrada con sonar F →
+     arco), armado de la U por odometría, servo 30/160, re-referencia de rumbo con la pared, harness `pre_U`.
+   - `t16gr`: ventana del giro rápido calculada (REVERSA) + holgura geométrica del arco contra la primera
+     lata (en lugar de `TURN_HOLD_INNER_CM=80`) + métrica de lado de paso.
+   - `t16infra`: sentido CW/CCW de una sola fuente (ACK `dir=`, hoy `DigitalMap` toma `'CW'` de config y el
+     twin le inyecta la verdad) + reporte de paridad twin↔carro (`GIRO_RAPIDO_MODO`, `FOX_*`, `TURNS_PER_RACE`…).
 1. ~~T16 rendimiento~~ hecho (t16-perf + 0e3f6f1); oráculo descartado.
 2. T15c esquinas (rama WIP `t15c-esquinas`) — evaluar si sirve al frente C.
 3. T12 escenarios explícitos por cartas (`--scenario`, `--noise-seed`, enumerador) y corregir
@@ -144,4 +160,6 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
 ## Pendiente de medir en el carro real
 Altura real del lente y grosor de la LiPo; montajes de US/ToF; PPR del encoder y pull-ups (GPIO 34/39);
 GPIO15 libre (XSHUT ToF frontal); VL53L0X vs VL53L1X; radio real de la contravuelta de la salida
-(`INICIO_R_CONTRA_MM`); fps reales en la Pi 5.
+(`INICIO_R_CONTRA_MM`); fps reales en la Pi 5. **Radio a tope por lado** (círculo del eje trasero a servo
+30 y 160): el twin usa bicicleta con 46.32° en ambos lados (R≈108); si 46.32° es la rueda interior, R≈163.
+Slew del servo y rodado en coast (hoy 'supuesto' en params.py).
