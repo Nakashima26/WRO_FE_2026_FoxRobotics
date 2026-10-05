@@ -55,8 +55,10 @@ class SteeringParams:
     def __post_init__(self) -> None:
         _prov(
             "steering.gain_left/right",
-            "medido",
-            "servo 30/160 = ±46.32° de rueda (CAD; confirmado por usuario aprox) — config.py",
+            "supuesto",
+            "46.32° es del CAD (usuario); que se alcance justo en servo 30/160 con centro 90 "
+            "sale de los topes del firmware del carro viejo (fc2bc3e); el carro nuevo usa "
+            "servo 0-180 (usuario) — pendiente frente t16servo",
         )
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")

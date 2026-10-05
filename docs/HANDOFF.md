@@ -22,6 +22,8 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 ## Presets
 - `hw_nuevo` = hardware de competencia: 180×130 mm, batalla 113, rueda 46.32°, cámara 45° a ~97 mm,
   encoder en motor, 4 ToF (L/R/F/B), IMU BNO085, Pi 5 (~28 fps), corrección del mapa con sonares.
+  **Servo de dirección 0-180** (dato del usuario, dicho varias veces): el firmware y el twin todavía usan
+  los topes 30/160 del carro viejo — ver "Pendiente de medir" y el frente `t16servo`.
   **Todo el trabajo nuevo se mide aquí.**
 - `giro_rapido` = carro actual (PWM sin encoder, MPU6050, 14 fps). Solo referencia.
 - Dimensiones/montajes: fuente única en `config.py` (bloque GEOMETRÍA DEL VEHÍCULO).
@@ -148,6 +150,10 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
      lata (en lugar de `TURN_HOLD_INNER_CM=80`) + métrica de lado de paso.
    - `t16infra`: sentido CW/CCW de una sola fuente (ACK `dir=`, hoy `DigitalMap` toma `'CW'` de config y el
      twin le inyecta la verdad) + reporte de paridad twin↔carro (`GIRO_RAPIDO_MODO`, `FOX_*`, `TURNS_PER_RACE`…).
+   - `t16servo`: servo físico 0-180 del carro nuevo. Firmware sigue pensando en unidades lógicas 30..160
+     (= tope); `escribirServo` las mapea a físico 0..180 bajo un define del carro nuevo; el twin `hw_nuevo`
+     modela el físico 0-180 → ±46.32°. Validar equivalencia (21 seeds + prepark contra baseline) y luego
+     sensibilidad al slew. `t16u`/`t16gr` diseñan en unidades lógicas.
 1. ~~T16 rendimiento~~ hecho (t16-perf + 0e3f6f1); oráculo descartado.
 2. T15c esquinas (rama WIP `t15c-esquinas`) — evaluar si sirve al frente C.
 3. T12 escenarios explícitos por cartas (`--scenario`, `--noise-seed`, enumerador) y corregir
@@ -158,6 +164,11 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
 ## Pendiente de medir en el carro real
 Altura real del lente y grosor de la LiPo; montajes de US/ToF; PPR del encoder y pull-ups (GPIO 34/39);
 GPIO15 libre (XSHUT ToF frontal); VL53L0X vs VL53L1X; radio real de la contravuelta de la salida
-(`INICIO_R_CONTRA_MM`); fps reales en la Pi 5. **Radio a tope por lado** (círculo del eje trasero a servo
-30 y 160): el twin usa bicicleta con 46.32° en ambos lados (R≈108); si 46.32° es la rueda interior, R≈163.
+(`INICIO_R_CONTRA_MM`); fps reales en la Pi 5. **Servo del carro nuevo** — dato del usuario: recorre
+**0-180**. Los topes 30/160 del firmware vienen del carro viejo (fc2bc3e, 2026-09-18) y el twin supone que
+en ellos la rueda llega a 46.32° (ganancia 60°/70° de comando por lado, también herencia del carro viejo).
+Si 0/180 = ±46.32° lineal, comandar 30/160 da ~30.9°/36.0° de rueda (R≈189/155 mm, no 108).
+Falta medir: valor de servo con ruedas rectas (el firmware supone `centroServo=90`), ángulo de cada rueda
+en 0 y en 180 (Ackermann o paralelas) y **radio a tope por lado** (círculo del eje trasero en 0 y en 180):
+el twin usa bicicleta con 46.32° (R≈108); si 46.32° es la rueda interior, R≈163.
 Slew del servo y rodado en coast (hoy 'supuesto' en params.py).
