@@ -429,3 +429,20 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - **(C) Reescribir ToF/sonar (`world.cast`) o `render_camera` en C/C++ vía ctypes, Cython o Numba**: candidato natural es `world.cast()` (ya vectorizado en numpy, pero con `n_rays × n_segs` arrays temporales) y el ensamblado de caras de `render_camera` (hoy ~225 llamadas pequeñas a `_to_cam`/frame, ver arriba). Ganancia potencial alta si se fusionan todas las caras en una sola transformación por frame (en vez de ~225 llamadas numpy pequeñas), pero igual de riesgosa que el punto B de arriba (reordena sumas flotantes) y de mayor esfuerzo (nueva toolchain: Cython necesita compilación aparte del `.ino`; Numba añade una dependencia nueva — ninguna de las dos está instalada en `.venv-sim`, requieren permiso para instalar). No se tocó ni se instaló nada.
   - **(C) Pantalla de screening con semillas reducidas**: correr un subconjunto fijo de 3-4 seeds "representativas" antes del lote completo de 21 para detectar regresiones grandes rápido. No cambia resultados pero cambia qué se reporta (menos cobertura por corrida) — decisión de proceso, no de código.
   - **(A, bajo impacto) `all.sh`/`drive.py`**: ya comparten caché de build por hash de contenido del `.ino` (`firmware/build.py`), así que no recompilan por job cuando el `.ino` no cambió entre corridas del lote — no hace falta un prebuild explícito salvo para evitar la ventana de carrera entre jobs documentada arriba en esta bitácora (sección CCW). Quedan huérfanos `.tmp.pdb` en `firmware/_build/` de compilaciones en paralelo en Windows (no se limpian); cosmético, no afecta tiempo de corrida.
+
+### T15b2 — auditoría de los agentes de parking (fase 26) y giros (HUG_CM) + diagnóstico de señales (2026-10-04, rama t15b2)
+- Los dos agentes murieron sin commit; sus transcripts los auditó un subagente en contexto fresco, y las cifras clave se verificaron en la Mac.
+- **Parking, fase 26 (sin commitear en t15b2):** el diagnóstico es correcto pero el fix no sirve.
+  - Diagnóstico del patrón 3: en la fase 8 el carro está girando a ~80°/s cuando el ToF trasero lo corta, y la seed 14 choca 0.09 s después de `dif=25.7`.
+  - Fix del patrón 2: en la fase 26 el carro no gira (`f=26 ext=11 avance=1 girado=0.1`) y `muyPegado` dispara sin filtrar por sentido.
+  - `t15b2_fixfull` termina 3/11 y la seed 6 pasa a chocar con el cajón. Conclusión: descartar.
+- **Giros (sin commitear en t15man):** los 23 giros MANIOBRA REVERSA del baseline ocurren con `distExt` entre 36 y 81 cm. El firmware reversea cuando el carro está lejos de la exterior y va hacia adelante solo si `distExt <= HUG_CM=20`.
+  - Corrijo el diagnóstico anterior: la reversa no viene de llegar a 5-8 cm.
+  - Subir `HUG_CM` 20→90 tapa el síntoma.
+  - La baja en el conteo de REVERSA es en parte artefacto: la seed 5 choca una esquina antes y por eso tiene menos esquinas donde reversear.
+- **Señales en el baseline de 21 seeds (`fox_man/runs/baseline`):** 12/21 chocan con una señal, y en todos los casos es la primera que encuentran.
+  - Por estado al chocar: SIGUIENDO 7 (con `obs` activo), GIRO_RAPIDO 2, ESTACIONANDO 2, SIG-GYRO 1.
+  - Por color: rojo 7, verde 5.
+  - Ningún choque viene de pasar por el lado equivocado.
+- **Ruido:** la carrera no es bit-reproducible entre procesos (la seed 2 alterna entre cajón e isla). Esto contradice la afirmación de T16 de que es "determinista"; está pendiente encontrar la causa.
+- Reglas de trabajo nuevas y el plan de tres frentes en `docs/HANDOFF.md` y `docs/PROMPT_SIGUIENTE.md`.

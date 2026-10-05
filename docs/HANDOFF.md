@@ -26,15 +26,78 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 - `giro_rapido` = carro actual (PWM sin encoder, MPU6050, 14 fps). Solo referencia.
 - Dimensiones/montajes: fuente única en `config.py` (bloque GEOMETRÍA DEL VEHÍCULO).
 
-## Estado (2026-10-04, HEAD 1250703 + lo que entreguen los agentes abajo)
-Carrera completa hw_nuevo 28 fps, 21 seeds (1-20 + 3170839): suma tc 177/252, 11 llegan a 12 giros,
-0 terminan limpios (≤5 mm fuera del cajón, sin contacto). Salida del cajón resuelta (harness 40/41).
+## Reglas duras (aprendidas, 2026-10-04)
+- **Planear antes de delegar**: el planner primero lee este archivo + las entradas de twin_plan.md que
+  toque, arma hipótesis y criterio de éxito por tarea, y solo entonces delega. Cada prompt de subagente
+  lleva: causa a verificar, archivos/zonas que puede tocar, criterio de validación, presupuesto de iteraciones.
+- **Causa raíz antes de editar**: el subagente debe demostrar la causa con pose real (`trace.csv`:
+  columnas `t,x,y,heading,est,servo,motor_dir,motor_pwm,speed_mm_s,...`) + `fw_debug.log`, citando líneas.
+  Prohibido "subir el umbral hasta que el síntoma desaparezca" sin explicar por qué el valor viejo estaba mal.
+- **Auditoría**: todo fix que se vaya a commitear lo revisa otro subagente en contexto fresco (solo lectura)
+  antes de aceptarlo. Las conclusiones de un subagente se verifican en la fuente antes de reportarlas.
+- **Ruido del twin**: la carrera NO es bit-reproducible entre procesos (seed 2 alterna `cajón magenta`/`isla`
+  con el mismo código; el agente de giros vio diferencias entre lote paralelo y serial). Sospecha no
+  verificada: algo depende del reloj real o de la carga de CPU (`pi_frame_ms`, hilos de OpenCV
+  `FOX_CV_THREADS`). Hasta aclararlo: toda seed que cambie de resultado se repite ×3 antes de atribuirlo
+  al fix; comparar siempre contra un baseline corrido en las mismas condiciones (mismo host, mismos jobs).
+- **Métricas normalizadas**: contar eventos (REVERSA, choques) por esquina recorrida, no totales — una
+  carrera que choca antes "tiene menos" de todo.
+- `prepark.py` NO ejercita la U ni la recta previa: 98/100 ahí no garantiza nada en carrera completa.
+  Validación final = prepark 100 + `all.sh` 21 seeds.
 
-Hecho y fusionado: fix del verde en esquina (CW), mapa digital (pose eje trasero, proyección,
+## Mac (corridas pesadas — Windows está al tope de RAM)
+- `ssh -o BatchMode=yes jesse@192.168.68.59` (arm64, 18 núcleos). Autorizado por el usuario para lotes.
+  Darle el permiso al subagente **en el prompt inicial** (si no, lo rechaza como sospechoso).
+- Cada agente su dir `~/Projects/fox_<tag>`, sincronizado por tar desde `git ls-files -co --exclude-standard`
+  sin `runs/` ni `_build/`. **Borrar `_build/` tras cada sync que cambie el .ino** (caché de `libfw_*.dylib`
+  puede servir un binario viejo).
+- Python `~/Documents/GitHub/FoxRobotics/.venv/bin/python`, `PYTHONPATH=.`, desde `src/RASPI/cam`.
+  Hasta 10 jobs por agente; coordinar si hay varios.
+- NO tocar `~/Documents/GitHub/FoxRobotics` (repo del usuario; solo su `.venv`) ni dirs de otros agentes.
+- No sondear con `sleep`: ssh en primer plano con timeout largo, o Bash `run_in_background` y esperar aviso.
+- `SOLO_CAJON=1 SEEDS="..." pure_pursuit/twin/tools/all.sh <tag> [jobs]` (en la Mac cambiar la ruta del
+  python del script o llamar drive.py directo); `summ3.py runs/<tag> <seeds>` resume.
+
+## Estado (2026-10-04, rama `t15b2` HEAD 0e3f6f1, NO fusionada a `digital-twin`, NO pusheada)
+Reglamento 9.23 (decisión del usuario): el cambio de sentido para estacionar se hace **dentro de la
+esquina 13**; luego solo se anda por esa esquina y la recta de salida. Criterio de parking: tocar la pared
+exterior está bien, tocar el cajón no.
+
+- Estacionamiento: `PARK_MODO=PARK_PARALELO` + U de 180° (`PARK_PARALELO_USA_UTURN=true`) disparada por
+  `vigilarUturn(distL,distR,distF)` con la señal de esquina (`contadorEsquina13`, commit a6e29b3; verificado
+  11/11 dentro de la sección de esquina con trace.csv). Luego fase 0 (escaneo) → fases 1-13.
+  - `prepark.py --solo-cajon`: **98/100** (fallan `CW_c2_p4`, `CW_c3_p4`: poste 2 en fase 8, holgura de la S ≈12 mm).
+  - Carrera (11 seeds que llegan a tc=12, tag `t15b2_esquina13`): estacionan 6, 8, 18, 3170839; cajón en
+    2, 7, 14, 19, 20; señal en 5, 9.
+  - Patrón 2 (7, 19 CCW): tras la U queda pegado a la pared (ext 9-11) y no se separa a 28 cm antes del poste 1.
+  - Patrón 3 (2, 14, 20 CW): entra a fase 9 aún girando ~80°/s, 25° fuera (`dif=25.7 ext=9 ATRAS PEGADO`).
+- `PARK_PARALELO_REV` (estacionar en reversa, fases 30-38): 0/100 limpios con el mejor valor
+  (`PARK_REV_B_MAX_MM=30`); el costado roza el poste a Ang≈150-165° del swing C con servo fijo. Ver
+  twin_plan "barrido PARK_REV_*".
+- Carrera completa 21 seeds (baseline Mac, `~/Projects/fox_man/.../runs/baseline`): terminan 4/21; **12/21
+  chocan con una señal** (7 en SIGUIENDO con esquive activo pero sin margen, 2 en GIRO_RAPIDO, 2 en
+  ESTACIONANDO, 1 SIG-GYRO; siempre la PRIMERA señal, ninguna por lado equivocado).
+- Giros con REVERSA ("corre raro"): 23 en el baseline, todos con `distExt` 36-81 cm (el firmware reversea
+  cuando está LEJOS de la exterior; adelante solo si `<= HUG_CM=20`). No se sabe por qué llega tan
+  separado de la exterior a esas esquinas.
+- Perf: commit 0e3f6f1 (×1.14, bit-idéntico). Ideas no hechas: vectorizar `collision()` (~8%), cachear
+  paredes en `camera.py`, C/numba (requiere instalar; pedir permiso).
+
+### Trabajo sin commitear (auditado; por defecto DESCARTAR)
+- `t15b2`: diff en `PurePursuit.ino` (~98 líneas): fase 26 "separarse de la pared" para el patrón 2.
+  Auditoría: diagnóstico correcto, fix malo — el carro no gira (`f=26 ext=11 avance=1 girado=0.1`), dispara
+  en seeds que no debía (`muyPegado` sin filtro de sentido) y `t15b2_fixfull` empeora (seed 6 pasa a cajón).
+  Conservar solo los comentarios de diagnóstico de patrón 2/3 si sirven.
+- `t15man` (worktree aparte): `HUG_CM` 20→90, `HUG_HIST_CM` 6→10. Tapa el síntoma (anula REVERSA), no
+  explica por qué llega a 36-81 cm; la baja de REVERSA es en parte artefacto (seed 5 choca una esquina
+  antes); nunca terminó la comparación serial. Corridas en `~/Projects/fox_man/src/RASPI/cam/runs/`.
+- Stash `fox-opt-t15b2-1791161724` en la pila compartida: copia redundante de 0e3f6f1, se puede borrar.
+
+Hecho y fusionado antes: fix del verde en esquina (CW), mapa digital (pose eje trasero, proyección,
 rumbo de arranque real, corrección con sonares), encoder+4 ToF, BNO085, Pi 5 + constantes en frames
 independientes de fps, arranque al ras del borde interior del cajón, salida del cajón sin reversa.
 
-## Trabajo en vuelo al cerrar la sesión anterior (revisar primero)
+## Ramas viejas (sesiones anteriores; revisar antes de borrar)
 Dos worktrees en `.claude/worktrees/` (ver `git worktree list`):
 - `agent-a6501da593f9e5146` (rama `worktree-agent-a6501da593f9e5146`, base cf8f97d — anterior a la salida nueva):
   **T15b estacionamiento en PARALELO**. Fases de tiempo → distancia de encoder + barrido de parámetros
@@ -57,11 +120,15 @@ Para cada uno: ver `git -C <worktree> log` y `diff --stat`; si hay commits útil
 `digital-twin` (conflictos esperables en PurePursuit.ino/runtime_nuevo.py/twin_plan.md), correr tests,
 validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
 
+(`ae1e3ed` ya está en t15b2 vía `t15b-merge`; `203d36c` WIP y `t15c-esquinas` 9cbc6ad WIP no.
+`t16-perf` ya está en t15b2; `t16-oracle` descartado.)
+
 ## Siguiente (en orden)
-1. **T16 rendimiento** (plan en twin_plan.md): hoy ~7 s reales por s simulado. Modo "percepción oráculo"
-   (saltar render+visión, detecciones desde la verdad del twin con ruido/latencia/FOV/oclusión) para
-   iterar lógica ×5-10; perfilar render + process_frame + física/ctypes; validar final con visión completa.
-2. Terminar T15b (estacionamiento paralelo incl. vuelta en U) y T15c con el simulador rápido.
+0. Sesión 2026-10-05: tres frentes en paralelo (prompt en `docs/PROMPT_SIGUIENTE.md`):
+   A) PARALELO 100/100 (prepark + carrera), B) PARK_PARALELO_REV, C) todas las seeds a 12 esquinas
+   (señales, giros con REVERSA, ruido del twin) sin tocar parking.
+1. ~~T16 rendimiento~~ hecho (t16-perf + 0e3f6f1); oráculo descartado.
+2. T15c esquinas (rama WIP `t15c-esquinas`) — evaluar si sirve al frente C.
 3. T12 escenarios explícitos por cartas (`--scenario`, `--noise-seed`, enumerador) y corregir
    `REQUIRED_CARDS` en wro_field.py:226 (debe ser 26, 27, 32, 33) después de guardar los escenarios de las seeds actuales.
 4. T11 mapa congelado tras vuelta 1 + ruta fija vueltas 2-3 (visión solo como sanity check).
