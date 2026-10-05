@@ -109,19 +109,35 @@ def _seat_world(section: str) -> list[tuple[str, float, float]]:
 
 class DigitalMap:
     def __init__(self) -> None:
-        self.direction = str(getattr(C, "DIGITAL_MAP_DIRECTION", "CW"))
+        # Sentido de carrera: None = sin decidir hasta que el ESP lo reporte
+        # (dir= del ACK, ver runtime_nuevo._update_digital y set_direction).
+        # "CW"/"CCW" en config lo fuerza desde el arranque (el twin inyecta
+        # la verdad del campo así, salvo DIGITAL_MAP_INJECT_TRUTH=0).
+        d = getattr(C, "DIGITAL_MAP_DIRECTION", None)
+        self.direction: str | None = d if d in ("CW", "CCW") else None
+        # Recta del cajón = marco del mapa, no un dato del campo: el tapete es
+        # simétrico a 90° (section_to_world, latas y cintas solo rotan), así
+        # que con el carro real basta una convención fija.
         self.parking = str(getattr(C, "DIGITAL_MAP_PARKING", "W"))
         self.section = self.parking
         self.along_mm = self._stall_along()
         self.lat_mm = 0.0
-        self.heading = _heading(self.section, self.direction)
+        # Sin sentido: rumbo/pose de relleno (solo HUD/logs). Nadie debe
+        # llamar update() así; set_direction() los fija antes del primero.
+        self.heading = _heading(self.section, self.direction) if self.direction else 0.0
         self.in_stall = True
         self._od: float | None = None
         self._tc = 0
         self._votes: dict[tuple[str, str], dict[str, int]] = {}
         self.confirmed: dict[tuple[str, str], str] = {}
         self._best: dict[tuple[str, str], float] = {}
-        self.pose_xy = self._stall_xy()
+        if self.direction:
+            self.pose_xy = self._stall_xy()
+        else:
+            # Centro del cajón (promedio de los dos arranques): dato del
+            # campo, no un sentido supuesto. Solo para el HUD.
+            a, b = stall_start_xy(self.parking, "CW"), stall_start_xy(self.parking, "CCW")
+            self.pose_xy = (0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]))
         self.line_world: list[tuple[float, float]] = []
         self._view_heading = self.heading
         self._aligned = False
@@ -148,6 +164,24 @@ class DigitalMap:
         self._dF: float | None = None
         self._pp_turn_tc: int | None = None
         self._tpr = 12
+
+    def set_direction(self, direction: str) -> bool:
+        """Fija el sentido UNA vez, antes del primer update(). True si lo fijó.
+
+        Si ya estaba fijado (config forzada o un dir= anterior) no lo cambia:
+        el mapa ya ancló la pose y los votos con ese sentido.
+        """
+        if direction not in ("CW", "CCW"):
+            raise ValueError(f"sentido inválido: {direction!r}")
+        if self.direction is not None:
+            if direction != self.direction:
+                print(f"[DMAP] sentido {direction} ignorado: ya es {self.direction}", flush=True)
+            return False
+        self.direction = direction
+        self.heading = _heading(self.section, direction)
+        self._view_heading = self.heading
+        self.pose_xy = self._stall_xy()
+        return True
 
     def _stall_along(self) -> float:
         # El cajón está fuera de la pared, del lado de atrás del w de la recta.

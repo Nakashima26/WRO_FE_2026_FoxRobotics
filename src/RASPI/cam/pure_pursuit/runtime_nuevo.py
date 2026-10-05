@@ -18,6 +18,7 @@ Para correrlo:
 """
 
 import argparse
+import copy
 import functools
 import math
 import os
@@ -306,6 +307,8 @@ class PPRuntime:
         # Corrección de color por el piso (otra iluminación), ver color_corr.py
         self.color_corr = FloorColorCorrector()
         self.digital = DigitalMap()
+        # Updates del mapa en espera del sentido (ver _update_digital).
+        self._dmap_pending: list = []
         # Lado de paso de la 1ª lata al salir del cajón (isal=, ver salida_cajon.py)
         self.salida = SalidaCajon()
         self._dig_img = None
@@ -507,7 +510,7 @@ class PPRuntime:
         return out
 
     def _resolve_map_drive_dir(
-        self, fields: dict[str, str], ack: str | None,
+        self, fields: dict[str, str], ack: str | None, use_vision: bool = True,
     ) -> str | None:
         # Sin fuente confiable se espera: los sonares al armar solo dicen en qué
         # lado del pasillo pusieron el carro, no hacia dónde va la pista, y una
@@ -520,10 +523,48 @@ class PPRuntime:
             d = _parse_direccion(ack or "")
         if d in ("L", "R"):
             return d
+        if not use_vision:
+            return None
         td = self.turn_dir_tracker.direction
         if td in ("L", "R"):
             return td
         return None
+
+    # ~43 s a 28 fps: el ESP decide en el cajón (t~1 s) o en el 1er giro.
+    _DMAP_PENDING_MAX = 1200
+
+    def _update_digital(self, ack: str | None, feet: list, orange: dict | None) -> None:
+        """DigitalMap.update con el sentido del ESP (dir= del ACK), fijado una vez.
+
+        Mientras el ESP no decide (dir=?), las llamadas se guardan y se
+        reproducen en orden al fijarlo: el mapa queda igual que si hubiera
+        arrancado con ese sentido. Sin update el mapa sigue en el cajón y sus
+        consultas (blocks_turn, needs_line, holds_for_center, line_bev) dan
+        neutro. No se usa el tracker de visión: un sentido mal adivinado
+        espejea el mapa toda la carrera. En el cajón el ESP decide en INICIO
+        fase -1 (|dL0-dR0| >= INICIO_DIR_MIN_GAP_CM); si no, en el 1er giro.
+        El buffer tiene tope (_DMAP_PENDING_MAX): si el ESP no decide, se dejan
+        de guardar los últimos (los primeros fijan el ancla de odometría) y el
+        replay ya no es exacto, pero el mapa no se espejea.
+        """
+        dm = self.digital
+        if dm.direction is None:
+            d = self._resolve_map_drive_dir({}, ack, use_vision=False)
+            if d is None:
+                if len(self._dmap_pending) < self._DMAP_PENDING_MAX:
+                    self._dmap_pending.append(
+                        (ack, list(feet), copy.deepcopy(orange)))
+                    if len(self._dmap_pending) == self._DMAP_PENDING_MAX:
+                        print(f"[DMAP] sin sentido tras {self._DMAP_PENDING_MAX} updates: "
+                              f"dejo de guardar", flush=True)
+                return
+            dm.set_direction("CW" if d == "R" else "CCW")
+            pend, self._dmap_pending = self._dmap_pending, []
+            print(f"[DMAP] sentido {dm.direction} (dir={d}) tras {len(pend)} "
+                  f"updates en espera", flush=True)
+            for p_ack, p_feet, p_orange in pend:
+                dm.update(p_ack, p_feet, p_orange)
+        dm.update(ack, feet, orange)
 
     def _ensure_map_geometry(self, drive_dir: str, odom_pose) -> None:
         if self._map_geometry is not None:
@@ -1361,6 +1402,7 @@ class PPRuntime:
         # Mapa digital limpio en GO: lo votado desarmado (carro en la mano,
         # otra pose) no vale, y el ancla del odómetro es el primer ACK armado.
         self.digital = DigitalMap()
+        self._dmap_pending = []
         self.salida = SalidaCajon()
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
         return ready_ack
@@ -1851,7 +1893,7 @@ class PPRuntime:
                 if self.bev.is_calibrated and not self._is_turning:
                     feet.extend(seen_above_obstacles(self.bev, positions))
                 if armed:
-                    self.digital.update(serial_ack, feet, line_info.get("Orange"))
+                    self._update_digital(serial_ack, feet, line_info.get("Orange"))
                     self.salida.update(serial_ack, feet)
                 if len(path_points) >= C.MIN_PATH_PTS:
                     if getattr(C, "DIGITAL_MAP_STEER", False) and not self._is_turning:
