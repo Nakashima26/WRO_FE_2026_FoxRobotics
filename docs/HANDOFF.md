@@ -100,6 +100,43 @@ exterior está bien, tocar el cajón no.
 - `PARK_PARALELO_REV` (estacionar en reversa, fases 30-38): 0/100 limpios con el mejor valor
   (`PARK_REV_B_MAX_MM=30`); el costado roza el poste a Ang≈150-165° del swing C con servo fijo. Ver
   twin_plan "barrido PARK_REV_*".
+- **Parking: diagnóstico geométrico T16** (2026-10-05, diagnóstico + verificación adversarial de cada modo).
+  Supuesto R=109 con servo a tope; R=163 si 46.32° es la rueda interior. Ningún modo llega hoy a 100/100
+  de forma robusta:
+  - **PARALELO** (98/100 en prepark, fallan CW_c2_p4/c3_p4 por −1.5/−0.8 mm contra el poste 2).
+    - El contragiro de fase 8 pasa con un margen de ~0±2 mm (ρ−r_FL +1.9/+1.8/−1.3/−1.3 frente a minP2 1.7/0.2/−0.8/−1.5).
+    - Cota analítica de la S simple: 7.1 mm con R=109 y −6.8 con R=163.
+    - S2 de 4 cúspides: 19.7 mm en ideal. Con dispersión el peor caso sale −12.7 mm (R=109) y −23.9 (R=163),
+      y termina fuera o torcido. **No viable.**
+    - El lazo de 33-72 ms existe pero su causa NO está identificada: no son los timeouts de pulseIn, refutado.
+    - Tiempo medido: CW 6.22 s, CCW 10.03 s (fase 0→TERMINADO); P2→fin 4.36 s.
+  - **PARALELO_REV** (0/100 hoy).
+    - Causa raíz: el barrido arranca ~26 mm antes de la ventana de x0 (~10 mm).
+    - Diseño de 5 tramos con R=109: 4.3 mm en cinemática. Con la dinámica del twin las paradas se pasan
+      +2.8..+4.6°, y el corte del ToF trasero llega −16±7.5 mm tarde (sample-and-hold a 30 Hz + EMA).
+      Calibrado sobre los mismos 100 casos quedan 0.4-1.8 mm.
+    - Sensibilidad: R=115 da 11/100 contactos, R=120 da 64/100, R=163 inviable.
+    - Con el contrato de entrada de t16u, CW tiene 53/90 contactos (la fase 0 no converge: Y32 varía 117 mm).
+    - No hay evidencia medida de que sea más rápido que PARALELO: P2→fin 4.5-4.9 s en emulación.
+    - `distB_filtrada` conserva una lectura vieja si el ToF no es válido (ino:3201).
+  - Lo que bloquea a los dos modos: (1) R por lado sin medir (±3 mm de R cambia el desenlace); (2) la dispersión
+    de entrada (fase 0 y U); (3) la sensibilidad a <0.4° de rueda cerca del centro (ver t16servo abajo).
+  - Scratch de las verificaciones (ignorado por git): `src/RASPI/cam/runs/t16pfv/`, `runs/t16revv/`;
+    Mac `~/Projects/fox_t16revv`.
+- **t16servo (dd2831f) auditado: FUSIONAR_CON_NOTAS**, pero solo junto con el commit de dinámica SG90 (su slew
+  900/771°/s es imposible para un SG90).
+  - El shim es correcto: ctl_q reproduce la base 100/100 en prepark y 21/21 en carrera.
+  - **La caída del prepark 98→87 NO es caos.** b_db pierde 11 escenarios y no gana ninguno; 8 son p2. La
+    descomposición CTLQ_NEW la ubica en la cuantización cerca del centro (84..96: caen los 6 CW p2), no
+    en el tope 160 (0 fallos).
+  - Esos p2 pasaban gracias al sesgo de +0.03..0.08° a la derecha que deja la truncación vieja.
+  - **Artefacto del twin** (vehicle.py:80-88, anterior a la rama): paso de slew 0.6 u/ms > banda 0.5 u, así que
+    el reposo depende del sub-paso. Con L=89 la rueda asienta en 0.851° (dt 1 ms), 0.695° (0.5 ms) y 0.579° (0.25 ms).
+  - `_en_banda_muerta` (vehicle.py:134) congela el servo si la banda de un lado vale 0.
+  - plano600 (slew del SG90) da prepark 79/100, roce_pared 15/100.
+  - FOX_SERVO_180/FOX_ENCODER/FOX_TOF solo valen 1 en el SIL: hay que activarlos al compilar el ESP del
+    carro nuevo.
+  - escribirServo usa 90 fijo y no centroServo (ino:1621).
 - Carrera completa 21 seeds (baseline Mac, `~/Projects/fox_man/.../runs/baseline`): terminan 4/21; **12/21
   chocan con una señal** (7 en SIGUIENDO con esquive activo pero sin margen, 2 en GIRO_RAPIDO, 2 en
   ESTACIONANDO, 1 SIG-GYRO; siempre la PRIMERA señal). "Ninguna por lado equivocado" NO está medido:
