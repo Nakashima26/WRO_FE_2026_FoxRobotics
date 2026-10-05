@@ -46,6 +46,15 @@ MPU6050 mpu(Wire);
 #ifndef FOX_TOF
 #define FOX_TOF 0
 #endif
+// Carro nuevo (hw_nuevo): servo de dirección 0-180 (dato del usuario). Las
+// maniobras siguen en unidades internas del firmware (30..160, centro 90; topes
+// de fc2bc3e) y escribirServo() las lleva a valor de servo (0-180): 30 -> 0,
+// 90 -> 90, 160 -> 180, lineal por tramos. Supuestos sin medir: ruedas rectas
+// en 90 y ±46.32° de rueda en 0/180, lineal y simétrico. Con 0 escribe el valor
+// interno tal cual (carro viejo).
+#ifndef FOX_SERVO_180
+#define FOX_SERVO_180 0
+#endif
 
 #if FOX_ENCODER && !defined(FOX_SIL)
 // Encoder de cuadratura del N20 (hardware nuevo). 34/39 son solo-entrada y SIN
@@ -1597,12 +1606,26 @@ float distB_filtrada = -1;
 // Actuadores
 // ═══════════════════════════════════════════════════════════════════════════════
 
-int ultimoServo = 90;   // último ángulo escrito al servo — para debug en el ACK
+int ultimoServo = 90;   // último ángulo escrito al servo (unidades internas) — para debug en el ACK
 
 void escribirServo(int angulo) {
+#if FOX_SERVO_180
+  // Unidades internas 30..160 -> valor de servo 0-180 (ver FOX_SERVO_180).
+  //   izq (>90): servo = 90 + (L-90)·90/70     der (<90): servo = 90 - (90-L)·90/60
+  // El pulso (500..2500 µs = servo 0..180) sale directo en µs, sin redondear
+  // antes a grado entero: 1500 + (L-90)·1000/70 o 1500 - (90-L)·1000/60.
+  // Lo que pida fuera de 30..160 (p. ej. la U de la fase 24 en CCW, servo 20)
+  // se queda en el tope. ultimoServo y los logs siguen en unidades internas.
+  angulo = constrain(angulo, 30, 160);
+  ultimoServo = angulo;
+  int d = angulo - 90;
+  int pulso = d >= 0 ? 1500 + (d * 1000 + 35) / 70
+                     : 1500 - (-d * 1000 + 30) / 60;
+#else
   angulo = constrain(angulo, 0, 180);
   ultimoServo = angulo;
   int pulso = map(angulo, 0, 180, 500, 2500);
+#endif
   int duty  = (pulso * ((1 << resServo) - 1)) / 20000;
   ledcWrite(SERVO_PIN, duty);
 }
@@ -2720,7 +2743,8 @@ void parsePiMessage(String line) {
     // ── DEBUG heading/control (2026-09-07: "heading es mi pata de palo") ──
     //   ao   : anguloObjetivo — el TARGET de heading que persigue el gyro PID
     //   eg   : errorGyro (anguloObjetivo - anguloGyro, capado ±20 en controlPID)
-    //   srv  : último ángulo escrito al servo (centroServo = centro; menor der, mayor izq)
+    //   srv  : último ángulo escrito al servo, en unidades internas 30..160 también con
+    //          FOX_SERVO_180 (centroServo = centro; menor der, mayor izq)
     //   tc   : turnsCompleted — qué esquina física va (0..12)
     Serial2.print(",ao=");   Serial2.print(anguloObjetivo, 1);
     Serial2.print(",eg=");   Serial2.print(errorGyro, 1);

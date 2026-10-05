@@ -457,3 +457,75 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Ningún choque viene de pasar por el lado equivocado.
 - **Ruido:** la carrera no es bit-reproducible entre procesos (la seed 2 alterna entre cajón e isla). Esto contradice la afirmación de T16 de que es "determinista"; está pendiente encontrar la causa.
 - Reglas de trabajo nuevas y el plan de tres frentes en `docs/HANDOFF.md` y `docs/PROMPT_SIGUIENTE.md`.
+
+### T16servo — servo de dirección 0-180 en el carro nuevo (hw_nuevo) (2026-10-05, rama t16servo)
+- **Dato (usuario):** el servo de dirección del carro nuevo recorre 0-180. El firmware suponía los topes 30/160 con centro 90 del carro viejo (fc2bc3e). **Supuestos sin medir:** ruedas rectas en valor de servo 90, ±46.32° de rueda en 0/180, lineal y simétrico.
+- **Firmware (`PurePursuit.ino`):** define nuevo `FOX_SERVO_180` (líneas 49-57, patrón `#ifndef … #define 0`).
+  - Con 1, `escribirServo()` (1611-1631; rama nueva 1612-1623) recorta las unidades internas a [30,160] y las lleva por tramos a valor de servo 0-180: der `90-(90-L)·90/60`, izq `90+(L-90)·90/70`. El pulso sale directo en µs, redondeado (`1500 ± (d·1000 + 35)/70` o `(… + 30)/60`), sin pasar por un grado entero.
+  - `ultimoServo`, `srv=` del ACK y los `Serial.print` siguen en unidades internas. Con 1, `srv` muestra el valor ya recortado: la U de la fase 24 en CCW pide 20 y el ACK dice `srv=30`; el log `PARK U servo=20` no cambia. En la Pi solo lo lee el HUD (`chassis_twin.py:448`).
+  - Con 0 es bit a bit igual. No se tocó ninguna maniobra ni las constantes 30/160. `escribirServo` es el único `ledcWrite` al servo.
+- **Twin:**
+  - `params.steering_servo_180()`: ganancia 46.32/90 por lado y clip [0,180]. Trae dos opciones de slew: `proporcional` (default, decisión del usuario 2026-10-05; 771.4 °/s izq y 900 °/s der de valor de servo, la misma tasa de rueda que 600 °/s con 30..160) y `plano600` (`TWIN_SERVO_SLEW=plano600`).
+  - `hw_nuevo` lleva `FOX_SERVO_180=1` y `Sim` arma el steering según el define. Los demás presets no cambian.
+  - `trace.csv` (solo con el define): `servo` sigue en unidades internas (lo que leen `triage`/`align` y los grep de `servo=160`). Se agregan `servo_180` (valor de servo del LEDC) y `rueda` (° de rueda tras el slew, + = derecha).
+- **Error del shim encontrado y corregido (iteración 1 de 3): la banda muerta.** El twin usa `|err| <= 0.5` sobre el comando.
+  - Con valor de servo 0-180, un 0.5 plano son 0.257° de rueda, contra 0.386° der y 0.331° izq con 30..160: la rueda paraba más cerca del objetivo, o sea otro carro.
+  - Ahora la banda es por lado (`deadband_left/right_deg`, `vehicle._en_banda_muerta`), escalada como el recorrido. Con eso la rueda que sale del mismo comando es idéntica a la de 30..160 con diferencia máxima de 8e-13 (`tests/test_servo_180.py::test_banda_muerta_misma_en_rueda`).
+- **Lo que sí cambia por diseño: la cuantización del pulso.**
+  - El camino viejo `map(L,0,180,500,2500)` trunca al µs: la rueda queda sesgada a la derecha hasta 0.079° del nominal (peor en L=89).
+  - El nuevo redondea al µs: ≤0.032° (peor en L=158). Diferencia viejo−nuevo hasta 0.079° (L=61). En 160: −46.271° viejo, −46.308° nuevo; en 76: 10.859° viejo, 10.802° nuevo.
+- **Gates (Mac):**
+
+| lote | terminan/21 | limpios/21 | suma_tc | choque señal | choque cajón | MANIOBRA REVERSA | prepark limpios/100 | salida |
+|---|---|---|---|---|---|---|---|---|
+| base (fox_base) | 4 | 4 | 177 | 12 | 5 | 23 | 98 | 41/41 |
+| b_prop (banda 0.5 plana, descartado) | 4 | 4 | 158 | 14 | 3 | 19 | 91 | 41/41 |
+| **b_db (hw_nuevo final)** | 7 | 6 | 185 | 12 | 2 | 23 | 87 | 41/41 |
+| ctl_q (b_db + cuantización vieja emulada) | 4 | 4 | 177 | 12 | 5 | 23 | 98 | — |
+| ctl_c (base sin shim, centro 90.001 = 0.0008° de rueda) | 5 | 4 | 171 | 10 | 5 (+1 max_time) | 23 | 97 | — |
+| ctl_g (base sin shim, tope izq 46.35°) | 3 | 3 | 156 | 14 | 3 (+1 isla) | 18 | 97 | — |
+| (c) c600 (hw_nuevo, `TWIN_SERVO_SLEW=plano600`) | 5 | 5 | 185 | 11 | 5 | 26 | 79 | 41/41 |
+
+  - **(a)** giro_rapido, seed 3170839, caché nueva: SHA de `trace.csv` sin `pi_frame_ms` idéntico entre base y t16servo (`9000c047d60d…`, 601 filas), y `fw_debug.log` idéntico.
+  - **(b)** No se cumple "mismo desenlace por seed": cambian 8 seeds de carrera (1, 2, 7, 10, 12, 13, 16, 19) y el prepark pierde 11 netos.
+  - **ctl_q** prueba que todo eso viene de la cuantización, no del shim. Usa el mismo firmware `FOX_SERVO_180=1` y el mismo twin 0-180 (slew y banda por lado); solo el twin decodifica el duty nuevo al entero interno y le aplica la cuantización vieja. Resultado: tabla de carrera idéntica en las 21 seeds (tiempos incluidos) y tabla de prepark idéntica en los 100 escenarios. `fw_debug.log` idéntico en las 8 seeds que cambiaban, con la pose a ≤3.4e-9 mm.
+  - En s1, s2, s7, s12 y s19, el primer número del fw que difiere es el ángulo del gyro en INICIO por 0.01°. Ejemplo s2, línea 151: `2.853 … Ang:-33.86` vs `-33.85`.
+  - Le sigue una decisión al filo. Ejemplo s19, línea 258: base `5.390 … -> MANIOBRA dir=IZQ REVERSA distExt=36 distF=25` vs b_db `5.385 … CRUCERO`.
+  - En s10 y s16, la primera diferencia de pose está en la rueda: s10 en servo 76 (0.057° de rueda), s16 en el centro.
+  - Sin shim, ctl_c (0.0008° de rueda) cambia el desenlace de 9/21 seeds y ctl_g (+0.03° en el tope izq) el de 8/21; b_db cambia 8/21. El twin es caótico a 0.001-0.05° de rueda. Conclusión: los cambios son marginales y el shim no tiene error.
+  - **(c)**, solo reporte: con `plano600` la rueda gira a ~309 °/s en vez de ~463 der / ~397 izq. La carrera queda parecida (5/21), el prepark baja a 79/100 (18 escenarios sin `TERMINADO`, 14 de ellos CW) y la salida sigue 41/41. El slew sin medir pesa en el estacionamiento.
+  - El prepark que se pierde es casi todo el grupo `CW_c*_p2` (misma geometría, caen juntos), el patrón 3 de arriba. CW_c5_p2: base mide `vel medida=29.2 cm/s` (línea 118), b_db `29.0` (línea 119); el avance de la fase 1 da 43 vs 40 mm; fase 9 `dif=28.6` (base, termina) vs `dif=26.8` (b_db, choca con el cajón a los 5.645 s).
+- **Sitios que suponen ganancia simétrica.** Las unidades internas no son simétricas: der 60 = 46.32° (0.772°/u), izq 70 = 46.32° (0.662°/u). El shim conserva esto a propósito para seguir equivalente; no se tocó.
+  - **U** (fase 24 `ino:4439-4440`, PUNTA fase 20 `ino:5768-5770`, comentario 5768): `ticks = (int)(δ/46.32·70)`, `centroServo ± ticks`. A la izquierda es exacto; a la derecha gira 70/60 = 1.167 veces lo pedido hasta que se recorta al tope en ticks ≥ 60.
+
+    | ext (cm) | ticks | valor interno der | rueda pedida | rueda que sale (der) | error | radio pedido → que sale (mm) |
+    |---|---|---|---|---|---|---|
+    | 6-61 | 70 | 20 → recorte 30 | 46.32° | 46.32° | 0 | 100-105 (no alcanzable) → 108 |
+    | 64 | 65 | 25 → 30 | 43.01° | 46.32° | +3.31° | 120 → 108 |
+    | 67 | 60 | 30 | 39.70° | 46.32° | +6.62° | 135 → 108 |
+    | 70 | 55 | 35 | 36.39° | 42.46° | +6.07° | 150 → 123 |
+    | 74 | 50 | 40 | 33.09° | 38.60° | +5.51° | 170 → 142 |
+    | 90 | 36 | 54 | 23.82° | 27.79° | +3.97° | 250 → 214 |
+    | 100-149 | 31-28 | 59-62 | 20.5-18.5° | 23.9-21.6° | +3.4 a +3.1° | 300-545 → 255-285 |
+    | inválido (≤5 o ≥150, gap 700) | 55 | 35 | 36.39° | 42.46° | +6.07° | 150 → 123 |
+
+    En las corridas, la U de la derecha (CCW) siempre pidió 20, con `ext` entre 11 y 48, así que no hubo error. La izquierda (CW) pidió 121-160 y es exacta; por ejemplo b_db s13 dio `PARK U servo=145 ext=200` (ToF inválido → 55 ticks). PUNTA no corre en estos presets.
+  - **PP** (`ino:3079`): `centroServo - steerDeg·ppServoGain` con `ppServoGain=1.0` (`ino:218`). Para el mismo `steer` de la Pi, la rueda gira 0.772·steer a la derecha y 0.662·steer a la izquierda: la derecha gira 1.167 veces lo de la izquierda. Contra el ángulo geométrico de `controller.py:140-143` es −22.8% der y −33.8% izq. Con `MAX_STEER_DEG=60` la izquierda llega a servo 150 = 39.70°.
+  - **Topes simétricos `|servo-centro| ≤ X`**, rueda máxima der / izq:
+    - `PARK_SERVO_MAX=35` (1972): 27.02° / 23.16°
+    - `PARK_PUNTA_SERVO_MAX=30` (2402): 23.16° / 19.85°
+    - `REV_HOLD_OUT_MAX=34` (2574): 26.25° / 22.50°
+    - `INICIO_REV_OUT_MAX=45` (3543): 34.74° / 29.78°
+    - `MANIOBRA_PIVOTE_OUT_MAX=60` (4248): 46.32° / 39.70°
+    - `outputRecup ±60` (2992): 46.32° / 39.70°
+    - `outputFinal ±25` (3099): 19.30° / 16.54°
+  - **Lazos PID** `centroServo + out` (1973, 2403, 2575, 3048, 3100, 4114): la ganancia del lazo a la derecha es 1.167 veces la de la izquierda.
+  - Los giros a tope (30/160) usan el tope de cada lado y no dependen de la simetría. `GR_VERDE_ABRE=32` (piso `centroServo-32`, 4119) es solo del lado derecho: 24.70°.
+- **Pi:** no depende del valor de servo. `controller.py:140-143` calcula `steer` geométrico y `controller.py:161` lo recorta a `MAX_STEER_DEG=60` (`config.py:287`). El `srv` del ACK solo lo lee el HUD (`chassis_twin.py:448`).
+- **Pendiente de medir en el carro nuevo:**
+  - valor de servo con las ruedas rectas;
+  - ángulo de rueda en 0 y en 180 (¿±46.32°, simétrico?);
+  - radio a tope por lado;
+  - slew del servo (°/s);
+  - banda muerta / juego.
+- **Pendiente para quien retome:** decidir si la U, el PP y los topes pasan a ticks por lado (60 der / 70 izq) o si las unidades internas pasan a ser simétricas. Hoy el shim las conserva tal cual. Revisar también la robustez del grupo `CW_c*_p2` (patrón 3) ante 0.04° de rueda.

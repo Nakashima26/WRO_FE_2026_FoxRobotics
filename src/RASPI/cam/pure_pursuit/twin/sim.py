@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -18,7 +19,12 @@ from pure_pursuit.runtime_nuevo import PPConfig, PPRuntime
 from pure_pursuit.twin.camera import CameraModel
 from pure_pursuit.twin.firmware.fw import FirmwareSIL, FirmwareSetupError
 from pure_pursuit.twin.metrics import compute_metrics, _parse_ack_field, _parse_est
-from pure_pursuit.twin.params import TwinParams, max_wheel_deg
+from pure_pursuit.twin.params import (
+    TwinParams,
+    max_wheel_deg,
+    servo_interno_desde_180,
+    steering_servo_180,
+)
 from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
 from pure_pursuit.twin.vehicle import Vehicle
@@ -100,10 +106,16 @@ PRESETS: dict[str, dict[str, Any]] = {
 # La Pi no necesita overrides: px/py del ACK ya son la pose (Odometry
 # "esp_pose", digital_map) y tL/tR/tB/tF entran al Localizer de track_map
 # (TRACK_MAP_SHADOW=True por defecto).
+# Servo 0-180 (FOX_SERVO_180=1): los giros a tope mandan 0/180; el twin toma el
+# valor de servo 0-180 del LEDC con steering_servo_180() (ver Sim.__init__).
+# "servo_slew": opción de steering_servo_180 (default "proporcional", decisión
+# del usuario 2026-10-05); la variable de entorno TWIN_SERVO_SLEW la pisa
+# (p. ej. "plano600" para la sensibilidad).
 PRESETS["hw_nuevo"] = {
     **PRESETS["giro_rapido"],
     "fw_overrides": dict(PRESETS["giro_rapido"]["fw_overrides"]),
-    "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1"},
+    "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1", "FOX_SERVO_180": "1"},
+    "servo_slew": "proporcional",
     # IMU nueva: BNO085 (yaw fusionado en el chip), no el MPU6050.
     "imu": "bno085",
     # Pi 5 (~2x Pi 4): ~28 fps (supuesto, medir fps reales; la cámara está
@@ -258,7 +270,17 @@ class Sim:
         self.fw_defines = dict(cfg.get("fw_defines", {}))
         self.pi_overrides = dict(cfg.get("pi_overrides", {}))
         self.imu = cfg.get("imu", "mpu6050")
-        self.params = params or TwinParams()
+        # El modelo del servo sigue al define del firmware: con FOX_SERVO_180=1
+        # el LEDC lleva el valor de servo 0-180, no las unidades internas 30..160.
+        self.servo_180 = str(self.fw_defines.get("FOX_SERVO_180", "0")) == "1"
+        self.servo_slew = os.environ.get("TWIN_SERVO_SLEW") or cfg.get("servo_slew", "proporcional")
+        if params is None:
+            params = TwinParams()
+            if self.servo_180:
+                params.steering = steering_servo_180(self.servo_slew)
+        elif self.servo_180 and params.steering.servo_max_deg != 180.0:
+            raise ValueError("FOX_SERVO_180=1 necesita params.steering = steering_servo_180()")
+        self.params = params
         self.speed_scale = speed_scale
         if speed_scale != 1.0:
             self.params.motor.k_mm_s_per_pwm *= speed_scale
@@ -327,6 +349,15 @@ class Sim:
             f"vel x{self.speed_scale:.2f}",
             flush=True,
         )
+        servo_180 = self.servo_180
+        if servo_180:
+            st = self.params.steering
+            print(
+                f"[SERVO] valor de servo 0-180 (FOX_SERVO_180=1) slew={self.servo_slew} "
+                f"izq={st.slew_left_deg_per_s or st.slew_deg_per_s:.1f} "
+                f"der={st.slew_right_deg_per_s or st.slew_deg_per_s:.1f} °/s",
+                flush=True,
+            )
 
         fw = FirmwareSIL(
             overrides=self.fw_overrides,
@@ -381,6 +412,15 @@ class Sim:
                 "servo": fw.servo_angle(),
                 "speed_mm_s": abs(veh.v),
             }
+            if servo_180:
+                # "servo" sigue en unidades internas 30..160 (lo que leen
+                # triage/align/hderr y los grep de servo=160); servo_180 es el
+                # valor de servo 0-180 del LEDC y rueda los grados de rueda del
+                # modelo tras el slew (+ = derecha).
+                s180 = row["servo"]
+                row["servo"] = servo_interno_desde_180(s180)
+                row["servo_180"] = s180
+                row["rueda"] = veh.wheel_deg
             row.update(extra)
             trace.append(row)
 
