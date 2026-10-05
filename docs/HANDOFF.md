@@ -84,8 +84,18 @@ exterior está bien, tocar el cajón no.
   - **Causa común de 2 y 3 (verificado 2026-10-05)**: la U de un solo arco (fase 24) satura cuando arranca con
     ext 30-34 cm (`PARK U servo=160/20`) y termina a ext ≈ ext0 − 22 cm (7-11 cm): 5 de 6 chocan el cajón.
     Con ext0 67-71 (s8, s18, s3170839) el servo queda proporcional (144-150), termina a 38-40 cm y estaciona 3/3.
-    Además: en CCW la fase 24 escribe servo 20 (bajo el tope 30; ticks ×70 a ambos lados) y el rumbo del ESP
-    llega a la U con ~6-7° de error (s14: heading real 186.5° vs `Ang:-0.14`).
+    Además: en CCW la fase 24 escribe servo 20 (bajo el tope 30; ticks ×70 a ambos lados).
+  - **Rumbo del ESP en la U** (verificado 2026-10-05, ACK crudo vs `trace.csv`, 11 seeds base): error RMS 4.06°
+    (s14 −7.26 CW, s2 −6.37, s9 +7.65, s7 +4.43; resto ≤2.1). Dos partes: (1) contabilidad relativa,
+    RMS 3.27° — el tope ±10 de `MANIOBRA_INCL_ENTRADA_MAX_DEG` (ino:531, aplicado en 1791 y 4147) pensado
+    contra picos del MPU tira inclinación REAL de entrada (s14 `6.510 ... ErrGyro:13.38 ... obj=-80.0`,
+    Ang −15.9 → ref −3.36 hasta la U; 10 GR saturadas en 21 logs) y en REVERSA el cero (4186) llega
+    300 ms después de la captura; residual/GIRO PI/U(−180) son exactos y lo conservan. (2) modelo BNO
+    (escala σ 0.1% + caminata, "supuesto"): RMS 1.82°, máx +3.90 (s14, escala sorteada 2.9σ). El firmware
+    no lee yaw absoluto (sin driver BNO, T14): integra `gz·dt` (ino:2593). Nada re-referencia (MANIOBRA 13
+    no corre; la Pi no manda rumbo). Arreglo: referencia por recta `yaw0 + s·90·k` desde `anguloTotal`
+    (quita la parte 1), luego corrección contra pared con ToF. La cifra vieja "186.5° vs Ang:-0.14"
+    emparejaba instantes distintos; twin_plan:208 "BNO ≤ 1°" es falso (7/11 seeds > 1°).
   - prepark arranca con la pose de tc=12 sin la U (h=370/460): mide una entrada que la carrera no produce.
 - `PARK_PARALELO_REV` (estacionar en reversa, fases 30-38): 0/100 limpios con el mejor valor
   (`PARK_REV_B_MAX_MM=30`); el costado roza el poste a Ang≈150-165° del swing C con servo fijo. Ver
