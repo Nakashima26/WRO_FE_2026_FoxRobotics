@@ -39,7 +39,7 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   mismo host — seed 2 en la Mac ×3 serie, ×3 en paralelo con carga (10 jobs) y ×2 sin fijar hilos dan el
   mismo SHA256 de `trace.csv` sin `pi_frame_ms`; seed 3170839 ×3 igual. Mac (arm64) vs Windows (x86_64)
   NO: divergen en t=21.99 s (fila 621, ACK `ang=3.12` vs `3.13`) por ULPs de punto flotante acumulados
-  en `anguloGyro += gz * dt` (PurePursuit.ino:2569). `millis()` del SIL es tiempo virtual; los
+  en `anguloGyro += gz * dt` (PurePursuit.ino:2593). `millis()` del SIL es tiempo virtual; los
   `perf_counter` de runtime_nuevo.py solo alimentan HUD/logs. La "alternancia" vieja de seed 2 casi seguro
   mezclaba hosts o una caché `_build/` vieja. Regla: 1 corrida por escenario basta; comparar SIEMPRE
   en el mismo host (baseline y fix); nunca Mac contra Windows.
@@ -54,6 +54,10 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 - Cada agente su dir `~/Projects/fox_<tag>`, sincronizado por tar desde `git ls-files -co --exclude-standard`
   sin `runs/` ni `_build/`. **Borrar `_build/` tras cada sync que cambie el .ino** (caché de `libfw_*.dylib`
   puede servir un binario viejo).
+- **CRLF**: el checkout de Windows tiene finales CRLF; un tar hecho desde Windows rompe los `.sh` en la
+  Mac (`xargs -P 10`). Tras cada sync: `find . -name '*.sh' -o -name '*.py' | xargs sed -i '' $'s/$//'`
+  (o empaquetar con `git archive`/`git ls-files` + `dos2unix`). El SHA del .ino cambia con eso: comparar
+  SHAs siempre del lado Mac.
 - Python `~/Documents/GitHub/FoxRobotics/.venv/bin/python`, `PYTHONPATH=.`, desde `src/RASPI/cam`.
   Hasta 10 jobs por agente; coordinar si hay varios.
 - NO tocar `~/Documents/GitHub/FoxRobotics` (repo del usuario; solo su `.venv`) ni dirs de otros agentes.
