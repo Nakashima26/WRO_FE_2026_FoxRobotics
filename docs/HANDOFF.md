@@ -16,7 +16,7 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 - venv: `.venv-sim` en la raíz (numpy, opencv-python con GUI, matplotlib, imageio, pytest, ziglang).
 - Desde `src/RASPI/cam/`: `PYTHONUTF8=1 ../../../.venv-sim/Scripts/python -m pure_pursuit.chassis_twin --preset hw_nuevo --seed 3170839 [--no-show --log-dir runs/x] < /dev/null`
 - Firmware SIL se compila con zig (~5 min la 1ª vez por cambio del .ino; caché por hash).
-- Herramientas: `pure_pursuit/twin/tools/` (all.sh = 21 seeds con drive.py, summ3.py, salida.py = harness salida del cajón, triage.py, parkcheck.py…). Salidas en `src/RASPI/cam/runs/` (ignorado).
+- Herramientas: `pure_pursuit/twin/tools/` (all.sh = 21 seeds con drive.py, summ3.py, salida.py = harness salida del cajón, triage.py, parkcheck.py, ens.sh/ens.py/ens_cmp.py = ensamble de ruido y comparación pareada, ver "Validación con ensamble"…). Salidas en `src/RASPI/cam/runs/` (ignorado).
 - Tests: `../../../.venv-sim/Scripts/python -m pytest pure_pursuit/twin/tests -q` (falla conocida previa: `test_corner_hint::test_v2_carries_hint_when_enabled`).
 
 ## Presets
@@ -43,12 +43,42 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   NO: divergen en t=21.99 s (fila 621, ACK `ang=3.12` vs `3.13`) por ULPs de punto flotante acumulados
   en `anguloGyro += gz * dt` (PurePursuit.ino:2593). `millis()` del SIL es tiempo virtual; los
   `perf_counter` de runtime_nuevo.py solo alimentan HUD/logs. La "alternancia" vieja de seed 2 casi seguro
-  mezclaba hosts o una caché `_build/` vieja. Regla: 1 corrida por escenario basta; comparar SIEMPRE
-  en el mismo host (baseline y fix); nunca Mac contra Windows.
+  mezclaba hosts o una caché `_build/` vieja. Comparar SIEMPRE en el mismo host (baseline y fix); nunca
+  Mac contra Windows. Determinista NO quiere decir representativa (T16ens): una corrida es una sola muestra
+  del ruido de sensores, y con otro `TWIN_NOISE_SEED` el mismo escenario cambia de resultado. 1 corrida
+  por escenario sirve para depurar ese caso (trace/fw_debug reproducibles), no para decir que un cambio
+  mejora o empeora.
 - **Métricas normalizadas**: contar eventos (REVERSA, choques) por esquina recorrida, no totales — una
   carrera que choca antes "tiene menos" de todo.
-- `prepark.py` NO ejercita la U ni la recta previa: 98/100 ahí no garantiza nada en carrera completa.
-  Validación final = prepark 100 + `all.sh` 21 seeds.
+- `prepark.py` NO ejercita la U ni la recta previa: un buen prepark no garantiza nada en carrera completa.
+  Y el "98/100" viejo era una sola muestra correlacionada: sin `--noise-seed`, los 100 escenarios comparten
+  la corriente `default_rng(0)`. Con corrientes independientes, el mismo código da 86.7 % [82.4, 90.1]
+  (T16ens). Con otras corrientes compartidas da 95, 90 y 79/100.
+- **Validación final = ensamble (K=10 carrera + K=3 prepark) de A y de B, comparado pareado con
+  `ens_cmp.py`; 21 corridas sueltas ya no bastan** (con K=1, ens_cmp siempre dice NO CONCLUYENTE).
+  Ver "Validación con ensamble".
+
+## Validación con ensamble (T16ens)
+- Desde `src/RASPI/cam`, en la Mac, con `PY=~/Documents/GitHub/FoxRobotics/.venv/bin/python`:
+  - A (base, una vez por código y host):
+    - `SOLO_CAJON=1 PY=$PY pure_pursuit/twin/tools/ens.sh A 10 6`
+    - `PREPARK=1 SOLO_CAJON=1 PY=$PY pure_pursuit/twin/tools/ens.sh A_pp 3 6`
+  - B (candidato): igual, con los mismos K, host y `EXTRA`/`PREPARK_ARGS` salvo el cambio.
+  - Comparar: `$PY pure_pursuit/twin/tools/ens_cmp.py runs/A runs/B` y `runs/A_pp runs/B_pp`.
+  - Solo cuenta la línea `VEREDICTO`: MEJOR / PEOR (McNemar pareada por (escenario, k), p<0.05) o
+    NO DISTINGUIBLE ± MDD. Lo demás (Δ con IC95, suma_tc, REVERSA por esquina, holgura casco-lata,
+    escenarios que cambian) es diagnóstico.
+- Costo a 6 jobs: carrera K=10 ≈ 28 min, prepark K=3 ≈ 6 min.
+  - Potencia para +10 pts: carrera K=10 0.97-1.00 con las tasas medidas (0.79-0.81 en el modelo
+    pesimista); prepark K=3 1.00 (0.91-0.94).
+  - Falsa alarma: 0/15 en `--split` de la carrera K=5; simulada ≤0.02.
+- Base ya corrida (t16ens = fox_base 0311b0e, salvo comentarios), en `~/Projects/fox_t16ens/src/RASPI/cam/`:
+  - `runs/ens_base`: carrera K=10, ENS10_TASA. Las réplicas n1-n5 son el ensamble K=5 del reporte.
+  - `runs/ens_base_pp`: prepark K=3, 260/300.
+  - Se puede usar como A si B parte del mismo código. Si no, correr A de nuevo.
+- `K0=6 ... ens.sh A 10 6` agranda un ensamble ya corrido (corre solo n6..n10).
+- `ens.py runs/<tag> [--power]` resume un ensamble. `ens_cmp.py runs/A --split` mide la falsa alarma con
+  datos reales.
 
 ## Mac (corridas pesadas — Windows está al tope de RAM)
 - `ssh -o BatchMode=yes jesse@192.168.68.59` (arm64, 18 núcleos). Autorizado por el usuario para lotes.
@@ -64,8 +94,9 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   Hasta 10 jobs por agente; coordinar si hay varios.
 - NO tocar `~/Documents/GitHub/FoxRobotics` (repo del usuario; solo su `.venv`) ni dirs de otros agentes.
 - No sondear con `sleep`: ssh en primer plano con timeout largo, o Bash `run_in_background` y esperar aviso.
-- `SOLO_CAJON=1 SEEDS="..." pure_pursuit/twin/tools/all.sh <tag> [jobs]` (en la Mac cambiar la ruta del
-  python del script o llamar drive.py directo); `summ3.py runs/<tag> <seeds>` resume.
+- `PY=~/Documents/GitHub/FoxRobotics/.venv/bin/python SOLO_CAJON=1 SEEDS="..." pure_pursuit/twin/tools/all.sh <tag> [jobs]`
+  (`PY` también vale para ens.sh; por defecto los dos usan el `.venv-sim` de Windows). `summ3.py runs/<tag> <seeds>`
+  resume. `TWIN_NOISE_SEED=k` cambia solo el ruido de sensores (mismo campo).
 
 ## Estado (2026-10-05, rama `t15b2` HEAD e2914de, NO fusionada a `digital-twin`, NO pusheada)
 Reglamento 9.23 (decisión del usuario): el cambio de sentido para estacionar se hace **dentro de la

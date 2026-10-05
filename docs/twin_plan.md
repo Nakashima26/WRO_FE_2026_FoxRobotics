@@ -121,7 +121,7 @@ Pendiente con el usuario: medir con regla grosor de la LiPo y altura real del le
   - T11 Fase B: localización con encoder + ToF (resets pared/naranja), mapa congelado tras vuelta 1, ruta fija vueltas 2-3.
 
 ### Revisión seeds / randomizer (verificado contra app.py oficial, 2026-10-03)
-- `randomize(seed)` (wro_field.py:317) sortea todo con un `random.Random(seed)` y reintenta hasta cumplir reglas: cualquier cambio en el bucle cambia qué pista es cada seed. sim.py:243-244 usa el mismo entero para el ruido de sensores (campo y ruido acoplados).
+- `randomize(seed)` (wro_field.py:317) sortea todo con un `random.Random(seed)` y reintenta hasta cumplir reglas: cualquier cambio en el bucle cambia qué pista es cada seed. sim.py:243-244 usa el mismo entero para el ruido de sensores (campo y ruido acoplados). (T16ens los desacopla con `Sim(noise_seed=...)`.)
 - BUG: `REQUIRED_CARDS = (22, 23, 28, 29)` (wro_field.py:226). La app oficial usa `required_obstacles_sets = [21, 22, 27, 28]` como ÍNDICES de su lista deduplicada de 32 → cartas 26, 27, 32, 33 (mixtas T1/T2 y T3/T4). El port los tomó como número de carta en la lista de 36 → mixtas T1/T4 y T1/T2. Corregir a (26, 27, 32, 33) — pero cambia el significado de cada seed.
 - Duplicados: wro_field sigue las 36 cartas físicas (14≡16, 15≡17, 20≡22, 21≡23, 26≡28, 27≡29, 32≡34, 33≡35); la app quitó 16/17/22/23. Diferencia de probabilidad menor; las 36 físicas son defendibles.
 - Archivos raros: batch.py mete listas de dicts en celdas CSV; drive.py (script scratch) mezcla texto + JSON en .out.
@@ -456,4 +456,73 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Por color: rojo 7, verde 5.
   - Ningún choque viene de pasar por el lado equivocado.
 - **Ruido:** la carrera no es bit-reproducible entre procesos (la seed 2 alterna entre cajón e isla). Esto contradice la afirmación de T16 de que es "determinista"; está pendiente encontrar la causa.
+  - **Superado (t15ruido, 2026-10-05; ver HANDOFF "Ruido del twin"):** dentro de un mismo host la carrera SÍ es bit-determinista; la alternancia mezclaba hosts (Mac arm64 contra Windows x86_64) o una caché `_build/` vieja. T16ens lo vuelve a confirmar: val_a en la Mac da el mismo SHA256 que fox_base.
 - Reglas de trabajo nuevas y el plan de tres frentes en `docs/HANDOFF.md` y `docs/PROMPT_SIGUIENTE.md`.
+
+### T16ens — ensamble de ruido de sensores y comparación pareada (2026-10-05, rama t16ens)
+- **Motivo:** dentro de un host el twin es bit-determinista, pero una corrida es una sola muestra del ruido de sensores, y varios escenarios cambian de resultado con otro ruido. Hasta ahora el campo y el ruido salían del mismo entero, así que no había forma de repetir un escenario con otro ruido. Por eso 21 corridas sueltas no separan un cambio de código del azar.
+- **Fuentes de aleatoriedad (auditadas en el código):**
+  - El campo (sentido, cartas, cajón, arranque) sale de `random.Random(seed)` (wro_field.py:350).
+  - Todo el ruido sale de UNA rng, `Sim.sensor_rng()` (sim.py:320), compartida por Encoder, Gyro, Bno085Heading, Ultrasonic y ToF.
+  - Al construirse, los sensores sortean constantes por corrida, una "calibración": `slip_bias` del encoder (sensors.py:182), bias/scale del gyro (:202-203) y scale del BNO (:228). El resto es ruido por lectura.
+  - Cámara, visión, vehículo y firmware SIL son deterministas.
+- **Diseño de la semilla de ruido:**
+  - `Sim(seed, noise_seed=k)` usa `default_rng(SeedSequence(seed, spawn_key=(k,)))`. Con una tupla `(k, sub)` usa `spawn_key=(k, sub)`.
+  - `noise_seed=None` es `default_rng(seed)`, como siempre (bit a bit).
+  - No se usa `default_rng([seed, k])`: SeedSequence rellena con ceros, así que `[seed, 0]` daba exactamente `default_rng(seed)`.
+  - drive.py/all.sh leen `TWIN_NOISE_SEED`.
+  - prepark.py tiene `--noise-seed k`. Como todos sus escenarios usan `Sim(0, ...)`, cada escenario toma la subcorriente `(k, crc32(nombre))`.
+  - **Sin `--noise-seed`, los 100 escenarios de prepark comparten una sola corriente `default_rng(0)`** (misma calibración y misma secuencia de ruido): una pasada es una muestra correlacionada, no 100 independientes. Ver el hallazgo abajo.
+- **Herramientas** (pure_pursuit/twin/tools):
+  - `ens.sh <tag> <K> [jobs]`: carrera = SEEDS × `TWIN_NOISE_SEED` 1..K → `runs/<tag>/s<seed>_n<k>/`. Con `PREPARK=1`: K pasadas de prepark.py `--noise-seed k` → `runs/<tag>/n<k>/`. Con `K0=k0` corre solo k0..K para agrandar un ensamble ya corrido.
+  - `ens.py runs/<tag> [--power]`: tabla por escenario, tasa con IC95 Wilson, suma_tc, REVERSA por esquina, holgura casco-lata, robustos/monedas, MDD y potencia simulada por K.
+  - `ens_cmp.py runs/<A> runs/<B>`: comparación pareada.
+    - Prueba principal: McNemar exacta sobre los pares (escenario, k).
+    - Secundarias: permutación por escenario y prueba de signos.
+    - Δ con IC95 y MDD; en carrera también suma_tc, REVERSA por esquina y holgura.
+    - VEREDICTO MEJOR / PEOR / NO DISTINGUIBLE; con K=1 siempre NO CONCLUYENTE.
+  - `ens_cmp.py runs/<A> --split`: falsa alarma con datos reales (mitades de las réplicas de A entre sí).
+  - `holg.py`: holg_todas / holg_1a, con la misma definición que summ3 de T16gr (copia de su `sign_passes`; si T16gr se fusiona, usa la de metrics.py).
+  - `summ3.run_row()`: el criterio de "limpio", compartido con ens.py.
+- **Validación (a), None bit a bit** (Mac, `all.sh` SOLO_CAJON=1 sin TWIN_NOISE_SEED, seeds 2/14/3170839 contra fox_base/runs/base): SHA256 idénticos de `trace.csv` sin `pi_frame_ms` (s2 `4736c26d…`, s14 `713752bf…`, s3170839 `c04cbfb9…`) y de `fw_debug.log` (`15990aa9…`, `69e7f1c0…`, `1e34d52b…`). Los `.out` son iguales salvo wall/perf.
+- **Validación (b), mismo campo y otro ruido** (`ens.sh val_b 2 3`): `field.txt` idéntico al de None en las 6 corridas, y trazas y `fw_debug.log` distintos entre n1 y n2 en las 3 seeds.
+- **Ensamble base (c)** (Mac, hw_nuevo, SOLO_CAJON=1, 6 jobs; `~/Projects/fox_t16ens/src/RASPI/cam/runs/ens_base` y `runs/ens_base_pp`):
+  - **Carrera K=5** (105 corridas, 851 s):
+    - 14/105 = 13.3 %, IC95 [8.1, 21.1].
+    - Por réplica: n1..n5 = 2, 4, 2, 4, 2 de 21.
+    - suma_tc media 163.6 (sd 9.8, rango 152-178).
+    - REVERSA 98/818 = 0.120 por esquina.
+    - Robusto éxito: 8 (5/5). Monedas: 18 (4/5), 3170839 (3/5) y 6 (2/5). Las otras 17 son robustas en falla.
+    - Las corridas sueltas de None (fox_base) dieron 4/21 y suma_tc 177. Es una muestra más del mismo reparto; en 2 y 19 justo le tocó el raro: la base llegó a tc=12, mientras las 5 réplicas chocan con una señal en tc 4 y 3.
+    - Holgura: holg_todas n=1314, p10=36, med=106, <=0: 82; holg_1a n=975, p10=33, med=107, <=0: 79.
+  - **Prepark K=3** (300 corridas, 339 s):
+    - 260/300 = 86.7 %, IC95 [82.4, 90.1].
+    - Por réplica 87, 87 y 86. Fines: cajón×37, no_paralelo×3.
+    - 64 escenarios 3/3, 36 monedas y ninguno 0/3.
+    - CW_c2_p4 y CW_c3_p4, los 2 fallos de la base de 98/100, salen 3/3.
+- **Hallazgo: el 98/100 de prepark no es la tasa de prepark.**
+  - Es una sola muestra correlacionada: los 100 escenarios usan la misma corriente `default_rng(0)`.
+  - Prueba directa (scratch, `runs/pp_shared`): con una corriente compartida distinta (spawn_key=(k,0) para todos), tres pasadas dan 95, 90 y 79/100. Con corrientes independientes por escenario dan 87, 87 y 86.
+  - Con las 4 pasadas de corriente compartida (98, 95, 90, 79), una pasada de prepark "a la vieja" tiene una sd de ~8 pts. Por eso 98/100 contra otro número de una sola pasada no dice nada.
+  - Las constantes de calibración no explican los fallos: el z medio de slip_bias, bias/scale del gyro y scale del BNO es el mismo en los ok y en los fallos, y la tasa por quintil de slip_bias va de 0.78 a 0.93 sin tendencia. Lo que pesa es la secuencia de ruido por lectura.
+- **Potencia y K (d)** (`ens.py --power`, 1000 simulaciones por celda, corridas independientes; prueba pareada, p<0.05, B mejor):
+  - Carrera, +10 pts (≈2.1 escenarios):
+    - Con las tasas medidas, la potencia es 0.59-0.75 con K=5, 0.93-0.97 con K=8 y 0.97-1.00 con K=10. En el modelo "monedas" solo caben +5.7 pts, porque solo 3 escenarios tienen margen.
+    - Con Jeffreys (pesimista: le da varianza a los 17 robustos en falla), es 0.42-0.44 con K=5, 0.67-0.70 con K=8, 0.79-0.81 con K=10 y 0.94 con K=15.
+    - Costo a 6 jobs: K=10 = 28 min por ensamble.
+  - Prepark, +10 pts: 1.00 con K=3 (Jeffreys 0.91-0.94) y 1.00 con K=5. Costo K=3 = 6 min, K=5 = 9 min. El modelo "robustas" no aplica: no hay escenarios 0/3.
+  - Falsa alarma simulada (B = A, nominal ≤0.025 por lado): carrera 0.004-0.009, prepark 0.015-0.019.
+  - `--split` con datos reales:
+    - Carrera K=5: 15 particiones de 2 contra 2 réplicas, 0/15 con p<0.05 (pareada y estratificada), 0/15 veredictos MEJOR/PEOR. Las mitades difieren hasta ±9.5 pts (p ≥ 0.125).
+    - Prepark K=3: 3 particiones de 1 contra 1, todas con p=1.0 y NO CONCLUYENTE por regla.
+  - **Recomendación: carrera K=10 + prepark K=3 por lado** (≈28 + 6 min de Mac a 6 jobs). Prepark K=5 si se busca un efecto de menos de 8 pts (MDD K=3 ±7.9 pts).
+  - ENS_BASE_K10
+- **Uso** (desde `src/RASPI/cam`; en la Mac `PY=~/Documents/GitHub/FoxRobotics/.venv/bin/python`):
+  1. Base A, una vez por código base y host: `SOLO_CAJON=1 PY=$PY pure_pursuit/twin/tools/ens.sh A 10 6` y `PREPARK=1 SOLO_CAJON=1 PY=$PY pure_pursuit/twin/tools/ens.sh A_pp 3 6`.
+  2. Candidato B, con el mismo host, los mismos K y el mismo `EXTRA`/`PREPARK_ARGS` salvo el cambio: `ens.sh B 10 6` y `PREPARK=1 ens.sh B_pp 3 6`.
+  3. Comparar: `$PY pure_pursuit/twin/tools/ens_cmp.py runs/A runs/B` y `... runs/A_pp runs/B_pp`. Solo cuenta el VEREDICTO; NO DISTINGUIBLE dice además cuánto efecto (±MDD) se habría visto con ese K.
+  4. Para agrandar un ensamble ya corrido: `K0=6 ... ens.sh A 10 6` (corre solo n6..n10).
+- **Pendiente:**
+  - `holg.py` duplica `sign_passes` de T16gr (sin commit allá). Al fusionar T16gr, borrar `_sign_passes_local` y dejar el import de metrics.py.
+  - Habrá conflicto esperado en summ3.py, que T16gr también toca.
+  - La potencia simulada supone corridas A y B independientes. Con la misma k en A y B puede haber correlación positiva: eso baja los pares discordantes y sube la potencia. La validez no cambia, porque McNemar bajo H0 solo exige la misma tasa en A y B.
