@@ -1310,17 +1310,21 @@ const int           PARK_UTURN_DEG             = 170;    // 180 menos el oversho
 const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
 const int           PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
-// Umbral de recorrido (mm, desde la vuelta 12) para disparar la U — ver vigilarUturn().
-// Verificado con el twin (t15b2_uturn, runs/t15b_uturn2): en CW el disparo con 1000 mm
-// cae en w~1840-2030 de la recta (bien pasado el cajón, w=1000-1310). En CCW, con el
-// MISMO umbral, cae en w~1075-1180 — DENTRO de la franja del cajón — y el barrido de
-// la U (que en el primer tramo se abre ~90-100mm hacia w decreciente antes de cerrar)
-// le pega a la madera. w0 al completar la vuelta 12 en CCW fue 2083-2699 en las
-// semillas revisadas, así que 650 mm deja el disparo en w>=1410 (margen > 100mm sobre
-// el borde w=1310 del cajón) en el peor caso visto. Si en pista no alcanza a
-// estabilizarse tras la vuelta 12, subir con cuidado — revisar contra el cajón de nuevo.
-PARK_AJ long         PARK_UTURN_RECORRIDO_MM     = 1000;
-PARK_AJ long         PARK_UTURN_RECORRIDO_CCW_MM = 650;
+// T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
+// esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
+// mitad de la recta. Antes, vigilarUturn() disparaba por un umbral fijo de
+// `recorrido` (odómetro desde la vuelta 12): PARK_UTURN_RECORRIDO_MM=1000 para
+// CW y PARK_UTURN_RECORRIDO_CCW_MM=650 para CCW (el mismo umbral en los dos
+// sentidos caía DENTRO de la franja del cajón en CCW — ver el diagnóstico de
+// "patrón 1" en twin_plan.md). Las dos constantes quedan sin efecto: ya no
+// hay umbral de recorrido que ajustar por sentido porque el disparo ahora
+// usa la MISMA señal que detectarEsquina() usa para las otras 12 esquinas de
+// la carrera (pared de enfrente cerca + un lateral que se abre, ver
+// vigilarUturn()), que por construcción solo arma cerca de la esquina real
+// — sea cual sea el sentido. PARK_UTURN_ARRANQUE_MM se deja como piso de
+// seguridad: nada más saliendo de la esquina 12 el lateral puede leer
+// "abierto" un instante por la geometría de esa esquina misma.
+PARK_AJ long         PARK_UTURN_ARRANQUE_MM      = 300;
 // T15b2: con PARK_MODO == PARK_PARALELO/_REV y retorno, usar la U de 180° de
 // PUNTA (fases 24-25 de ESTACIONANDO, reusa el arco de PARK_UTURN_*) en vez de
 // la media vuelta de 90° + reversa (fases 20-23). Al cerrar la U entrega
@@ -1464,7 +1468,12 @@ bool          puntaRetorno      = false; // estacionando de regreso, tras la U
 float         puntaRumboGiro0   = 0.0f;  // heading al empezar la U
 bool          parkUturnPendiente = false; // vuelta 12 cerrada: falta la U
 long          parkUturnOdom0     = 0;
-bool          parkNaranjaVista   = false;
+// Contador propio para "ya estoy en la esquina 13" (ver vigilarUturn()): usa
+// el mismo criterio que detectarEsquina() (pared de enfrente + lateral que se
+// abre), pero NO comparte contadorEsquina — vigilarUturn() corre en el mismo
+// frame, antes de la detectarEsquina() de la rama "ronda cerrada" de más
+// abajo; de compartir el contador, un solo frame lo movería dos veces.
+int           contadorEsquina13  = 0;
 int           puntaMuros         = 0;     // paredes del cajón ya contadas (0..2)
 bool          puntaEnPoste       = false; // la bajada actual ya se contó
 bool          puntaHueco         = false; // entre la 1a y la 2a pared
@@ -2120,7 +2129,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
-  SIL_AJ(PARK_UTURN_RECORRIDO_MM); SIL_AJ(PARK_UTURN_RECORRIDO_CCW_MM);
+  SIL_AJ(PARK_UTURN_ARRANQUE_MM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2287,30 +2296,46 @@ void iniciarEstacionamiento(bool retorno) {
   else                         iniciarParkBuscando();
 }
 
-// Tras la vuelta 12, en SIGUIENDO/CRUCERO. La naranja marca la esquina; mientras
-// esa esquina tenga una lata, la visión sigue esquivando. Sin naranja, solo un
-// frontal ya corto dispara la U, para no entrar a la pared del fondo.
-void vigilarUturn(long distF) {
+// Tras la vuelta 12, en SIGUIENDO/CRUCERO. Reglamento 9.23: el cambio de
+// sentido solo puede hacerse en la esquina 13 (la siguiente, al final de la
+// recta de salida), no a mitad de la recta — antes esta función disparaba la
+// U por un umbral fijo de `recorrido` (ver PARK_UTURN_ARRANQUE_MM arriba),
+// que caía a mitad de la recta y a veces encima del cajón según el sentido.
+// Ahora usa la MISMA señal que detectarEsquina() usa para las otras 12
+// esquinas de la carrera (pared de enfrente cerca + un lateral que se abre:
+// la isla interior retrocede en la esquina real, no en la recta) — así el
+// disparo por construcción solo arma cerca de la esquina, sin importar el
+// sentido. Contador propio (contadorEsquina13, ver declaración arriba): no
+// se puede compartir contadorEsquina con detectarEsquina() porque esta
+// función corre antes, en el mismo frame, en la rama "ronda cerrada" de más
+// abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
+void vigilarUturn(long distL, long distR, long distF) {
   if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO) return;
-  // La naranja de la vuelta 12 es la esquina que ACABAS de tomar. La de la
-  // U es la siguiente, después de recorrer la recta.
+  // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
+  // para esta U (que es la de la esquina 13, la siguiente).
   long recorrido = odomMm - parkUturnOdom0;
-  if (recorrido > 1200 && piEsquina && (millis() - lastPiMsgMs) < 500)
-    parkNaranjaVista = true;
   bool ocupado = piPriority || (piMemoryFrames > 0);
   if (ocupado) {
     if (estado == CRUCERO) estado = SIGUIENDO;
+    // No dejes historia de "esquina" armándose a medias mientras se esquiva
+    // un obstáculo de la recta — un hueco lateral visto ahí no es la esquina.
+    contadorEsquina13 = max(contadorEsquina13 - 1, 0);
     return;
   }
-  // Ya pasaste la lata de esta recta. Lo que falta de recta se usa para
-  // pegarse a la exterior; la U misma arranca en la fase 20.
-  // Umbral por sentido: en CCW el cajón queda mucho antes en el recorrido desde
-  // la vuelta 12 (ver PARK_UTURN_RECORRIDO_CCW_MM arriba) — con el mismo valor
-  // de CW la U se disparaba encima del cajón y el barrido le pegaba.
-  long recorridoMinUturn = direccionIzquierda ? PARK_UTURN_RECORRIDO_CCW_MM : PARK_UTURN_RECORRIDO_MM;
-  bool lista = recorrido > recorridoMinUturn && (parkNaranjaVista || distF > 50 || distF <= 0);
-  bool fondo = recorrido > recorridoMinUturn && distF > 0 && distF <= 55;
-  if (!(lista || fondo)) return;
+  // Piso de seguridad: nada más saliendo de la esquina 12, el lateral puede
+  // leer "abierto" un instante por la geometría de esa esquina misma, antes
+  // de asentarse en la recta — no lo confundas con la esquina 13.
+  if (recorrido <= PARK_UTURN_ARRANQUE_MM) return;
+  bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
+  bool apertura    = paredFrente && ((distL > umbralPared) || (distR > umbralPared));
+  contadorEsquina13 = apertura ? min(contadorEsquina13 + 1, (int)esquinaDebounce)
+                                : max(contadorEsquina13 - 1, 0);
+  bool enEsquina13 = contadorEsquina13 >= esquinaDebounce;
+  // Red de seguridad: frontal ya muy cerca (va a chocar) aunque el lateral no
+  // haya armado (p.ej. el lado de la U lee corto porque el poste/pared de la
+  // esquina quedó justo ahí) — dispara igual, antes de pegarse a la pared.
+  bool fondo = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
+  if (!(enEsquina13 || fondo)) return;
   parkUturnPendiente = false;
   // Antes llamaba a iniciarEstacionandoPunta(true) directo, sin consultar
   // PARK_MODO: con PARK_MEDIA_VUELTA=true la carrera completa SIEMPRE
@@ -2392,7 +2417,7 @@ void completarTurnoObstaculos() {
     else {
       parkUturnPendiente = true;
       parkUturnOdom0     = odomMm;
-      parkNaranjaVista   = false;
+      contadorEsquina13  = 0;
     }
   }
   Serial.print("MANIOBRA completada ");
@@ -3547,7 +3572,7 @@ void loop() {
 
     case SIGUIENDO: {
       if (parkUturnPendiente) {
-        vigilarUturn(distF);
+        vigilarUturn(distL, distR, distF);
         if (estado != SIGUIENDO) break;
       }
       velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
@@ -3777,7 +3802,7 @@ void loop() {
     // ═══════════════════════════════════════════════════════════════════════════
     case CRUCERO: {
       if (parkUturnPendiente) {
-        vigilarUturn(distF);
+        vigilarUturn(distL, distR, distF);
         if (estado != CRUCERO) break;
       }
       velocidadMotor = MOTOR_MAX;
