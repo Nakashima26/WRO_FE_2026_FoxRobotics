@@ -125,6 +125,17 @@ class World:
         self._materials = [s.material for s in self.segments]
         self._obj_idx = np.array([s.object_index for s in self.segments], dtype=np.int32)
 
+        def _edges(poly):
+            wall = [(float(p[0]), float(p[1])) for p in poly]
+            return list(zip(wall, wall[1:] + wall[:1]))
+
+        self._outer_edges = _edges(field.outer)
+        self._inner_edges = _edges(field.inner)
+        self._v2_all = self._b - self._a
+        self._best_mat_vals = np.array(
+            [{"wall": 0, "magenta": 1, "sign": 2}.get(m, 0) for m in np.array(self._materials)]
+        )
+
     def cast(
         self,
         origins: np.ndarray,
@@ -150,7 +161,9 @@ class World:
         # Vectorized: shape (n_segs, 2) for segment endpoints
         a_all = self._a  # (n_segs, 2)
         b_all = self._b  # (n_segs, 2)
-        v2_all = b_all - a_all  # (n_segs, 2)
+        v2_all = getattr(self, "_v2_all", None)  # (n_segs, 2)
+        if v2_all is None:
+            v2_all = b_all - a_all
 
         # Perpendicular to each ray direction: (n_rays, 2)
         v3 = np.stack([-dirs[:, 1], dirs[:, 0]], axis=1)  # (n_rays, 2)
@@ -187,8 +200,9 @@ class World:
         best_t = np.where(closer, closest_t, best_t)
 
         # Material index, object index, normal for closest segment
-        mat_names = np.array(self._materials)  # (n_segs,)
-        best_mat_vals = np.array([mat_to_i.get(m, 0) for m in mat_names])  # (n_segs,) -> int
+        best_mat_vals = getattr(self, "_best_mat_vals", None)  # (n_segs,) int
+        if best_mat_vals is None:
+            best_mat_vals = np.array([mat_to_i.get(m, 0) for m in np.array(self._materials)])
         best_mat = np.where(closer, best_mat_vals[closest_seg], best_mat)
 
         best_obj = np.where(closer, self._obj_idx[closest_seg], best_obj)
@@ -266,7 +280,13 @@ def collision(
 ) -> str | None:
     """Primera causa de contacto, saltando las de `ignore` (p. ej. "pared exterior")."""
     corners = body_corners(x, y, heading_deg, length_mm, width_mm, rear_overhang_mm)
-    corner_list = [tuple(c) for c in corners]
+    try:
+        return _collision_on(world, [tuple(c) for c in corners.tolist()], ignore)
+    except ZeroDivisionError:
+        return _collision_on(world, [tuple(c) for c in corners], ignore)
+
+
+def _collision_on(world: World, corner_list, ignore) -> str | None:
     for cx, cy in corner_list:
         if _point_outside_field(cx, cy) and "pared exterior" not in ignore:
             return "pared exterior"
@@ -275,9 +295,14 @@ def collision(
     edges = list(zip(corner_list, corner_list[1:] + corner_list[:1]))
     track = world.field
     polys = (track.inner,) if "pared exterior" in ignore else (track.outer, track.inner)
-    for poly in polys:
-        wall =[(float(p[0]), float(p[1])) for p in poly]
-        wall_edges = list(zip(wall, wall[1:] + wall[:1]))
+    if getattr(world, "_outer_edges", None) is not None:
+        polys_edges = (world._inner_edges,) if "pared exterior" in ignore else (world._outer_edges, world._inner_edges)
+    else:
+        polys_edges = []
+        for poly in polys:
+            wall = [(float(p[0]), float(p[1])) for p in poly]
+            polys_edges.append(list(zip(wall, wall[1:] + wall[:1])))
+    for wall_edges in polys_edges:
         for a, b in edges:
             for c, d in wall_edges:
                 if _segments_cross(a, b, c, d):
