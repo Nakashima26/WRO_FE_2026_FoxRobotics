@@ -483,3 +483,21 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Queda para t16gr: `holds_for_center` llama `_hold_cm()` antes de las guardas `in_stall`/`_aligned`. Hoy no falla, porque `confirmed` está vacío mientras no hay sentido.
   - Preexistente: en `sim.run()`, una excepción entre la mutación de `C` y el `try` deja `C` modificado.
 - Nota: en Windows, `build.load_ino_text("head")` decodifica con cp1252 y falla con el .ino UTF-8 (`TODAVÍA`). Los tests que usan `fw_source=head` necesitan `PYTHONUTF8=1`. `paridad.py` lee HEAD como UTF-8.
+
+### T17 — optimización twin/visión bit-exacta (2026-10-05, rama `t17-perf` HEAD 1a126a7)
+Infra (96dfc54): detcheck_all, native/ C99 con -ffp-contract=off, test_render_equiv, bench_stages, vision_corpus.
+Medido en Windows x86_64, seed 14 a 100 s sim, gold `runs/t17/gold/s14.json`.
+
+| etapa | gold / base | final (digsens) | nota |
+|---|---|---|---|
+| wall s14 | ~99 s (gold) / 141 s (base_n1 bajo carga) | **46 s** | ×2.2 vs gold |
+| render_s | 44.9 | **4.7** | piso C + caras lote |
+| pi_s | 33.3 | **29.8** | dig_map gate + cans memo |
+| other_s | 21.1 | **11.5** | collision float + sensors cache |
+| bench render | 16.6 ms | **1.5–1.7 ms** | |
+| bench collision | 0.449 ms | **0.14 ms** | |
+| bench sensors | 0.30 ms | **0.14 ms** | |
+
+Hecho y medido (5/5 IDENTICO detcheck_all): floor native, faces batch, collision float, cans memo, dig_map gate, sensors rays cache. Cleanup detect_on (flip doble + bloque R/G duplicado): corpus 470/470 IDENTICO, microbench detect_on sin ganancia real (~3%) — no se siguió.
+Descartado por ROI: collision C, widest C, firmware actuators, corner mask reuse. Oráculo ya descartado en T16.
+
