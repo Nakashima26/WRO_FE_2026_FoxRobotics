@@ -1407,7 +1407,14 @@ class PPRuntime:
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
         return ready_ack
 
-    def process_frame(self, frame, now: float, armed: bool, need_bev_frame: bool = True) -> FrameResult:
+    def process_frame(
+        self,
+        frame,
+        now: float,
+        armed: bool,
+        need_bev_frame: bool = True,
+        need_dig_map: bool = True,
+    ) -> FrameResult:
         # FPS contador
         self._fps_count += 1
         if now - self._last_fps_time >= 1.0:
@@ -1435,8 +1442,9 @@ class PPRuntime:
         # rangos HSV (conos, BEV/naranja/piso, rosa). Con la luz del
         # cuarto de pruebas las ganancias son ~1 y no cambia nada.
         frame = self.color_corr.process(frame)
-        frame = cv2.flip(frame, 1)
-        processed_frame, positions = self.vision.process_frame(frame)
+        # process_frame volteaba otra vez: flip(flip(F)) == F; la copia conserva
+        # que detect_on dibuje sobre un array propio.
+        processed_frame, positions = self.vision.detect_on(frame.copy())
         t_vis = time.perf_counter()
         self._timing_ms["vis"] = (t_vis - now) * 1000.0
 
@@ -2202,7 +2210,8 @@ class PPRuntime:
 
         shown = bev_frame
         shift = (0, 0)
-        self._dig_img = self.digital.render()
+        # HUD: solo chassis_twin lo consume (FrameResult.dig_map)
+        self._dig_img = self.digital.render() if need_dig_map else None
         # warp_wide es un cv2.warpPerspective a un lienzo ~2300x1320 SOLO
         # para el HUD de depuración (bev_frame no realimenta el PP: ya se
         # usó bev_frame/bev_hsv de arriba para todo el pipeline). Los

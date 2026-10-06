@@ -593,6 +593,7 @@ class Sim:
                         result = runtime.process_frame(
                             frame, now=t_end, armed=armed,
                             need_bev_frame=frame_callback is not None,
+                            need_dig_map=frame_callback is not None,
                         )
                         pi_ms = (time.perf_counter() - t_proc0) * 1000.0
                         pi_s += pi_ms / 1000.0

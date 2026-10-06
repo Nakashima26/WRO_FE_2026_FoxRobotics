@@ -29,6 +29,25 @@ def _body_dir_world(heading_deg: float, direction_deg: float) -> np.ndarray:
     return d / n if n > 1e-12 else fwd
 
 
+_BODY_RAYS_CACHE: dict = {}
+
+
+def _body_rays(direction_deg, half_deg, step_deg):
+    key = (direction_deg, half_deg, step_deg, type(direction_deg), type(half_deg), type(step_deg))
+    hit = _BODY_RAYS_CACHE.get(key)
+    if hit is None:
+        angles = np.arange(
+            direction_deg - half_deg,
+            direction_deg + half_deg + 0.5 * step_deg,
+            step_deg,
+        )
+        dirs_body = np.stack([_body_dir_world(0.0, a) for a in angles], axis=0)
+        dirs_body.setflags(write=False)
+        hit = (len(angles), dirs_body)
+        _BODY_RAYS_CACHE[key] = hit
+    return hit
+
+
 class Ultrasonic:
     def __init__(self, params: UltrasonicParams, rng: np.random.Generator) -> None:
         self.params = params
@@ -41,23 +60,14 @@ class Ultrasonic:
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)
         origin = np.array([ox, oy], dtype=np.float64)
 
-        angles = np.arange(
-            mount.direction_deg - p.cone_half_deg,
-            mount.direction_deg + p.cone_half_deg + 0.5 * p.ray_step_deg,
-            p.ray_step_deg,
-        )
-        dirs_body = np.stack(
-            [_body_dir_world(0.0, a) for a in angles],
-            axis=0,
-        )
-        # Rotar al mundo
+        n_rays, dirs_body = _body_rays(mount.direction_deg, p.cone_half_deg, p.ray_step_deg)
         h = math.radians(pose.heading_deg)
-        rot = np.array([[math.sin(h), math.cos(h)], [math.cos(h), -math.sin(h)]], dtype=np.float64)
-        # body: x right, y forward -> world: same as robot_to_world Jacobian
+        c = math.cos(h)
+        s = math.sin(h)
         dirs = np.column_stack(
             [
-                dirs_body[:, 0] * math.cos(h) + dirs_body[:, 1] * math.sin(h),
-                -dirs_body[:, 0] * math.sin(h) + dirs_body[:, 1] * math.cos(h),
+                dirs_body[:, 0] * c + dirs_body[:, 1] * s,
+                -dirs_body[:, 0] * s + dirs_body[:, 1] * c,
             ]
         )
         norms = np.linalg.norm(dirs, axis=1, keepdims=True)
@@ -66,8 +76,8 @@ class Ultrasonic:
         origins = np.broadcast_to(origin, dirs.shape)
         dists, mat_i, normals, _obj = world.cast(origins, dirs, p.max_range_mm)
 
-        valid = np.zeros(len(angles), dtype=bool)
-        for i in range(len(angles)):
+        valid = np.zeros(n_rays, dtype=bool)
+        for i in range(n_rays):
             if mat_i[i] < 0 or dists[i] >= p.max_range_mm - 1e-6:
                 continue
             mat = world.material_name(int(mat_i[i]))
@@ -119,17 +129,14 @@ class ToF:
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)
         origin = np.array([ox, oy], dtype=np.float64)
 
-        angles = np.arange(
-            mount.direction_deg - p.half_fov_deg,
-            mount.direction_deg + p.half_fov_deg + 0.5 * p.ray_step_deg,
-            p.ray_step_deg,
-        )
-        dirs_body = np.stack([_body_dir_world(0.0, a) for a in angles], axis=0)
+        n_rays, dirs_body = _body_rays(mount.direction_deg, p.half_fov_deg, p.ray_step_deg)
         h = math.radians(pose.heading_deg)
+        c = math.cos(h)
+        s = math.sin(h)
         dirs = np.column_stack(
             [
-                dirs_body[:, 0] * math.cos(h) + dirs_body[:, 1] * math.sin(h),
-                -dirs_body[:, 0] * math.sin(h) + dirs_body[:, 1] * math.cos(h),
+                dirs_body[:, 0] * c + dirs_body[:, 1] * s,
+                -dirs_body[:, 0] * s + dirs_body[:, 1] * c,
             ]
         )
         norms = np.linalg.norm(dirs, axis=1, keepdims=True)
@@ -138,7 +145,7 @@ class ToF:
         dists, mat_i, normals, _obj = world.cast(origins, dirs, p.max_range_mm)
 
         clusters: dict[tuple[int, int], list[tuple[float, float]]] = {}
-        for i in range(len(angles)):
+        for i in range(n_rays):
             if mat_i[i] < 0:
                 continue
             d = float(dists[i])
