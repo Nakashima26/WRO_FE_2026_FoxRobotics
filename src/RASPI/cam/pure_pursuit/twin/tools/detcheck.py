@@ -35,11 +35,11 @@ def compute_fingerprint(sim_result):
 
 def extract_metrics(sim_result):
     """Extraer métricas sin wall_time_s."""
-    metrics = dict(sim_result.metrics)
-    # Remover métricas dependientes del timing
-    for key in ['wall_time_s', 'wall_per_sim_s', 'mean_pi_frame_ms']:
-        metrics.pop(key, None)
-    return metrics
+    return _strip_timing(dict(sim_result.metrics))
+
+
+def _norm(m):
+    return json.loads(json.dumps(_strip_timing(m), default=str, sort_keys=True))
 
 
 def save_golden(output_path, seed, preset, max_time_s):
@@ -74,6 +74,14 @@ def compare_with_golden(golden_path, seed, preset, max_time_s):
     """Ejecutar sim y comparar con dorada."""
     golden_data = json.load(open(golden_path))
 
+    # Validar parámetros contra el golden (ignorar los que sean None)
+    for field, val in [('seed', seed), ('preset', preset), ('max_time_s', max_time_s)]:
+        if val is not None:
+            golden_val = golden_data.get(field)
+            if golden_val is not None and golden_val != val:
+                print(f"PARAMS DISTINTOS: {field} golden={golden_val} arg={val}")
+                return False, 0.0
+
     print(f"Ejecutando Sim para comparar (seed={seed}, preset={preset})...", file=sys.stderr)
     t_start = time.perf_counter()
     sim = Sim(seed=seed, preset=preset, max_time_s=max_time_s)
@@ -86,9 +94,11 @@ def compare_with_golden(golden_path, seed, preset, max_time_s):
     golden_fp = golden_data['fingerprint']
     golden_metrics = golden_data['metrics']
 
-    if fingerprint == golden_fp and metrics == golden_metrics:
+    cur = _norm(metrics)
+    gold = _norm(golden_metrics)
+
+    if fingerprint == golden_fp and cur == gold:
         print("IDENTICO")
-        return True, wall_time
     else:
         # Reportar diferencias
         if fingerprint != golden_fp:
@@ -96,12 +106,18 @@ def compare_with_golden(golden_path, seed, preset, max_time_s):
             print(f"  Esperado: {golden_fp}", file=sys.stderr)
             print(f"  Actual:   {fingerprint}", file=sys.stderr)
 
-        diff_keys = set(golden_metrics.keys()) | set(metrics.keys())
+        diff_keys = set(gold.keys()) | set(cur.keys())
         for k in sorted(diff_keys):
-            if golden_metrics.get(k) != metrics.get(k):
-                print(f"  {k}: {golden_metrics.get(k)} -> {metrics.get(k)}", file=sys.stderr)
+            if gold.get(k) != cur.get(k):
+                print(f"  {k}: {gold.get(k)} -> {cur.get(k)}", file=sys.stderr)
 
-        return False, wall_time
+    # Imprimir timing (solo informativo)
+    render_s = result.metrics.get('render_s')
+    pi_s = result.metrics.get('pi_s')
+    other_s = result.metrics.get('other_s')
+    print(f"timing: render_s={render_s} pi_s={pi_s} other_s={other_s}")
+
+    return fingerprint == golden_fp and cur == gold, wall_time
 
 
 def main():
