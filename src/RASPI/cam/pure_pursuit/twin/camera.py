@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import math
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -52,6 +55,34 @@ _PALETTE = np.array(
     [SKY_BGR, FLOOR_BGR, WALL_BGR, RED_BGR, GREEN_BGR, MAGENTA_BGR],
     dtype=np.uint8,
 )
+
+_PALETTE_C = np.ascontiguousarray(_PALETTE, dtype=np.uint8)
+_UNSET = object()
+_FLOOR_KERNEL = _UNSET
+_NATIVE_GEN = 0
+
+
+def _floor_kernel():
+    global _FLOOR_KERNEL
+    if _FLOOR_KERNEL is _UNSET:
+        try:
+            from ..native import get_kernel
+            _FLOOR_KERNEL = get_kernel(
+                'fox_floor_ids',
+                [ctypes.c_void_p] * 3 + [ctypes.c_size_t] + [ctypes.c_float] * 6
+                + [ctypes.c_void_p] * 2,
+                None)
+        except ImportError:
+            _FLOOR_KERNEL = None
+    return _FLOOR_KERNEL
+
+
+def _reset_native() -> None:
+    """Limpia el kernel cacheado; cada instancia reinicia self-check y tablas en su siguiente frame."""
+    global _FLOOR_KERNEL, _NATIVE_GEN
+    _FLOOR_KERNEL = _UNSET
+    _NATIVE_GEN += 1
+
 
 # Calibración antigua 4 puntos (bev_calib.npz viejo)
 OLD_CALIB_4_MM = np.float32(
@@ -135,6 +166,10 @@ class CameraModel:
             -1.0 / dz[self._floor_down]).astype(np.float32)
         self._ray_right = self._dirs_robot[..., 0].astype(np.float32)
         self._ray_fwd = self._dirs_robot[..., 1].astype(np.float32)
+        self._floor_cache = {}
+        self._fast_ok = None
+        self._floor_fn = None
+        self._native_gen = _NATIVE_GEN
 
     def _project(self, cam_pts: np.ndarray) -> np.ndarray:
         """Puntos en el frame de la cámara (z adelante) → píxeles."""
@@ -182,18 +217,55 @@ class CameraModel:
     def behind_front_mm(self) -> float:
         return self.vehicle.vehicle.wheelbase_mm - self.params.forward_from_rear_axle_mm
 
-    def render_camera(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
-        p = self.params
-        h = math.radians(heading_deg)
-        sh, ch = math.sin(h), math.cos(h)
-        ox, oy = robot_to_world(
-            self.params.right_mm,
-            self.params.forward_from_rear_axle_mm,
-            robot_x,
-            robot_y,
-            heading_deg,
-        )
+    def _floor_tables(self) -> dict:
+        k = self.params.height_mm
+        tb = self._floor_cache.get(k)
+        if tb is None:
+            t = self._floor_scale * np.float32(k)
+            fin = self._floor_down & (t >= np.float32(1e-3))
+            rr = t * self._ray_right
+            ff = t * self._ray_fwd
+            assert ff.dtype == np.float32 and rr.dtype == np.float32
+            tb = dict(
+                shape=fin.shape,
+                n=fin.size,
+                ff_c=np.ascontiguousarray(ff).ravel(),
+                rr_c=np.ascontiguousarray(rr).ravel(),
+                fin_u8=np.ascontiguousarray(fin, dtype=np.uint8).ravel(),
+                ff_f=ff[fin],
+                rr_f=rr[fin],
+                fin_flat=np.flatnonzero(fin),
+            )
+            self._floor_cache[k] = tb
+        return tb
 
+    def _floor_fast(self, ox, oy, sh, ch, force_numpy: bool = False) -> np.ndarray:
+        tb = self._floor_tables()
+        ox32 = np.float32(ox)
+        oy32 = np.float32(oy)
+        sh32 = np.float32(sh)
+        ch32 = np.float32(ch)
+        fn = None if force_numpy else _floor_kernel()
+        if fn is not None:
+            img = np.empty(tb['shape'] + (3,), np.uint8)
+            fn(tb['ff_c'].ctypes.data, tb['rr_c'].ctypes.data, tb['fin_u8'].ctypes.data,
+               tb['n'], float(ox32), float(oy32), float(sh32), float(ch32),
+               float(np.float32(OUTER_HALF_MM)), float(np.float32(INNER_HALF_MM)),
+               _PALETTE_C.ctypes.data, img.ctypes.data)
+            return img
+        gx = ox32 + tb['ff_f'] * sh32 + tb['rr_f'] * ch32
+        gy = oy32 + tb['ff_f'] * ch32 - tb['rr_f'] * sh32
+        ax = np.abs(gx)
+        ay = np.abs(gy)
+        in_mat = (ax <= OUTER_HALF_MM) & (ay <= OUTER_HALF_MM)
+        in_island = (ax < INNER_HALF_MM) & (ay < INNER_HALF_MM)
+        idf = np.where(in_island, np.uint8(2), np.where(in_mat, np.uint8(1), np.uint8(0)))
+        best = np.zeros(tb['n'], np.uint8)
+        best[tb['fin_flat']] = idf
+        return _PALETTE[best.reshape(tb['shape'])]
+
+    def _floor_ref(self, ox, oy, sh, ch) -> np.ndarray:
+        p = self.params
         # Distancia al piso por rayo, y de ahí el punto del tapete. El giro del
         # heading se aplica al punto, no al rayo: una sola rotación por frame.
         t = self._floor_scale * np.float32(p.height_mm)
@@ -212,6 +284,21 @@ class CameraModel:
         best_id = np.where(floor, np.uint8(1), best_id)
         best_id = np.where(island, np.uint8(2), best_id)
         img = _PALETTE[best_id]
+        return img
+
+    def _render_camera_ref(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
+        p = self.params
+        h = math.radians(heading_deg)
+        sh, ch = math.sin(h), math.cos(h)
+        ox, oy = robot_to_world(
+            self.params.right_mm,
+            self.params.forward_from_rear_axle_mm,
+            robot_x,
+            robot_y,
+            heading_deg,
+        )
+
+        img = self._floor_ref(ox, oy, sh, ch)
 
         oz = p.height_mm
         half_line = LINE_MM / 2.0
@@ -264,6 +351,105 @@ class CameraModel:
         for _depth, cam, color in sorted(faces, key=lambda item: item[0], reverse=True):
             self._fill_face(img, cam, color)
         return img
+
+    def _render_camera_fast(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
+        p = self.params
+        h = math.radians(heading_deg)
+        sh, ch = math.sin(h), math.cos(h)
+        ox, oy = robot_to_world(
+            self.params.right_mm,
+            self.params.forward_from_rear_axle_mm,
+            robot_x,
+            robot_y,
+            heading_deg,
+        )
+
+        img = self._floor_fast(ox, oy, sh, ch)
+
+        oz = p.height_mm
+        half_line = LINE_MM / 2.0
+        for seg, color in (
+            *((s, ORANGE_BGR) for s in orange_segments()),
+            *((s, BLUE_BGR) for s in blue_segments()),
+        ):
+            self._fill_face(img, self._ribbon_to_cam(seg, half_line, ox, oy, oz, sh, ch), color)
+
+        faces = []
+        # Pared en tramos: con el quad entero (3 m) la profundidad media del
+        # pintor quedaba por delante de la madera del cajón pegada a ella y la
+        # tapaba (CCW: el rosa del INICIO caía de 0.29 a 0.22). Los cortes caen
+        # también en los cantos de las maderas, si no el tramo que las cruza
+        # sigue tapando una esquina.
+        for axis, value, a0, a1, b0, b1 in self._wall_quads():
+            n = max(1, int(math.ceil((a1 - a0) / _WALL_TILE_MM)))
+            cuts = {a0 + k * (a1 - a0) / n for k in range(n + 1)}
+            for box in track.barriers:
+                for pt in box:
+                    if a0 < pt[1 - axis] < a1:
+                        cuts.add(pt[1 - axis])
+            cuts = sorted(cuts)
+            for c0, c1 in zip(cuts[:-1], cuts[1:]):
+                corners = self._quad_corners(axis, value, c0, c1, b0, b1)
+                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
+                if np.all(cam[:, 2] < 8.0):
+                    continue
+                faces.append((float(np.mean(cam[:, 2])), cam, WALL_BGR))
+        half = SIGN_MM / 2.0
+        for sign in track.signs:
+            color = RED_BGR if sign.color == "Red" else GREEN_BGR
+            for corners in self._box_quads(
+                sign.x - half,
+                sign.x + half,
+                sign.y - half,
+                sign.y + half,
+                p.sign_height_mm,
+            ):
+                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
+                faces.append((float(np.mean(cam[:, 2])), cam, color))
+        for box in track.barriers:
+            xs = [pt[0] for pt in box]
+            ys = [pt[1] for pt in box]
+            for corners in self._box_quads(
+                min(xs), max(xs), min(ys), max(ys), p.sign_height_mm
+            ):
+                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
+                faces.append((float(np.mean(cam[:, 2])), cam, MAGENTA_BGR))
+        for _depth, cam, color in sorted(faces, key=lambda item: item[0], reverse=True):
+            self._fill_face(img, cam, color)
+        return img
+
+    def _fast_selfcheck(self, track) -> bool:
+        poses = [(0.0, -1000.0, 90.0), (0.0, 1000.0, 270.0), (1000.0, 0.0, 0.0),
+                 (-1000.0, 0.0, 180.0), (-1000.0, -1000.0, 45.0), (700.0, -1200.0, 100.0)]
+        msg = '[camera] render rápido != referencia en este host; uso referencia'
+        for ps in poses:
+            if not np.array_equal(self._render_camera_fast(track, *ps),
+                                  self._render_camera_ref(track, *ps)):
+                print(msg, file=sys.stderr)
+                return False
+        if _floor_kernel() is not None:
+            for ps in poses:
+                h = math.radians(ps[2])
+                sh, ch = math.sin(h), math.cos(h)
+                ox, oy = robot_to_world(self.params.right_mm, self.params.forward_from_rear_axle_mm,
+                                        ps[0], ps[1], ps[2])
+                if not np.array_equal(self._floor_fast(ox, oy, sh, ch),
+                                      self._floor_fast(ox, oy, sh, ch, force_numpy=True)):
+                    print(msg, file=sys.stderr)
+                    return False
+        return True
+
+    def render_camera(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
+        if os.environ.get('FOX_FAST_RENDER', '1') == '0' or self.params.equidistant:
+            return self._render_camera_ref(track, robot_x, robot_y, heading_deg)
+        if self._native_gen != _NATIVE_GEN:
+            self._native_gen = _NATIVE_GEN
+            self._floor_cache = {}
+            self._fast_ok = None
+        if self._fast_ok is None:
+            self._fast_ok = self._fast_selfcheck(track)
+        fn = self._render_camera_fast if self._fast_ok else self._render_camera_ref
+        return fn(track, robot_x, robot_y, heading_deg)
 
     def build_bev(self, calib_real_mm: np.ndarray | None = None) -> tuple[BEVTransformer, float]:
         xy = np.asarray(

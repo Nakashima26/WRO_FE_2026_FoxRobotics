@@ -82,6 +82,8 @@ def test_equiv(monkeypatch, native, field_seed, tp):
     try:
         import pure_pursuit.native as N
         N._reset()
+        import pure_pursuit.twin.camera as _cm
+        _cm._reset_native()
     except (ImportError, AttributeError):
         pass
 

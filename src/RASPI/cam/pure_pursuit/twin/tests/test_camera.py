@@ -67,6 +67,8 @@ def test_render_performance():
     params = TwinParams()
     cam = CameraModel(params.camera, params)
     field = randomize(2)
+    # self-check de la ruta rápida corre en el 1er frame; medir en régimen.
+    cam.render_camera(field, 0.0, 500.0, 0.0)
     t0 = time.perf_counter()
     for _ in range(5):
         cam.render_camera(field, 0.0, 500.0, 0.0)
