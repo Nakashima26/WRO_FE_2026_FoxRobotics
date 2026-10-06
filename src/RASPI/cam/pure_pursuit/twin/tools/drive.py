@@ -86,8 +86,14 @@ if os.environ.get("NO_OUTSIDE_RELEASE"):
             return False
         return ahead[0] > (480.0 if ahead[1] else 260.0)
     _bt = _bt_nr
+# TWIN_NOISE_SEED=k (T16ens): mismo campo/cartas/arranque de `seed`, otro ruido de
+# sensores (Sim.sensor_rng). Sin definir = comportamiento de siempre.
+_ns = os.environ.get("TWIN_NOISE_SEED", "").strip()
+NOISE_SEED = int(_ns) if _ns else None
+if NOISE_SEED is not None:
+    print("NOISE_SEED", NOISE_SEED, flush=True)
 sim = S.Sim(seed, preset=preset, log_dir=out, pi_overrides=extra.get("pi"), fw_overrides=extra.get("fw"), fw_defines=extra.get("def"), pi_period_s=extra.get("period"),
-            ignore_collisions=("pared exterior",) if SOLO_CAJON else ())
+            ignore_collisions=("pared exterior",) if SOLO_CAJON else (), noise_seed=NOISE_SEED)
 r = sim.run()
 dbg.close()
 if "dm" in _LAST:

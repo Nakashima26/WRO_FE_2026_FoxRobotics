@@ -263,7 +263,20 @@ class Sim:
         fw_params: dict[str, float] | None = None,
         ignore_collisions: tuple[str, ...] = (),
         inject_map_truth: Any = None,
+        noise_seed: int | tuple[int, ...] | None = None,
     ) -> None:
+        # Semilla del ruido de sensores, aparte de la del escenario (T16ens).
+        # None = la de siempre (default_rng(seed), bit-idéntico); ver sensor_rng().
+        # Una tupla (k, sub) da una subcorriente por escenario cuando muchos
+        # escenarios comparten `seed` (prepark.py usa Sim(0, ...) en los 100).
+        if noise_seed is None:
+            self.noise_key: tuple[int, ...] | None = None
+        else:
+            key = (noise_seed,) if isinstance(noise_seed, (int, np.integer)) else tuple(noise_seed)
+            self.noise_key = tuple(int(x) for x in key)
+            if not self.noise_key or min(self.noise_key) < 0:
+                raise ValueError(f"noise_seed debe ser >= 0: {noise_seed}")
+        self.noise_seed = noise_seed
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
         self.knock_signs = knock_signs
@@ -311,6 +324,27 @@ class Sim:
         self.calib_npz = None if calib_npz is None else Path(calib_npz)
         self.camera_report: dict[str, Any] | None = None
 
+    def sensor_rng(self) -> np.random.Generator:
+        """rng de TODO el ruido del twin: encoder (slip), gyro, BNO085, sonar y ToF.
+
+        Es la única fuente aleatoria aparte del sorteo del campo: randomize(seed)
+        usa random.Random(seed) para sentido, cartas, cajón y arranque; cámara,
+        visión, vehículo y firmware SIL son deterministas (sin rand()).
+
+        noise_seed=None: default_rng(seed), como siempre. Con noise_seed=k, la
+        corriente hija SeedSequence(seed, spawn_key=(k,)); con una tupla (k, sub),
+        spawn_key=(k, sub). No se usa default_rng([seed, noise_seed]): SeedSequence
+        rellena con ceros, así que [seed, 0] daba exactamente default_rng(seed)
+        (verificado, numpy 2.5.3).
+
+        Los sensores sortean al construirse constantes por corrida (slip_bias del
+        encoder, bias/scale del gyro, scale del BNO): con seed fija y noise_seed=None
+        todas las corridas de esa seed comparten esa "calibración".
+        """
+        if self.noise_key is None:
+            return np.random.default_rng(self.seed)
+        return np.random.default_rng(np.random.SeedSequence(self.seed, spawn_key=self.noise_key))
+
     def run(
         self,
         frame_callback: Callable[[SimFrameView], bool] | None = None,
@@ -322,7 +356,7 @@ class Sim:
             if hasattr(C, k):
                 saved_cfg[k] = getattr(C, k)
                 setattr(C, k, v)
-        rng = np.random.default_rng(self.seed)
+        rng = self.sensor_rng()
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start)
         for key in self.inject_map_truth:
             k, attr = _MAP_TRUTH_KEYS[key]

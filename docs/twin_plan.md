@@ -121,7 +121,7 @@ Pendiente con el usuario: medir con regla grosor de la LiPo y altura real del le
   - T11 Fase B: localización con encoder + ToF (resets pared/naranja), mapa congelado tras vuelta 1, ruta fija vueltas 2-3.
 
 ### Revisión seeds / randomizer (verificado contra app.py oficial, 2026-10-03)
-- `randomize(seed)` (wro_field.py:317) sortea todo con un `random.Random(seed)` y reintenta hasta cumplir reglas: cualquier cambio en el bucle cambia qué pista es cada seed. sim.py:243-244 usa el mismo entero para el ruido de sensores (campo y ruido acoplados).
+- `randomize(seed)` (wro_field.py:317) sortea todo con un `random.Random(seed)` y reintenta hasta cumplir reglas: cualquier cambio en el bucle cambia qué pista es cada seed. sim.py:243-244 usa el mismo entero para el ruido de sensores (campo y ruido acoplados). (T16ens los desacopla con `Sim(noise_seed=...)`.)
 - BUG: `REQUIRED_CARDS = (22, 23, 28, 29)` (wro_field.py:226). La app oficial usa `required_obstacles_sets = [21, 22, 27, 28]` como ÍNDICES de su lista deduplicada de 32 → cartas 26, 27, 32, 33 (mixtas T1/T2 y T3/T4). El port los tomó como número de carta en la lista de 36 → mixtas T1/T4 y T1/T2. Corregir a (26, 27, 32, 33) — pero cambia el significado de cada seed.
 - Duplicados: wro_field sigue las 36 cartas físicas (14≡16, 15≡17, 20≡22, 21≡23, 26≡28, 27≡29, 32≡34, 33≡35); la app quitó 16/17/22/23. Diferencia de probabilidad menor; las 36 físicas son defendibles.
 - Archivos raros: batch.py mete listas de dicts en celdas CSV; drive.py (script scratch) mezcla texto + JSON en .out.
@@ -456,6 +456,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Por color: rojo 7, verde 5.
   - Ningún choque viene de pasar por el lado equivocado.
 - **Ruido:** la carrera no es bit-reproducible entre procesos (la seed 2 alterna entre cajón e isla). Esto contradice la afirmación de T16 de que es "determinista"; está pendiente encontrar la causa.
+  - **Superado (t15ruido, 2026-10-05; ver HANDOFF "Ruido del twin"):** dentro de un mismo host la carrera SÍ es bit-determinista; la alternancia mezclaba hosts (Mac arm64 contra Windows x86_64) o una caché `_build/` vieja. T16ens lo vuelve a confirmar: val_a en la Mac da el mismo SHA256 que fox_base.
 - Reglas de trabajo nuevas y el plan de tres frentes en `docs/HANDOFF.md` y `docs/PROMPT_SIGUIENTE.md`.
 
 ### T16infra — sentido del mapa desde el ESP, verdad del twin apagable, `paridad.py` (2026-10-05, rama t16infra)
@@ -483,3 +484,116 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Queda para t16gr: `holds_for_center` llama `_hold_cm()` antes de las guardas `in_stall`/`_aligned`. Hoy no falla, porque `confirmed` está vacío mientras no hay sentido.
   - Preexistente: en `sim.run()`, una excepción entre la mutación de `C` y el `try` deja `C` modificado.
 - Nota: en Windows, `build.load_ino_text("head")` decodifica con cp1252 y falla con el .ino UTF-8 (`TODAVÍA`). Los tests que usan `fw_source=head` necesitan `PYTHONUTF8=1`. `paridad.py` lee HEAD como UTF-8.
+
+### T16ens — ensamble de ruido de sensores y comparación pareada (2026-10-05, rama t16ens)
+- **Motivo:** dentro de un host el twin es bit-determinista, pero una corrida es una sola muestra del ruido de sensores, y varios escenarios cambian de resultado con otro ruido. Hasta ahora el campo y el ruido salían del mismo entero, así que no había forma de repetir un escenario con otro ruido. Por eso 21 corridas sueltas no separan un cambio de código del azar.
+- **Fuentes de aleatoriedad (auditadas en el código):**
+  - El campo (sentido, cartas, cajón, arranque) sale de `random.Random(seed)` (wro_field.py:350).
+  - Todo el ruido sale de UNA rng, `Sim.sensor_rng()` (sim.py:288, usada en sim.py:320), compartida por Encoder, Gyro, Bno085Heading, Ultrasonic y ToF (construidos en ese orden, sim.py:336-340).
+  - Al construirse, los sensores sortean constantes por corrida, una "calibración": `slip_bias` del encoder (sensors.py:182), bias/scale del gyro (:202-203) y scale del BNO (:228). El resto es ruido por lectura.
+  - Cámara, visión, vehículo y firmware SIL son deterministas.
+- **Diseño de la semilla de ruido:**
+  - `Sim(seed, noise_seed=k)` usa `default_rng(SeedSequence(seed, spawn_key=(k,)))`. Con una tupla `(k, sub)` usa `spawn_key=(k, sub)`. Con enteros < 0 o una tupla vacía da ValueError (sim.py:241-248).
+  - `noise_seed=None` es `default_rng(seed)`, como siempre (bit a bit; ver validación (a)).
+  - No se usa `default_rng([seed, k])`: SeedSequence rellena con ceros, así que `[seed, 0]` daba exactamente `default_rng(seed)`.
+  - drive.py/all.sh leen `TWIN_NOISE_SEED` (drive.py:89-96). Si está definida, el `.out` empieza con `NOISE_SEED k`.
+  - prepark.py tiene `--noise-seed k`. Como todos sus escenarios usan `Sim(0, ...)`, cada escenario toma la subcorriente `(k, crc32(nombre))` (`noise_key`, prepark.py:42-45).
+  - **Sin `--noise-seed`, los 100 escenarios de prepark comparten una sola corriente `default_rng(0)`:** la misma calibración de sensores y la misma secuencia de ruido en todos. Una pasada es una sola muestra del ruido, no 100 independientes. Ver el hallazgo abajo.
+- **Herramientas** (pure_pursuit/twin/tools):
+  - `ens.sh <tag> <K> [jobs]`: carrera = SEEDS × `TWIN_NOISE_SEED` 1..K → `runs/<tag>/s<seed>_n<k>/`. Con `PREPARK=1`: K pasadas de prepark.py `--noise-seed k` → `runs/<tag>/n<k>/`. Con `K0=k0` corre solo k0..K para agrandar un ensamble ya corrido. Al final escribe `wall.txt` y corre ens.py.
+    - Modo local (default): `PY` es el `.venv-sim` de Windows y cada proceso pasa por `C:/Users/jbanda/fox_local/slot.py`. En carrera usa `--tag <tag>_s<seed>_n<k>`. En prepark usa `--tag <tag>_n<k> --n J` con `--jobs J`, J ≤ 2 (default 2). Antes del lote compila el firmware una vez, también por slot.py. En la carrera, `jobs` (default 4) solo fija cuántos esperan en cola: corren a la vez los que deje el semáforo.
+    - Otro host: `PY=<python> SLOT= ens.sh ...` (sin semáforo; jobs default 8).
+    - Como `<tag>`, usar el nombre del frente (p. ej. `t17_ensA`): slot.py lo anota en `slot_log.csv`.
+  - `ens.py runs/<tag> [--power] [--kmax K]`: tabla por escenario, tasa con IC95 Wilson, suma_tc, REVERSA por esquina, holgura casco-lata, robustos/monedas, MDD y potencia simulada por K. Avisa si los escenarios no tienen todos el mismo K. `--kmax K` usa solo las réplicas k ≤ K.
+  - `ens_cmp.py runs/<A> runs/<B> [--kmax K]`: comparación pareada.
+    - Prueba principal: McNemar exacta sobre los pares (escenario, k).
+    - Secundarias: permutación por escenario (exacta si todos tienen el mismo K) y prueba de signos.
+    - Δ con IC95 y MDD; en carrera también suma_tc, REVERSA por esquina y holgura.
+    - VEREDICTO MEJOR / PEOR / NO DISTINGUIBLE; con K=1 siempre NO CONCLUYENTE.
+  - `ens_cmp.py runs/<A> --split`: falsa alarma con datos reales (mitades de las réplicas de A entre sí).
+  - `holg.py`: holg_todas / holg_1a, con la misma definición que summ3 de T16gr (copia de su `sign_passes`; si T16gr se fusiona, usa la de metrics.py).
+  - `summ3.run_row()`: el criterio de "limpio", compartido con ens.py.
+  - Tests: `tests/test_noise_seed.py` (11), con datos sintéticos donde hace falta:
+    - None = `default_rng(seed)`, con el mismo estado interno;
+    - int, np.int64, tupla y lista, y ValueError;
+    - la subcorriente `(k, crc32(nombre))` del prepark;
+    - Wilson, MDD/k_needed, McNemar exacta y permutación estratificada (exacta y Monte Carlo, contra enumeración a mano);
+    - `load --kmax` y los veredictos de ens_cmp.
+- **Uso en Windows** (desde `src/RASPI/cam`; las corridas pasan solas por slot.py):
+  1. Base A, una vez por código base. Tiene que ser de Windows: no sirve una base de la Mac.
+     - `SOLO_CAJON=1 bash pure_pursuit/twin/tools/ens.sh <frente>_A 8`
+     - `PREPARK=1 SOLO_CAJON=1 bash pure_pursuit/twin/tools/ens.sh <frente>_A_pp 3`
+  2. Candidato B, en su worktree, con los mismos K, SEEDS y `EXTRA`/`PREPARK_ARGS`, salvo el cambio: `... ens.sh <frente>_B 8` y `PREPARK=1 ... ens.sh <frente>_B_pp 3`.
+  3. Comparar (con `PY` = el `.venv-sim`):
+     - `$PY pure_pursuit/twin/tools/ens_cmp.py runs/<frente>_A runs/<frente>_B`
+     - `$PY pure_pursuit/twin/tools/ens_cmp.py runs/<frente>_A_pp runs/<frente>_B_pp`
+     - Si A está en otro worktree, con su ruta.
+     - Solo cuenta el VEREDICTO. NO DISTINGUIBLE dice además cuánto efecto (±MDD) se habría visto con ese K.
+  4. Para agrandar un ensamble ya corrido: `K0=9 SOLO_CAJON=1 bash ... ens.sh <tag> 10` (corre solo n9..n10 y suma la pared).
+  5. Los lotes van con `run_in_background` y sin sondear con sleep (`C:\Users\jbanda\fox_local\REGLAS_LOCAL.md`).
+- **Validación (a), None bit a bit:**
+  - Windows (2026-10-05): seeds 2 y 14 con `drive.py ... hw_nuevo null --solo-cajon`, sin `TWIN_NOISE_SEED` y por slot.py.
+    - Se corrieron en t16ens y en un worktree temporal limpio en 9338efb (ya borrado), con la misma `libfw_4837392f70795d4a.dll`.
+    - Los sha256 de `trace.csv` sin `pi_frame_ms` y de `fw_debug.log` son idénticos:
+      - s2: trace `c810bdaf5a9b…`, fw_debug `6219b37beade…` (2566 filas);
+      - s14: trace `1ac5d2e64d0d…`, fw_debug `095aac14f888…` (2583 filas).
+    - Los `.out` son iguales salvo wall/perf, y ninguno imprime NOISE_SEED. Las dos terminan en tc=12 con fin cajón.
+  - Host Mac (copia en `C:\Users\jbanda\mac_runs\fox_t16ens\src\RASPI\cam\runs\val_a`): s2, s14 y s3170839 contra `fox_base/runs/base`, con los mismos sha256 (fw_debug `15990aa9…`, `69e7f1c0…`, `1e34d52b…`).
+- **Validación (b), mismo campo y otro ruido:**
+  - Windows, smoke (`SEEDS="3170839 11" SOLO_CAJON=1 ens.sh smoke_b 2`, 4 corridas, pared 136 s):
+    - Los `.out` empiezan con `NOISE_SEED 1`/`2`.
+    - `field.txt` es igual al de None (salvo CRLF).
+    - `trace.csv` y `fw_debug.log` difieren entre n1 y n2 en las 2 seeds.
+    - 3170839: n1 choca con una señal en tc=0 (5.0 s de sim) y n2 termina limpio en 97.9 s.
+    - 11: las dos chocan con la misma señal (t 7.092 contra 7.085 s).
+  - Host Mac (`runs/val_b`, 3 seeds × K=2): lo mismo.
+- **Ensamble base (c), host Mac, base fox_base 0311b0e** (hw_nuevo, SOLO_CAJON=1, 6 jobs):
+  - Copia en `C:\Users\jbanda\mac_runs\fox_t16ens\src\RASPI\cam\runs\ens_base` y `runs\ens_base_pp`; los reportes `d_*.txt` están en la misma carpeta.
+  - Solo sirve para comparar contra otros resultados de la Mac. En Windows hay que correr la base de nuevo.
+  - **Carrera K=5** (105 corridas, 851 s): usar `ens.py ... --kmax 5`, porque `ens_base` también tiene n6-n10 a medias (el lote K=10 se cortó al perder la Mac).
+    - 14/105 = 13.3 %, IC95 [8.1, 21.1].
+    - Por réplica: n1..n5 = 2, 4, 2, 4, 2 de 21.
+    - suma_tc media 163.6 (sd 9.8, rango 152-178).
+    - REVERSA 98/818 = 0.120 por esquina.
+    - Robusto éxito: 8 (5/5). Monedas: 18 (4/5), 3170839 (3/5) y 6 (2/5). Las otras 17 son robustas en falla.
+    - Las corridas sueltas de None (fox_base, `runs/base`) dieron 4/21 y suma_tc 177: son una muestra más del mismo reparto. En 2 y 19 justo les tocó el caso raro: la base llegó a tc=12 (fin cajón), mientras sus 5 réplicas chocan con una señal en tc 4 y 3.
+    - Holgura: holg_todas n=1314, p10=36, med=106, <=0: 82; holg_1a n=975, p10=33, med=107, <=0: 79.
+  - **Prepark K=3** (300 corridas, 339 s):
+    - 260/300 = 86.7 %, IC95 [82.4, 90.1].
+    - Por réplica 87, 87 y 86. Fines: cajón×37, no_paralelo×3.
+    - 64 escenarios 3/3, 36 monedas y ninguno 0/3.
+    - CW_c2_p4 y CW_c3_p4, los 2 fallos de la base de 98/100, salen 3/3.
+- **Hallazgo: el 98/100 de prepark (host Mac, `fox_base/runs/base_prepark`) no es la tasa de prepark.**
+  - Venía de una sola calibración de sensores compartida por los 100 escenarios. Todos usan `Sim(0)` y, sin `--noise-seed`, la misma corriente `default_rng(0)`, así que tienen las mismas constantes (slip_bias, bias/scale del gyro, scale del BNO) y la misma secuencia de ruido por lectura. Es UNA muestra del ruido repetida en 100 escenarios, no 100 muestras.
+  - Prueba directa en `runs/pp_shared`, con una corriente compartida distinta por pasada (`--noise-seed 1..3`, según su log; el script scratch de la Mac no se conservó): las tres pasadas dan 95, 90 y 79/100. Con corrientes independientes por escenario dan 87, 87 y 86.
+  - Con las 4 pasadas de corriente compartida (98, 95, 90, 79), una pasada de prepark "a la vieja" tiene una sd de ~8 pts. Por eso 98/100 contra otro número de una sola pasada no dice nada.
+  - No hay una calibración "mala" que explique los fallos:
+    - En `ens_base_pp`, el z medio de las 4 constantes es casi el mismo en los 260 ok que en los 40 fallos: slip_bias −0.05/+0.09, gyro bias −0.07/+0.17, gyro scale −0.04/−0.03, BNO scale +0.02/−0.14.
+    - La tasa por quintil de slip_bias (0.93, 0.78, 0.92, 0.88, 0.82) no tiene tendencia.
+    - Lo que mueve el resultado es la muestra de ruido entera. Al compartirla, las 100 corridas fallan o salen juntas.
+- **Potencia y K (d)** (host Mac, `ens.py --power`, 1000 simulaciones por celda, corridas independientes; prueba pareada, p<0.05, B mejor):
+  - Carrera, +10 pts (≈2.1 escenarios):
+    - Con las tasas medidas, la potencia es 0.59-0.75 con K=5, 0.93-0.97 con K=8 y 0.97-1.00 con K=10. En el modelo "monedas" solo caben +5.7 pts, porque solo 3 escenarios tienen margen.
+    - Con Jeffreys (pesimista: le da varianza a los 17 robustos en falla), es 0.42-0.44 con K=5, 0.67-0.70 con K=8, 0.79-0.81 con K=10 y 0.94 con K=15.
+  - Prepark, +10 pts: 1.00 con K=3 (Jeffreys 0.91-0.94). MDD K=3 ±7.9 pts. El modelo "robustas" no aplica: no hay escenarios 0/3.
+  - Falsa alarma simulada (B = A, nominal ≤0.025 por lado): carrera 0.004-0.009, prepark 0.015-0.019.
+  - `--split` con datos reales:
+    - Carrera K=5: 15 particiones de 2 contra 2 réplicas, 0/15 con p<0.05 (pareada y estratificada), 0/15 veredictos MEJOR/PEOR. Las mitades difieren hasta ±9.5 pts (p ≥ 0.125).
+    - Prepark K=3: 3 particiones de 1 contra 1, todas con p=1.0 y NO CONCLUYENTE por regla.
+  - Estas potencias salen de las tasas de la Mac. Con la base de Windows hay que volver a mirarlas (`ens.py runs/<base> --power`).
+- **Costo en Windows (2 slots, medido 2026-10-05):**
+  - Una carrera completa de hw_nuevo tarda 120-134 s de pared por slot: s2/s14, 119-121 s para ~89.5 s de sim; 3170839 n2, 134 s para 97.9 s. Las que chocan al principio tardan ~10 s.
+  - En la Mac, la corrida media del ensamble duraba 0.66 de una completa, así que en Windows la media debería andar en ~80 s. REGLAS_LOCAL usa ~105 s.
+  - Carrera K=8 = 168 corridas: entre 168×80/2 ≈ 1.9 h y 168×105/2 ≈ 2.5 h por lado, con los 2 slots ocupados. K=10 (210 corridas) = 2.3-3.1 h.
+  - Prepark: una pasada de 100 escenarios con `--jobs 2` (smoke `PREPARK=1 SOLO_CAJON=1 ens.sh smoke_pp 1`) tardó 634 s con los 2 slots, más 47 s de espera de slot (pared 682 s). Prepark K=3 ≈ 32 min y K=5 ≈ 53 min por lado, sin contar esperas. Esa pasada dio 87/100 (fines cajón×11 y no_paralelo×2): está en línea con el 86.7 % de la Mac, pero no se compara bit a bit.
+- **Recomendación: carrera K=8 + prepark K=3 por lado**, comparadas con `ens_cmp.py`.
+  - De los K simulados (3, 5, 8, 10, 15, 20), K=8 es el menor con potencia ≥0.9 para +10 pts con las tasas medidas (0.67-0.70 en el modelo pesimista).
+  - K=10 sube eso a 0.79-0.81 por un 25 % más de máquina.
+  - Para efectos menores de ~8 pts en prepark, K=5.
+- **Pendiente:**
+  - Correr la base A en Windows (carrera K=8 + prepark K=3) sobre la base que se vaya a usar. No hay ninguna todavía.
+  - `holg.py` duplica `sign_passes` de T16gr (sin commit allá). Al fusionar T16gr, borrar `_sign_passes_local` y dejar el import de metrics.py.
+  - Habrá conflicto esperado en summ3.py, que T16gr también toca.
+  - La potencia simulada supone corridas A y B independientes. Con la misma k en A y B puede haber correlación positiva: eso baja los pares discordantes y sube la potencia. La validez no cambia, porque McNemar bajo H0 solo exige la misma tasa en A y B.
+  - `all.sh` tiene por default `PY=../../../.venv-sim/...`, que no existe dentro de un worktree. ens.sh cae a la ruta absoluta; all.sh no. Pasar `PY=` o usar ens.sh.
+  - La DLL del firmware no es reproducible en bytes entre compilaciones: la de t17 y la de t15b2, con el mismo hash de fuente, difieren. Para una comparación bit a bit, los dos lados tienen que usar la misma DLL.
