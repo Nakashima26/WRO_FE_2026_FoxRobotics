@@ -167,6 +167,8 @@ class CameraModel:
         self._ray_right = self._dirs_robot[..., 0].astype(np.float32)
         self._ray_fwd = self._dirs_robot[..., 1].astype(np.float32)
         self._floor_cache = {}
+        self._faces_cache = {}
+        self._faces_mode = None
         self._fast_ok = None
         self._floor_fn = None
         self._native_gen = _NATIVE_GEN
@@ -352,34 +354,30 @@ class CameraModel:
             self._fill_face(img, cam, color)
         return img
 
-    def _render_camera_fast(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
-        p = self.params
-        h = math.radians(heading_deg)
-        sh, ch = math.sin(h), math.cos(h)
-        ox, oy = robot_to_world(
-            self.params.right_mm,
-            self.params.forward_from_rear_axle_mm,
-            robot_x,
-            robot_y,
-            heading_deg,
+    def _faces_static(self, track):
+        """Esquinas en mundo de cintas/paredes/señales/cajón, cacheadas por pista."""
+        key = (
+            tuple((s.x, s.y, s.color) for s in track.signs),
+            tuple(tuple(tuple(pt) for pt in b) for b in track.barriers),
+            self.params.wall_height_mm,
+            self.params.sign_height_mm,
         )
+        hit = self._faces_cache.get(key)
+        if hit is not None:
+            return hit
+        if len(self._faces_cache) > 64:
+            self._faces_cache.clear()
 
-        img = self._floor_fast(ox, oy, sh, ch)
+        rib = []
+        rib_colors = []
+        for s in orange_segments():
+            rib.append(self._ribbon(*s, LINE_MM / 2.0))
+            rib_colors.append(ORANGE_BGR)
+        for s in blue_segments():
+            rib.append(self._ribbon(*s, LINE_MM / 2.0))
+            rib_colors.append(BLUE_BGR)
 
-        oz = p.height_mm
-        half_line = LINE_MM / 2.0
-        for seg, color in (
-            *((s, ORANGE_BGR) for s in orange_segments()),
-            *((s, BLUE_BGR) for s in blue_segments()),
-        ):
-            self._fill_face(img, self._ribbon_to_cam(seg, half_line, ox, oy, oz, sh, ch), color)
-
-        faces = []
-        # Pared en tramos: con el quad entero (3 m) la profundidad media del
-        # pintor quedaba por delante de la madera del cajón pegada a ella y la
-        # tapaba (CCW: el rosa del INICIO caía de 0.29 a 0.22). Los cortes caen
-        # también en los cantos de las maderas, si no el tramo que las cruza
-        # sigue tapando una esquina.
+        wall = []
         for axis, value, a0, a1, b0, b1 in self._wall_quads():
             n = max(1, int(math.ceil((a1 - a0) / _WALL_TILE_MM)))
             cuts = {a0 + k * (a1 - a0) / n for k in range(n + 1)}
@@ -389,44 +387,112 @@ class CameraModel:
                         cuts.add(pt[1 - axis])
             cuts = sorted(cuts)
             for c0, c1 in zip(cuts[:-1], cuts[1:]):
-                corners = self._quad_corners(axis, value, c0, c1, b0, b1)
-                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-                if np.all(cam[:, 2] < 8.0):
-                    continue
-                faces.append((float(np.mean(cam[:, 2])), cam, WALL_BGR))
+                wall.append(self._quad_corners(axis, value, c0, c1, b0, b1))
+
+        sg = []
+        sign_colors = []
         half = SIGN_MM / 2.0
         for sign in track.signs:
             color = RED_BGR if sign.color == "Red" else GREEN_BGR
             for corners in self._box_quads(
-                sign.x - half,
-                sign.x + half,
-                sign.y - half,
-                sign.y + half,
-                p.sign_height_mm,
+                sign.x - half, sign.x + half, sign.y - half, sign.y + half,
+                self.params.sign_height_mm,
             ):
-                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-                faces.append((float(np.mean(cam[:, 2])), cam, color))
+                sg.append(corners)
+                sign_colors.append(color)
         for box in track.barriers:
             xs = [pt[0] for pt in box]
             ys = [pt[1] for pt in box]
             for corners in self._box_quads(
-                min(xs), max(xs), min(ys), max(ys), p.sign_height_mm
+                min(xs), max(xs), min(ys), max(ys), self.params.sign_height_mm
             ):
-                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-                faces.append((float(np.mean(cam[:, 2])), cam, MAGENTA_BGR))
-        for _depth, cam, color in sorted(faces, key=lambda item: item[0], reverse=True):
-            self._fill_face(img, cam, color)
+                sg.append(corners)
+                sign_colors.append(MAGENTA_BGR)
+
+        parts = []
+        if rib:
+            parts.append(np.asarray(rib, np.float64).reshape(-1, 4, 3))
+        if wall:
+            parts.append(np.asarray(wall, np.float64).reshape(-1, 4, 3))
+        if sg:
+            parts.append(np.asarray(sg, np.float64).reshape(-1, 4, 3))
+        allw = np.concatenate(parts, axis=0) if parts else np.zeros((0, 4, 3), np.float64)
+        nr, nw = len(rib), len(wall)
+        colors = rib_colors + [WALL_BGR] * nw + sign_colors
+        hit = (allw, nr, nw, colors)
+        self._faces_cache[key] = hit
+        return hit
+
+    def _faces_fast(self, img, track, ox, oy, sh, ch, mode, _dbg=None):
+        """Pinta caras en lote (batch o slice). Misma geometría que _render_camera_ref."""
+        allw, nr, nw, colors = self._faces_static(track)
+        if len(allw) == 0:
+            return img
+        oz = self.params.height_mm
+        dx = allw[..., 0] - ox
+        dy = allw[..., 1] - oy
+        dz = allw[..., 2] - oz
+        right = dx * ch - dy * sh
+        fwd = dx * sh + dy * ch
+        robot = np.stack([right, fwd, dz], axis=-1)
+        rt = self._robot_to_cam.T
+        if mode == "batch":
+            cams = robot @ rt
+        else:
+            cams = np.empty_like(robot)
+            for i in range(len(robot)):
+                cams[i] = np.ascontiguousarray(robot[i]) @ rt
+        z = cams[..., 2]
+        depth = np.mean(z, axis=1).tolist()
+        behind = np.all(z < 8.0, axis=1).tolist()
+        full = np.all(z >= 8.0, axis=1).tolist()
+        p = cams[:, [1, 2, 3, 0], :]
+        with np.errstate(all="ignore"):
+            u = self._cx + self._fx * p[..., 0] / p[..., 2]
+            v = self._cy + self._fy * p[..., 1] / p[..., 2]
+            uv = np.stack([u, v], axis=-1)
+            bad = np.any(np.abs(uv) > 20000, axis=(1, 2)).tolist()
+            pix = np.round(uv).astype(np.int32)
+        if _dbg is not None:
+            _dbg["cams"] = cams
+            _dbg["depth"] = depth
+            _dbg["robot"] = robot
+            _dbg["allw"] = allw
+
+        def draw(i):
+            if full[i]:
+                if not bad[i]:
+                    cv2.fillConvexPoly(img, np.ascontiguousarray(pix[i]), colors[i])
+            else:
+                self._fill_face(img, cams[i], colors[i])
+
+        for i in range(nr):
+            draw(i)
+        cand = [nr + k for k in range(nw) if not behind[nr + k]] + list(
+            range(nr + nw, len(allw))
+        )
+        for i in sorted(cand, key=depth.__getitem__, reverse=True):
+            draw(i)
         return img
+
+    def _render_camera_fast(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
+        h = math.radians(heading_deg)
+        sh, ch = math.sin(h), math.cos(h)
+        ox, oy = robot_to_world(
+            self.params.right_mm,
+            self.params.forward_from_rear_axle_mm,
+            robot_x,
+            robot_y,
+            heading_deg,
+        )
+        img = self._floor_fast(ox, oy, sh, ch)
+        mode = self._faces_mode or "batch"
+        return self._faces_fast(img, track, ox, oy, sh, ch, mode)
 
     def _fast_selfcheck(self, track) -> bool:
         poses = [(0.0, -1000.0, 90.0), (0.0, 1000.0, 270.0), (1000.0, 0.0, 0.0),
                  (-1000.0, 0.0, 180.0), (-1000.0, -1000.0, 45.0), (700.0, -1200.0, 100.0)]
         msg = '[camera] render rápido != referencia en este host; uso referencia'
-        for ps in poses:
-            if not np.array_equal(self._render_camera_fast(track, *ps),
-                                  self._render_camera_ref(track, *ps)):
-                print(msg, file=sys.stderr)
-                return False
         if _floor_kernel() is not None:
             for ps in poses:
                 h = math.radians(ps[2])
@@ -437,7 +503,52 @@ class CameraModel:
                                       self._floor_fast(ox, oy, sh, ch, force_numpy=True)):
                     print(msg, file=sys.stderr)
                     return False
-        return True
+
+        for mode in ("batch", "slice"):
+            self._faces_mode = mode
+            ok = True
+            for ps in poses:
+                h = math.radians(ps[2])
+                sh, ch = math.sin(h), math.cos(h)
+                ox, oy = robot_to_world(
+                    self.params.right_mm, self.params.forward_from_rear_axle_mm,
+                    ps[0], ps[1], ps[2],
+                )
+                dbg = {}
+                img_fast = self._floor_fast(ox, oy, sh, ch)
+                self._faces_fast(img_fast, track, ox, oy, sh, ch, mode, _dbg=dbg)
+                ref = self._render_camera_ref(track, *ps)
+                if not np.array_equal(img_fast, ref):
+                    ok = False
+                    break
+                allw = dbg.get("allw")
+                cams = dbg.get("cams")
+                depth = dbg.get("depth")
+                if allw is None or cams is None:
+                    ok = False
+                    break
+                oz = self.params.height_mm
+                for i in range(len(allw)):
+                    ref_cam = self._to_cam(allw[i], ox, oy, oz, sh, ch)
+                    if not np.array_equal(cams[i], ref_cam):
+                        ok = False
+                        break
+                    if depth[i] != float(np.mean(ref_cam[:, 2])):
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if ok:
+                if mode == "slice":
+                    print('[camera] matmul en lote difiere; uso por cara', file=sys.stderr)
+                self._faces_mode = mode
+                return True
+            if mode == "batch":
+                print('[camera] matmul en lote difiere; pruebo por cara', file=sys.stderr)
+
+        self._faces_mode = None
+        print(msg, file=sys.stderr)
+        return False
 
     def render_camera(self, track, robot_x: float, robot_y: float, heading_deg: float) -> np.ndarray:
         if os.environ.get('FOX_FAST_RENDER', '1') == '0' or self.params.equidistant:
@@ -445,6 +556,8 @@ class CameraModel:
         if self._native_gen != _NATIVE_GEN:
             self._native_gen = _NATIVE_GEN
             self._floor_cache = {}
+            self._faces_cache = {}
+            self._faces_mode = None
             self._fast_ok = None
         if self._fast_ok is None:
             self._fast_ok = self._fast_selfcheck(track)
