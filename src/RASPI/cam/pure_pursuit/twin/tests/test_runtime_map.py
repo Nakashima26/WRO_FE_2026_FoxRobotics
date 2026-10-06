@@ -170,3 +170,25 @@ def test_shadow_cost_budget(monkeypatch):
     assert rt._map_shadow_ms < 15.0
     rt.render_map_panel(400)
     assert rt._map_render_ms < 50.0
+
+
+def test_cans_memo_equals_impl(monkeypatch):
+    from pure_pursuit.digital_map import DigitalMap
+    from pure_pursuit.twin.sim import Sim
+
+    stats = {"memo": 0, "total": 0, "bad": 0}
+    orig = DigitalMap._cans_on
+
+    def checked(self, sec, along0, along1, latch=True):
+        out = orig(self, sec, along0, along1, latch)
+        stats["total"] += 1
+        if self._cans_memo is not None:
+            stats["memo"] += 1
+            if out != self._cans_on_impl(sec, along0, along1, latch):
+                stats["bad"] += 1
+        return out
+
+    monkeypatch.setattr(DigitalMap, "_cans_on", checked)
+    Sim(seed=14, preset="hw_nuevo", max_time_s=20).run()
+    assert stats["bad"] == 0
+    assert stats["memo"] > 0
