@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -42,7 +43,9 @@ class VehicleParams:
 
 @dataclass
 class SteeringParams:
-    # Grados de rueda por 90° de comando de servo. Topes del .ino: 30 y 160.
+    # Grados de rueda por 90° de comando de servo. Default: el comando son las
+    # unidades internas del firmware (topes 30 y 160), presets sin FOX_SERVO_180.
+    # El carro nuevo (hw_nuevo) usa steering_servo_180(): valor de servo 0-180.
     # El CAD de la mangueta mide 46.32° en ese recorrido (antes el twin usaba 50°).
     gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / 70.0   # servo 160 (70° de comando) → 46.32°
     gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / 60.0  # servo 30 (60° de comando) → 46.32°
@@ -51,17 +54,215 @@ class SteeringParams:
     servo_max_deg: float = 160.0
     slew_deg_per_s: float = 600.0
     deadband_deg: float = 0.5
+    # Slew por lado (°/s de comando). None en ambos = slew_deg_per_s a los dos
+    # lados (camino de siempre, bit a bit). El lado lo da la POSICIÓN del servo:
+    # > servo_center_deg = izquierda; al cruzar el centro cambia la tasa.
+    slew_left_deg_per_s: float | None = None
+    slew_right_deg_per_s: float | None = None
+    # Banda muerta por lado (° de comando), mismo criterio de lado. None en ambos
+    # (y sin slew por lado) = deadband_deg en el camino de siempre.
+    deadband_left_deg: float | None = None
+    deadband_right_deg: float | None = None
+    # Refresco del pulso (Hz). None = el comando llega al servo al instante
+    # (camino de siempre). Con valor, sim.py retiene el comando en cada borde
+    # del PWM y el servo lo ve recién al terminar el pulso (ver Sim.run).
+    refresh_hz: float | None = None
+    # True: el servo se mueve hacia el borde de la banda muerta y se queda ahí
+    # (reposo = objetivo − signo(err)·banda), independiente de dt. False: camino
+    # de siempre (para cuando |err| <= banda al inicio del sub-paso).
+    banda_al_borde: bool = False
+    # Desvío de la rueda con valor de servo 90 (°, + = izquierda): rueda =
+    # f(servo) + desvío, sin recorte extra. 0.0 = camino de siempre.
+    centro_rueda_deg: float = 0.0
 
     def __post_init__(self) -> None:
         _prov(
             "steering.gain_left/right",
             "supuesto",
             "46.32° es del CAD (usuario); que se alcance justo en servo 30/160 con centro 90 "
-            "sale de los topes del firmware del carro viejo (fc2bc3e); el carro nuevo usa "
-            "servo 0-180 (usuario) — pendiente frente t16servo",
+            "sale de los topes del firmware del carro viejo (fc2bc3e). El carro nuevo "
+            "(hw_nuevo) va con steering_servo_180()",
         )
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")
+
+
+# ── Carro nuevo: valor de servo 0-180 (FOX_SERVO_180=1 en el .ino) ────────────
+# Las maniobras del firmware siguen en unidades internas 30..160 (centro 90) y
+# escribirServo() las lleva a valor de servo 0-180 por tramos: 30 -> 0,
+# 90 -> 90, 160 -> 180. Supuestos sin medir (usuario: el servo recorre 0-180):
+# ruedas rectas en 90 y ±46.32° de rueda en 0/180, lineal y simétrico.
+SERVO_INT_MIN = 30.0
+SERVO_INT_CENTRO = 90.0
+SERVO_INT_MAX = 160.0
+# Slew de siempre en unidades internas (600 °/s). "proporcional" lo escala por
+# lado al valor de servo 0-180 (misma tasa de rueda que con 30..160: ~397 °/s
+# izq, ~463 °/s der); "plano600" son 600 °/s de valor de servo (~309 °/s de rueda).
+# "sg90" es el servo SG90 del repo según su datasheet: 600 valor-de-servo/s,
+# banda muerta ±0.45 que deja el servo en el borde y pulso retenido a 50 Hz.
+SLEW_INTERNO_DEG_S = 600.0
+SLEW_SG90_DEG_S = 600.0
+SLEW_180_OPCIONES = ("proporcional", "plano600", "sg90")
+# SG90: dead band de 10 µs de ancho total (±5 µs) sobre 2000 µs = 180 de valor
+# de servo -> ±0.45 de valor de servo (±0.232° de rueda).
+BANDA_SG90 = 5.0 * 180.0 / 2000.0
+# freqServo = 50 en PurePursuit.ino:104 (ledcAttach en :3163).
+REFRESCO_SERVO_HZ = 50.0
+
+
+def servo_180_desde_interno(v: float) -> float:
+    """Unidades internas (30..160) -> valor de servo 0-180, sin el redondeo del pulso."""
+    v = min(SERVO_INT_MAX, max(SERVO_INT_MIN, v))
+    if v >= SERVO_INT_CENTRO:
+        return 90.0 + (v - SERVO_INT_CENTRO) * 90.0 / (SERVO_INT_MAX - SERVO_INT_CENTRO)
+    return 90.0 - (SERVO_INT_CENTRO - v) * 90.0 / (SERVO_INT_CENTRO - SERVO_INT_MIN)
+
+
+def servo_interno_desde_180(s: float) -> float:
+    """Valor de servo 0-180 -> unidades internas (30..160). Inversa de la anterior."""
+    if s >= 90.0:
+        return SERVO_INT_CENTRO + (s - 90.0) * (SERVO_INT_MAX - SERVO_INT_CENTRO) / 90.0
+    return SERVO_INT_CENTRO - (90.0 - s) * (SERVO_INT_CENTRO - SERVO_INT_MIN) / 90.0
+
+
+def pulso_us_servo_180(v: int) -> int:
+    """Pulso (µs) que escribe escribirServo() con FOX_SERVO_180=1 (misma aritmética entera)."""
+    v = min(int(SERVO_INT_MAX), max(int(SERVO_INT_MIN), int(v)))
+    d = v - int(SERVO_INT_CENTRO)
+    return 1500 + (d * 1000 + 35) // 70 if d >= 0 else 1500 - (-d * 1000 + 30) // 60
+
+
+def steering_servo_180(
+    slew: str = "proporcional",
+    *,
+    slew_deg_s: float | None = None,
+    centro_rueda_deg: float = 0.0,
+    tope_rueda_deg: float | None = None,
+) -> SteeringParams:
+    """SteeringParams del carro nuevo (hw_nuevo): el comando es el valor de servo 0-180.
+
+    slew_deg_s: solo con "sg90", pisa los 600 valor-de-servo/s del datasheet.
+    centro_rueda_deg: desvío de la rueda con valor de servo 90 (+ = izquierda).
+    tope_rueda_deg: pisa los 46.32° de rueda en valor de servo 0/180.
+    Con los tres en su default el resultado es el de siempre para cada slew."""
+    if slew not in SLEW_180_OPCIONES:
+        raise ValueError(f"slew desconocido: {slew} (opciones: {SLEW_180_OPCIONES})")
+    if slew_deg_s is not None and slew != "sg90":
+        raise ValueError(f"slew_deg_s solo vale con slew=sg90 (pedido: {slew})")
+    if slew_deg_s is not None and not slew_deg_s > 0.0:
+        raise ValueError(f"slew_deg_s debe ser > 0 (pedido: {slew_deg_s})")
+    tope = C.MAX_WHEEL_STEER_DEG if tope_rueda_deg is None else float(tope_rueda_deg)
+    if not 0.0 < tope < 90.0:
+        raise ValueError(f"tope de rueda fuera de (0, 90)°: {tope}")
+    lado_izq = 90.0 / (SERVO_INT_MAX - SERVO_INT_CENTRO)   # 90/70
+    lado_der = 90.0 / (SERVO_INT_CENTRO - SERVO_INT_MIN)   # 90/60
+    db = SteeringParams.deadband_deg   # 0.5 de unidades internas
+    if slew == "sg90":
+        tasa = SLEW_SG90_DEG_S if slew_deg_s is None else float(slew_deg_s)
+        st = SteeringParams(
+            gain_left=tope,
+            gain_right=tope,
+            servo_center_deg=90.0,
+            servo_min_deg=0.0,
+            servo_max_deg=180.0,
+            slew_deg_per_s=tasa,
+            slew_left_deg_per_s=tasa,
+            slew_right_deg_per_s=tasa,
+            deadband_deg=BANDA_SG90,
+            deadband_left_deg=BANDA_SG90,
+            deadband_right_deg=BANDA_SG90,
+            refresh_hz=REFRESCO_SERVO_HZ,
+            banda_al_borde=True,
+            centro_rueda_deg=float(centro_rueda_deg),
+        )
+    else:
+        st = SteeringParams(
+            gain_left=tope,
+            gain_right=tope,
+            servo_center_deg=90.0,
+            servo_min_deg=0.0,
+            servo_max_deg=180.0,
+            slew_deg_per_s=SLEW_INTERNO_DEG_S,
+            slew_left_deg_per_s=SLEW_INTERNO_DEG_S * lado_izq if slew == "proporcional" else None,
+            slew_right_deg_per_s=SLEW_INTERNO_DEG_S * lado_der if slew == "proporcional" else None,
+            # Banda muerta escalada igual que el recorrido (0.5·90/70 y 0.5·90/60 de
+            # valor de servo): la misma en rueda que con 30..160 (0.331° izq, 0.386° der).
+            # Con 0.5 plano la rueda paraba más cerca del objetivo (0.257°) y el twin
+            # cambiaba de comportamiento sin que cambiara el carro.
+            deadband_left_deg=db * lado_izq,
+            deadband_right_deg=db * lado_der,
+            centro_rueda_deg=float(centro_rueda_deg),
+        )
+    if tope_rueda_deg is None:
+        _prov(
+            "steering(servo 0-180).gain",
+            "supuesto",
+            "46.32° (CAD, usuario) en valor de servo 0 y 180, centro 90, lineal y simétrico; "
+            "el servo recorre 0-180 (usuario). Medir: valor con ruedas rectas, rueda en 0/180, "
+            "radio a tope por lado",
+        )
+    else:
+        _prov(
+            "steering(servo 0-180).gain",
+            "supuesto",
+            f"{tope:.2f}° de rueda en valor de servo 0 y 180 (TWIN_RUEDA_TOPE_DEG; CAD 46.32°): "
+            f"radio de bicicleta a tope = {C.WHEELBASE_MM:.0f}/tan({tope:.2f}°) = "
+            f"{C.WHEELBASE_MM / math.tan(math.radians(tope)):.1f} mm; sensibilidad, medir",
+        )
+    if centro_rueda_deg != 0.0:
+        _prov(
+            "steering(servo 0-180).centro_rueda",
+            "supuesto",
+            f"rueda con valor de servo 90 corrida {centro_rueda_deg:+.2f}° (+ = izquierda; "
+            "TWIN_SERVO_CENTRO_RUEDA_DEG): horn montado corrido un diente; sensibilidad, "
+            "medir con ruedas rectas",
+        )
+    if slew == "sg90":
+        _prov(
+            "steering(servo 0-180).slew",
+            "supuesto",
+            f"SG90 (servo del repo): {st.slew_deg_per_s:.0f} valor-de-servo/s a los dos lados "
+            "(datasheet 0.1 s/60° a 4.8 V SIN carga; con la carga de la dirección es más "
+            "lento"
+            + ("" if slew_deg_s is None else "; TWIN_SERVO_SLEW_DEG_S")
+            + f") = {st.slew_deg_per_s * tope / 90.0:.1f} °/s de rueda; medir el servo",
+        )
+        _prov(
+            "steering(servo 0-180).deadband",
+            "supuesto",
+            "SG90: dead band de 10 µs de ancho total (datasheet) = ±0.45 de valor de servo "
+            "a los dos lados; histéresis de servo analógico: apaga el motor al entrar en la "
+            "banda y queda en su borde (objetivo − signo(err)·0.45), sin inercia",
+        )
+        _prov(
+            "steering(servo 0-180).refresh_hz",
+            "supuesto",
+            "pulso a 50 Hz (freqServo=50 en PurePursuit.ino:104, ledcAttach en :3163): "
+            "el comando se retiene en cada borde y el servo lo ve al terminar el pulso "
+            "(0.5..2.5 ms); bordes desde el ledcAttach del SIL",
+        )
+        return st
+    if slew == "proporcional":
+        _prov(
+            "steering(servo 0-180).slew",
+            "supuesto",
+            "supuesto — escalado a proporción del rango viejo (decisión del usuario 2026-10-05); "
+            "medir el servo. 600·90/70≈771.4 °/s izq, 600·90/60=900 °/s der de valor de servo "
+            "(misma tasa de rueda que con 30..160)",
+        )
+    else:
+        _prov(
+            "steering(servo 0-180).slew",
+            "supuesto",
+            "600 °/s plano de valor de servo (sensibilidad; ~309 °/s de rueda); medir el servo",
+        )
+    _prov(
+        "steering(servo 0-180).deadband",
+        "supuesto",
+        "micro-juego mecánico; 0.5 de unidades internas escalado como el recorrido "
+        "(0.643 izq, 0.75 der de valor de servo, misma banda en rueda); medir el servo",
+    )
+    return st
 
 
 @dataclass
@@ -265,11 +466,16 @@ class TwinParams:
 
 
 def wheel_deg_from_servo(servo_deg: float, steering: SteeringParams) -> float:
-    """Rueda + = derecha; servo > 90 = izquierda (firmware)."""
+    """Rueda + = derecha; servo > 90 = izquierda (firmware). centro_rueda_deg
+    (+ = izquierda) corre la rueda entera, sin recorte extra en los topes."""
     delta = steering.servo_center_deg - servo_deg
     if delta >= 0.0:
-        return delta * steering.gain_right / 90.0
-    return delta * steering.gain_left / 90.0
+        w = delta * steering.gain_right / 90.0
+    else:
+        w = delta * steering.gain_left / 90.0
+    if steering.centro_rueda_deg != 0.0:
+        w -= steering.centro_rueda_deg
+    return w
 
 
 def max_wheel_deg(steering: SteeringParams) -> float:

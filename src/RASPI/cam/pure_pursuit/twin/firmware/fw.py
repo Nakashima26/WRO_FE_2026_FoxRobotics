@@ -17,6 +17,12 @@ _A1 = 18
 _A2 = 19
 
 
+def servo_desde_duty(duty: int) -> float:
+    """Duty LEDC del servo (16 bits a 50 Hz) -> ángulo 0..180 (pulso 500..2500 µs)."""
+    pulse_us = duty * 20000.0 / 65535.0
+    return (pulse_us - 500.0) * 180.0 / 2000.0
+
+
 class FirmwareSetupError(RuntimeError):
     pass
 
@@ -93,6 +99,8 @@ class FirmwareSIL:
 
         lib.sil_ledc_duty.argtypes = [ctypes.c_uint8]
         lib.sil_ledc_duty.restype = ctypes.c_int
+        lib.sil_ledc_freq.argtypes = [ctypes.c_uint8]
+        lib.sil_ledc_freq.restype = ctypes.c_int
         lib.sil_digital.argtypes = [ctypes.c_uint8]
         lib.sil_digital.restype = ctypes.c_int
 
@@ -179,9 +187,18 @@ class FirmwareSIL:
         return b"".join(chunks).decode("utf-8", errors="replace")
 
     def servo_angle(self) -> float:
-        duty = self._lib.sil_ledc_duty(_SERVO_PIN)
-        pulse_us = duty * 20000.0 / 65535.0
-        return (pulse_us - 500.0) * 180.0 / 2000.0
+        """Ángulo que codifica el duty del LEDC (500..2500 µs = 0..180). Sin
+        FOX_SERVO_180 son las unidades internas del firmware (30..160); con
+        FOX_SERVO_180=1, el valor de servo 0-180."""
+        return servo_desde_duty(self._lib.sil_ledc_duty(_SERVO_PIN))
+
+    def servo_duty(self) -> int:
+        """Duty crudo del LEDC del servo (0 = sin pulso: ledcAttach lo deja en 0)."""
+        return int(self._lib.sil_ledc_duty(_SERVO_PIN))
+
+    def servo_attached(self) -> bool:
+        """True desde el ledcAttach del pin del servo (el SIL guarda la frecuencia ahí)."""
+        return int(self._lib.sil_ledc_freq(_SERVO_PIN)) > 0
 
     def motor_pwm(self) -> int:
         return int(self._lib.sil_ledc_duty(_PWMA))

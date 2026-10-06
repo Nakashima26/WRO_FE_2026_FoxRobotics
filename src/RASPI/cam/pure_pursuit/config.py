@@ -75,9 +75,11 @@ FRONT_OVERHANG_MM    = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 33.5 derivado,
 TRACK_MM             = 110.0    # supuesto (solo dibujo); pendiente medir
 WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
 # Ángulo máximo de RUEDA. Carro nuevo: servo 0-180 (usuario); se supone ±46.32° en
-# 0/180 con centro 90, sin medir. Firmware y twin aún usan los topes 30/160 del carro
-# viejo (fc2bc3e). OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo
-# maneja otra tarea, no se cambia aquí.
+# 0/180 con centro 90, sin medir. Las maniobras del firmware siguen en unidades
+# internas 30..160 (topes del carro viejo, fc2bc3e); la config del carro nuevo
+# (hw_nuevo, FOX_SERVO_180=1) pasa a servo 0-180: los giros a tope mandan 0/180.
+# OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo maneja otra
+# tarea, no se cambia aquí.
 MAX_WHEEL_STEER_DEG  = 46.32    # confirmado por usuario (CAD de la mangueta)
 # Cámara (NoIR ancho)
 CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
