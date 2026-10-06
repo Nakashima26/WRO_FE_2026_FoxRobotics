@@ -22,8 +22,12 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 ## Presets
 - `hw_nuevo` = hardware de competencia: 180×130 mm, batalla 113, rueda 46.32°, cámara 45° a ~97 mm,
   encoder en motor, 4 ToF (L/R/F/B), IMU BNO085, Pi 5 (~28 fps), corrección del mapa con sonares.
-  **Servo de dirección 0-180** (dato del usuario, dicho varias veces): el firmware y el twin todavía usan
-  los topes 30/160 del carro viejo — ver "Pendiente de medir" y el frente `t16servo`.
+  **Servo de dirección SG90 de 0-180** (dato del usuario, dicho varias veces). Desde T16servo/T16sg90
+  (fusionadas en t15b2, 825a187) hw_nuevo compila con `FOX_SERVO_180=1`: el firmware sigue pensando en
+  unidades internas 30..160 (centro 90) y `escribirServo` las lleva a valor de servo 0-180 (= ±46.32° de
+  rueda). El twin modela el SG90 por default (`servo_slew="sg90"`: 600 valor-de-servo/s = 308.8 °/s de
+  rueda, banda ±0.45 al borde, pulso retenido a 50 Hz); `TWIN_SERVO_SLEW=proporcional|plano600` da los
+  modelos viejos. Decir "valor de servo (0-180)" o "unidades internas (30..160)", nunca "servo físico".
   **Todo el trabajo nuevo se mide aquí.**
 - `giro_rapido` = carro actual (PWM sin encoder, MPU6050, 14 fps). Solo referencia.
 - Dimensiones/montajes: fuente única en `config.py` (bloque GEOMETRÍA DEL VEHÍCULO).
@@ -86,24 +90,49 @@ Detalle, números y validaciones en `docs/twin_plan.md`, "T16ens". Todo corre en
 - `ens.py runs/<tag> [--power] [--kmax K]` resume un ensamble y avisa si hay K distintos.
   `ens_cmp.py runs/A --split` mide la falsa alarma con datos reales.
 
-## Mac (corridas pesadas — Windows está al tope de RAM)
-- `ssh -o BatchMode=yes jesse@192.168.68.59` (arm64, 18 núcleos). Autorizado por el usuario para lotes.
-  Darle el permiso al subagente **en el prompt inicial** (si no, lo rechaza como sospechoso).
-- Cada agente su dir `~/Projects/fox_<tag>`, sincronizado por tar desde `git ls-files -co --exclude-standard`
-  sin `runs/` ni `_build/`. **Borrar `_build/` tras cada sync que cambie el .ino** (caché de `libfw_*.dylib`
-  puede servir un binario viejo).
-- **CRLF**: el checkout de Windows tiene finales CRLF; un tar hecho desde Windows rompe los `.sh` en la
-  Mac (`xargs -P 10\r`). Tras cada sync: `find . -name '*.sh' -o -name '*.py' | xargs sed -i '' $'s/\r$//'`
-  (o empaquetar con `git archive`/`git ls-files` + `dos2unix`). El SHA del .ino cambia con eso: comparar
-  SHAs siempre del lado Mac.
-- Python `~/Documents/GitHub/FoxRobotics/.venv/bin/python`, `PYTHONPATH=.`, desde `src/RASPI/cam`.
-  Hasta 10 jobs por agente; coordinar si hay varios.
-- NO tocar `~/Documents/GitHub/FoxRobotics` (repo del usuario; solo su `.venv`) ni dirs de otros agentes.
-- No sondear con `sleep`: ssh en primer plano con timeout largo, o Bash `run_in_background` y esperar aviso.
-- `SOLO_CAJON=1 SEEDS="..." pure_pursuit/twin/tools/all.sh <tag> [jobs]` (en la Mac cambiar la ruta del
-  python del script o llamar drive.py directo); `summ3.py runs/<tag> <seeds>` resume.
+## Corridas: solo Windows, por `slot.py` (desde 2026-10-05 ya no hay Mac)
+- No hay Mac ni ssh. Las reglas completas están en `C:\Users\jbanda\fox_local\REGLAS_LOCAL.md`; léelas antes de correr nada.
+- Toda corrida del twin (drive.py, prepark.py, salida.py, pytest) pasa por el semáforo global
+  `$PY C:/Users/jbanda/fox_local/slot.py --tag <frente>_<qué> [--n K] -- $PY <script> ...`. Hay 2 slots
+  compartidos con la otra sesión de Claude, y `prepark.py --jobs K` va con `--n K` (K ≤ 2).
+- Costo por corrida: carrera hw_nuevo ~105-120 s y ~790 MB de pico; prepark 100 con `--jobs 2` ~634 s.
+- Lote de carreras: `printf '%s\n' <seeds> | xargs -P 4 -I{} sh -c '$PY .../slot.py --tag X_s{} -- $PY
+  pure_pursuit/twin/tools/drive.py {} runs/X/s{} hw_nuevo null --solo-cajon > runs/X/s{}.out 2>&1'`.
+  Antes, UNA corrida sola para que compile el firmware si cambió el .ino.
+- Si el .ino es idéntico al de otro worktree, copiar su `libfw_<hash>.dll` a `_build/`. Las DLL no son
+  reproducibles en bytes entre compilaciones, pero dan el mismo resultado (verificado en T16ens/T16sg90).
+- Firma bit a bit de una corrida: `python C:/Users/jbanda/fox_local/shasig.py <run_dir>...`, que da el sha256
+  de trace.csv sin `pi_frame_ms` y el de fw_debug.log.
+- Los resultados viejos de la Mac están en `C:\Users\jbanda\mac_runs\fox_<frente>\...` y solo sirven como
+  diagnóstico: Mac y Windows no son comparables bit a bit.
+- No sondear con `sleep`: Bash `run_in_background` y esperar el aviso. No matar python.exe ajenos.
+- `summ3.py runs/<tag> <seeds>` resume una carrera; `ens.py runs/<tag>` resume un ensamble.
 
-## Estado (2026-10-05, rama `t15b2` HEAD e2914de, NO fusionada a `digital-twin`, NO pusheada)
+## Estado al 2026-10-05 (noche): t15b2 con T16infra + T16ens + T16sg90 fusionados (NO pusheada)
+- Fusionado: t16infra, t16ens (f6095b7), t16sg90 (825a187). Identidad verificada en Windows con `shasig.py`:
+  seed 2 sin ruido = base anterior (trace c810bdaf…, fw 6219b37b…); `TWIN_SERVO_SLEW=proporcional` = t16sg90
+  g1_prop (fw b1726361…, 810 filas); default sg90 = g1_sg90 (fw 08dd0966…, 1495 filas).
+- pytest tras el merge: 118 passed; falla la conocida `test_corner_hint` y `test_paridad::test_hw_nuevo_todo_aceptado`
+  (integración T16infra+T16sg90: la fila `servo.fisico` ya no difiere; se renombró a `servo.rango`, 5/5 pasan).
+- **Hallazgos a no perder:**
+  - Prepark con ruido independiente ≈86-87 %, no 98 (el 98 era una sola muestra de ruido compartida).
+  - Con el SG90 modelado: prepark 86/100 (88 con slew proporcional). Las fallas pasan de "choque con el cajón"
+    a "pegado de lado" (24): la vuelta del tope al centro en la fase 14 es más lenta (309 °/s) y el carro
+    termina 66.1° vs 64.1°. A 500°/s baja a 75/100: hay que medir el slew con carga.
+  - El harness `salida.py` estaba roto desde 87532bb (no detectaba choques); arreglado en T16sg90. Toda salida
+    medida entre 87532bb y el arreglo no vale.
+- **Pendiente, en este orden** (el usuario pidió parar aquí; nada de esto se ha lanzado):
+  1. Línea base nueva en Windows sobre t15b2 (`runs/loc_base2/`): carrera 21 `--solo-cajon`, prepark 100,
+     `salida.py all`, prepark K=3 (ens.sh PREPARK=1); carrera K=8 opcional (~2.5 h).
+  2. Fase B de t16gr y t16u con `fox_recover/t16gr_local.md` y `t16u_local.md` (cada uno: impl → auditoría fresca).
+  3. Frente de parking (PARALELO y PARALELO_REV a 100/100 bajo ensamble, elegir el más rápido) con la entrada
+     "pegado de lado" / fase 14 de arriba.
+  4. Menores: `holg.py` `_sign_passes_local` al fusionar t16gr; AVISO de `ens.py` (una corrida sin STOP cuenta
+     como "error" y no cambia K); borrar `.claude/wf_recover`; yawRecta; T14 BNO; FOX_* para el ESP real.
+- Esperando al usuario (no bloquea): valor de servo con ruedas rectas, radio a tope por lado, slew con carga,
+  SG90 analógico o digital, si 2500 µs zumba.
+
+## Estado anterior (2026-10-05, rama `t15b2` HEAD e2914de, NO fusionada a `digital-twin`, NO pusheada)
 Reglamento 9.23 (decisión del usuario): el cambio de sentido para estacionar se hace **dentro de la
 esquina 13**; luego solo se anda por esa esquina y la recta de salida. Criterio de parking: tocar la pared
 exterior está bien, tocar el cajón no.

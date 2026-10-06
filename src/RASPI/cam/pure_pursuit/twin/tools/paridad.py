@@ -93,13 +93,13 @@ ACEPTADAS: dict[str, tuple[str, str]] = {
     "DIGITAL_MAP_PP_TURN_CM": ("carro", "giro_rapido: verde en la boca, la esquina la dobla el PP"),
     "DIGITAL_MAP_WALL_FIX": (
         "carro", "hw_nuevo: la pose del mapa derivaba 150-430 mm; sonares contra paredes conocidas"),
-    "servo.fisico": (
-        "pendiente", "carro nuevo: servo físico 0-180; el twin modela 30..160 = ±46.32° "
-        "de rueda. t16servo agrega FOX_SERVO_180 (30..160 -> 0..180)"),
+    "servo.rango": (
+        "pendiente", "carro nuevo: valor de servo 0-180 (SG90); sin FOX_SERVO_180 el twin "
+        "modela 30..160 = ±46.32° de rueda. Con el define (T16servo) modela 0..180"),
     "servo.fuera_de_topes": (
         "pendiente", "las U del .ino (PARK/PUNTA) escriben centroServo - ticks con ticks "
-        "hasta 70 = 20, fuera de 30..160; escribirServo solo acota a 0..180 y el twin "
-        "acota a 30"),
+        "hasta 70 = 20, fuera de 30..160. Con FOX_SERVO_180 escribirServo lo recorta a "
+        "30 (valor de servo 0), igual que el twin; sin el define solo acota a 0..180"),
     "servo.rueda_der": (
         "pendiente", "las U del .ino suponen 70 ticks = 46.32° a los dos lados; el twin "
         "pone 46.32° en servo 30 (60 ticks) a la derecha. Sin medir cuál es el real"),
@@ -107,7 +107,7 @@ ACEPTADAS: dict[str, tuple[str, str]] = {
 
 # Hardware del carro nuevo que no está en el .ino ni en config (dato del usuario).
 CARRO_NUEVO = {
-    "servo.fisico": "0..180",
+    "servo.rango": "0..180",
 }
 
 
@@ -325,13 +325,13 @@ def _servo_rows(info: InoInfo, cfg: dict[str, Any], errors: list[str]) -> list[R
     slew = (f"izq {sl:g} / der {sr:g} °/s" if sl is not None and sr is not None
             else f"{st.slew_deg_per_s:g} °/s ambos lados (supuesto SG90)")
     rows.append(Row("servo.slew", "twin", "sin medir", slew, None,
-                    "" if s180 else "con FOX_SERVO_180 (t16servo): 900 °/s der, ~771 °/s izq"))
+                    "" if s180 else "con FOX_SERVO_180: SG90 600 valor-de-servo/s (T16sg90)"))
     # Solo el carro nuevo (preset con su hardware) tiene el servo 0-180.
     fd = cfg.get("fw_defines", {})
     if any(str(fd.get(k, "0")) == "1" for k in ("FOX_ENCODER", "FOX_TOF", "FOX_SERVO_180")):
         rango = f"{st.servo_min_deg:g}..{st.servo_max_deg:g}"
-        rows.append(Row("servo.fisico", "carro", CARRO_NUEVO["servo.fisico"], rango,
-                        CARRO_NUEVO["servo.fisico"] != rango))
+        rows.append(Row("servo.rango", "carro", CARRO_NUEVO["servo.rango"], rango,
+                        CARRO_NUEVO["servo.rango"] != rango))
     if "FOX_SERVO_180" not in info.defines and "FOX_SERVO_180" not in cfg.get("fw_defines", {}):
         rows.append(Row("FOX_SERVO_180", "ino-define", "(no existe)", "(no definido)", None,
                         "hueco previsto: lo agrega t16servo"))

@@ -64,8 +64,10 @@ def test_hw_nuevo_todo_aceptado(monkeypatch):
     by = {r.name: r for r in rows}
     # Lo que distingue al carro nuevo del .ino desplegado.
     for k in ("TURNS_PER_RACE", "FOX_ENCODER", "FOX_TOF", "imu", "pi_period_s",
-              "inject_map_truth", "servo.fisico"):
+              "inject_map_truth"):
         assert by[k].difiere, k
+    # Con FOX_SERVO_180 (T16servo) el twin ya modela el valor de servo 0-180.
+    assert not by["servo.rango"].difiere
     assert not by["servo.centro"].difiere and not by["servo.rueda_izq"].difiere
     assert not by["servo.rueda_max"].difiere and by["servo.rueda_der"].difiere
 

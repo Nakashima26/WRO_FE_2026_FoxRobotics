@@ -565,7 +565,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
     - CW_c2_p4 y CW_c3_p4, los 2 fallos de la base de 98/100, salen 3/3.
 - **Hallazgo: el 98/100 de prepark (host Mac, `fox_base/runs/base_prepark`) no es la tasa de prepark.**
   - Venía de una sola calibración de sensores compartida por los 100 escenarios. Todos usan `Sim(0)` y, sin `--noise-seed`, la misma corriente `default_rng(0)`, así que tienen las mismas constantes (slip_bias, bias/scale del gyro, scale del BNO) y la misma secuencia de ruido por lectura. Es UNA muestra del ruido repetida en 100 escenarios, no 100 muestras.
-  - Prueba directa en `runs/pp_shared`, con una corriente compartida distinta por pasada (`--noise-seed 1..3`, según su log; el script scratch de la Mac no se conservó): las tres pasadas dan 95, 90 y 79/100. Con corrientes independientes por escenario dan 87, 87 y 86.
+  - Prueba directa en `runs/pp_shared`, con una corriente compartida distinta por pasada (`--noise-seed 1..3`, según `run_pp_shared.sh` de la copia; el script scratch que llama no se conservó): las tres pasadas dan 95, 90 y 79/100 (`run_pp_shared.log`). Con corrientes independientes por escenario dan 87, 87 y 86.
   - Con las 4 pasadas de corriente compartida (98, 95, 90, 79), una pasada de prepark "a la vieja" tiene una sd de ~8 pts. Por eso 98/100 contra otro número de una sola pasada no dice nada.
   - No hay una calibración "mala" que explique los fallos:
     - En `ens_base_pp`, el z medio de las 4 constantes es casi el mismo en los 260 ok que en los 40 fallos: slip_bias −0.05/+0.09, gyro bias −0.07/+0.17, gyro scale −0.04/−0.03, BNO scale +0.02/−0.14.
@@ -732,7 +732,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
 - **Causa raíz 1, CW_c2_p1** (prop OK, ya alineado −1.1° → sg90 X, pegado de lado, rumbo 10.5°):
   - En la fase 14 (RECTO, `ino:5244-5262`) el firmware manda `escribirServo(centroServo)` en reversa. La traza sg90 en t=4.457929 da `servo_180=89.997`, `servo_180_visto=179.976` y `rueda=−46.08`: el servo todavía no vio el pulso nuevo. En prop la rueda ya va en −45.60 a los 4.458365 y en −31.17 a los 4.494734.
   - La rueda llega a −2.26 a los 4.6034 s con sg90 (prop: −2.23 a los 4.5676 s), y el carro sigue girando en reversa. El `Ang` al final de la fase 14 es −66.95 contra −64.41 (+2.5°).
-  - En la fase 9 el exterior ya está más cerca: `fw_debug.log:469` da `5.845 … ext=4` en prop y `5.888 … ext=3` en sg90. L llega a 2 a los 5.912 s.
+  - En la fase 9 el exterior ya está más cerca: `fw_debug.log:235` da `5.845 … ext=4` en prop y `5.888 … ext=3` en sg90. L llega a 2 a los 5.912 s.
   - **Línea decisiva:** `runs/g1_sg90_pp/CW_c2_p1/fw_debug.log:297` `6.998 PARK fase 13 fin: dif=13.4 dF=2.00 ext=2 distB=8.5`, seguida de `:299` `TERMINADO: REV FINAL: pegado de lado`.
     - La regla es `pegado = (extRaw > 0 && extRaw <= PARK_PEGADO_CM)` (`ino:5429`, `PARK_PEGADO_CM=2` en `ino:999`). Con pegado no se cicla (`ino:5442`).
     - Prop `:316`: `7.299 PARK fase 13 fin: dif=4.7 dF=4.00 ext=3 distB=5.7` → ya alineado.
@@ -742,7 +742,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - En el coast de la fase 9 (`ino:5348`, servo al centro, `MANIOBRA_FRENO_MS`) se repite la latencia. La traza sg90 en t=5.600565 da `servo_180=89.997` con `servo_180_visto=−0.010` y `rueda=46.09`. A los 5.660583 la rueda va en 27.84, cuando prop ya estaba en 0.32 a los 5.655531.
   - Mientras la rueda vuelve al centro, el rumbo cambia 3.4° (111.89→108.54) con ~12 mm de avance, contra 2.1° (110.30→108.23) y ~9 mm en prop.
   - El choque con el cajón llega a los 5.8475 s. No se verificó qué esquina toca.
-- **Origen común de las dos causas:** cada vuelta del tope al centro en reversa (fases 14 y 9) suma una latencia de 0.5-22.5 ms. Además la rueda vuelve a 309 °/s en vez de los 397/463 °/s del modelo proporcional (771.4/900 valor-de-servo/s). Son 0.150 s del tope al centro con el carro moviéndose.
+- **Origen común de las dos causas:** la vuelta del tope al centro con el carro moviéndose (fase 14 en reversa, fase 9 en coast). Lo que pesa es el slew: la rueda vuelve a 309 °/s en vez de los 397/463 °/s del modelo proporcional (771.4/900 valor-de-servo/s), 0.150 s del tope al centro. La retención del pulso puede sumar 0.5-22.5 ms, pero en estos dos casos fue chica: ~3-4 ms en CW_c2_p1 (contra ~31 ms del slew) y ~1-2 ms en CW_c4_p2 (auditoría).
   - El margen del parking al pegado (ext 3 vs 2 cm) y al rumbo de "paralelo" (10.2°) es de pocos mm y pocos grados.
   - **No se tocó ningún umbral.** Para cerrar esto hay que medir el slew con carga y después, si hace falta, repensar la maniobra con la geometría del mapa.
 - **G1 carrera** (21 seeds hw_nuevo `--solo-cajon`, Windows; prop s2, s14 y s3170839 son los de G0):
@@ -763,7 +763,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
 | sg90 | 40/41 (s11 señal Red S/T3@7.25) | 10/10, 10/10, 20/21 | 42/99/36 | 106 | 8.22 |
 
   - s11 es la falla conocida de T15a.
-  - CW_5, CW_6 y s20 llegan a tc=1 más tarde con sg90 (8.63 → 12.0 s) sin chocar. s3 y s4 pierden ~50 mm de holgura a la señal (185→129, 186→133). No se analizó.
+  - CW_5, CW_6 y s20 llegan a tc=1 más tarde con sg90 sin chocar (s20: 8.29 → 11.99 s). s3 y s4 pierden ~50 mm de holgura a la señal (185→129, 186→133). No se analizó.
   - Las corridas `g1_*_salida` (sin el arreglo) se dejan como evidencia del harness roto: dan 41/41 con `min` vacío.
 - **Discrepancia con el brief:** el brief atribuía la caída del prepark de T16servo a "cambio de banda/slew". La auditoría (ctl_q, corrección de arriba) dice otra cosa: es la cuantización vieja del pulso, amplificada por el artefacto de banda/slew del modelo. El slew y la banda del SG90 son otro efecto, el de esta entrada.
 - **Preguntas abiertas** (necesitan el carro nuevo):
@@ -771,7 +771,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - **Analógico o "SG90 Digital":** banda de 10 o de 1 µs.
   - **Valor de servo con las ruedas rectas, y rueda en 0/180.** `TWIN_SERVO_CENTRO_RUEDA_DEG` y `TWIN_RUEDA_TOPE_DEG` ya existen para la sensibilidad; no se corrieron.
   - **Stall a 2500 µs:** si zumba o se calienta en valor de servo 180. Queda 100 µs más allá de las referencias de 2400 µs.
-  - **Robustez del parking a la latencia y al slew** en las vueltas al centro en reversa (fases 14 y 9). Lo mismo para el filo del criterio: ext=2 de `PARK_PEGADO_CM` y rumbo 10.2° de "paralelo". Es una pregunta de diseño de maniobra, no de umbrales.
+  - **Robustez del parking a la latencia y al slew** en las vueltas al centro (fase 14 en reversa, fase 9 en coast). Lo mismo para el filo del criterio: ext=2 de `PARK_PEGADO_CM` y rumbo 10.2° de "paralelo". Es una pregunta de diseño de maniobra, no de umbrales.
   - Las salidas medidas en otras ramas después de 87532bb no valen; hay que repetirlas con el `salida.py` arreglado.
 - **Corridas** (`src/RASPI/cam/runs/` de t16sg90):
   - prepark: `g1_prop_pp`, `g1_sg90_pp`, `g1_sg500_pp`, `g1_p600_pp`;
