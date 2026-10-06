@@ -71,7 +71,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             # encima de la lata cuando empieza a abrirse, y el cuerpo (65 mm)
             # más la lata (25 mm) no caben en los 70 mm del inflado.
             "CENTERLINE_RAMP_PX": 220,
-            "OBS_INFLATE_R": 56,
+            "OBS_INFLATE_R": 61,  # +1 cm de esquiva BEV (2 mm/px), no el real
             # La línea se cortaba en BEV_H/3 (~49 cm) aunque la pared de la
             # esquina ya estaba dibujada arriba. Muestrea hasta ~70 cm.
             "CENTERLINE_TOP_Y": 30,
@@ -584,8 +584,9 @@ class Sim:
                     while sim_t >= t_k + self.pi_period_s:
                         t_end = t_k + self.pi_period_s
                         link.set_now_us(int(t_end * 1e6))
-                        t_cam = max(0.0, t_k - self.cam_latency_s)
-                        px, py, ph = _pose_at(history, t_cam)
+                        # Misma pose que el chasis/ACK de este frame. La latencia
+                        # de cámara dejaba el BEV y el mapa ~un tramo atrás.
+                        px, py, ph = veh.x, veh.y, veh.heading_deg
                         t_render0 = time.perf_counter()
                         frame = cam.render_camera(field, px, py, ph)
                         render_s += time.perf_counter() - t_render0

@@ -59,6 +59,7 @@ _YAW_GAIN = 0.6
 _YAW_STEP_DEG = 3.0
 _REAR_WALL_MAX_MM = 250.0               # pared negra, el ToF no ve más lejos
 _CLEAR_MM = 130.0                       # del centro de la lata al centro del carro
+_PASS_CLEAR_MM = 210.0                  # esquiva +1 cm; no el tamaño real
 _LAT_CAP_MM = 220.0
 _SEAT_GATE_MM = 160.0
 _VOTES = 4
@@ -377,7 +378,7 @@ class DigitalMap:
                 sa, sr = self._section_frame(sx, sy, sec)
                 fr = sr
             if dist < 260.0 and abs(fr - sr) < 110.0:
-                side = sr + 200.0 if color == "Red" else sr - 200.0
+                side = sr + _PASS_CLEAR_MM if color == "Red" else sr - _PASS_CLEAR_MM
                 side = max(-260.0, min(260.0, side))
                 self._live.append((sec, sa, side))
             self._pull_known(wx, wy, color)
@@ -715,7 +716,7 @@ class DigitalMap:
             sa, sr = self._section_frame(sx, sy, sec)
             if sa < along0 - 80.0 or sa > along1 + 40.0:
                 continue
-            side = sr + 200.0 if color == "Red" else sr - 200.0
+            side = sr + _PASS_CLEAR_MM if color == "Red" else sr - _PASS_CLEAR_MM
             for osid, ox, oy in _seat_world(sec):
                 if osid == sid or _COL.get(osid) != _COL.get(sid):
                     continue
@@ -769,9 +770,9 @@ class DigitalMap:
             return onto(cans[0][0], cans[0][1])
         if along >= cans[-1][0]:
             side = cans[-1][1]
-            # Verde: se queda a la izquierda el resto de la recta. Volver al
-            # centro mete la línea en el siguiente verde, que todavía no se vio.
-            if side < -40.0:
+            # Lado de paso hasta la esquina. Volver al centro mete la línea
+            # en la lata de la recta siguiente (3170839: S/T1 rojo → W rojo).
+            if abs(side) > 40.0:
                 return side
             back = cans[-1][0] + 120.0
             if along <= back:
@@ -826,25 +827,33 @@ class DigitalMap:
         fwd = dx * math.sin(h) + dy * math.cos(h)
         return fwd, against_wall
 
+    def _pass_matches_turn(self, side: float) -> bool:
+        """Rojo+giro der (CW) o verde+giro izq (CCW): paso interior.
+
+        Ahí no aplica 'esperar a pasarlo': el giro ya va al lado de paso.
+        """
+        if self.direction == "CW":
+            return side > 40.0
+        if self.direction == "CCW":
+            return side < -40.0
+        return False
+
     def blocks_turn(self) -> bool:
-        """Sigue bloqueado hasta que el arco del giro cabe a la izquierda del verde."""
+        """prio=1 hasta que el arco del giro cabe a la izquierda del verde.
+
+        Solo si el verde es paso EXTERIOR (giro a la derecha = CW). Con CCW
+        el verde se pasa por dentro del giro: no esperar.
+        """
         if self._tc >= self._tpr:
-            # Vuelta 12 cerrada: no hay más esquinas. Con prio=1 el ESP nunca
-            # arrancaba la U del estacionamiento (vigilarUturn espera libre).
+            return False
+        if self.direction == "CCW":
             return False
         if self._pp_turn_tc == self._tc and not self.in_stall:
             return True
         ahead = self._green_ahead()
         if ahead is None:
             return False
-        # Antes aquí se soltaba "ya en la esquina y del lado de afuera". Falso
-        # con el verde en la primera columna de la recta siguiente (3170839,
-        # S/T4): el giro rápido desde la exterior sale por dentro de la lata.
         block = ahead[0] > (480.0 if ahead[1] else 260.0)
-        # Ya cerca de la pared y sin soltar: el giro rápido no alcanza (la
-        # ventana es 40-95 cm y el ESP tarda ~15 cm en entrar). La esquina
-        # la dobla la línea del mapa con prio=1 hasta que el ESP la cuente
-        # por el gyro (GIRO_PI_CUENTA_DEG) y suba tc.
         pp_cm = float(getattr(C, "DIGITAL_MAP_PP_TURN_CM", 0.0))
         if block and pp_cm > 0.0 and self._dF is not None and 0.0 < self._dF <= pp_cm:
             self._pp_turn_tc = self._tc
@@ -894,24 +903,38 @@ class DigitalMap:
         return _SPAN_MM - _FRONT_MOUNT_MM - hold * 10.0
 
     def needs_line(self) -> bool:
-        """El carro va del lado malo de la lata. El gyro lo deja irse derecho."""
+        """prio=1 si vas del lado malo (gyro no se va derecho).
+
+        No aplica si el paso ya coincide con el giro (rojo+CW / verde+CCW):
+        esperar a pasarlo traba la esquina. El cruce verde→rojo en recta
+        no va aquí.
+        """
         if not getattr(C, "DIGITAL_MAP_STEER", False) or self.in_stall or not self._aligned:
             return False
         target = self._ease(self.section, self.along_mm + 180.0)
+        if self._pass_matches_turn(target):
+            return False
         if target < -40.0:
             return self.lat_mm > target + 70.0
-        # Rojo igual (3: sale del giro encima de la fila del rojo y el gyro
-        # sigue derecho hasta pegarle).
         if target > 40.0:
             return self.lat_mm < target - 70.0
         return False
 
+    def pass_side_ahead(self) -> bool:
+        """La línea ya no es centro: cruce o lado de paso por delante."""
+        if self.in_stall or not self._aligned:
+            return False
+        return abs(self._ease(self.section, self.along_mm + 180.0)) > 40.0
+
     def hold_pasado(self) -> bool:
-        """No enderezar: RECUPERANDO se iría derecho y el giro cortaría el verde."""
-        # Tampoco si todavía no llega al lado de paso de la lata que viene:
-        # RECUPERANDO lo endereza a medio camino y se la lleva (semilla 3).
+        """No enderezar: RECUPERANDO se iría derecho y cortaría el verde exterior.
+
+        Verde + CCW (paso interior): no retener.
+        """
         if self.needs_line():
             return True
+        if self.direction == "CCW":
+            return False
         ahead = self._green_ahead()
         if ahead is None:
             return False

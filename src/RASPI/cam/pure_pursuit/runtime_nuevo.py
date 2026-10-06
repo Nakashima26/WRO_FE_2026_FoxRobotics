@@ -1904,19 +1904,17 @@ class PPRuntime:
                     self._update_digital(serial_ack, feet, line_info.get("Orange"))
                     self.salida.update(serial_ack, feet)
                 if len(path_points) >= C.MIN_PATH_PTS:
+                    mapped = []
                     if getattr(C, "DIGITAL_MAP_STEER", False) and not self._is_turning:
                         mapped = self.digital.line_bev()
                         if len(mapped) >= C.MIN_PATH_PTS:
                             path_points = mapped
-                    # Lookahead ADAPTATIVO: se acorta (~45 px) cuando hay
-                    # una lata cerca -> la geometría pure-pursuit exige un
-                    # steer más cerrado para el mismo path -> esquiva de
-                    # inmediato en vez de entrar largo y comerse el cono.
-                    # Sin obstáculos cerca vuelve a LOOKAHEAD_MAX_PX
-                    # (trayectoria suave en recta/curva normal).
                     lookahead_eff = self.controller.adaptive_lookahead(
                         bev_obstacles, C.ROBOT_BEV_X, C.ROBOT_BEV_Y
                     )
+                    # Cruce: carrot más cerca → más steer, sin inflar ppServoGain.
+                    if len(mapped) >= C.MIN_PATH_PTS and self.digital.pass_side_ahead():
+                        lookahead_eff = 50.0
                     steer_deg, lookahead_pt = self.controller.compute(
                         path_points, C.ROBOT_BEV_X, C.ROBOT_BEV_Y,
                         lookahead_px=lookahead_eff,

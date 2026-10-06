@@ -1927,19 +1927,21 @@ void decidirManiobra(long distL, long distR) {
   //    (orillas1188 giro 4). distExt se sigue guardando para maniobraRetroceso.
   long distExt = maniobraGirarDer ? distL : distR;
   maniobraDistExt  = distExt;
+  // --- OFF: pivote/backoff en REVERSA en la esquina ("corrigiendo").
+  // Dejaba el carro del lado malo en vueltas 2–3 y se “esperaba” el rojo.
+  // Antes: maniobraReversa = !giroModoFwd (+ hug -> REVERSE); retroceso si
+  // distExt > MANIOBRA_BACKOFF_MIN_CM.
+  maniobraReversa   = false;
+  maniobraRetroceso = false;
+  /*
   maniobraReversa  = !giroModoFwd;
-  // Fallback: si pese a todo toca FORWARD con la pared de enfrente ya encima,
-  // el arco no cabe (se incrusta en fase 1) -> REVERSE.
   if (!maniobraReversa && distF_filtrada > 0 && distF_filtrada <= FWD_MIN_FRONT_CM) {
     maniobraReversa = true;
     Serial.print("[HUG] FORWARD sin espacio (dF="); Serial.print((long)distF_filtrada);
     Serial.println(") -> REVERSE");
   }
-
-  // ── ¿RETROCEDER un poco DESPUÉS de la maniobra? ── solo si la pared exterior
-  //    (la que sigo) tiene holgura: > MANIOBRA_BACKOFF_MIN_CM. Si voy pegado a
-  //    ella, retroceder recto no me separa de la recta nueva, solo raspa.
   maniobraRetroceso = (maniobraDistExt > MANIOBRA_BACKOFF_MIN_CM);
+  */
 
   maniobraDecidida = true;
 }
@@ -3047,8 +3049,9 @@ void controlPID(long distL, long distR) {
     float headingCorr = 0.0;
     float wallCorr     = 0.0;
 
-    if (!piPriority && piMemoryFrames <= 0) {
-        headingCorr = outputGyro * PP_GYRO_BLEND;   // peso bajo, no domina
+    // Gyro/pared solo si el PP va casi recto. En el cruce recortaban el servo.
+    if (!piPriority && piMemoryFrames <= 0 && fabsf(steerDeg) < 8.0f) {
+        headingCorr = outputGyro * PP_GYRO_BLEND;
         wallCorr    = outputWall * PP_WALL_BLEND;
     }
 
