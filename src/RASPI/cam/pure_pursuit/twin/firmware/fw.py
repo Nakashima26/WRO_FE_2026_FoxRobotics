@@ -99,6 +99,8 @@ class FirmwareSIL:
 
         lib.sil_ledc_duty.argtypes = [ctypes.c_uint8]
         lib.sil_ledc_duty.restype = ctypes.c_int
+        lib.sil_ledc_freq.argtypes = [ctypes.c_uint8]
+        lib.sil_ledc_freq.restype = ctypes.c_int
         lib.sil_digital.argtypes = [ctypes.c_uint8]
         lib.sil_digital.restype = ctypes.c_int
 
@@ -189,6 +191,14 @@ class FirmwareSIL:
         FOX_SERVO_180 son las unidades internas del firmware (30..160); con
         FOX_SERVO_180=1, el valor de servo 0-180."""
         return servo_desde_duty(self._lib.sil_ledc_duty(_SERVO_PIN))
+
+    def servo_duty(self) -> int:
+        """Duty crudo del LEDC del servo (0 = sin pulso: ledcAttach lo deja en 0)."""
+        return int(self._lib.sil_ledc_duty(_SERVO_PIN))
+
+    def servo_attached(self) -> bool:
+        """True desde el ledcAttach del pin del servo (el SIL guarda la frecuencia ahí)."""
+        return int(self._lib.sil_ledc_freq(_SERVO_PIN)) > 0
 
     def motor_pwm(self) -> int:
         return int(self._lib.sil_ledc_duty(_PWMA))

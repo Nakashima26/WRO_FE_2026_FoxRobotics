@@ -123,7 +123,9 @@ def run_one(scn: str, out: Path, extra: dict) -> None:
     st = {"field": None, "min": {}, "samples": []}
     _coll = S.collision
 
-    def coll(world, x, y, hd, L, Wd_, ro):
+    def coll(world, x, y, hd, L, Wd_, ro, **kw):
+        # **kw: Sim pasa ignore= desde 87532bb (T15b). Sin esto el TypeError
+        # se lo traga el callback ctypes de advance: ni colisiones ni mínimos.
         fld = world.field
         st["field"] = fld
         P = [tuple(c) for c in Wd.body_corners(x, y, hd, L, Wd_, ro)]
@@ -144,7 +146,7 @@ def run_one(scn: str, out: Path, extra: dict) -> None:
         isl = [(500.0, -500.0), (500.0, 500.0), (-500.0, 500.0), (-500.0, -500.0)]
         mins["island"] = min(mins.get("island", 1e9), poly_dist(P, isl))
         st["samples"].append((S.Sim._now_hack(), x, y, hd))
-        return _coll(world, x, y, hd, L, Wd_, ro)
+        return _coll(world, x, y, hd, L, Wd_, ro, **kw)
 
     S.collision = coll
     sim = S.Sim(seed, preset="hw_nuevo", log_dir=out, max_time_s=MAX_T,

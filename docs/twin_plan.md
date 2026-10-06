@@ -492,8 +492,12 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - En s1, s2, s7, s12 y s19, el primer número del fw que difiere es el ángulo del gyro en INICIO por 0.01°. Ejemplo s2, línea 151: `2.853 … Ang:-33.86` vs `-33.85`.
   - Le sigue una decisión al filo. Ejemplo s19, línea 258: base `5.390 … -> MANIOBRA dir=IZQ REVERSA distExt=36 distF=25` vs b_db `5.385 … CRUCERO`.
   - En s10 y s16, la primera diferencia de pose está en la rueda: s10 en servo 76 (0.057° de rueda), s16 en el centro.
-  - Sin shim, ctl_c (0.0008° de rueda) cambia el desenlace de 9/21 seeds y ctl_g (+0.03° en el tope izq) el de 8/21; b_db cambia 8/21. El twin es caótico a 0.001-0.05° de rueda. Conclusión: los cambios son marginales y el shim no tiene error.
+  - Sin shim, ctl_c (0.0008° de rueda) cambia el desenlace de 9/21 seeds y ctl_g (+0.03° en el tope izq) el de 8/21; b_db cambia 8/21. En la carrera, el caos es plausible: los controles quedan entre 3 y 5 de 21. El shim no tiene error.
+  - **Corrección (auditoría de t16servo, 2026-10-05): la caída del prepark 98→87 NO es caos.** Antes este punto decía "los cambios son marginales". Los controles ctl_c y ctl_g mueven el prepark solo 1/100 (97 y 97). b_db pierde 11 escenarios y no gana ninguno; 8 son p2, y caen los 6 `CW_c*_p2`. Es una sensibilidad determinista de esa maniobra a la rueda asentada cerca del centro (valor interno 84..96). El tope 160 no tiene fallos.
+    - La truncación vieja del pulso dejaba la rueda objetivo +0.03..0.08° a la derecha. El artefacto de slew/banda de `vehicle.py:80-88` (anterior a la rama) amplificaba ese sesgo: el paso de slew de 0.6 u/ms es mayor que la banda de 0.5 u, así que el reposo depende del sub-paso. Con L=89 desde el centro, la rueda asienta en 0.851° (base) contra 0.463° (b_db), es decir 0.388° de diferencia. A dt de 1, 0.5 y 0.25 ms asienta en 0.851°, 0.695° y 0.579°. En 2558 pares (inicio, L) enteros, 47 difieren entre 0.30° y 0.39°.
+    - Los p2 pasaban gracias a ese sesgo. La diferencia de 0.079° de arriba es entre ruedas objetivo; asentada llega a una banda entera. ctl_q aísla la causa en la cuantización, y el artefacto la amplifica. T16sg90 cambia ese modelo de banda (ver abajo).
   - **(c)**, solo reporte: con `plano600` la rueda gira a ~309 °/s en vez de ~463 der / ~397 izq. La carrera queda parecida (5/21), el prepark baja a 79/100 (18 escenarios sin `TERMINADO`, 14 de ellos CW) y la salida sigue 41/41. El slew sin medir pesa en el estacionamiento.
+  - **Corrección (T16sg90): la columna "salida 41/41" de esta tabla no mide nada.** Desde 87532bb (T15b, `ignore=` en la llamada a `collision`), el `coll()` que `salida.py` mete en `sim.collision` no acepta ese argumento. El `TypeError` se lo traga el callback ctypes de `advance` (`Exception ignored while calling ctypes callback function`, ~2300 veces por escenario en `.out`). Así no se detecta ningún choque, `min` queda `{}` y además se corta la física del resto de ese `advance`: con el harness roto, t_tc1 p50 da 11.2 s contra 8.63 s arreglado. Se arregló en T16sg90 (ver abajo).
   - El prepark que se pierde es casi todo el grupo `CW_c*_p2` (misma geometría, caen juntos), el patrón 3 de arriba. CW_c5_p2: base mide `vel medida=29.2 cm/s` (línea 118), b_db `29.0` (línea 119); el avance de la fase 1 da 43 vs 40 mm; fase 9 `dif=28.6` (base, termina) vs `dif=26.8` (b_db, choca con el cajón a los 5.645 s).
 - **Sitios que suponen ganancia simétrica.** Las unidades internas no son simétricas: der 60 = 46.32° (0.772°/u), izq 70 = 46.32° (0.662°/u). El shim conserva esto a propósito para seguir equivalente; no se tocó.
   - **U** (fase 24 `ino:4439-4440`, PUNTA fase 20 `ino:5768-5770`, comentario 5768): `ticks = (int)(δ/46.32·70)`, `centroServo ± ticks`. A la izquierda es exacto; a la derecha gira 70/60 = 1.167 veces lo pedido hasta que se recorta al tope en ticks ≥ 60.
@@ -528,4 +532,110 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - radio a tope por lado;
   - slew del servo (°/s);
   - banda muerta / juego.
-- **Pendiente para quien retome:** decidir si la U, el PP y los topes pasan a ticks por lado (60 der / 70 izq) o si las unidades internas pasan a ser simétricas. Hoy el shim las conserva tal cual. Revisar también la robustez del grupo `CW_c*_p2` (patrón 3) ante 0.04° de rueda.
+- **Pendiente para quien retome:** decidir si la U, el PP y los topes pasan a ticks por lado (60 der / 70 izq) o si las unidades internas pasan a ser simétricas. Hoy el shim las conserva tal cual. Revisar también la robustez del grupo `CW_c*_p2` (patrón 3) ante ~0.4° de rueda asentada cerca del centro (no 0.04°; ver la corrección de arriba).
+
+### T16sg90 — dinámica del SG90 en el carro nuevo (hw_nuevo) (2026-10-05, rama t16sg90)
+- **Qué cambia:** hw_nuevo modela el servo de dirección SG90 según su datasheet: slew, banda muerta al borde y pulso retenido a 50 Hz. El default de hw_nuevo pasa a `servo_slew="sg90"` (`sim.py:130`). `proporcional` (el default de T16servo) y `plano600` siguen disponibles con `TWIN_SERVO_SLEW` y son bit a bit iguales a dd2831f (G0). Todo es en valor de servo (0-180); el firmware no cambia: sus unidades internas (30..160, centro 90) son las de T16servo.
+- **Parámetros y procedencia** (nada de esto está medido en el carro nuevo):
+  - **Slew 600 valor-de-servo/s** (`params.py:104`). Fuente: components101 y TowerPro, 0.1 s/60° a 4.8 V sin carga (verificado). Con 46.32° de rueda por 90 valores son 308.8 °/s de rueda: 0.150 s del centro al tope y 0.300 s de tope a tope. friendlywire da 0.12 s/60° (500/s), que se corre como sensibilidad. Con la carga de la dirección podría quedar en 250-470/s; es un supuesto sin fuente.
+  - **Banda ±0.45 valor de servo** (`params.py:108`) = ±0.232° de rueda. Sale de los 10 µs de "dead band width" del SG90 analógico (PDF de components101) y del FS90 (Pololu), leídos como ancho total: ±5 µs. Esa lectura es inferida. "Al borde" significa que la rueda se detiene en objetivo ± banda sin depender del sub-paso (`vehicle.py:156`); así desaparece el artefacto de banda de T16servo (ver la corrección de arriba). Si el servo es el "SG90 Digital", la banda sería de 1 µs.
+  - **Refresco 50 Hz** (`params.py:110`). En el firmware, `freqServo = 50` (`ino:104`) y `ledcAttach(SERVO_PIN, freqServo, resServo)` (`ino:3163`). La documentación de ESP-IDF dice que el duty nuevo "don't take effect until the next PWM cycle" (verificado); que el `ledcWrite` del core Arduino pase por ahí es inferido. El servo ve el valor en el flanco siguiente más el ancho del pulso (500 + v·2000/180 µs), así que la latencia va de 0.5 a 22.5 ms.
+  - Siguen sin medir: ruedas rectas en valor de servo 90, ±46.32° de rueda en 0/180, lineal y simétrico. Ahora se pueden mover por entorno (abajo); la sensibilidad a centro y tope no se corrió.
+- **Cambios:**
+  - `params.py`:
+    - `SteeringParams.refresh_hz` / `banda_al_borde` / `centro_rueda_deg` (69, 73, 76) y las constantes 104-110.
+    - `steering_servo_180(slew, slew_deg_s, centro_rueda_deg, tope_rueda_deg)` (135), con la rama `sg90` en 161-176.
+    - `wheel_deg_from_servo` resta `centro_rueda_deg` (468-477).
+  - `vehicle.py`:
+    - Rama `banda_al_borde` en `_integrate_substep` (76), `_en_banda_muerta` (125), `_banda_lado` (149) y `_slew_al_borde` (156).
+    - `pulso_us_desde_valor` (197) y `RetencionPulso` (202-263). Los flancos están en origen + k·20 ms; el origen es el primer `advance` con el pin adjunto. Una escritura vale desde el ciclo siguiente y se ve en el flanco más el ancho del pulso. Varias escrituras en un período: cuenta la última. Duty 0 = sin pulso, el servo queda quieto.
+  - `firmware/fw.py`: binding de `sil_ledc_freq` (~102) y `servo_duty()` / `servo_attached()` (195-202).
+  - `sim.py`:
+    - `_SERVO_ENV` (46-50) con `TWIN_SERVO_SLEW_DEG_S`, `TWIN_SERVO_CENTRO_RUEDA_DEG` y `TWIN_RUEDA_TOPE_DEG`, leídas en 288-301.
+    - La línea `[SERVO]` lleva banda, al_borde, refresco, centro, tope y env (373-393). Solo cambia con sg90 o con env; sin env, las de proporcional/plano600 quedan como en dd2831f.
+    - `advance` parte cada intervalo en tramos por flanco y el `_paso` recibe el valor que el servo ya vio (425-429, 470, 526-550).
+    - `trace.csv` gana la columna `servo_180_visto` solo con la retención (462-466).
+  - `tools/salida.py:126-149`: `coll(..., **kw)`. Arregla el harness roto desde 87532bb (ver la corrección en T16servo).
+  - `tests/test_servo_180.py`: 11 tests nuevos (145-347) y `test_preset_hw_nuevo_usa_servo_180` ampliado (104):
+    - 308.8 °/s y 150 ms del centro al tope;
+    - banda ±0.45 simétrica y al borde;
+    - 5 de retención: escritura a mitad de período, avance largo partido en el flanco, dos escrituras por período, escritura justo en el flanco, sin attach ni pulso;
+    - proporcional/plano600 idénticos a dd2831f;
+    - banda cero no congela;
+    - centro y tope de rueda;
+    - env en hw_nuevo.
+
+    Suite en Windows: 92 passed, 1 skipped, 1 failed (la conocida `test_corner_hint::test_v2_carries_hint_when_enabled`).
+- **G0 (bit a bit; t16sg90 con `TWIN_SERVO_SLEW=proporcional` contra t16servo dd2831f, Windows): pasa 14/14.**
+  - Escenarios: prepark `--cards 5` (10 escenarios), carreras hw_nuevo `--solo-cajon` s2, s14 y s3170839, y giro_rapido s3170839.
+  - Se compara el SHA-256 de `trace.csv` sin `pi_frame_ms` y el de `fw_debug.log`. Ejemplos de trace: hw_nuevo s3170839 `c70da2a5eb83…` (2690 filas), giro_rapido s3170839 `a897056ee63e…` (601 filas), CW_c5_p2 `b7c4a6d94e01…` (155 filas).
+  - La tabla completa está en `runs/t16sg90_scripts/g0_full_sha.txt`; la referencia, en t16servo `runs/g0sg90_servo_pp` y `runs/g0sg90_servo/`.
+- **G1 prepark** (100 escenarios `--solo-cajon`, Windows):
+
+| lote | limpios | sin contacto | fuera≤5 | roce pared (n, mm metidos p50/max) | min_cajón p10/p50/p90 (mm) | rumbo_err p50/p90 (°) | ext≤2 desde fase 9 | swing al fin de la fase 14 p50 |
+|---|---|---|---|---|---|---|---|---|
+| prop (`proporcional`) | 88 | 88 | 90 | 6, 1.7/7.9 | 0.0/4.6/6.9 | 1.2/21.5 | 1 | 64.1° |
+| **sg90 (default)** | 86 | 93 | 98 | 29, 5.6/27.4 | 0.6/4.6/7.2 | 1.5/11.4 | 19 | 66.1° |
+| p600 (`plano600`) | 79 | 82 | 90 | 15, 2.7/17.8 | 0.0/3.8/6.7 | 1.5/20.8 | 6 | 65.5° |
+| sg500 (`TWIN_SERVO_SLEW_DEG_S=500`) | 75 | 89 | 95 | 49, 8.8/19.2 | 0.3/4.0/7.2 | 2.5/18.6 | 34 | 67.2° |
+
+  - "swing" es |Ang − ref| en la primera línea de la fase 4. "ext≤2" cuenta los escenarios cuyo ToF exterior llegó a ≤ `PARK_PEGADO_CM` desde la fase 9 (`runs/t16sg90_scripts/pp_fases.py`).
+  - **El modo de falla cambia.** Motivos de prop: ya alineado 87, choque con el cajón 12, pegado de lado 1. Motivos de sg90: ya alineado 69, pegado de lado 24 (7 de ellos no paralelos: rumbo > 10.2°), cajón 7.
+  - El roce con la pared exterior sube de 6 a 29 (21 en CCW). No corta la corrida (`--solo-cajon`).
+  - Por grupo, los limpios de prop → sg90 son: CCW p0 10→9, p1 10→9, p2 8→10, p3 9→9, p4 10→9; CW p0 9→10, p1 10→9, **p2 4→4**, p3 10→8, p4 8→9. `CW_c*_p2` sigue roto igual (min_cajón med 0.0 vs 0.2 mm): sg90 no lo recupera, y su sensibilidad viene de T16servo (corrección de arriba).
+  - 14 escenarios cambian de desenlace: 8 se pierden y 6 se ganan.
+    - Se pierden 6 por "pegado de lado" no paralelo (rumbo |10.4-15.5|°: CCW_c1_p0, CCW_c25_p1, CCW_c2_p3, CW_c1_p3, CW_c2_p1, CW_c2_p3) y 2 por choque con el cajón (CCW_c25_p4 @9.105, CW_c4_p2 @5.848).
+    - Se ganan 6 que en prop chocaban con el cajón (rumbo −54.9..+45.6°): CCW_c1_p2, CCW_c4_p2, CCW_c6_p3, CW_c26_p2, CW_c3_p4, CW_c4_p0.
+  - **Sensibilidad (dosis-respuesta):** con slew más lento, la fase 14 termina más girada (64.1° prop → 65.5° p600 → 66.1° sg90 → 67.2° sg500). Eso arrima el exterior (ext≤2: 1 → 6 → 19 → 34) y sube el pegado de lado (1 → 7 → 24 → 39) y el roce con la pared (6 → 15 → 29 → 49).
+  - Con 500/s quedan 75 limpios (25 desenlaces cambian contra prop), sobre todo en CCW_p0/p1 (6/10 cada uno). El prepark pierde 11 limpios entre 600 y 500/s, así que el slew con carga hay que medirlo.
+  - p600 tiene el mismo slew de rueda que sg90 (~309 °/s), pero sin banda al borde ni retención. Choca más con el cajón (18, sobre todo CW_p0/p1) y se pega menos (7). Agregar la banda al borde y el pulso retenido mueve fallas de "choque con el cajón" a "termina pegado de lado".
+- **Causa raíz 1, CW_c2_p1** (prop OK, ya alineado −1.1° → sg90 X, pegado de lado, rumbo 10.5°):
+  - En la fase 14 (RECTO, `ino:5244-5262`) el firmware manda `escribirServo(centroServo)` en reversa. La traza sg90 en t=4.457929 da `servo_180=89.997`, `servo_180_visto=179.976` y `rueda=−46.08`: el servo todavía no vio el pulso nuevo. En prop la rueda ya va en −45.60 a los 4.458365 y en −31.17 a los 4.494734.
+  - La rueda llega a −2.26 a los 4.6034 s con sg90 (prop: −2.23 a los 4.5676 s), y el carro sigue girando en reversa. El `Ang` al final de la fase 14 es −66.95 contra −64.41 (+2.5°).
+  - En la fase 9 el exterior ya está más cerca: `fw_debug.log:469` da `5.845 … ext=4` en prop y `5.888 … ext=3` en sg90. L llega a 2 a los 5.912 s.
+  - **Línea decisiva:** `runs/g1_sg90_pp/CW_c2_p1/fw_debug.log:297` `6.998 PARK fase 13 fin: dif=13.4 dF=2.00 ext=2 distB=8.5`, seguida de `:299` `TERMINADO: REV FINAL: pegado de lado`.
+    - La regla es `pegado = (extRaw > 0 && extRaw <= PARK_PEGADO_CM)` (`ino:5429`, `PARK_PEGADO_CM=2` en `ino:999`). Con pegado no se cicla (`ino:5442`).
+    - Prop `:316`: `7.299 PARK fase 13 fin: dif=4.7 dF=4.00 ext=3 distB=5.7` → ya alineado.
+- **Causa raíz 2, CW_c4_p2** (prop OK → sg90 `cajón magenta@5.847546`):
+  - El mismo efecto de la fase 14 deja el `Ang` al entrar a la fase 4 en −66.04 contra −62.37 de prop. La fase 8 corta por alineado (`dif ≤ PARK_ENDEREZA_TOL_DEG=24`, `ino:998`) con el carro más atrás.
+  - **Línea decisiva:** `runs/g1_sg90_pp/CW_c4_p2/fw_debug.log:228` `5.601 PARK fase 9: COAST -> ENFRENTE (dif=23.3 ext=5 ALINEADO ATRAS PEGADO distB=4.1)`. En prop, `:224` dice `5.559 … (dif=22.3 ext=7 … distB=5.6)`.
+  - En el coast de la fase 9 (`ino:5348`, servo al centro, `MANIOBRA_FRENO_MS`) se repite la latencia. La traza sg90 en t=5.600565 da `servo_180=89.997` con `servo_180_visto=−0.010` y `rueda=46.09`. A los 5.660583 la rueda va en 27.84, cuando prop ya estaba en 0.32 a los 5.655531.
+  - Mientras la rueda vuelve al centro, el rumbo cambia 3.4° (111.89→108.54) con ~12 mm de avance, contra 2.1° (110.30→108.23) y ~9 mm en prop.
+  - El choque con el cajón llega a los 5.8475 s. No se verificó qué esquina toca.
+- **Origen común de las dos causas:** cada vuelta del tope al centro en reversa (fases 14 y 9) suma una latencia de 0.5-22.5 ms. Además la rueda vuelve a 309 °/s en vez de los 397/463 °/s del modelo proporcional (771.4/900 valor-de-servo/s). Son 0.150 s del tope al centro con el carro moviéndose.
+  - El margen del parking al pegado (ext 3 vs 2 cm) y al rumbo de "paralelo" (10.2°) es de pocos mm y pocos grados.
+  - **No se tocó ningún umbral.** Para cerrar esto hay que medir el slew con carga y después, si hace falta, repensar la maniobra con la geometría del mapa.
+- **G1 carrera** (21 seeds hw_nuevo `--solo-cajon`, Windows; prop s2, s14 y s3170839 son los de G0):
+
+| lote | terminan | choque señal | choque cajón | otro | suma tc | wall p10/p50 | sign p10/p50 |
+|---|---|---|---|---|---|---|---|
+| prop | 4 | 13 | 4 | 0 | 184 | 14.32/64.79 | 10.57/40.92 |
+| sg90 | 3 | 11 | 5 | 2 (isla s2@52.57, stuck s8) | 173 | 15.44/64.8 | 13.54/44.42 |
+
+  - Cambian 8 de 21 desenlaces: s1, s2, s6, s8, s10, s12, s16 y s3170839.
+  - En T16servo (Mac), controles de 0.0008° de rueda ya cambiaban 8-9/21, así que la carrera no separa los dos modelos. El nivel de ruido en Windows no se midió.
+  - s8 sg90 termina en `stuck` sin choque a los 88.17 s, en ESTACIONANDO. No se analizó.
+- **G1 salida** (`salida.py all`, 41 escenarios, harness arreglado):
+
+| lote | buenos | CW / CCW / semillas | señal de la recta p10/p50/min (mm) | isla min | t_tc1 p50 |
+|---|---|---|---|---|---|
+| prop | 39/41 (s10 señal Red W/T2@7.50, s11 señal Red S/T3@7.15) | 10/10, 10/10, 19/21 | 35/104/21 | 109 | 8.63 |
+| sg90 | 40/41 (s11 señal Red S/T3@7.25) | 10/10, 10/10, 20/21 | 42/99/36 | 106 | 8.22 |
+
+  - s11 es la falla conocida de T15a.
+  - CW_5, CW_6 y s20 llegan a tc=1 más tarde con sg90 (8.63 → 12.0 s) sin chocar. s3 y s4 pierden ~50 mm de holgura a la señal (185→129, 186→133). No se analizó.
+  - Las corridas `g1_*_salida` (sin el arreglo) se dejan como evidencia del harness roto: dan 41/41 con `min` vacío.
+- **Discrepancia con el brief:** el brief atribuía la caída del prepark de T16servo a "cambio de banda/slew". La auditoría (ctl_q, corrección de arriba) dice otra cosa: es la cuantización vieja del pulso, amplificada por el artefacto de banda/slew del modelo. El slew y la banda del SG90 son otro efecto, el de esta entrada.
+- **Preguntas abiertas** (necesitan el carro nuevo):
+  - **Slew con carga:** de 0 a 180, ruedas en el piso. Entre 600 y 500/s el prepark pierde 11 limpios.
+  - **Analógico o "SG90 Digital":** banda de 10 o de 1 µs.
+  - **Valor de servo con las ruedas rectas, y rueda en 0/180.** `TWIN_SERVO_CENTRO_RUEDA_DEG` y `TWIN_RUEDA_TOPE_DEG` ya existen para la sensibilidad; no se corrieron.
+  - **Stall a 2500 µs:** si zumba o se calienta en valor de servo 180. Queda 100 µs más allá de las referencias de 2400 µs.
+  - **Robustez del parking a la latencia y al slew** en las vueltas al centro en reversa (fases 14 y 9). Lo mismo para el filo del criterio: ext=2 de `PARK_PEGADO_CM` y rumbo 10.2° de "paralelo". Es una pregunta de diseño de maniobra, no de umbrales.
+  - Las salidas medidas en otras ramas después de 87532bb no valen; hay que repetirlas con el `salida.py` arreglado.
+- **Corridas** (`src/RASPI/cam/runs/` de t16sg90):
+  - prepark: `g1_prop_pp`, `g1_sg90_pp`, `g1_sg500_pp`, `g1_p600_pp`;
+  - carreras: `g1_prop/`, `g1_sg90/`;
+  - salida: `g1_prop_salida2`, `g1_sg90_salida2` (válidas) y `g1_prop_salida`, `g1_sg90_salida` (harness roto);
+  - G0: `g0_prop_pp` y `g1_prop/hw_nuevo_s{2,14,3170839}`, `g1_prop/giro_rapido_s3170839`;
+  - scripts y logs en `t16sg90_scripts/`.

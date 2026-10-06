@@ -27,7 +27,8 @@ from pure_pursuit.twin.params import (
 )
 from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
-from pure_pursuit.twin.vehicle import Vehicle
+from pure_pursuit.twin.firmware.fw import servo_desde_duty
+from pure_pursuit.twin.vehicle import RetencionPulso, Vehicle
 from pure_pursuit.twin.world import OUTER_HALF_MM, World, body_corners, collision
 from pure_pursuit.wro_field import randomize
 from vision import Vision
@@ -41,6 +42,12 @@ _STUCK_WINDOW_S = 8.0
 _STUCK_PROGRESS_MM = 50.0
 _STOPPED_SPEED_MM_S = 15.0
 _STOPPED_HOLD_S = 0.5
+# Variable de entorno -> argumento de steering_servo_180 (solo con FOX_SERVO_180=1).
+_SERVO_ENV = (
+    ("TWIN_SERVO_SLEW_DEG_S", "slew_deg_s"),
+    ("TWIN_SERVO_CENTRO_RUEDA_DEG", "centro_rueda_deg"),
+    ("TWIN_RUEDA_TOPE_DEG", "tope_rueda_deg"),
+)
 
 PRESETS: dict[str, dict[str, Any]] = {
     "baseline": {
@@ -108,14 +115,19 @@ PRESETS: dict[str, dict[str, Any]] = {
 # (TRACK_MAP_SHADOW=True por defecto).
 # Servo 0-180 (FOX_SERVO_180=1): los giros a tope mandan 0/180; el twin toma el
 # valor de servo 0-180 del LEDC con steering_servo_180() (ver Sim.__init__).
-# "servo_slew": opción de steering_servo_180 (default "proporcional", decisión
-# del usuario 2026-10-05); la variable de entorno TWIN_SERVO_SLEW la pisa
-# (p. ej. "plano600" para la sensibilidad).
+# "servo_slew": opción de steering_servo_180. Default "sg90" (T16sg90,
+# 2026-10-05): el SG90 del carro nuevo según su datasheet (600 valor-de-servo/s,
+# banda ±0.45 al borde, pulso retenido a 50 Hz). La variable de entorno
+# TWIN_SERVO_SLEW la pisa: "proporcional" (la tasa de rueda de 30..160, el
+# default de T16servo) o "plano600". Sensibilidades (solo con FOX_SERVO_180=1):
+# TWIN_SERVO_SLEW_DEG_S (pisa los 600, solo "sg90"), TWIN_SERVO_CENTRO_RUEDA_DEG
+# (rueda con valor de servo 90, + = izquierda) y TWIN_RUEDA_TOPE_DEG (pisa los
+# 46.32° del CAD en 0/180).
 PRESETS["hw_nuevo"] = {
     **PRESETS["giro_rapido"],
     "fw_overrides": dict(PRESETS["giro_rapido"]["fw_overrides"]),
     "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1", "FOX_SERVO_180": "1"},
-    "servo_slew": "proporcional",
+    "servo_slew": "sg90",
     # IMU nueva: BNO085 (yaw fusionado en el chip), no el MPU6050.
     "imu": "bno085",
     # Pi 5 (~2x Pi 4): ~28 fps (supuesto, medir fps reales; la cámara está
@@ -274,10 +286,19 @@ class Sim:
         # el LEDC lleva el valor de servo 0-180, no las unidades internas 30..160.
         self.servo_180 = str(self.fw_defines.get("FOX_SERVO_180", "0")) == "1"
         self.servo_slew = os.environ.get("TWIN_SERVO_SLEW") or cfg.get("servo_slew", "proporcional")
+        # Sensibilidades del servo 0-180 por entorno (se imprimen en [SERVO]).
+        self.servo_env: dict[str, float] = {}
         if params is None:
             params = TwinParams()
             if self.servo_180:
-                params.steering = steering_servo_180(self.servo_slew)
+                for env, _kw in _SERVO_ENV:
+                    v = os.environ.get(env)
+                    if v:
+                        self.servo_env[env] = float(v)
+                params.steering = steering_servo_180(
+                    self.servo_slew,
+                    **{kw: self.servo_env[env] for env, kw in _SERVO_ENV if env in self.servo_env},
+                )
         elif self.servo_180 and params.steering.servo_max_deg != 180.0:
             raise ValueError("FOX_SERVO_180=1 necesita params.steering = steering_servo_180()")
         self.params = params
@@ -352,12 +373,24 @@ class Sim:
         servo_180 = self.servo_180
         if servo_180:
             st = self.params.steering
-            print(
+            linea = (
                 f"[SERVO] valor de servo 0-180 (FOX_SERVO_180=1) slew={self.servo_slew} "
                 f"izq={st.slew_left_deg_per_s or st.slew_deg_per_s:.1f} "
-                f"der={st.slew_right_deg_per_s or st.slew_deg_per_s:.1f} °/s",
-                flush=True,
+                f"der={st.slew_right_deg_per_s or st.slew_deg_per_s:.1f} °/s"
             )
+            if st.refresh_hz is not None or self.servo_env:
+                # Campos nuevos solo con sg90 o con env: las líneas de
+                # proporcional/plano600 sin env quedan como en dd2831f.
+                dbl = st.deadband_left_deg if st.deadband_left_deg is not None else st.deadband_deg
+                dbr = st.deadband_right_deg if st.deadband_right_deg is not None else st.deadband_deg
+                env = " ".join(f"{k}={v:g}" for k, v in self.servo_env.items()) or "-"
+                linea += (
+                    f" banda izq={dbl:.3f} der={dbr:.3f} al_borde={int(st.banda_al_borde)}"
+                    f" refresco={st.refresh_hz if st.refresh_hz is not None else 'no'}"
+                    f" centro_rueda={st.centro_rueda_deg:g}° tope_rueda={st.gain_left * (st.servo_max_deg - st.servo_center_deg) / 90.0:g}°"
+                    f" env: {env}"
+                )
+            print(linea, flush=True)
 
         fw = FirmwareSIL(
             overrides=self.fw_overrides,
@@ -389,6 +422,11 @@ class Sim:
         progress_anchor_t = 0.0
         progress_anchor_xy = (veh.x, veh.y)
         terminado_seen = False
+        # Pulso retenido a refresh_hz (solo sg90): el servo ve el valor del LEDC
+        # en cada borde del PWM más el ancho del pulso, no al instante del
+        # ledcWrite. La rejilla arranca en el ledcAttach del pin del servo.
+        refresh_hz = self.params.steering.refresh_hz
+        retencion = RetencionPulso(refresh_hz) if refresh_hz is not None else None
 
         def _t_s() -> float:
             return fw.now_us / 1e6
@@ -421,68 +459,95 @@ class Sim:
                 row["servo"] = servo_interno_desde_180(s180)
                 row["servo_180"] = s180
                 row["rueda"] = veh.wheel_deg
+            if retencion is not None:
+                # Valor de servo 0-180 que el servo ya recibió (último pulso
+                # completo); vacío antes del primer pulso. Solo con el pulso
+                # retenido: las otras trazas quedan con sus columnas de siempre.
+                row["servo_180_visto"] = retencion.visto
             row.update(extra)
             trace.append(row)
 
-        def advance(us: int) -> None:
+        def _paso(sub: float, servo_cmd: float) -> None:
+            """Un sub-paso (<= 1 ms) de vehículo, encoder, historia y colisiones."""
             nonlocal last_yaw_rate, last_ds, last_coll_check, collision_cause, collision_t, stop_reason, world
-            dt_total = us / 1e6
-            remaining = dt_total
-            while remaining > 1e-12:
-                sub = min(remaining, 0.001)
-                remaining -= sub
-                info = veh.step(
-                    sub,
-                    fw.servo_angle(),
-                    float(fw.motor_pwm()),
-                    fw.motor_dir(),
+            info = veh.step(
+                sub,
+                servo_cmd,
+                float(fw.motor_pwm()),
+                fw.motor_dir(),
+            )
+            last_ds = info.ds_true_mm
+            last_yaw_rate = info.yaw_rate_ccw_dps
+            enc.update(info.ds_true_mm, veh.wheel_deg, info.accel_mm_s2, w_max)
+            t = _t_s()
+            history.append((t, veh.x, veh.y, veh.heading_deg))
+            if t - last_coll_check >= _COLLISION_INTERVAL_S:
+                last_coll_check = t
+                hit = collision(
+                    world,
+                    veh.x,
+                    veh.y,
+                    veh.heading_deg,
+                    self.params.vehicle.length_mm,
+                    self.params.vehicle.width_mm,
+                    self.params.vehicle.rear_overhang_mm,
+                    ignore=self.ignore_collisions,
                 )
-                last_ds = info.ds_true_mm
-                last_yaw_rate = info.yaw_rate_ccw_dps
-                enc.update(info.ds_true_mm, veh.wheel_deg, info.accel_mm_s2, w_max)
-                t = _t_s()
-                history.append((t, veh.x, veh.y, veh.heading_deg))
-                if t - last_coll_check >= _COLLISION_INTERVAL_S:
-                    last_coll_check = t
-                    hit = collision(
-                        world,
-                        veh.x,
-                        veh.y,
-                        veh.heading_deg,
-                        self.params.vehicle.length_mm,
-                        self.params.vehicle.width_mm,
-                        self.params.vehicle.rear_overhang_mm,
-                        ignore=self.ignore_collisions,
-                    )
-                    if self.ignore_collisions and collision_cause is None:
-                        for cause in self.ignore_collisions:
-                            if cause not in ignored_contacts and collision(
-                                    world, veh.x, veh.y, veh.heading_deg,
-                                    self.params.vehicle.length_mm, self.params.vehicle.width_mm,
-                                    self.params.vehicle.rear_overhang_mm,
-                                    ignore=tuple(c for c in self.ignore_collisions if c != cause),
-                            ) == cause:
-                                ignored_contacts[cause] = {"t": round(t, 3), "cause": cause}
-                        if "pared exterior" in ignored_contacts:
-                            pen = max(max(abs(cx), abs(cy)) - OUTER_HALF_MM for cx, cy in body_corners(
-                                veh.x, veh.y, veh.heading_deg, self.params.vehicle.length_mm,
-                                self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm))
-                            c = ignored_contacts["pared exterior"]
-                            c["max_mm"] = round(max(c.get("max_mm", 0.0), pen), 1)
-                    if hit and collision_cause is None:
-                        touched = _sign_from_hit(field, hit) if self.knock_signs else None
-                        if touched is not None:
-                            field.signs.remove(touched)
-                            world = World(field)
-                            sign_contacts.append({
-                                "t": round(t, 3), "sign": hit,
-                                "x": round(veh.x), "y": round(veh.y),
-                                "heading": round(veh.heading_deg, 1),
-                            })
-                        else:
-                            collision_cause = hit
-                            collision_t = t
-                            stop_reason = "collision"
+                if self.ignore_collisions and collision_cause is None:
+                    for cause in self.ignore_collisions:
+                        if cause not in ignored_contacts and collision(
+                                world, veh.x, veh.y, veh.heading_deg,
+                                self.params.vehicle.length_mm, self.params.vehicle.width_mm,
+                                self.params.vehicle.rear_overhang_mm,
+                                ignore=tuple(c for c in self.ignore_collisions if c != cause),
+                        ) == cause:
+                            ignored_contacts[cause] = {"t": round(t, 3), "cause": cause}
+                    if "pared exterior" in ignored_contacts:
+                        pen = max(max(abs(cx), abs(cy)) - OUTER_HALF_MM for cx, cy in body_corners(
+                            veh.x, veh.y, veh.heading_deg, self.params.vehicle.length_mm,
+                            self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm))
+                        c = ignored_contacts["pared exterior"]
+                        c["max_mm"] = round(max(c.get("max_mm", 0.0), pen), 1)
+                if hit and collision_cause is None:
+                    touched = _sign_from_hit(field, hit) if self.knock_signs else None
+                    if touched is not None:
+                        field.signs.remove(touched)
+                        world = World(field)
+                        sign_contacts.append({
+                            "t": round(t, 3), "sign": hit,
+                            "x": round(veh.x), "y": round(veh.y),
+                            "heading": round(veh.heading_deg, 1),
+                        })
+                    else:
+                        collision_cause = hit
+                        collision_t = t
+                        stop_reason = "collision"
+
+        def advance(us: int) -> None:
+            # Dentro del callback fw.now_us ya es el FINAL del intervalo
+            # (sil_advance_internal suma us antes de llamar), y el firmware no
+            # escribe el LEDC mientras corre: el duty es el de todo (t0, t1].
+            if retencion is None:
+                # Camino de siempre (bit a bit con dd2831f): el servo ve el duty
+                # al instante.
+                dt_total = us / 1e6
+                remaining = dt_total
+                while remaining > 1e-12:
+                    sub = min(remaining, 0.001)
+                    remaining -= sub
+                    _paso(sub, fw.servo_angle())
+                return
+            t1 = fw.now_us
+            duty = fw.servo_duty()
+            valor = servo_desde_duty(duty) if duty > 0 else None
+            for dur, visto in retencion.tramos(t1 - us, t1, fw.servo_attached(), valor):
+                # visto None: todavía no llegó ningún pulso; el servo queda quieto.
+                cmd = veh.servo_deg if visto is None else visto
+                rem = dur
+                while rem > 1e-12:
+                    sub = min(rem, 0.001)
+                    rem -= sub
+                    _paso(sub, cmd)
 
         fw.set_callbacks(
             advance=advance,
