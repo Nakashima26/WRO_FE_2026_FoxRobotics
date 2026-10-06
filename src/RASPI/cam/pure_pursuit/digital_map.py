@@ -108,6 +108,8 @@ def _seat_world(section: str) -> list[tuple[str, float, float]]:
 
 
 class DigitalMap:
+    _cans_memo = None
+
     def __init__(self) -> None:
         # Sentido de carrera: None = sin decidir hasta que el ESP lo reporte
         # (dir= del ACK, ver runtime_nuevo._update_digital y set_direction).
@@ -692,6 +694,18 @@ class DigitalMap:
         return SECTIONS_CW[(i + step) % 4]
 
     def _cans_on(self, sec: str, along0: float, along1: float, latch: bool = True) -> list[tuple[float, float]]:
+        memo = self._cans_memo
+        if memo is None:
+            return self._cans_on_impl(sec, along0, along1, latch)
+        key = (sec, along0, along1, latch)
+        hit = memo.get(key)
+        if hit is None:
+            out = self._cans_on_impl(sec, along0, along1, latch)
+            memo[key] = tuple(out)
+            return out
+        return list(hit)
+
+    def _cans_on_impl(self, sec: str, along0: float, along1: float, latch: bool = True) -> list[tuple[float, float]]:
         """(altura, lado de paso) de las latas confirmadas en ese tramo."""
         out = []
         for (s, sid), color in self.confirmed.items():
@@ -911,6 +925,13 @@ class DigitalMap:
         return not (on_left and past)
 
     def _build_line(self) -> list[tuple[float, float]]:
+        self._cans_memo = {}
+        try:
+            return self._build_line_impl()
+        finally:
+            self._cans_memo = None
+
+    def _build_line_impl(self) -> list[tuple[float, float]]:
         """Entra al lado de paso y a la esquina con una curva, no con un escalón."""
         if self.in_stall:
             self._line_shifts = []
