@@ -748,14 +748,30 @@ def draw_bev_debug(
             if info["seen"]:
                 ny = int(info["near_y"])
                 line = info.get("line")
-                if line is not None and abs(line[0]) > 1e-3:
+                cvd = info.get("_cv")
+                if cvd is None and line is not None and abs(line[0]) > 1e-3:
                     vx, vy, x0, y0 = line
                     slope = vy / vx
                     y_left  = int(round(y0 + (0     - x0) * slope))
                     y_right = int(round(y0 + (w - 1 - x0) * slope))
                     cv2.line(out, (0, y_left), (w - 1, y_right), col_bgr, 2)
-                else:
+                elif cvd is None:
                     cv2.line(out, (0, ny), (w, ny), col_bgr, 2)   # fallback plano
+                if cvd is not None:
+                    # Curva con la que se CLASIFICA (ver corner_lines._fit_curve):
+                    # tramo medido en magenta, extensión por la tangente en rosa.
+                    # (La recta/horizontal de antes ya no clasifica si hay curva.)
+                    (mx, my), (ux, uy) = cvd["mu"], cvd["u"]
+                    a, b, c = cvd["c"]
+                    t0, t1 = cvd["t"]
+                    def _pt(t, _a=a, _b=b, _c=c, _t0=t0, _t1=t1):
+                        te = min(max(t, _t0), _t1)
+                        s = _a * te * te + _b * te + _c + (2 * _a * te + _b) * (t - te)
+                        return (int(round(mx + t * ux - s * uy)), int(round(my + t * uy + s * ux)))
+                    seg = np.array([_pt(t) for t in np.linspace(t0, t1, 24)], np.int32)
+                    cv2.polylines(out, [seg.reshape(-1, 1, 2)], False, (255, 0, 255), 2)
+                    for te, sg in ((t0, -1), (t1, 1)):
+                        cv2.line(out, _pt(te), _pt(te + sg * 400), (200, 120, 255), 1)
                 close = (C.ROBOT_BEV_Y - ny) <= C.LINE_PROXIMITY_PX
                 txt = f"{color}: y={ny}" + ("  CERCA" if close else "")
             else:

@@ -1,21 +1,24 @@
 # FoxRobotics — WRO 2026 Future Engineers
 # Raspberry Pi runtime dependencies (Python >= 3.10).
 #
-#   python3 -m venv .venv
+#   PC:  python3 -m venv .venv
+#   Pi:  python3 -m venv --system-site-packages .venv   (uses the apt packages below)
 #   source .venv/bin/activate
 #   pip install -r requirements.txt
 #
 # Versions below are the minimums we run against. To lock the exact set that
 # is on the competition Pi, run `pip freeze > requirements.lock.txt` there.
 
-numpy>=1.24
-opencv-python>=4.6          # cv2 — BEV warp, HSV masks, contours.
-                            #   On the Pi you may prefer the system build:
-                            #   sudo apt install python3-opencv   (then skip this line)
+numpy>=1.24 ; platform_machine != "aarch64"     # Pi: apt python3-numpy (must match the apt OpenCV)
+opencv-python>=4.6 ; platform_machine != "aarch64"   # PC only (sim, replay, tools).
+                            #   Pi: apt python3-opencv — the pip wheel has NO GStreamer,
+                            #   so vision.open_camera() can't open the camera with it.
 pyserial>=3.5               # `serial` — UART link to the ESP32 (V2 protocol)
-RPi.GPIO>=0.7.1             # start button (GPIO17) + status LED (GPIO27)
+RPi.GPIO>=0.7.1 ; platform_machine != "aarch64"      # Pi: apt python3-rpi-lgpio (RPi.GPIO
+                            #   drop-in; the original RPi.GPIO does not support the Pi 5)
 
 # ── System packages (apt, NOT pip) ──────────────────────────────────────────
+#   python3-opencv python3-numpy python3-rpi-lgpio python3-picamera2 python3-serial
 #   python3-smbus                     # `import smbus` (I2C helper, legacy path)
 #   libcamera + gstreamer1.0-libcamera, gstreamer1.0-plugins-{base,good}
 #                                     # camera capture pipeline in vision.open_camera()

@@ -32,6 +32,11 @@ class ThreadedFrameGrabber:
 		self.cap = cap
 		self.lock = threading.Lock()
 		self.frame = None
+		# read() devuelve el ÚLTIMO frame para siempre, aunque la cámara deje de
+		# mandar (cap.read() se cuelga 30 s por intento). frame_id/frame_t dicen
+		# si de verdad llegan frames nuevos (ver chequeo de cámara de runtime_nuevo).
+		self.frame_id = 0
+		self.frame_t = 0.0
 		self.stopped = False
 		self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -58,6 +63,8 @@ class ThreadedFrameGrabber:
 			failures = 0
 			with self.lock:
 				self.frame = frame
+				self.frame_id += 1
+				self.frame_t = time.monotonic()
 		print("[CAM] Hilo de captura terminado", flush=True)
 
 	def read(self):
@@ -65,6 +72,13 @@ class ThreadedFrameGrabber:
 			if self.frame is None:
 				return False, None
 			return True, self.frame.copy()
+
+	def freshness(self):
+		"""(frame_id, segundos desde el último frame NUEVO). frame_id=0 = ninguno aún."""
+		with self.lock:
+			if self.frame_id == 0:
+				return 0, float("inf")
+			return self.frame_id, time.monotonic() - self.frame_t
 
 	def stop(self):
 		self.stopped = True

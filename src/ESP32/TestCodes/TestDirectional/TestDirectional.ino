@@ -1,22 +1,37 @@
-#include <ESP32Servo.h>
+// Barrido continuo del servo de dirección: 20° ↔ 150°
+// Pin: GPIO 13 (mismo que PurePursuit / Controller_PI)
 
-Servo miServo;
+#define SERVO_PIN 13
+const int freqServo = 50;
+const int resServo  = 16;
+
+void escribirServo(int angulo) {
+  angulo = constrain(angulo, 20, 150);
+  int pulso = map(angulo, 0, 180, 500, 2400);  // us
+  int duty  = (pulso * ((1 << resServo) - 1)) / 20000;
+  ledcWrite(SERVO_PIN, duty);
+}
 
 void setup() {
   Serial.begin(115200);
-  miServo.attach(13, 500, 2400); 
+  ledcAttach(SERVO_PIN, freqServo, resServo);
+  escribirServo(80);  // centro
+  delay(500);
+  Serial.println("Servo sweep 20 <-> 150");
 }
 
 void loop() {
-  miServo.write(0);
-  Serial.println(0);
-  delay(2000);
+  for (int a = 20; a <= 150; a++) {
+    escribirServo(a);
+    Serial.println(a);
+    delay(15);
+  }
+  delay(300);
 
-  miServo.write(90);
-  Serial.println(90);
-  delay(2000);
-
-  miServo.write(180);
-  Serial.println(180);
-  delay(2000);
+  for (int a = 150; a >= 20; a--) {
+    escribirServo(a);
+    Serial.println(a);
+    delay(15);
+  }
+  delay(300);
 }

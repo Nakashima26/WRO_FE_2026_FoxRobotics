@@ -40,7 +40,7 @@
 
 Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers — Self-Driving Cars challenge. It completes 3 laps around a randomized track, and in the Obstacle Challenge it also detects and correctly passes coloured traffic-sign pillars (**red → keep the pillar on the car's left / pass on its right; green → keep it on the right / pass on its left**) before parking at the end.
 
-The car uses **two controllers working together**: a Raspberry Pi 4 runs the camera vision pipeline and the high-level path planner (Pure Pursuit), and an ESP32 runs the real-time control loop, the state machine and all the actuators. They talk over a UART link with a small line-based protocol ("V2"). This split is the central architectural decision of the project and is explained in [Section 4](#4-software-architecture) and [Section 5](#5-systemic-thinking--engineering-decisions).
+The car uses **two controllers working together**: a Raspberry Pi runs the camera vision pipeline (a Raspberry Pi 4 at the national final, a Raspberry Pi 5 for the international final) and the high-level path planner (Pure Pursuit), and an ESP32 runs the real-time control loop, the state machine and all the actuators. They talk over a UART link with a small line-based protocol ("V2"). This split is the central architectural decision of the project and is explained in [Section 4](#4-software-architecture) and [Section 5](#5-systemic-thinking--engineering-decisions).
 
 **Key specifications:**
 
@@ -49,12 +49,12 @@ The car uses **two controllers working together**: a Raspberry Pi 4 runs the cam
 | Dimensions | 210 × 140 × 80 mm |
 | Weight | 564 g |
 | Drive type | Rear-wheel drive (RWD) |
-| Steering | Ackermann rack-and-pinion, SG90 servo |
-| High-level controller | Raspberry Pi 4 Model B (vision + Pure Pursuit) |
+| Steering | Ackermann rack-and-pinion, SG90 servo — v2: 53° inner / 37° outer wheel at full lock, ~106% Ackermann (§2.4) |
+| High-level controller | Raspberry Pi 5, 16 GB + Active Cooler (vision + Pure Pursuit) — Raspberry Pi 4 Model B until the national final (§3.4) |
 | Real-time controller | ESP32 DevKit (FSM, PID, motor & sensor I/O) |
 | Inter-controller link | UART @ 115200 baud, line protocol "V2" (see §4.2) |
-| Vision | Raspberry Pi Camera, NoIR wide-angle lens (FOV ≈ 120°), processed at 640 × 480 |
-| Distance sensors | HC-SR04 (5V) × 3 — left, right, front — via 5V↔3.3V level shifter |
+| Vision | Raspberry Pi Camera, NoIR wide-angle lens (FOV ≈ 120°), processed at 640 × 480; custom lens-shading calibration on the Pi 5 (ERR-03) |
+| Distance sensors | HC-SR04 (5V) × 3 — left, right, front — via 5V↔3.3V level shifter · v2: + VL53L1X ToF × 4, in integration (§3.2) |
 | IMU | MPU-6050 (gyroscope + accelerometer) |
 | Drive motor | N20 DC gear motor (50:1) + 2:1 LEGO stage → 100:1 total |
 | Motor driver | TB6612FNG |
@@ -115,7 +115,7 @@ One reliable vehicle that finishes **both** challenges — scoring for completin
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
 | 23 | ESP32 | Real-time controller: sensor I/O, cascade PID, finite state machine, actuator PWM. | 1 | Unit Electronics | 8 USD |
-| 24 | Raspberry Pi 4 Model B | High-level controller: computer vision and Pure Pursuit path planning. | 1 | Amazon | 60 USD |
+| 24 | Raspberry Pi 5 (16 GB) + Active Cooler + M.2 HAT+ | High-level controller: computer vision and Pure Pursuit path planning. Replaced the Raspberry Pi 4 (60 USD) after the national final; price includes taxes and shipping. | 1 | Official reseller | 410 USD |
 | 25 | Mini560 5V | Step-down regulator powering the Raspberry Pi, ESP32 and peripherals. | 1 | Amazon | 6 USD |
 | 26 | MPU 6050 | 6-axis IMU used to measure angular velocity and integrate heading. | 1 | Unit Electronics | 3 USD |
 | 27 | HC-SR04 | Ultrasonic distance sensors — left, right (wall following) and front (obstacle-round cornering). | 3 | Unit Electronics | 10.5 USD |
@@ -155,8 +155,21 @@ One reliable vehicle that finishes **both** challenges — scoring for completin
 
 | Total |
 |---|
-| ~155 USD |
+| ~505 USD |
 
+
+## 1.3 What changed for the international final (v2)
+
+After winning the national final (2026-09-19, release [`v1.0-nacional`](docs/releases.md)) we reworked the parts of the car that were limiting it. Each change has its own section with the numbers behind it.
+
+| Area | v1 (national final) | v2 | Why | Details |
+|---|---|---|---|---|
+| Steering geometry | Anti-Ackermann: the outer wheel steered *more* than the inner one (39.5° inner / 42.8° outer) | Ackermann corrected: rack joints 43 → 47 mm apart, tie rods 18.13 mm | Both front wheels now roll around the same turning center instead of fighting each other | [2.4](#24-steering--rack-and-pinion-with-ackermann-geometry) |
+| Steering pinion | Module 1, 14 teeth | Module 1, **19 teeth**; servo moved 2.5 mm away from the rack | Same servo travel moves the rack 36% further: ~37° → **53°** on the inner wheel (measured in CAD) | [2.4](#24-steering--rack-and-pinion-with-ackermann-geometry) |
+| Main computer | Raspberry Pi 4 | **Raspberry Pi 5, 16 GB** + Active Cooler | The Pi 4 was compute-bound at 14–18 fps and hit thermal throttling at 84 °C; the Pi 5 runs the same pipeline at ~40 fps at 52 °C | [3.4](#34-main-computer--raspberry-pi-5-v2) |
+| Distance sensing | 3 × HC-SR04 only | + 4 × **VL53L1X** ToF (front, left, right, rear) | The front ultrasonic produced phantom echoes in ~20% of straight-line frames; ToF gives a narrow beam and a rear sensor for reverse maneuvers | [3.2](#32-sensor-selection-and-placement) |
+| Camera color | Fixed white-balance gains only (Pi 4) | Lens-shading table calibrated for our lens + gains, as a project tuning file | The new image processor of the Pi 5 showed a magenta ring at the frame edges, close to the pink parking walls and red pillars | [ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame) |
+| Documentation | One README | + [releases](docs/releases.md), [test record](docs/testing.md), [engineering log](docs/engineering-log.md) (ERR-10 onward) | One release per event; every failure tied to a run number and a commit | §6 |
 
 ---
 
@@ -206,7 +219,7 @@ The car completes all three Open Challenge laps in about 12 seconds at just 60% 
 
 Steering is controlled by an SG90 servo connected to both front knuckles through a rack-and-pinion mechanism with symmetric tie rods.
 
-**Mechanism specs:**
+**Mechanism specs (v1, national final):**
 
 | Parameter | Value |
 |---|---|
@@ -235,6 +248,66 @@ The firmware never commands the full mechanical range: `escribirServo()` is clam
 
 A direct arm only controls one wheel directly. The opposite knuckle, linked by a fixed-length tie rod, gets an angle that's geometrically correct only at center — producing toe error everywhere else. The rack pushes both tie rods symmetrically, so both wheels get the right angle at every steering position. Combined with the Ackermann geometry of the knuckles, each wheel tracks its own correct turning radius. No lateral scrub, and steering response is linear across the full range.
 
+#### v2 redesign (October 2026) — Ackermann fix and a bigger pinion
+
+In v2 we redesigned this mechanism because of two problems: the geometry was **anti-Ackermann**, and the car **could not turn tightly enough**. We simulated the linkage in Python with the exact CAD dimensions (the model matched the CAD within ~1°) before reprinting anything.
+
+**Geometry reference** (top view, wheels straight, measured in SolidWorks):
+
+| Parameter | Value |
+|---|---|
+| Kingpin track T (distance between the two knuckle pivots) | 60 mm |
+| Wheelbase L (front kingpin line → rear axle) | 112.85 mm |
+| Knuckle steering arm (pivot → tie-rod joint) | 12.49 mm, pointing ~43° outward and backward |
+| Rack joints behind the kingpin line | 18.94 mm |
+| Servo swing actually used | ±71° (measured from the rack travel, not the nominal ±90°) |
+
+##### Problem 1 — anti-Ackermann (fixed)
+
+In a turn, the inner wheel follows a smaller circle than the outer wheel, so it must steer **more**. Correct (100%) Ackermann is reached when
+
+  **cot(δ_outer) − cot(δ_inner) = T / L = 0.532**
+
+and the axis lines of both front wheels cross on the rear axle line.
+
+In v1 the rack joints were only 28.5 mm apart with 26 mm tie rods. We simulated the linkage in Python with the exact CAD dimensions, and the model matched the CAD within ~1°. At full travel the car steered **39.5° on the inner wheel and 42.8° on the outer wheel**: the outer wheel was steering *more* than the inner one. The two front wheels were trying to turn around different centers, so one of them always dragged sideways. That cost traction and current in every corner, and the car turned wider than the servo command implied.
+
+Because the knuckles had to stay as they were (a new knuckle means a new arm, and the rack position is fixed by the chassis), we only changed **the spacing between the rack joints** and **the tie-rod length**. Those two values must change together: for the wheels to point straight with the rack centered, the tie rod must be
+
+  **linkage = √( (38.66 − spacing/2)² + 9.94² )**  (mm, center to center)
+
+| Rack joint spacing | Tie rod | Ackermann at 30° | 40° | 45° | 50° | 55° |
+|---|---|---|---|---|---|---|
+| 28.5 (v1) | 26.0 | anti-Ackermann | | | | |
+| 43.0 (intermediate) | 19.83 | 51% | 62% | 69% | 76% | 84% |
+| **47.0 (v2)** | **18.13** | 76% | **89%** | **95%** | **102%** | 110% |
+| 50.0 | 16.89 | 99% | 111% | 117% | 124% | 131% |
+
+*(Percentage = how much of the ideal inner/outer difference the linkage achieves. Below 100% the outer wheel steers slightly too much; above 100% it steers too little.)*
+
+**Why 47 mm:** with a fixed knuckle, Ackermann cannot be exact over the whole range, because the percentage grows as the wheels turn. We chose the spacing that is closest to 100% in the 40°–50° range, which is where the car actually turns at corners and during parking. At small angles the error is under 0.7°, so it does not matter there. Each 0.1 mm of tie-rod error toes a wheel by ~0.5°, so the printed linkages are trimmed in 0.05–0.1 mm steps until the wheels are straight.
+
+##### Problem 2 — turning radius (bigger pinion)
+
+The steering angle depends almost only on **how far the rack moves**, and with the v1 pinion that was **±8.7 mm**: only ~37° on the inner wheel. We looked at three options: shorter knuckle arms, moving the rack, and a bigger pinion. The bigger pinion was the only one that needed no new chassis or knuckles.
+
+| | v1 | **v2** |
+|---|---|---|
+| Pinion | Module 1, 14 teeth | **Module 1, 19 teeth** (20° pressure angle) |
+| Pitch / outer diameter | 14 / 16 mm | **19 / 21 mm** |
+| Rack travel per servo degree | 0.122 mm/° | **0.166 mm/°** |
+| Rack travel at ±71° servo | ±8.7 mm | **±11.8 mm** |
+| Inner / outer wheel at full lock | ~37° / ~32° (with 43 mm spacing) | **53.1° / 37.0°** (measured in the CAD assembly; the linkage model predicted ~50° / ~37°) |
+| Turning radius at the rear-axle center (L / tan δ_inner + T/2) | ~167 mm (v1 at 39.5°) | **~115 mm** (−31%) |
+| Ackermann at full lock | anti-Ackermann | **~106%** (ideal outer for 53.1° inner = 37.9°, measured 37.0°) |
+
+- **Servo position.** The pitch radius grows from 7 to 9.5 mm, so the servo axis moved **2.5 mm away from the rack** with a spacer on its mount. The rack and the tie-rod joints stay at the same height, so the linkage geometry above is not affected.
+- **Pinion profile.** We generated the involute tooth profile with our own script ([`Mecanica/Engranes/gen_pinon.py`](Mecanica/Engranes/gen_pinon.py)) and exported it as a single closed DXF contour that we extrude in SolidWorks. It includes 0.10 mm of backlash for 3D printing.
+- **Toggle limit.** The linkage would lock (arm and tie rod aligned) at around 16 mm of rack travel. If the servo ever reached a true ±90°, the 19-tooth pinion could push the rack to ±14.9 mm. The intended mechanical stop is the knuckle touching the chassis before that point, and the servo output is also clamped in software.
+- **Servo load.** The bigger pinion needs ~1.36× more servo torque for the same rack force. It also loses some angular resolution, which is still fine for an SG90 in a 0.5 kg car. The servo must not be left stalled against the stop, because it heats up and drags down the 5 V rail.
+
+**Servo calibration.** The servo-to-wheel relation is no longer linear: near full lock the wheels turn faster per servo degree. The servo map and the steering gains in the ESP32 firmware are recalibrated on the assembled car (pending).
+
 ### 2.5 Custom parts & assembly
 
 Every structural part is 3D-printed in SUNLU PLA on a Bambu Lab A1. The mechanical model was built first; the PCB was then laid out to fit it. Editable SolidWorks parts are in [`models/CAD/`](models/CAD/), printable meshes in [`models/STL/`](models/STL/), isometric renders in [`models/renders/`](models/renders/).
@@ -247,7 +320,7 @@ Every structural part is 3D-printed in SUNLU PLA on a Bambu Lab A1. The mechanic
 |---|---|---|
 | <img src="models/renders/BaseChasis.png" width="200" alt="BaseChasis render"> | **BaseChasis** | Main structure. Sized around the electronics (Raspberry Pi 4 first); carries the PCB, steering, drivetrain and every sensor mount. |
 | <img src="models/renders/TopShell.png" width="200" alt="TopShell render"> | **TopShell** | Top cover — closes the electronics bay and protects the wiring. |
-| <img src="models/renders/ServoGearDirection.png" width="200" alt="ServoGearDirection render"> | **ServoGearDirection** | Pinion pressed onto the SG90 output shaft — module 1, 14 teeth. |
+| <img src="models/renders/ServoGearDirection.png" width="200" alt="ServoGearDirection render"> | **ServoGearDirection** | Pinion pressed onto the SG90 output shaft — module 1, 14 teeth (19 teeth in v2, [§2.4](#24-steering--rack-and-pinion-with-ackermann-geometry); profile generated by [`Mecanica/Engranes/gen_pinon.py`](Mecanica/Engranes/gen_pinon.py)). |
 | <img src="models/renders/Cremallera.png" width="200" alt="Cremallera render"> | **Cremallera** (rack) | Module 1, 11 teeth, 27.5 mm travel. Converts servo rotation into lateral travel for the tie rods. |
 | <img src="models/renders/LinkageDirection.png" width="200" alt="LinkageDirection render"> | **LinkageDirection** ×2 | Tie rods from the rack ends to the steering knuckles — symmetric, so both wheels get the correct angle at every rack position. |
 | <img src="models/renders/SteeringKnuckle.png" width="200" alt="SteeringKnuckle render"> | **SteeringKnuckle** ×2 | Front-wheel pivots; their geometry sets the Ackermann steering angles. |
@@ -286,6 +359,8 @@ The Ovonic battery is rated 120C continuous, which is theoretically 264 A. We're
 
 The Raspberry Pi and the ESP32 share the 5 V rail but the DC motor is fed straight from the battery through the TB6612FNG, so stall-current spikes on the motor never sag the logic supply.
 
+**v2 power change (Raspberry Pi 5).** The Pi 5 draws more than the Pi 4 and is sensitive to voltage drops: when its supply sags, it throttles the CPU, which directly lowers the vision frame rate. We already saw this on the Pi 4 when it was fed through Dupont jumpers (`throttled=0x50005`, CPU down to 600 MHz); replacing them with 22 AWG wire fixed it. For v2 the plan is **two Mini560 regulators: one dedicated to the Pi 5** and one for the ESP32, servo and sensors, so servo current spikes can't pull the Pi's rail down. The motor driver stays on raw battery voltage. `vcgencmd get_throttled` must read `0x0` under full load before every test session.
+
 ### 3.2 Sensor selection and placement
 
 | Sensor | Purpose | Placement | Notes |
@@ -295,14 +370,17 @@ The Raspberry Pi and the ESP32 share the 5 V rail but the DC motor is fed straig
 | HC-SR04 (right) | Right wall distance | Right side of the chassis | Feeds the wall-centering PID |
 | HC-SR04 (front) | Distance to the wall ahead when approaching a corner | Front bumper, facing forward | Obstacle round only — triggers the CRUCERO → MANIOBRA sequence |
 | MPU-6050 | Heading integration during cornering and recovery | Center of chassis | Gyro Z integrated into `anguloGyro`, echoed back to the Pi |
+| VL53L1X ToF ×4 *(v2, in integration)* | Near-field distance with a narrow beam | Front, left, right and rear | Complements the HC-SR04, which stay as long-range sensors and as a backup |
 
 #### Camera system
 
-The camera handles lane geometry (via a bird's-eye-view transform), the orange corner-line markers, and red/green pillar detection. Image processing runs on the Raspberry Pi 4 with OpenCV in real time and drives the Pure Pursuit planner.
+The camera handles lane geometry (via a bird's-eye-view transform), the orange corner-line markers, and red/green pillar detection. Image processing runs on the Raspberry Pi (Pi 4 → Pi 5 in v2) with OpenCV in real time and drives the Pure Pursuit planner.
 
 It is mounted front-center with a ~15° downward tilt. We tested a horizontal mount first, but that captured too much background, which slowed detection and added noise. Tilting it down focuses the field of view on the track and the obstacle zone, which cut both false positives and computational load. The exact tilt is baked into the bird's-eye-view homography during calibration (see §4.3), so the mount must not move after calibration.
 
 The lens is a wide-angle **NoIR** unit (~120° FOV), chosen over the original ~63° lens so the camera sees far enough ahead to react to a pillar and read the corner on the same frame. The wide lens ships without an IR-cut filter, which gave the raw image a heavy red cast and broke every HSV mask. The libcamera capture pipeline pins white-balance instead of letting it float — `libcamerasrc awb-enable=false colour-gains=<1.2,1.5>` — so the correction holds across venue lighting, and the pillar HSV ranges were re-tuned on the corrected image (see [ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame)).
+
+**v2 (Raspberry Pi 5):** fixed gains alone are not enough. The lens also needs its own **lens-shading table** (ALSC), otherwise the edges of the frame turn magenta. We calibrate that table from photos of a white sheet with the official Raspberry Pi tuning tool and ship it as a project tuning file, [`src/RASPI/cam/camera_tuning/`](src/RASPI/cam/camera_tuning/README.md). Result on a white sheet: R/G and B/G = 1.00 at the center **and** at all four corners (they were 1.3–1.4 at the corners).
 
 #### HC-SR04 ultrasonic sensors
 
@@ -313,6 +391,25 @@ We originally tested VL53L0X time-of-flight sensors. On paper they win — ±3 m
 #### MPU-6050 IMU
 
 The MPU-6050 gives heading and rotation data during cornering and recovery. The gyro Z axis is integrated each loop into `anguloGyro`, with a 1°/s deadband to suppress MEMS thermal drift on straights. On startup the firmware averages several hundred stationary samples to compute the gyro bias (`calcGyroOffsets`); if that offset comes back unusually large the firmware halves the integration scale as a safety net. The integrated heading is also sent back to the Pi in every acknowledgement so the vision side can dead-reckon obstacle positions (see §4.4).
+
+#### VL53L1X time-of-flight array (v2, in integration)
+
+**Why we are adding ToF again.** In v1 we dropped the VL53L0X because it lost the black walls (see [ERR-01](#err-01--vl53l0x-lost-the-black-wall-past-70-cm)). We are revisiting ToF because of a measured problem with the ultrasonics. In the Open Challenge logs, the front HC-SR04 reported a wall closer than 90 cm in **~20% of the frames on straight sections** where there was no wall. These readings jump more than 60 cm from one frame to the next (e.g. 199 → 65 → 179 cm), which no real wall can do. Each phantom made the car slow down in the middle of a straight. The phantoms only appear when the car runs ~25 cm from the side wall, which points to the wide ultrasonic cone grazing that wall. A ToF sensor has a much narrower field of view, so it should not see the side wall.
+
+**Why the VL53L1X and not the VL53L0X.** It has a longer range (up to ~4 m in long mode on bright targets), a configurable timing budget and a configurable region of interest. Teams that tested it against the WRO black wall reported usable readings up to about 80–100 cm. That makes it a **near-field** sensor; the HC-SR04 stay for long range and as an independent check.
+
+**Layout:**
+
+| Sensor | Position | Use | XSHUT pin (ESP32) | I²C address |
+|---|---|---|---|---|
+| Front | Front bumper | Distance to the wall ahead (corner trigger, approach speed) without side-wall phantoms | GPIO 0 | 0x30 |
+| Left | Left side | Distance to the side wall | GPIO 15 | 0x31 |
+| Right | Right side | Distance to the side wall | GPIO 5 | 0x32 |
+| Rear | Rear bumper | Reverse maneuvers: leaving the parking lot, reverse pivots and parking, which are blind today | GPIO 4 | 0x33 |
+
+All four share the I²C bus (SDA 21, SCL 22). They all start at the same factory address (0x29), so at boot the ESP32 holds every sensor off with its XSHUT pin, then powers them one by one and gives each a new address. They run in long-distance mode with a 50 ms timing budget. Test sketches are in `src/ESP32/TofTest4/` (4 sensors), `src/ESP32/TofId/` (tells an L0X from an L1X) and `src/ESP32/TofBnoTest/`. The last one also reads a **BNO085** IMU in UART-RVC mode, which we are evaluating as a replacement for the MPU-6050 (on-chip sensor fusion, less heading drift).
+
+**Integration plan.** First on the bench against a real black wall, varying distance, wall angle and mounting height. Then **log-only** on the car, recorded next to the HC-SR04 values for several runs. The firmware will only use them for control after the logs show they are reliable. The ultrasonics remain as a backup in every case.
 
 ### 3.3 PCB & wiring
 
@@ -339,6 +436,28 @@ The ESP32 DevKit (`U1`) sits at the centre. Battery voltage (~11.1 V, 3S) comes 
 </p>
 
 The board is a custom non-rectangular shape (~55 mm at its widest) that nests into the chassis around the Raspberry Pi 4 and the drivetrain — the electronics-first packaging from [§1.1](#11-design-goals) in physical form. The cut-outs and the mounting-hole row let the PCB, the steering and the sensor mounts share one footprint without stacking height.
+
+### 3.4 Main computer — Raspberry Pi 5 (v2)
+
+**Why we upgraded.** We profiled the Pi 4 running the real race code. The main Python thread was using **97% of one core**, and the loop ran at **14–18 fps** depending on the scene. Most of that time was spent on vision, not on the camera: ~5 ms capture, 17–22 ms color detection, 45–48 ms bird's-eye view and centerline. With the remote desktop client running, the Pi 4 also reached **84 °C** and entered thermal throttling. A faster CPU attacks every stage at once.
+
+**Measured result.** We ran the unmodified race runtime on the Pi 5, replaying a recorded Obstacle Challenge run as the camera input at 30 fps:
+
+| | Raspberry Pi 4 | Raspberry Pi 5 (16 GB) |
+|---|---|---|
+| Vision loop rate | ~15.5 fps (same run, recorded live) | **40–41.5 fps**, stable for 60 s |
+| Time per frame | ~65 ms | ~25 ms |
+| Temperature | up to 84 °C, throttled | 46 → 52 °C, no throttling (`0x0`) |
+
+The Pi 5 also has the official **Active Cooler**. Its fan is controlled by the firmware: it stays off below 50 °C and speeds up in steps up to 100% at 75 °C. The **M.2 HAT+** is installed for a future NVMe SSD, which will mainly make storage more durable when recording a video of every run.
+
+**What the port required:**
+- **Per-frame constants.** Many filters and confirmations in the runtime count *frames* and were tuned at ~14 fps. At 40 fps they would run almost 3× faster in real time. The loop also doesn't wait for a new camera frame. Before racing on the Pi 5 we either cap the loop at the old rate or rescale those constants.
+- **Serial port.** On the Pi 5, `/dev/serial0` points to the debug UART connector, not to the GPIO header. The ESP32 link uses `/dev/ttyAMA0` (GPIO 14/15).
+- **GPIO.** The original `RPi.GPIO` library does not support the Pi 5, so we use the drop-in `rpi-lgpio` package and the code stays the same.
+- **Camera.** The Pi 5 uses the smaller 22-pin camera connector, so the Camera v2 needs a 22-to-15-pin cable. The automatic camera detection did not recognize our module, so `/boot/firmware/config.txt` loads it explicitly (`camera_auto_detect=0`, `dtoverlay=imx219,cam1`). The capture pipeline must request `format=BGRx`; without it, the camera source fails to negotiate a format on the Pi 5's image processor (`not-negotiated`). BGRx comes straight from the image processor at 30 fps using ~2% CPU.
+- **Live view without a monitor.** The remote-desktop client used on the Pi 4 does not work on the Pi 5 desktop (Wayland). [`pure_pursuit/cam_web.py`](src/RASPI/cam/pure_pursuit/cam_web.py) streams the camera (or the race HUD with `--hud`) to a browser, with the color-calibration controls.
+- **OpenCV.** It must be the system package (`python3-opencv`), because the pip wheel is built without the GStreamer backend that the `libcamerasrc` capture pipeline needs.
 
 ---
 
@@ -538,7 +657,7 @@ This replaced an earlier approach that anchored the can's position when first se
 ### 4.5 ESP32 finite state machine (`src/ESP32/PurePursuit/PurePursuit.ino`)
 
 ```
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO };
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
 ```
 
 ```mermaid
@@ -612,6 +731,19 @@ With the Pi's vision out of the loop, three guards keep the continuous turn hone
 - **`giroArmado` — corridor arm.** `detectarEsquina()` is not allowed to fire a turn until the car has first confirmed it is *inside* a corridor: both side walls < 100 cm for `PASILLO_FRAMES` (3) consecutive frames. A wide reading in the start zone therefore can't trigger a false first turn. Once armed it stays armed for the whole run, so real corners are never delayed by it (unlike a fixed time lockout).
 - **Front-wall approach slow-down.** When the front sensor sees the end wall closer than `FRONT_SLOWDOWN_CM` (60 cm), speed drops to `VEL_APROX_CERRADA` (140) so `detectarEsquina()` gets a clean read of which side opens before the car is on top of the corner.
 - **`marchaIniciada` timer re-anchor.** The start-guard timer (`timeStart`) is reset to the instant the car actually starts rolling — not to when `READY` arrived seconds earlier — so its window is measured from roll-off.
+
+#### 4.5.2 States added for the national final: start from the lot and parking
+
+The diagram above shows the six driving states. Three more were added between 2026-09-07 and the national final:
+
+| State | Entered when | What it does |
+|---|---|---|
+| `INICIO` | The Pi sends `inicio=1` (the car starts inside the parking lot) | Scripted S-shaped exit from the lot, gyro-checked, then `SIGUIENDO` |
+| `ESTACIONANDO` | Last corner, parking mode `PARK_PARALELO` | Parallel parking in reverse inside the magenta lot |
+| `ESTACIONANDO_PUNTA` | Last corner, parking mode `PARK_PUNTA` | Simpler nose-in partial parking (fallback) |
+
+- **Start in the lot.** While disarmed, the Pi measures the share of magenta in the frame. When the button is pressed it decides once whether the car is inside the parking lot, and sends `inicio=1` if so. The ESP32 then runs `INICIO`: it swings out of the lot, drives straight, counter-steers back to the track heading, and backs up briefly to square up before the first straight.
+- **Parking.** After the last corner the car follows the outer wall. It detects the lot from the side ultrasonic profile (wall → gap → wall), and the camera confirms the magenta walls. Then it parks **in reverse** in `ESTACIONANDO`. During parking, the heading reference is re-measured against the wall to cancel the gyro drift collected over 3 laps (`PARK_TRIM_*`). Runs 1025, 1052 and 1064 produced perfect parallel parks, and we keep their constants as the reference set.
 
 ### 4.6 Cascade PID (always running underneath)
 
@@ -698,9 +830,13 @@ sequenceDiagram
 | Rolling obstacle memory (dead reckoning) | Obstacle | Complete, track-tuned |
 | Corner-line "mine / beyond" classifier | Obstacle | Complete |
 | Measured-state RECUPERANDO trigger | Obstacle | Complete, track-tuned |
-| Segmented turn (CRUCERO → MANIOBRA) | Obstacle | Implemented, tuning on track |
+| Segmented turn (CRUCERO → MANIOBRA) | Obstacle | Raced at the national final; forward/reverse hysteresis added after it ([ERR-22](docs/engineering-log.md#err-22--the-corner-maneuver-changed-its-mind-at-the-last-moment)) |
 | Mid-turn cone detector | Obstacle | Phase 1 — logging only |
-| Parking maneuver | Obstacle | In development |
+| Start from the parking lot (`INICIO`) | Obstacle | Raced at the national final |
+| Parallel parking (`ESTACIONANDO`) | Obstacle | Working in testing — perfect parks in runs 1025, 1052, 1064 |
+| Floor-referenced color correction + ratio tests | both | Complete ([ERR-15](docs/engineering-log.md#err-15--in-a-darker-room-the-orange-line-was-read-as-red), [ERR-17](docs/engineering-log.md#err-17--strong-light-tape-read-as-red-pale-floor-read-as-green)) |
+| Raspberry Pi 5 port | both | In progress — pipeline at 40 fps on recorded video; per-frame constants pending (§3.4) |
+| VL53L1X ToF sensors | both | Bench testing (§3.2) |
 
 ---
 
@@ -784,6 +920,18 @@ A dated, phase-by-phase account of the same history — including the pre-repo d
 | v3.0 — segmented turns (`SectionTurning`) | 2026-09-01 | Obstacle round only: `GIRANDO` → `CRUCERO` (cruise to a set distance on the front sensor) → `MANIOBRA` (forward arc **or** reverse pivot from outer-wall distance); motor-coast phase before every direction reversal | A can at the corner mouth makes a blind 90° arc a coin-flip; a missing coast delay had already killed a driver + a motor — [ERR-04](#err-04--tb6612-and-motor-destroyed-by-a-reversal-with-no-coast-delay) | `9219f17` (+386 lines to `.ino`) | On branch |
 | v3.1 — mid-turn cone detector | 2026-08-31 | `mid_turn.py` — raw per-frame BEV projections (rolling memory is off during a pivot); **Phase 1: log only** | A can first seen *during* the turn ends up beside the car afterwards → clipped | `6b0b5c7` | On branch (logging) |
 | v3.2 — Open round runs pure PID | 2026-09-03 → 09-04 | Open round ignores the Pi steer — wall + gyro PID only; per-round `AngGiro` / `MOTOR_MAX`; `giroArmado` corridor-arm; front-wall approach slow-down; `TERMINANDO` finish | Open round doesn't need vision and was inheriting obstacle-round speed caps; a wide start-zone reading latched a false first turn — [ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner) | `626fc91`, `13e05c1` | On branch |
+| v3.3 — gyro heading-hold by default | 2026-09-05 | On a clean straight the gyro steers; vision steers only while a pillar of ours is present. `RECUPERANDO` made non-interruptible; proportional wall override (`wallPanic`) | Small dodges left the chassis 20–30° crooked and the car drifted into a wall (runs 679–690); run 700 = first clean 12-corner run | `9c4b75e` era | Shipped |
+| v3.4 — start from the parking lot (`INICIO`) | 2026-09-09 | Pi measures the magenta share at the button press and sends `inicio=1`; ESP32 drives a scripted S-exit | The Obstacle Challenge may start inside the lot | `6a713e3` | Shipped |
+| v3.5 — floor-referenced color correction | 2026-09-12 | Per-frame gains so the white mat matches a reference color | A darker room pushed the orange tape into the red range — [ERR-15](docs/engineering-log.md#err-15--in-a-darker-room-the-orange-line-was-read-as-red) | `7bd353f` | Shipped |
+| v3.6 — camera check before arming | 2026-09-14 | Start blocked (LED off) until the camera delivers real frames | Run 860 drove 19 s with a blind camera — [ERR-12](docs/engineering-log.md#err-12--camera-blackout-mid-run) | `486cc4c` | Shipped |
+| v3.7 — obstacle-memory merge guard | 2026-09-15 | A remembered pillar can't "reappear" where it physically couldn't be | Two reds across a corner merged into one (run 954) — [ERR-21](docs/engineering-log.md#err-21--two-red-signs-on-both-sides-of-a-corner-merged-into-one) | `8bfe4d0` | Shipped |
+| v3.8 — red range for the new venue + B/R test | 2026-09-16 | Red hue 168–179 plus a blue/red ratio test against the pink walls | New venue: red pillars not detected at all (run 1013) — [ERR-14](docs/engineering-log.md#err-14--at-a-new-venue-red-signs-were-not-detected-at-all) | `e3784a8` | Shipped |
+| v3.9 — parallel parking | 2026-09-12 → 09-17 | Lot found from the side-ultrasonic profile, reverse parallel park, heading trimmed against the wall | 15-point parking; perfect parks in runs 1025, 1052, 1064 | `cf28a0f`, `8ef47d0` | Shipped |
+| **Release `v1.0-nacional`** | 2026-09-19 | Code raced at the national final — **1st place** | — | `d5cc66d` | Released |
+| v3.10 — ratio tests + corner hysteresis | 2026-09-22 | `RED_GR_MAX`, `GREEN_S_MIN_MED`; forward/reverse decision with ±6 cm hysteresis | Strong light: tape read as red, floor as green (run 1190) — [ERR-17](docs/engineering-log.md#err-17--strong-light-tape-read-as-red-pale-floor-read-as-green); maneuver flip at the boundary (run 1188) — [ERR-22](docs/engineering-log.md#err-22--the-corner-maneuver-changed-its-mind-at-the-last-moment) | `96145ba` | Shipped |
+| v4.0 — steering Ackermann fix + 19-tooth pinion | 2026-10-06 | Rack joints 43 → 47 mm, tie rods 18.13 mm, pinion 14 → 19 teeth | Anti-Ackermann (39.5° / 42.8°) and only ~37° of steering — [§2.4](#24-steering--rack-and-pinion-with-ackermann-geometry) | `844195e` | Validated in CAD |
+| v4.1 — Raspberry Pi 5 + camera calibration | 2026-10-06 → 10-07 | Pi 5 16 GB + Active Cooler; `format=BGRx` capture; lens-shading table for our lens | Pi 4 compute-bound at 14–18 fps and throttling at 84 °C; magenta ring on the Pi 5 — [§3.4](#34-main-computer--raspberry-pi-5-v2) | `844195e` | On branch |
+| v4.2 — VL53L1X ToF ×4 | 2026-10 | Front, left, right, rear on one I²C bus with XSHUT re-addressing | Front ultrasonic phantom echoes — [ERR-19](docs/engineering-log.md#err-19--phantom-echoes-from-the-front-ultrasonic) | `844195e` (test sketches) | Bench test |
 
 ### 5.4 Risk analysis
 
@@ -835,7 +983,8 @@ Post-mortems for the failures that changed the design — what happened, the con
 | **Symptom** | Every frame came out heavily red-tinted. HSV masks for the floor, the orange line and the red/green pillars all broke. |
 | **Root cause** | With no IR-cut filter the sensor integrates near-IR the eye doesn't see; on this sensor it lands mostly in the red channel. |
 | **Fix** | Pinned the libcamera pipeline to fixed white-balance — `libcamerasrc awb-enable=false colour-gains=<1.2,1.5>` — so auto-WB can't chase the cast, then re-tuned the red/green HSV ranges on the corrected image (`945c2f1`, 2026-08-07, and the `vision.py` range passes after it). |
-| **Status** | Resolved. The wide FOV is now a net win — more track and obstacle zone per frame. |
+| **Status** | Resolved on the Pi 4. The wide FOV is now a net win — more track and obstacle zone per frame. |
+| **v2 update (Raspberry Pi 5)** | The Pi 5 has a different image processor and tuning. With fixed gains only, the frame edges showed a strong **magenta ring** (corners R/G ≈ 1.31–1.40 on a white sheet). Root cause: the factory lens-shading table (ALSC) is made for the stock lens and *raises* red at the corners. Fix: new ALSC table calibrated for our lens from 5 photos of a white sheet with the official tool (`rpi-ctt`), brightness part symmetrized, shipped as [`camera_tuning/imx219_noir_wro_pi5.json`](src/RASPI/cam/camera_tuning/README.md) + gains `<1.10,1.51>`. Result: R/G and B/G = 1.00 at the center and at all corners. See [ERR-29](docs/engineering-log.md#err-29--raspberry-pi-5-magenta-ring-at-the-frame-edges). |
 
 #### ERR-04 — TB6612 and motor destroyed by a reversal with no coast delay
 
@@ -900,6 +1049,36 @@ Post-mortems for the failures that changed the design — what happened, the con
 | **Impact** | The main reason the obstacle round is not yet complete on every field configuration. Simple layouts pass reliably; a can straddling the corner sightline does not. |
 | **Status** | **Open — active work.** |
 
+
+#### ERR-10 onward — after 2026-09-06
+
+The incidents after this point are logged in the same format, with run numbers and commits, in [`docs/engineering-log.md`](docs/engineering-log.md):
+
+| ID | Incident | Status |
+|---|---|---|
+| [ERR-10](docs/engineering-log.md#err-10--power-cut-right-after-git-pull-left-files-empty) | Power cut right after `git pull` left files empty | Mitigated (procedure) |
+| [ERR-11](docs/engineering-log.md#err-11--a-fresh-battery-over-rotates-the-dodges) | A fresh battery over-rotates the dodges | Mitigated (battery window) |
+| [ERR-12](docs/engineering-log.md#err-12--camera-blackout-mid-run) | Camera blackout mid-run | Mitigated |
+| [ERR-13](docs/engineering-log.md#err-13--pink-parking-lot-wall-detected-as-a-red-sign) | Pink parking-lot wall detected as a red pillar | Validated |
+| [ERR-14](docs/engineering-log.md#err-14--at-a-new-venue-red-signs-were-not-detected-at-all) | New venue: red pillars not detected | Validated |
+| [ERR-15](docs/engineering-log.md#err-15--in-a-darker-room-the-orange-line-was-read-as-red) | Darker room: orange line read as red | Validated |
+| [ERR-16](docs/engineering-log.md#err-16--false-orange-line-in-the-middle-of-a-straight) | False orange line mid-straight | Validated |
+| [ERR-17](docs/engineering-log.md#err-17--strong-light-tape-read-as-red-pale-floor-read-as-green) | Strong light: tape as red, floor as green | Validated (replay) |
+| [ERR-18](docs/engineering-log.md#err-18--camera-tilted-up-caused-over-steering) | Camera tilted up → over-steering | Validated |
+| [ERR-19](docs/engineering-log.md#err-19--phantom-echoes-from-the-front-ultrasonic) | Phantom echoes from the front ultrasonic | Under investigation |
+| [ERR-20](docs/engineering-log.md#err-20--drift-towards-a-wall-after-small-dodges) | Drift towards a wall after small dodges | Validated |
+| [ERR-21](docs/engineering-log.md#err-21--two-red-signs-on-both-sides-of-a-corner-merged-into-one) | Two reds across a corner merged into one | Validated (replay) |
+| [ERR-22](docs/engineering-log.md#err-22--the-corner-maneuver-changed-its-mind-at-the-last-moment) | Corner maneuver changed its mind at the last moment | In repository |
+| [ERR-23](docs/engineering-log.md#err-23--systematic-heading-offset-after-every-corner) | Systematic heading offset after every corner | Mitigated |
+| [ERR-24](docs/engineering-log.md#err-24--green-then-red-slalom-the-red-is-grazed-sometimes) | Green-then-red slalom: red grazed "sometimes" | Under investigation |
+| [ERR-25](docs/engineering-log.md#err-25--the-geometric-sign-passed-trigger-crashed-on-the-track) | Geometric "passed" trigger crashed on the track | Rejected |
+| [ERR-26](docs/engineering-log.md#err-26--doubling-the-frame-rate-made-the-car-more-aggressive) | Doubling the frame rate made the car aggressive | Validated, open again for the Pi 5 |
+| [ERR-27](docs/engineering-log.md#err-27--the-remote-desktop-client-overheated-the-pi-4) | Remote desktop client overheated the Pi 4 | Mitigated |
+| [ERR-28](docs/engineering-log.md#err-28--raspberry-pi-5-the-race-camera-pipeline-would-not-start) | Pi 5: the race camera pipeline would not start | Resolved |
+| [ERR-29](docs/engineering-log.md#err-29--raspberry-pi-5-magenta-ring-at-the-frame-edges) | Pi 5: magenta ring at the frame edges | Resolved |
+
+The decisions behind these fixes ("we chose X instead of Y because…") are in the [decision log](docs/engineering-log.md#1-decision-log--we-chose-x-instead-of-y-because).
+
 ---
 
 # 6. Testing & Validation
@@ -920,6 +1099,8 @@ Almost all tuning is done from **recorded track runs**. The runtime writes a com
 **Open Challenge — validated.** After the corner-detection work ([ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner)): **10 complete autonomous runs** from varied start positions and field configurations, no wall contact, correct finish. Three laps in ~12 s at 60 % motor speed. Reference run: [YouTube](https://youtu.be/orP-BNSG-6s).
 
 **Obstacle Challenge — in progress.** Simple layouts: the car completes the round comfortably. Layouts with a can straddling the corner sightline still fail on the *mine vs. beyond* classification ([ERR-09](#err-09--separating-my-straight-from-the-next-straight-open)) — the current blocker. The pivot-trap fix ([ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing)) was confirmed clean at orillas 417 (both cans cleared, 12 turns). Segmented turns (`CRUCERO → MANIOBRA`) are being tuned on track. The parking maneuver is **not yet designed** — full obstacle-round completion comes first.
+
+**Update — national final (2026-09-19): 1st place.** Code: release [`v1.0-nacional`](docs/releases.md) (`d5cc66d`). Reference runs before the event: **700** (first clean 12-corner Obstacle run), **1025** (first perfect parallel park), **1047** (Open, 12/12 corners), **1064** (full clean Obstacle round: start from the lot, 12 corners, parallel park, 0.9° final heading error). The run-by-run record, the replay testing method and the v2 validation matrix are in [`docs/testing.md`](docs/testing.md).
 
 ### 6.3 Validation matrix
 
@@ -948,6 +1129,10 @@ Figures are from our own test runs and recorded HUD footage, not lab instrumenta
 5. Firmware — `rondaObstaculos` set for the round; correct build flashed.
 6. Pi input voltage checked **at the Pi**, not just at the PCB ([ERR-08](#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring)); battery voltage logged; `journalctl` clean at idle.
 7. Start-up handshake — LED on GPIO 27 lights, button on GPIO 17 responds, `ACK:READY` seen.
+8. Battery between **11.70 and 12.15 V** — a fresh charge over-rotates the dodges ([ERR-11](docs/engineering-log.md#err-11--a-fresh-battery-over-rotates-the-dodges)).
+9. Firmware built with `TURNS_PER_RACE = 12` (test builds use 4).
+10. New venue: redo the camera color calibration ([`camera_tuning/README.md`](src/RASPI/cam/camera_tuning/README.md)) and check red/green/orange/magenta on real frames.
+11. Wi-Fi, Tailscale, remote view and Claude Remote Control **off** for official rounds (rule 11.10). After any `git pull` on the Pi: `sync` before unplugging ([ERR-10](docs/engineering-log.md#err-10--power-cut-right-after-git-pull-left-files-empty)).
 
 ### 6.5 Milestones
 
@@ -967,7 +1152,12 @@ The [Engineering Journal](ENGINEERING_JOURNAL.md) places these milestones on the
 | M8 | Open Challenge, full autonomous run — see [MIL-01](#mil-01--open-challenge-full-autonomous-run) | 2026-08-28 | Partially validated |
 | M9 | Efficient obstacle-avoidance algorithm — see [MIL-02](#mil-02--obstacle-avoidance-standard-layouts) | 2026-08 → 09 | Under test |
 | M10 | Every obstacle-round layout covered — see [MIL-03](#mil-03--obstacle-challenge-full-layout-coverage) | — | In progress |
-| M11 | Parking inside the bay — see [MIL-04](#mil-04--parking-maneuver) | — | Not started |
+| M11 | Parking inside the bay — see [MIL-04](#mil-04--parking-maneuver) | 2026-09-16 | Partially validated |
+| M12 | First clean 12-corner Obstacle run with segmented turns (run 700) | 2026-09-05 | Completed |
+| M13 | Full clean Obstacle round: start from the lot + 12 corners + parallel park (run 1064) | 2026-09 | Completed |
+| M14 | **1st place, Mexico national final** — release `v1.0-nacional` | 2026-09-19 | Completed |
+| M15 | Raspberry Pi 5 port: same pipeline at 40 fps (replayed run 1190), camera calibrated | 2026-10-06 → 10-07 | In progress |
+| M16 | International final — release `v2.0-internacional` | 2026-12-08 | In progress |
 
 #### MIL-01 — Open Challenge, full autonomous run
 
@@ -1008,8 +1198,13 @@ The [Engineering Journal](ENGINEERING_JOURNAL.md) places these milestones on the
 | **Objective** | After the final lap of the Obstacle Challenge, park fully inside the marked bay. |
 | **Related work** | §4.8 (Parking maneuver — in development) |
 | **Acceptance criteria** | Vehicle fully within the parking-bay limits · no contact with the bay walls · within the 3-minute round time limit. |
-| **Current record** | Not started — the parking algorithm is not yet designed. Full obstacle-round completion (MIL-03) comes first. |
-| **Status** | **Not started.** |
+| **Current record** | Parallel parking in reverse (`ESTACIONANDO`), lot found from the side-ultrasonic profile, heading trimmed against the wall. Perfect parks in runs 1025, 1052 and 1064 (1064: final heading 0.9°, 4 cm from the inner wall, 3 cm from the front post). |
+| **Evidence pending** | Park success / attempt count over a fixed set of layouts. |
+| **Status** | **Partially validated.** |
+
+### 6.6 Releases
+
+Each competition is one git tag on the exact code that ran, with release notes in [`docs/releases.md`](docs/releases.md): `v1.0-nacional` (`d5cc66d`, national final, 1st place) and `v2.0-internacional` (in progress).
 
 ---
 
@@ -1017,7 +1212,8 @@ The [Engineering Journal](ENGINEERING_JOURNAL.md) places these milestones on the
 
 ### 7.1 Hardware requirements
 
-- Raspberry Pi 4 (2 GB+), Raspberry Pi Camera + NoIR wide-angle lens (~120°)
+- Raspberry Pi 5 (we use 16 GB) + Active Cooler — a Raspberry Pi 4 also works, at a lower frame rate
+- Raspberry Pi Camera v2 + NoIR wide-angle lens (~120°); on the Pi 5, a 22-to-15-pin camera cable
 - ESP32 DevKit
 - HC-SR04 × 3 (left, right, front) + 5 V↔3.3 V level shifter
 - MPU-6050 IMU
@@ -1049,8 +1245,12 @@ Replace `COM5` with your port. `src/ESP32/Controller_PI/Controller_PI.ino` is th
 ```bash
 git clone https://github.com/Nakashima26/WRO_FE_2026_FoxRobotics.git FoxRobotics
 cd FoxRobotics
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# Raspberry Pi: OpenCV, NumPy and GPIO come from apt (the pip OpenCV has no GStreamer -> no camera)
+sudo apt install python3-opencv python3-numpy python3-serial python3-smbus python3-picamera2 \
+                 python3-rpi-lgpio gstreamer1.0-libcamera gstreamer1.0-plugins-good
+python3 -m venv --system-site-packages .venv && source .venv/bin/activate
+pip install -r requirements.txt   # skips the apt-provided packages on the Pi (aarch64)
+# Pi 5 only: ESP32 UART is /dev/ttyAMA0 (serial0 = debug connector); camera: dtoverlay=imx219,cam1
 # System packages (apt, not pip): python3-smbus, libcamera + gstreamer1.0-libcamera
 #   (the camera pipeline in vision.open_camera)
 # Enable the camera: sudo raspi-config → Interface Options → Camera
@@ -1069,7 +1269,10 @@ python -m pure_pursuit.calibrate          # C to freeze, click P1..P9, S to save
 # 2. HSV ranges for the venue lighting — edit pure_pursuit/config.py (floor / orange line)
 #    and vision.py (red / green pillars)
 
-# 3. Vision-only sanity check (no ESP32, no motors)
+# 3. Camera color (Pi 5): lens-shading table + white balance — src/RASPI/cam/camera_tuning/README.md
+#    live view and calibration controls in the browser: python -m pure_pursuit.cam_web
+
+# 4. Vision-only sanity check (no ESP32, no motors)
 python -m pure_pursuit.test_vision                 # live camera
 python -m pure_pursuit.test_vision --video clip.mp4 # recorded clip
 ```
@@ -1093,7 +1296,9 @@ sudo ./scripts/install_autostart_pi.sh
 
 installs `deploy/systemd/wro-runtime.service`, which runs `pure_pursuit/runtime_nuevo.py` on boot (headless, with HUD recording to `videos_orillas/`). Logs: `journalctl -u wro-runtime.service -f`.
 
-`.github/workflows/deploy-pi.yml` is a CI job that, on every push to `main`, SSHes into the Pi, runs `git pull`, and restarts the runtime and VNC services.
+`.github/workflows/deploy-pi.yml` is a CI job that, on every push to `main`, SSHes into the Pi, runs `git pull`, and restarts the runtime with `stop → sleep 4 → start` (a plain `restart` wedges the camera).
+
+Each run can be summarized from the Pi journal with `python scripts/reporte_run.py --pi` (per-corner states, heading, distances, maneuver choice).
 
 ---
 
@@ -1121,15 +1326,20 @@ FoxRobotics/
 │   │   │   │   ├── mid_turn.py            # Cone-during-turn detector (Phase 1: logging only)
 │   │   │   │   ├── far_hint.py            # Early steering hint for far pillars
 │   │   │   │   ├── planner.py             # Rollout planner (experimental, not in the main loop)
+│   │   │   │   ├── color_corr.py          # Floor-referenced color correction
+│   │   │   │   ├── cam_web.py             # Live camera / HUD in the browser + color calibration (v2)
+│   │   │   │   ├── calibra_luz.py         # Venue color calibration
 │   │   │   │   ├── test_vision.py / pure_pursuit_sim.py   # bench + offline sim
 │   │   │   │   └── INSTRUCCIONES.md       # Calibration + run guide
+│   │   │   ├── camera_tuning/             # Pi 5 lens-shading tuning file + calibration procedure (v2)
 │   │   │   ├── pista/                     # Track-edge detection / recording
 │   │   │   └── _archive/                  # Superseded runtimes
 │   │   └── tests/                         # UART diagnostics + kinematic simulation
 │   └── ESP32/
-│       ├── PurePursuit/PurePursuit.ino    #  ← CURRENT firmware — V2 protocol, 6-state FSM
+│       ├── PurePursuit/PurePursuit.ino    #  ← CURRENT firmware — V2 protocol, 9-state FSM
 │       ├── Controller_PI/Controller_PI.ino# Legacy Open-only firmware (cascade PID + 3-state FSM)
 │       ├── _archive/                      # Previous firmware iteration
+│       ├── TofTest4/ TofId/ TofBnoTest/ BnoRvcTest/   # VL53L1X + BNO085 bench tests (v2)
 │       └── TestCodes/                     # Per-peripheral bring-up sketches (servo, gyro, motor, US, serial)
 │
 ├── electrical/WRO_RevA/                   # KiCad project — schematic, PCB layout, 3D models
@@ -1142,6 +1352,9 @@ FoxRobotics/
 │   ├── systemd/wro-runtime.service        # Pi autostart → runs pure_pursuit/runtime_nuevo.py
 │   └── systemd/wro-vnc.service            # VNC for the live camera view
 ├── scripts/install_autostart_pi.sh        # Installs the systemd service on the Pi
+├── scripts/reporte_run.py                 # Per-run report from the Pi journal
+├── docs/                                  # releases.md · testing.md · engineering-log.md (ERR-10 onward)
+├── Mecanica/Engranes/                     # Involute pinion generator + DXF profiles (v2 steering)
 ├── .github/workflows/deploy-pi.yml        # CI: push to main → git pull + service restart on the Pi
 ├── remote/                                # client/server remote-control helper (bench use)
 ├── videos_orillas/                        # Recorded HUD run footage (debug)

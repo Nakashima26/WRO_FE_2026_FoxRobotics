@@ -46,3 +46,6 @@ build/
 # Generated backups and archives
 **/*-backups/*.zip
 **/*-backups/*.bak
+
+# KiCad lock files (exist only while a project is open)
+*.lck

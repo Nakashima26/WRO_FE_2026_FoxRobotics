@@ -32,19 +32,55 @@ python -m pure_pursuit.calibrate
 
 ---
 
-## 2. Calibrar colores HSV (antes de cada competencia)
+## 2. Calibrar colores (antes de cada competencia / si cambia la luz)
 
-La iluminación del venue cambia los colores. Ajusta los rangos en `config.py`:
+El detector **no usa rangos RGB**. Usa HSV: conos en `vision.py` (`COLOR_RANGES`),
+cinta naranja / rosa / piso en `config.py`. La cámara tiene el balance de blancos
+apagado, así que otra luz corre los tonos. `color_corr.py` intenta devolverlos
+al color del cuarto de pruebas midiendo el piso; si el piso está quemado no
+puede, y hay que medir a mano.
 
-```python
-# Piso blanco WRO
-FLOOR_LOWER = np.array([0,   0,  160])
-FLOOR_UPPER = np.array([180, 50, 255])
+Para el servicio (tiene la cámara tomada):
+
+```bash
+sudo systemctl stop wro-runtime && sleep 4
 ```
 
-Si el blanco del piso se ve grisáceo o amarillento bajo las luces del venue, baja `FLOOR_LOWER[2]` hasta 140 o 120.
+Ventana (recomendado): pinta el cono/cinta/pared o pulsa `a` para auto-detectar
+por RGB (dominancia de canal, aguanta el cambio de luz). Te imprime HSV listo
+para pegar:
 
-Los rangos de rojo y verde están en `vision.py` (el archivo de visión principal).
+```bash
+python3 -m pure_pursuit.calibra_luz --gui
+```
+
+- `1` rojo  `2` verde  `3` naranja  `4` rosa
+- click + arrastrar = muestrear  |  `a` = auto-detectar el color activo
+- `p` imprime ese color  |  `s` imprime todos  |  `c` prende/apaga color_corr
+- overlay: lo que AGARRAN los rangos actuales vs lo que estás midiendo
+
+Sin pantalla (SSH), con un cono rojo y uno verde enfrente:
+
+```bash
+python3 -m pure_pursuit.calibra_luz --vivo --sugerir
+```
+
+Sobre una corrida grabada (panel izquierdo del HUD = lo que ve la visión):
+
+```bash
+python3 -m pure_pursuit.calibra_luz --avi videos_orillas/orillasNNNN.avi --sugerir
+```
+
+Dónde pegar lo que imprime:
+
+| Color | Archivo |
+|---|---|
+| rojo / verde | `vision.py` → `COLOR_RANGES` (y `LINE_CONE_HSV` en `config.py`) |
+| naranja (cinta) | `config.py` → `LINE_ORANGE_HSV` / `LINE_CORE_HSV` |
+| rosa (estacionamiento) | `config.py` → `PARK_PINK_HSV` |
+| piso BGR | `config.py` → `COLOR_CORR_FLOOR_REF_BGR` |
+
+Después: `sudo systemctl start wro-runtime` (nunca `restart`: deja la CSI colgada).
 
 ---
 

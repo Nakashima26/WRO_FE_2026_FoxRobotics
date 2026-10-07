@@ -71,7 +71,7 @@ CALIB_POINT_LABELS = [
 # advierte que probablemente un clic quedó mal puesto.
 CALIB_MAX_MEAN_ERR_PX = 4.0
 
-WALL_MARGIN_PX = 22
+WALL_MARGIN_PX = 40
 
 # ─── Color del piso (HSV) — tapete WRO: beige / madera cálida ────────────────
 FLOOR_LOWER = np.array([0, 0, 140])
@@ -79,6 +79,28 @@ FLOOR_UPPER = np.array([35, 80, 255])
 
 FLOOR_LOWER_BLUE = np.array([95, 50, 10])
 FLOOR_UPPER_BLUE = np.array([150, 255, 220])
+
+# ─── Corrección de color por el piso (otra iluminación) — ver color_corr.py ───
+# Escala B,G,R de cada frame para que el piso de la franja de abajo quede del
+# color que tenía en el cuarto de pruebas -> los rangos HSV de todo el proyecto
+# siguen sirviendo con otra luz (orillas900: cinta naranja H 9->4, caía en rojo).
+# Con la luz de siempre las ganancias salen ~1.00 (no cambia nada). Si en el
+# cuarto de pruebas el log [COLOR] muestra ganancias lejos de 1, copia aquí el
+# piso_BGR que imprime.
+COLOR_CORR_ENABLED        = True
+COLOR_CORR_FLOOR_REF_BGR  = (175.0, 198.0, 213.0)  # piso del cuarto de pruebas (medido en orillas854)
+COLOR_CORR_EVERY_N        = 5      # re-mide el piso cada N frames (la tabla se aplica en TODOS)
+COLOR_CORR_ALPHA          = 0.3    # EMA de la ganancia por medida (suave, no parpadea)
+COLOR_CORR_ROI_TOP        = 0.70   # franja de medida: el 30% de abajo del frame (piso frente al carro)
+COLOR_CORR_FLOOR_S_MAX    = 90     # px de piso: poco saturados...
+COLOR_CORR_FLOOR_V_MIN    = 60     # ...y no oscuros (fuera paredes negras / sombras duras)
+COLOR_CORR_MIN_FLOOR_FRAC = 0.5    # si menos de esto de la franja es piso (cono enfrente) -> no re-mide
+COLOR_CORR_GAIN_MIN       = 0.6    # topes de ganancia por canal
+COLOR_CORR_GAIN_MAX       = 1.8
+COLOR_CORR_BRILLO_MAX     = 1.2    # el tono se corrige completo; el brillo sube máx. esto (más ->
+                                   # conos rojos reales pasan el tope V<=160 del rango Red)
+COLOR_CORR_SKIP_DELTA     = 0.02   # ganancias a menos de esto de 1.00 -> no aplica la tabla (0 ms)
+COLOR_CORR_LOG_EVERY_S    = 2.0    # log [COLOR] en journalctl (0 = apagado)
 
 FLOOR_LOWER_BLUE_WIDE = np.array([90, 15, 60])   # baja el mínimo de S y sube V
 FLOOR_UPPER_BLUE_WIDE = np.array([150, 255, 230])
@@ -115,6 +137,22 @@ CENTERLINE_EXIT_RAMP_PX = 90   # 2026-08-28: sobre cuántos px de Y (pasada la
                               # círculo ("brinco hacia adentro"). 90px = arco de
                               # salida limpio, sin sesgar tanto tramo por delante
                               # que estorbe a la siguiente lata.
+
+# ── Cap del steer de APROXIMACIÓN a un cono de color (2026-09-08) ────────────
+# DESACTIVADO 2026-09-08. Idea original: un VERDE pide ~2x el desplazamiento de
+# un ROJO -> la centerline saturaba el steer de lejos y el carro pivoteaba, así
+# que se capaba |steer| a 26° mientras el cono estaba "lejos" (y_BEV < _Y) y se
+# soltaba al cruzar _Y. En pista (orillas771, 1ra corrida con esto) el cap clavó
+# el steer en exactamente -26.0°/obs -0.433 por ~1.5s en la esquiva del verde
+# del segmento 4: no pudo cerrar el arco, se comió la pared de enfrente
+# (dF 61->24) y se fue contra la exterior (dL 41->28) -> RECUPERANDO tarde con
+# overshoot -> choque en el giro 4. La corrida anterior sin el cap (orillas770,
+# commit 493af83) usó 27-37° libremente en 415 frames e hizo 12/12 limpio.
+# El release por y_BEV >= 300 es estructuralmente tarde (a esa Y el cono ya te
+# pasó de lado) y `_prev_steer_deg = steer_deg` clava el slew al valor capado.
+# 0 = sin cap.
+CENTERLINE_COLOR_APPROACH_MAX_STEER_DEG = 0.0
+CENTERLINE_COLOR_APPROACH_Y            = 300.0   # px BEV; y del cono por debajo de esto = "lejos"
 CENTERLINE_SMOOTH_WIN = 5    # ventana (impar) de media móvil sobre X post-muestreo
 CENTERLINE_DEBUG      = False  # 2026-08-29: APAGADO. El log [CLDBG] fila-a-fila
                               # llenaba el journal de la Pi (74MB) y rotaba los
@@ -130,7 +168,7 @@ CENTERLINE_COMMIT_W   = 0.12   # peso de esquiva a partir del cual el punto del
 
 # ─── Manejo de obstáculos en BEV ─────────────────────────────────────────────
 # Tamaño físico real de los obstáculos (latas de refresco WRO ≈ 65 mm diámetro)
-OBS_REAL_DIAMETER_MM = 75.0
+OBS_REAL_DIAMETER_MM = 80.0
 OBS_PHYSICAL_R_PX    = round(OBS_REAL_DIAMETER_MM / 2.0 / MM_PER_PX)  # ≈ 16 px
 OBS_SAFETY_R_PX      = 20    # margen de seguridad adicional (px)
 OBS_INFLATE_R        = OBS_PHYSICAL_R_PX + OBS_SAFETY_R_PX             # ≈ 35 px
@@ -236,6 +274,43 @@ OBS_MEM_DECAY      = 0.06    # confianza perdida por frame sin re-ver el obstác
                             # 2026-08-28: 0.12->0.06 al doblar fps (~7->~14), mismo decay/seg
 OBS_MEM_MIN_CONF   = 0.4    # por debajo de esto el obstáculo recordado se descarta
 OBS_MEM_REFRESH    = 1.0     # confianza al re-detectar (se satura en 1.0)
+
+# ── Fade de la urgencia de esquiva SOLO para la centerline (2026-09-08) ──
+# Una vez que el carro YA rodeó un cono por ÁNGULO y la cámara lo PERDIÓ, la
+# MEMORIA del cono (no el cono) sigue acercándose por dead-reckon y la
+# centerline sigue curvando alrededor -> volante de más aunque ya vas girado
+# ("empujón" justo antes de PASADO, run 743: obs -0.35 -> -0.55 en yaw 45->54).
+# Se baja a ~0 el `conf` que ve detect_centerline (wgt = ramp * conf, centerline
+# .py) -> el fantasma deja de curvar el path y el carro rueda su propio arco.
+# NO toca o.conf real: _prune / decay / trigger de RECUPERANDO siguen igual, así
+# que ESTE fade NO puede disparar un RECUPERANDO falso.
+# Doble candado: yaw alto (comprometido) Y conf < FADE_CONF (cámara lo perdió).
+OBS_MEM_PATH_FADE_YAW_DEG  = 38.0   # yaw (deg) rodeado el cono para empezar a atenuar
+                                    # su peso en la centerline. Subir si el carro
+                                    # under-esquiva; bajar si aún sobre-gira / RECUPERANDO
+                                    # entra tarde. 45->38 (2026-09-08): en el verde grande
+                                    # RECUPERANDO entraba tan tarde que casi/rozaba la pared
+                                    # -> el pivote-PASADO ahora dispara a yaw ~50 (era 57).
+                                    # Sigue doble-candado con conf<0.9; esquivas normales
+                                    # (yaw 20-25°, cono a la vista) no lo tocan.
+OBS_MEM_PATH_FADE_SPAN_DEG = 12.0   # grados extra de yaw sobre los que el peso baja a 0
+OBS_MEM_PATH_FADE_CONF     = 0.9    # SOLO atenúa si la conf ya cayó bajo esto (fantasma,
+                                    # no un cono trackeado). Cono a la vista (conf~1) -> intacto.
+
+# ── PASADO por PIVOTE (obstacle_memory._prune) ──
+# DESACTIVADO 2026-09-08 (reporte del usuario, confirmado en orillas772).
+# Idea: cuando el fade ya llevó el peso de un cono a 0 (yaw >= FADE_YAW+SPAN Y
+# conf < FADE_CONF), declarar PASADO sin esperar a que la `y` dead-reckon cruce
+# behind_y (que en pivote de cono CENTRADO llega ~15° tarde, run 743/744).
+# PROBLEMA: dispara por YAW, no por posición del cono. En una esquiva dura el
+# carro acumula 45-67° de giro con el cono TODAVÍA al lado del morro
+# (orillas772: PASADO(pivote) yaw=67, cono en falta=+44px, x=144 pegado al
+# morro) -> prune prematuro de memoria -> pasado=1 -> RECUPERANDO endereza
+# ENCIMA del cono. El PASADO por posición (o.y > behind_y) + el trigger medido
+# ya cubren el rebase real; el atraso de ~15° en pivote centrado es mal menor.
+# Re-activar solo con un candado LATERAL (no disparar si el cono sigue dentro
+# de ±ancho-de-carro y no está cerca de behind_y).
+OBS_MEM_PIVOT_PASS_ENABLED = False
 OBS_MEM_BEHIND_PAD = -35    # 2026-08-28: -18 -> -75 (rojo bien) pero -75 mató al
                             # verde: layout con verde a 40cm de la pared EXTERIOR
                             # -> traverse gigante -> a y=305 el verde sigue 150mm
@@ -278,6 +353,44 @@ OBS_MEM_TURN_DEADZONE_DEG = 4.0
 OBS_MEM_TURN_FLOOR_DEG    = 12.0
 OBS_MEM_TURN_SCALE_MIN    = 0.3
 
+# ── Freno de ds_px por ESQUIVA LATERAL (obstacle_memory.update) ──
+# El freno por giro de arriba solo agarra esquivas ANGULARES (dheading grande).
+# Una esquiva de DESPLAZAMIENTO LATERAL vira fuerte el servo para correrse de
+# lado SIN rotar mucho el chasis -> dheading chico -> el freno por giro no la
+# toca, pero el avance de frente igual cae (el servo torcido derrapa / la Pi
+# baja la velocidad). Sin esto la lata esquivada se sobre-marcha, cruza
+# behind_y todavía enfrente y se poda (run 2026-09-07: verde/rojo de arranque).
+# Se escala ds_px por |steer_deg| con zona muerta ALTA: correcciones de recta
+# (steer < DEADZONE, obs<~0.23) NO lo tocan; solo la esquiva real.
+#   obs = steer_deg / 60  ->  DEADZONE 22°≈obs0.37,  FLOOR 50°≈obs0.83
+# 2026-09-08 (tarde): 14/36/0.45 -> 22/50/0.72. A 14/36/0.45 este freno
+# agarraba CUALQUIER esquiva (steer>14° = casi todas): el cono esquivado se
+# quedaba "enfrente" en la memoria muchos frames -> prio/mem/obs seguían altos
+# -> el carro sostenía el full-lock y no arqueaba, y el PASADO medido entraba
+# tardísimo (RECUPERANDO a -50/-60°). Ahora solo un pivote de verdad
+# (steer > ~22°) lo toca, y suave (0.72). El freno por |dheading| (OBS_MEM_TURN_*)
+# y la rampa de arranque (OBS_MEM_LAUNCH_RAMP_S) siguen cubriendo los casos que
+# este freno atendía.
+OBS_MEM_STEER_DEADZONE_DEG = 22.0
+OBS_MEM_STEER_FLOOR_DEG    = 50.0
+OBS_MEM_STEER_SCALE_MIN    = 0.72
+
+# ── Umbral de yaw del PASADO por PIVOTE (obstacle_memory._prune) ──
+# Antes el trigger del pivote-pass usaba FADE_YAW + FADE_SPAN (38+12 = 50°) ->
+# RECUPERANDO entraba recién con el chasis 50-62° cruzado (herr enorme, sobre-
+# corrige y oscila). Desacoplado: el pivote-pass ahora dispara a este yaw, sin
+# arrastrar el tuning del fade de centerline. La guarda `_piv_pending` (no
+# enderezar si queda otro cono por esquivar) SIGUE usando el umbral alto (50).
+OBS_MEM_PIVOT_PASS_YAW_DEG = 36.0   # 45 -> 36 (revert 2026-09-08). Subirlo a 45 para
+                                   # matar un roce hizo que la centerline siguiera
+                                   # clavando el volante 9° más de yaw -> latiguazos de
+                                   # 60°+, y ahí el `ahead_tol` del trigger medido se
+                                   # colapsa (tol=0 a |herr|>=58) -> PASADO(medido)
+                                   # dispara tarde/errático (orillas772: 7 giros y a
+                                   # rastras). 36 = config de orillas770 (12/12 limpio).
+                                   # El roce real se arregla metiéndole chequeo LATERAL
+                                   # al pivote-pass, no subiendo el yaw.
+
 # ── Rebase LATERAL (obstacle_memory._prune) ──
 # En una esquiva de ángulo el carro pasa la lata DE LADO, no de frente: el
 # mapa rota con el heading y la lata cruza el eje del robot al lado opuesto
@@ -317,6 +430,12 @@ OBS_MEM_LAT_TURN_DEG       = 35
 #             respaldo para el rebase DE FRENTE (la lata sale por abajo del BEV).
 # 2026-08-29: "off". geom retirado como disparo (código sigue, dormido). El
 # rebase lateral ahora es el trigger medido de runtime_nuevo (RECUP_MEAS_*).
+# 2026-09-01 (rama SectionTurning): se probó "angle" y disparaba RECUPERANDO
+# TEMPRANO (orillas445: con la lata aún 40-58px adelante) — lat-giro y lat-x
+# disparan por el YAW de la esquiva, no porque la lata quedó atrás. De vuelta a
+# "off" + trigger MEDIDO. Lo que sí se mantiene: supresión por naranja apagada
+# (RECUP_SUPPRESS_NEAR_ORANGE_Y=9999). El giro falso cerca de la esquina se
+# arregla en el ESP32 (trigger de giro nuevo), no matando el pasado en la Pi.
 OBS_MEM_LAT_TURN_MODE      = "off"
 OBS_MEM_LAT_TURN_ENABLED   = False  # compat (sin MODE: True->"angle")
 
@@ -332,7 +451,9 @@ OBS_MEM_LAT_TURN_ENABLED   = False  # compat (sin MODE: True->"angle")
 # Separa solo con (3) el caso "esquiva suave con espacio" (heading chico -> PP +
 # wall PID solos, NO dispara) del "latiguazo sin espacio" (heading grande ->
 # dispara justo al terminar de rodearla).
-RECUP_MEAS_ENABLED        = True
+RECUP_MEAS_ENABLED        = True   # rama SectionTurning: de vuelta a True. "angle" disparaba
+                                   # RECUPERANDO temprano (orillas445). El medido espera a que
+                                   # la lata quede atrás de verdad.
 RECUP_MEAS_NEAR_PX        = 120.0  # px BEV por delante del eje: banda de filas cuyo peso
                                    # de esquiva se mira para ARMAR (hubo lata rodeada)
 RECUP_MEAS_ARM_W          = 0.35   # peso de esquiva que ARMA el trigger
@@ -362,13 +483,75 @@ RECUP_MEAS_ARM_FRAMES     = 3      # 2026-08-29: la esquiva debe estar en curso 
                                    # 1 frame y se pierde (tras giro, FOV rasante) ya no arma
                                    # -> no entra a RECUPERANDO "super rápido" con la lata aún
                                    # enfrente (orillas417/418, reporte del usuario).
-RECUP_MEAS_CLEAR_FRAMES   = 3      # frames seguidos "despejado" antes de poder disparar (~0.2s @14fps)
+RECUP_MEAS_CLEAR_FRAMES   = 5      # frames seguidos "despejado" antes de poder disparar.
+                                   # 3 -> 5 (2026-09-08, pedido del usuario): +~125ms @16fps
+                                   # para pasar el cono con más holgura antes de enderezar.
+                                   # Sube a 6 para +~185ms. Es el knob de "cuánto más dura
+                                   # RECUPERANDO en mandarse" sin meter un delay directo.
+RECUP_MEAS_CLEAR_FRAMES_CORNER = 1  # ...PERO si la línea naranja ya está encima
+                                   # (near_y >= RECUP_SUPPRESS_NEAR_ORANGE_Y): disparar en
+                                   # cuanto el path despeja 1 frame. El debounce de 3 dejaba
+                                   # 2 frames con prio=0/mem=0/pasado=0 y el chasis chueco ->
+                                   # el ESP32 metía un detectarEsquina() falso -> GIRANDO en
+                                   # vez de RECUPERANDO (Verde6/Rojo2/CW, orillas440, ~2/3).
+                                   # El pasado espurio (memory.last_passed) sigue suprimido
+                                   # cerca de la esquina; esto solo adelanta el MEDIDO.
 RECUP_MEAS_GENTLE_FRAMES  = 10     # despejado tantos frames CON heading siempre < HEADING_DEG
                                    # => fue esquiva suave, se desarma sin RECUPERANDO (~0.7s)
 RECUP_MEAS_HEADING_DEG    = 25.0   # 2026-08-29 (15->25 tras orillas412): giro mín. vs la
                                    # recta para disparar. En pista una esquiva de verdad
                                    # llega a 35-64°; por debajo de 25 es deriva/esquiva
                                    # suave -> PP + wall PID solos.
+# 2026-09-01: si la lata que "estorba" no se ve FRESCA (cámara: camR/camG=0)
+# tantos frames seguidos -- con la esquiva armada y |herr| >= HEADING_DEG --
+# se da el path por despejado aunque su ghost de memoria diga que sigue
+# adelante. La lata salió del FOV durante el yaw grande -> el carro ya la
+# rodeó; su dead-reckoning (~3px/frame) nunca vencía el ahead_tol que se
+# achica con el yaw -> RECUPERANDO nunca disparaba y el ESP llegaba a la
+# esquina ladeado 50° (orillas490).
+RECUP_MEAS_GHOST_CLEAR_FRAMES = 3
+
+# _merge/_dedupe de la memoria rodante: cuando la CÁMARA ve 2+ conos del mismo
+# color en el mismo frame, son conos FÍSICOS distintos -- no dejar que la
+# detección de uno "secuestre" el _Obs del otro. Con esto:
+#   • _merge asigna 1:1 (una detección reclama a lo más un _Obs, y un _Obs es
+#     reclamado por a lo más una detección por frame) -> la 2a detección crea
+#     su propio _Obs en vez de re-anclar el del 1o.
+#   • cada _Obs recuerda con qué otros _Obs fue CO-DETECTADO (codet_peers) y
+#     _dedupe nunca fusiona ese par, aunque uno dead-reckone hacia el otro al
+#     salir del FOV -- eso, no drift de velocidad, es lo que los acerca.
+# Motivo (orillas ~2026-09-02): Verde6/Rojo1 en mi recta + Rojo5 en la recta
+# siguiente, a ~20-40px en BEV (< OBS_MEM_MATCH_PX=75 y < OBS_MEM_DEDUPE_PX=85).
+# La detección de Rojo5 caía dentro del radio del _Obs de Rojo1 y lo re-anclaba
+# FRESCO cada frame -> el _Obs de Rojo1 nunca hacía dead-reckoning hacia atrás
+# -> `blocking` del trigger medido de RECUPERANDO nunca se limpiaba -> el carro
+# no entraba a RECUPERANDO hasta que Rojo5 salía del FOV (ya en la esquina).
+# SIN Rojo5 el _Obs de Rojo1 sí dead-reckona y RECUPERANDO entra normal.
+# False = comportamiento viejo (un solo _Obs para los dos conos).
+OBS_MEM_SPLIT_CODETECTED = True
+
+# Reaparición IMPOSIBLE (2026-09-15, ver ObstacleMemory._reaparicion_imposible).
+# Una lata que la cámara no vio en el frame anterior no acepta una detección que,
+# respecto a donde se detectó por última vez (rotada con el giro real del carro),
+# aparece a la vez a más de LAT_PX de lado Y más de AHEAD_PX más adelante: es otra
+# lata del mismo color. orillas954: el rojo de la recta siguiente se fusionaba con
+# el rojo que se acababa de pasar (+66 lado, 25 adelante) y heredaba "mía".
+# Replay de 16 runs: 4 rechazos, efecto solo en 954 y 933. False = comportamiento viejo.
+OBS_MEM_REAPPEAR_REJECT   = True
+OBS_MEM_REAPPEAR_LAT_PX   = 40.0
+OBS_MEM_REAPPEAR_AHEAD_PX = 15.0
+
+# Rotación del mapa de memoria con el signo FÍSICO (+dθ) en _advance (2026-09-15).
+# El signo viejo (−dθ) predice la posición de un cono al frame siguiente PEOR que
+# no rotar (18 runs: error lateral mediana 8.6 px vs 2.0 px con +dθ, 4.0 sin rotar).
+# APAGADO a propósito: replay de 18 runs con True -> el PASADO sale ~1 frame antes
+# en ~130 esquivas, PERO aparecen pasado=1 NUEVOS a media esquiva de OTRO cono que
+# sigue enfrente (orillas931 x3, 936, 944 a +68° con el verde a 88 px): con el signo
+# correcto el cono se sigue a través del giro, conserva su heading0 viejo y hereda
+# yaw ajeno -> "PASADO esquiva", o su fantasma cruza behind_y antes -> RECUPERANDO
+# con el otro cono enfrente (mismo modo de falla que orillas822). El signo viejo lo
+# evitaba de rebote. No encender sin un candado que impida ese PASADO.
+OBS_MEM_MAP_ROT_FISICA = False
 
 # Frames que runtime repite pasado=1 al ESP32 (un mensaje serial perdido si no
 # retrasaría/perdería RECUPERANDO). El ESP32 consume el pulso e ignora repeticiones.
@@ -379,7 +562,11 @@ PASADO_HOLD_FRAMES        = 6
 # En RECUPERANDO el ESP32 no evalúa detectarEsquina() -> un pasado justo antes de
 # la esquina metía el giro ~0.5s tarde y el carro se llevaba el cono de la recta
 # siguiente (orillas420/421). El giro mismo endereza el heading.
-RECUP_SUPPRESS_NEAR_ORANGE_Y = 285.0
+# 2026-09-01 (rama SectionTurning): NEUTRALIZADO (9999) — esta supresión era la
+# causa del "GIRANDO en vez de RECUPERANDO cerca de la naranja". Con la maniobra
+# por-tramos la esquina la maneja APROXIMANDO (no pasado->RECUPERANDO), así que
+# ya no hace falta suprimir. Volver a 285 si se retoma el giro continuo.
+RECUP_SUPPRESS_NEAR_ORANGE_Y = 9999.0
 
 # ...PERO NO suprimir si el pasado vino del trigger MEDIDO (esquiva de ÁNGULO
 # real — cono rojo/verde en la MISMA recta, cerca de la esquina). Ahí el chasis
@@ -406,6 +593,21 @@ RECUP_CORNER_TURN_DELAY_FRAMES = 3
 # (ACK con ruido, "est=G fantasma tras verde") ya NO dispara el wipe de memoria
 # a media esquiva -> RECUPERANDO deja de perder la lata que venía siguiendo.
 TURN_EST_G_CONFIRM_FRAMES = 2
+
+# ─── Detector de obstáculos DURANTE el giro (mid_turn.py) ────────────────────
+# FASE 1: solo observa y registra (línea [MTURN] en journalctl). NO cambia el
+# steering ni manda nada al ESP32. Sirve para medir en pista si la detección
+# mid-turn confirma latas reales sin fantasmas, antes de cablearla al firmware.
+# La memoria rodante sigue apagada durante el giro; esto es aparte.
+MIDTURN_WINDOW            = 4      # frames de historia (ring buffer)
+MIDTURN_CONFIRM_FRAMES    = 3      # de esos, cuántos deben coincidir en color+posición
+MIDTURN_ROI_MAX_MM        = 280.0  # distancia real máx. robot->lata para contarla
+MIDTURN_ROI_HALF_ANGLE_DEG = 45.0 # semiapertura del cono "hacia adelante" del ROI
+MIDTURN_POS_TOL_PX        = 50.0   # tolerancia de posición BEV entre frames (100 mm)
+MIDTURN_MIN_GYRO_DEG      = 25.0   # no mirar antes de este avance de giro (los
+                                   # primeros grados ven la esquina / la recta que
+                                   # se deja atrás, no la recta nueva)
+MIDTURN_SIDE_DEADBAND_PX  = 24.0   # |bev_x - eje| bajo esto -> lado '?' (indeciso)
 
 # ── MODO "geom" — cómo funciona ─────────────────────────────────────────────
 # Al detectar la lata se guarda su posición (x0,y0) y el heading del IMU.
@@ -464,6 +666,65 @@ OBS_MEM_BEHIND_X_HALFWIDTH = 90.0   # px: al salir la lata por el borde inferior
                                       # del BEV, se cuenta como "pasada" solo si
                                       # |x - robot_x| < esto (rebase real, no
                                       # ruido de rotación que la saca de lado)
+# 2026-09-01: la poda por "y > behind_y" solo dispara PASADO (=> RECUPERANDO) si
+# la lata está a |x - robot_x| <= esto al cruzar. Un rebase DE FRENTE deja la
+# lata bajo la nariz; una lata muy de lado que cruza por dead-reckoning es un
+# cono del SIGUIENTE segmento mal proyectado, y su falso PASADO le roba el
+# trigger de RECUPERANDO a la esquiva en curso (orillas487: 2do rojo a ~66px).
+OBS_MEM_PASSED_X_HALFWIDTH = 50.0
+# 2026-09-02: ...PERO x0 centrado NO es la única vía. Si el carro GIRÓ (IMU)
+# >= esto grados desde que vio la lata, fue una esquiva de ÁNGULO real y la
+# rodeó de verdad -> PASADO aunque su x0 quede de lado (verde slot 2, x0=144:
+# 56px de lado, pero el chasis giró ~50° -> hay que enderezar = RECUPERANDO).
+# Un cono del SIGUIENTE segmento NO acumula ese giro (aparece a media/final de
+# la esquiva) y además clasifica beyond -> ese SÍ se queda en DESCARTE_DE_LADO.
+# Antes (ee27dd1) el verde esquivado caía en DESCARTE y nunca mandaba
+# RECUPERANDO -> el ESP llegaba a la esquina ladeado y hacía la MANIOBRA a ~50°.
+# 30 > RECUP_MEAS_HEADING_DEG(25): "giro grande" inequívoco, no una esquiva
+# suave que PP endereza solo.
+OBS_MEM_PASSED_YAW_DEG = 30.0
+# 2026-09-10: ...y la suposición de arriba ("un cono del siguiente segmento NO
+# acumula ese giro y además clasifica beyond") falló en orillas822 vuelta 2: un
+# verde secundario apareció a ~yaw -22 en plena esquiva del ROJO, acumuló 39° del
+# giro del rojo, y sin naranja a la vista nunca se clasificó beyond (el LOCK lo
+# saca de la esquiva pero no marca el objeto) -> "PASADO y=358 x0=147 yaw=39
+# esquiva" con el rojo todavía 80px enfrente -> RECUPERANDO -> choque.
+# True = la vía por giro solo cuenta para una lata que fue OBJETIVO de la esquiva
+# en algún frame (primaria del LOCK o única en mi recta, _Obs.was_target).
+OBS_MEM_PASS_REQUIRE_TARGET = True
+# 2026-09-04: "centrado" (x0 dentro de PASSED_X_HALFWIDTH) por sí solo NO basta
+# -- un obstáculo puede aparecer centrado a distancia y aun así requerir una
+# esquiva fuerte en curso cuando el carro ya está cerca (steer grande). Ese caso
+# es del trigger MEDIDO (yaw real), no de este respaldo "de frente", que fue
+# pensado para el obstáculo que de verdad no necesita esquivarse. Exige que el
+# steer ACTUAL esté por debajo de esto para contar como "centrado" -- si hay
+# esquiva en curso, este respaldo se queda callado y deja pasar el rebase al
+# trigger medido.
+OBS_MEM_PASSED_FRONT_STEER_MAX_DEG = 12.0
+
+# 2026-09-01: LOCK al obstáculo primario (runtime_nuevo). Con >=2 conos se fija
+# uno (bbox de cámara más grande = más cerca; después por posición) y el resto
+# NO entra a la centerline hasta pasarlo. Un cono a <= esto px del lock cuenta
+# como el mismo. Evita el zigzag de dos lados de paso opuestos (orillas488).
+LOCK_MATCH_RADIUS_PX = 70.0
+# 2026-09-10: el LOCK sigue al cono fijado por posición, pero cambia a otro que
+# esté >= LOCK_SWITCH_CLOSER_PX más cerca (en y BEV), VISIBLE este frame (una
+# detección a <= LOCK_SWITCH_VIS_PX) y todavía enfrente (y <= LOCK_SWITCH_MAX_Y).
+# orillas828 vueltas 1-2: LOCK en un verde lejano (y=124-150) mientras el rojo
+# reaparecía a y=280-284 -> rojo sin esquivar. 60 >> los 12px de orillas488 (el
+# caso de vaivén que el LOCK evita). MAX_Y=320 deja fuera un cono que ya va al
+# lado del carro (esos se ven a y~330-345 y solo estimados, no visibles).
+# 2026-09-14: 60 -> 40. orillas932 v1: el verde de la recta siguiente se vio 1 frame
+# antes que el rojo (entraba por el borde de la imagen durante RECUPERANDO), el LOCK
+# quedó en el verde y el rojo apareció 52/49/48px más cerca -> nunca cambió -> choque.
+# 40 sigue >> 12px de 488. Se probó "re-elegir por bbox al llegar el 2do cono" en vez
+# de esto y en orillas936 eligió un verde FANTASMA de memoria (sin detección, tomaba
+# prestado el bbox del rojo) -> choque; esta regla exige VISIBLE, un fantasma no pasa.
+# Simulado en 928-936: solo cambia el frame del choque de 932 (+2 cambios verde->verde
+# al arrancar).
+LOCK_SWITCH_CLOSER_PX = 40.0
+LOCK_SWITCH_VIS_PX    = 25.0
+LOCK_SWITCH_MAX_Y     = 320.0
 OBS_MEM_DEDUPE_PX  = 85.0    # 2026-08-29: 55 -> 85. Un cono cerca de la cámara se
                               # re-proyecta saltando >55px frame a frame -> _merge
                               # creaba 2 registros que _dedupe no fusionaba -> nobs=2
@@ -509,8 +770,137 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
-LINE_MIN_RUN_PX   = 8   # ancho mínimo de corrida CONTIGUA en una fila para
+# NÚCLEO saturado de la cinta naranja — ver corner_lines._core_px_count().
+# LINE_ORANGE_HSV (S>=85) no distingue la cinta de una marca café/tostada sobre
+# el tapete claro. Medido en orillas820 (~22:46:51, esquiva de verde abortada):
+#   trazos del piso  H 11-15  S  86-112  V 152-168   <- lo que disparó la falsa
+#   cinta real       H 10-16  S 140-198  V 152-200
+# Con S>=140 en una banda de +-LINE_BAND_CHECK_PX la separación es total:
+# núcleo 14-221 px en los frames de los 4 giros del run, 0-3 px en los frames
+# de la falla (donde la banda ANCHA sí tenía 46-272 px y no filtraba nada).
+# 2026-09-10: OJO, esa medición salió del panel BEV del HUD, que tiene la ruta y
+# los círculos dibujados encima; con el BEV limpio (orillas831/832) lo "pálido"
+# resultó ser la cinta LEJANA y el falso de 820 una clasificación contra una
+# horizontal. El núcleo sigue como vía rápida; la cinta pálida entra por
+# LINE_ACCEPT_STRIPE (abajo).
+# Tope de S en 255 (no 200 como la banda ancha): parte del núcleo real vive
+# arriba de 200 y recortarlo bajaba la cuenta a la mitad en las lecturas más
+# débiles (f096/f097: 14 -> 22/27 px al abrir el tope).
+LINE_CORE_HSV    = [(np.array([7, 140, 140]), np.array([18, 255, 255]))]
+LINE_CORE_MIN_PX = 8     # px de núcleo mínimos para aceptar el near_y. Medido en
+                         # los 396 frames de orillas820: los grupos de línea REAL
+                         # dan núcleo 9-221 px (los tres frames más flojos: 9, 9,
+                         # 12) y los tres grupos de línea FALSA (f35-41, f59-67,
+                         # f114-120, uno después de cada giro) dan 0-5 px. 8 cae
+                         # justo en ese hueco. Subirlo si vuelve
+                         # a colarse una línea fantasma; bajarlo si una cinta
+                         # desgastada/en sombra deja de verse (mirar `core=` en
+                         # el log [LINEA] justo antes de un giro).
+
+# ── Naranja LEJANA (2026-09-10, medido en el BEV limpio de orillas831/832) ──
+# La cinta de la esquina que viene se ve desde ~50 cm como una franja delgada
+# (2-6 px) y PÁLIDA (S 85-130 -> 0 px de núcleo) que la lente curva en el BEV.
+# Con solo la guarda de núcleo se aceptaba ~25 frames antes del giro y el verde
+# de la recta siguiente, pegado a esa cinta, se esquivaba (giros 4/8/12).
+# Pixeles naranjas pegados a un cono o a la pared magenta NO cuentan como línea
+# (el borde de la cuña de un rojo sobre el crema sale naranja pálido). Mismos
+# rangos que vision.py (Red/Green) + magenta del estacionamiento.
+# 2026-09-16: los topes de V suben igual que en vision.py (en la sede nueva el
+# cono cercano llega a V~208). Aquí solo se BORRAN px, así que de más no daña.
+LINE_CONE_HSV = [(np.array([0, 150, 40]),   np.array([5, 255, 200])),
+                 (np.array([177, 150, 40]), np.array([179, 255, 235])),
+                 (np.array([35, 60, 40]),   np.array([75, 255, 200])),
+                 (np.array([140, 50, 40]),  np.array([176, 255, 255]))]
+LINE_CONE_MASK_KERNEL = 9       # dilatación (px) de esos colores antes de borrar
+LINE_ACCEPT_STRIPE    = True    # aceptar sin núcleo si la componente es cinta:
+LINE_STRIPE_MIN_LEN   = 40.0    #   largo (4*sigma del eje principal) >= esto
+LINE_STRIPE_MAX_THICK = 7.0     #   y grosor (area/largo) <= esto. Medido: cinta
+                                #   lejana largo 45-150 / grosor 2-6.
+# Clasificación contra la CURVA de la cinta (corner_lines._fit_curve), no contra
+# una recta en +-45 px de near_y ni una horizontal.
+LINE_CURVE_MIN_PX        = 25    # px mínimos para ajustar la curva
+LINE_CURVE_QUAD_MIN_SPAN = 60.0  # con menos largo, recta (sin término cuadrático)
+LINE_CURVE_FRAG_PX       = 10.0  # pedazos de la misma cinta partida por un cono
+LINE_CLASSIFY_CONE_CENTER = True # clasificar el CENTRO del cono, no su pie
+LINE_PROVISIONAL         = True  # lectura cruda de cinta -> puede decir "beyond"
+                                 # antes de que la estable se confirme
+LINE_PROVISIONAL_MAX_AGE = 8     # la provisional solo manda a beyond latas con menos de
+                                 # estos frames en memoria (~0.5 s); las que ya se venían
+                                 # viendo esperan a la naranja confirmada. orillas942 v2:
+                                 # óvalo del tapete + borde del rojo = cinta falsa, el rojo
+                                 # (13 frames) se fue a beyond. Correctas en 942: edad 0-3. 0 = apagado
+LINE_PENDING_BEYOND      = True  # cono nuevo del otro lado: no va como `mia`
+                                 # mientras vota su primer veredicto
+LINE_HORIZ_FALLBACK_MIN_Y = 285.0  # sin curva ni recta: horizontal solo en la boca
+
+# Diagnóstico (NO cambia el manejo): graba el BEV limpio de CADA frame en
+# videos_orillas/orillasNNN_bev.bin (ver bev_recorder.py), para re-probar la
+# detección de la naranja offline frame por frame. El .avi del HUD no sirve para
+# eso: tiene dibujados la ruta, los círculos y la propia línea encima de la cinta,
+# y solo 1 de cada 6 frames. ~30 KB por frame (~75-100 MB por corrida):
+# apagarlo cuando ya no haga falta.
+REC_BEV_CLEAN        = True
+REC_BEV_JPEG_QUALITY = 95
+
+# ─── INICIO — salida del estacionamiento (solo ronda de obstáculos) ──────────
+# Al APRETAR EL BOTÓN (una sola vez) la Pi mide qué fracción del frame es
+# magenta/rosa. Si >= PARK_PINK_RATIO_MIN -> manda inicio=1 en cada V2 y el
+# ESP32 hace la maniobra de salida (PurePursuit.ino `case INICIO`) antes de
+# SIGUIENDO. Debajo del umbral -> arranque normal. La Pi NO hace nada más: el
+# pipeline corre igual que siempre y el ESP32 ignora `obs` durante su maniobra.
+# Rango ANCHO a propósito (el muro magenta se veía a 3% con un rango estrecho —
+# la cámara tira el tono hacia el azul por su blue-gain 1.5x). Es un chequeo de
+# "casi todo el frame es de este tono", no una detección fina. Calibrar fino con:
+#   python -m pure_pursuit.pick_color --image <frame_dentro_del_cajon>.jpg
+PARK_PINK_HSV       = [(np.array([135, 45, 40]), np.array([175, 255, 255]))]
+PARK_PINK_RATIO_MIN = 0.28   # fracción del ROI que debe ser magenta
+PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
+PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
+PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
+
+LINE_MIN_RUN_PX   = 6   # ancho mínimo de corrida CONTIGUA en una fila para
                           # contar como línea real (no puntos de ruido dispersos)
+                          # 2026-09-09: 8 -> 6. A ~55° (giro CCW) la línea de esquina
+                          # cruza cada fila del BEV con una corrida corta -> con 8 no
+                          # calificaba ninguna fila y 'seen' entraba ~8 frames tarde
+                          # en la boca de la esquina (journal 13:59:49: seen salta de
+                          # None a near_y=277 de golpe). Esos frames ciegos dejan un
+                          # cono de la recta siguiente como `mia` -> RECUPERANDO se
+                          # retrasa y el chasis sobre-gira (+46° medido). 6 sigue muy
+                          # por encima del ruido disperso (MASK_CLOSE + contigüidad).
+LINE_MIN_COL_RUN_PX = 8   # 2026-09-09: idem pero para el escaneo por COLUMNA
+                          # (_find_near_line_col). En el giro CCW la naranja se ve
+                          # casi vertical -> ninguna FILA junta LINE_MIN_RUN_PX pero
+                          # sí hay columnas con corrida vertical larga. De esas
+                          # columnas se toma el Y más cercano y detect_lines() se
+                          # queda con el mayor (más cerca) entre fila y columna ->
+                          # near_y deja de quedarse ~40-60px corto (o en None) en la
+                          # boca de la esquina cuando la pista gira a la izquierda.
+                          # 8 > 6 porque una columna de ruido vertical es más común
+                          # que una fila (bordes de cono, reflejo de cinta); afinar
+                          # con el log [LINEA] en el tapete (near_y debe llegar a
+                          # ~285 antes de la esquina, no clavarse en ~240).
+LINE_MIN_COL_GROUP = 3    # 2026-09-09 (pt2): columnas CONTIGUAS que deben calificar
+                          # en _find_near_line_col() para que la lectura cuente.
+                          # Una línea real casi vertical es una franja de ~10px de
+                          # ancho en BEV (20mm de cinta / MM_PER_PX=2) -> deja varias
+                          # columnas seguidas con corrida vertical larga. Una columna
+                          # SUELTA no: es borde de cono, reflejo, o dos specks que el
+                          # cierre morfológico (5,7) unió en una "corrida" de 8px
+                          # (medido en orillas818: n=1 y n=2 columnas reportando
+                          # near_y=245/248 sin línea en el piso). 1 = desactivado.
+LINE_BAND_CHECK_PX = 20   # +-px alrededor del near_y candidato donde se cuenta masa
+LINE_BAND_MIN_PX   = 25   # px naranjas mínimos en esa banda para ACEPTAR el near_y.
+                          # 2026-09-09 (pt2): guarda de masa — donde la lectura dice
+                          # que cruza la línea tiene que haber línea. Una franja real
+                          # deja 80-110px en +-25 incluso pasando bajo la nariz del
+                          # carro (medido en orillas818 frames 108/109/121: 110/88/112);
+                          # el ruido que disparó la línea falsa dejaba <15. Se prueba
+                          # primero el candidato más cercano y, si no tiene masa, el
+                          # otro; si ninguno la tiene -> 'no visto' (comportamiento de
+                          # antes de que existiera el escaneo por columna).
+                          # Subir si siguen apareciendo líneas fantasma; bajar si una
+                          # línea real lejana/desgastada deja de verse.
 LINE_PROXIMITY_PX = 60   # si el punto más cercano de la línea está a esta
                           # distancia (o menos) del robot en Y-BEV, cuenta como "cerca"
 
@@ -561,24 +951,81 @@ LINE_DIR_MIN_NEAR_Y    = 285.0   # solo mirar la pendiente con la línea a <=~19
 LINE_DIR_SLOPE_DEADBAND = 20.0   # |vy| por debajo de esto = no opina
 
 # ─── Suavizado temporal de la línea naranja — ver OrangeLineTracker ───────────
-LINE_MASK_CLOSE_KERNEL    = (5, 3)  # cierre morfológico (ancho, alto) sobre la máscara
+LINE_MASK_CLOSE_KERNEL    = (5, 7)  # cierre morfológico (ancho, alto) sobre la máscara
                                     # naranja antes del run-length: puentea huecos de
                                     # 1-3 px por oclusión parcial / sombra para que un
                                     # segmento real no se parta en dos.
-LINE_TRACK_PERSIST_FRAMES = 6    # (2026-08-28: 3->6 al doblar fps ~7->~14) frames seguidos que una lectura nueva debe repetirse
+                                    # 2026-09-09: alto 3 -> 7. En el giro CCW la línea
+                                    # se ve casi vertical y cada fila cercana al robot
+                                    # deja huecos verticales -> un cierre alto rellena
+                                    # esos huecos y más filas llegan a LINE_MIN_RUN_PX
+                                    # (menos frames ciegos en la boca de la esquina).
+LINE_TRACK_PERSIST_FRAMES = 4    # (2026-08-28: 3->6 al doblar fps ~7->~14) frames seguidos que una lectura nueva debe repetirse
                                  # (mismo 'seen', near_y dentro de tolerancia) antes de
                                  # aceptarla como estado estable.
-LINE_TRACK_TOLERANCE_PX   = 20   # (antes 15) margen en near_y para seguir contando la
+                                 # 2026-09-09: 6 -> 4. En la diagonal a ~55° el near_y
+                                 # crudo salta >TOLERANCE_PX cada frame -> con 6 nunca
+                                 # se satisface y self.stable se CONGELA (journal
+                                 # 13:59:51: near_y clavado en 272.39125326987613 ~15
+                                 # frames). 4 + TOLERANCE 30 deja que el tracker siga
+                                 # una línea inclinada que se mueve.
+LINE_TRACK_TOLERANCE_PX   = 30   # (antes 15, luego 20) margen en near_y para seguir contando la
                                  # misma lectura como "la misma" entre frames.
-LINE_TRACK_HOLD_FRAMES    = 4    # (2026-08-28: 2->4 al doblar fps ~7->~14) si 'seen' se pierde, cuántos frames se mantiene la
+                                 # 2026-09-09: 20 -> 30 (ver PERSIST_FRAMES).
+LINE_TRACK_HOLD_FRAMES    = 6    # (2026-08-28: 2->4 al doblar fps ~7->~14) si 'seen' se pierde, cuántos frames se mantiene la
                                  # última línea estable antes de darla por perdida
                                  # (absorbe dropouts cortos). 0 = soltar de inmediato.
+                                 # 2026-09-09: 4 -> 6. A ~55° la línea desaparece 1-2
+                                 # frames seguido en plena curva (journal 14:00:04:
+                                 # seen:False toda la 2a mitad del giro) -> coastear
+                                 # en el último valor en vez de tirar seen:False.
 LINE_TRACK_NEAR_Y_EMA     = 0.4  # peso de la lectura nueva al mezclar near_y (EMA).
                                  # 1.0 = sin suavizado. Sube a 0.7 automáticamente cuando
                                  # la línea se ACERCA (near_y crece) para no frenar un
                                  # dato relevante para frenar/clasificar.
 LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendiente:
                                  # amortigua el "baile" de la diagonal frame a frame.
+
+# ── Dead-reckon de la línea naranja (clasificación mía / siguiente-recta) ──
+# Si la línea se pierde de vista CERCA de la esquina (chasis ladeado tras una
+# recuperación suave), sin ella runtime clasifica TODO como `mia` y el carro
+# intenta esquivar el rojo del SIGUIENTE tramo en la boca de la esquina (bug
+# 2026-09-07, "siempre la misma vuelta"). Tras el hold del tracker, se estima
+# near_y unos frames marchándola por ds_px. GUARDAS (todas):
+#  - solo si la última lectura REAL tuvo near_y >= MIN_ANCHOR_Y -> proyección
+#    BEV fiable (una línea vista de LEJOS, near_y chico, es basura -> NO se
+#    estima, comportamiento actual). Cubre "la venía viendo de lejos, esquivé,
+#    la perdí" -> no genera línea fantasma.
+#  - solo MAX_FRAMES frames sin re-verla -> acota el error acumulado del ds_px.
+#  - nunca en el cooldown post-giro ni tras un reset del tracker (línea pre-giro
+#    no aplica a la recta nueva).
+#  - la línea ESTIMADA solo puede clasificar `beyond` (diferir la esquiva),
+#    NUNCA `mia` -> si se equivoca, el peor caso es "no esquiva algo que debía"
+#    (lo agarra la maniobra / el siguiente tramo), nunca "esquiva en la boca de
+#    la esquina" (fatal). Ver OrangeLineTracker.classify().
+ORANGE_DR_MIN_ANCHOR_Y = 240.0   # px BEV; la línea real debió estar al menos así de cerca
+ORANGE_DR_MAX_FRAMES   = 8       # frames que se estima sin volver a verla (si NO latcheó)
+ORANGE_DR_LATCH_Y      = 290.0   # px BEV; si la línea real llegó a estar ASÍ de cerca ("boca
+                                 # de esquina") antes de perderse -> LATCH: no expira a los
+                                 # MAX_FRAMES, se mantiene marcada hasta el giro (todo lo que
+                                 # se vea después es siguiente segmento). La detección real
+                                 # de una línea nueva la re-ancla / la suelta.
+ORANGE_POST_TURN_CD_FRAMES = 40  # tras reset() del tracker (giro): ignora TODA lectura de
+                                 # naranja estos frames -- la que se ve recién girado suele
+                                 # ser la del giro que se acaba de hacer.
+                                 # 2026-09-08: 12 -> 20. Y runtime lo RE-ARMA cada frame
+                                 # mientras _is_turning (line_tracker.hold_cooldown()), así
+                                 # que los N frames cuentan desde que TERMINA la maniobra,
+                                 # no desde que arranca.
+                                 # 2026-09-08 pt2: 20 -> 40. Con 20 (~1.3s @16fps) la línea
+                                 # del giro que se acaba de hacer queda ARRASTRÁNDOSE en el
+                                 # borde inferior del BEV; ~2s después de "Giro terminado"
+                                 # (cooldown ya vencido) la cámara la re-agarra como fit
+                                 # REAL a near_y~319 -> LATCH (>=290) -> se congela 34
+                                 # frames dead_reckoned -> un VERDE de esa recta cae
+                                 # `beyond` 24 frames seguidos y NO se esquiva (orillas783).
+                                 # 40 (~2.5s) cubre hasta que el carro se aleja y la vieja
+                                 # sale del cuadro / cae bajo ORANGE_DR_MIN_ANCHOR_Y(240).
 
 # Frames tras TERMINAR un giro durante los cuales NO se filtra por la línea
 # naranja (todo cuenta como "mi recta", sin excepción) — justo al salir de
@@ -587,7 +1034,16 @@ LINE_TRACK_LINE_EMA       = 0.35 # idem para los extremos de la recta con pendie
 # arriesgarse a que se clasifique "más allá" por una lectura de línea que
 # todavía no se estabilizó sobre datos reales de esta recta.
 # 2026-08-28: 10->20 al pasar el pipeline de ~7fps a ~14fps (misma ventana en seg).
-TURN_RECOVERY_FRAMES = 20
+# 2026-09-17 (orillas1063 tc=8): 20->60. Tras el giro 8 el carro esquivó un verde
+# y, DURANTE la recuperación (est=R, ~48 frames después del giro), el barrido de
+# rumbo re-vio la cinta naranja del giro que ACABABA de salir -> _find_near_line_col
+# la enganchó (near_y=320 fijo, blob 40x25) -> el rojo de esta recta apareció en
+# y=281 < 320 y se clasificó `beyond` desde el 1er frame -> no lo esquivó. El
+# cooldown de 20 ya había expirado a los 48 frames. La recta giro8->giro9 dura
+# ~180 frames y la naranja REAL del siguiente corner sale al final, así que 60
+# tapa la cinta vieja sin tapar la buena. Si reaparece con una esquiva aún más
+# tardía tras el giro, súbelo más (o suprime la naranja también durante est=R).
+TURN_RECOVERY_FRAMES = 60
 
 # Clasificación "mía" / "más allá" de la línea naranja
 # (obstacle_memory.classify_and_split): NO es un latch permanente. Cada frame se
@@ -645,7 +1101,12 @@ INTERIOR_PASS_ENABLED = False
 # RECUP_SUPPRESS_NEAR_ORANGE_Y ya anula el pulso `pasado` -> el ESP32 pasa
 # directo a GIRANDO. NO es el intento viejo de "interior pass" (ese soltaba el
 # giro ANTES via intr=1; esto lo RETIENE). No se toca intr ni el .ino.
-CORNER_EXTERIOR_PASS_ENABLED = True
+# 2026-09-01 (rama SectionTurning): OFF. En el modelo por-tramos todo lo que
+# está pasando la naranja es "beyond" y se maneja cuando ya estás en esa recta
+# (tras la maniobra). No se rescata ningún cono exterior -> rescue_fn=None,
+# _ext_corner_hold nunca se activa, y toda la lógica CORNER_EXT_PASS_* queda
+# inerte.
+CORNER_EXTERIOR_PASS_ENABLED = False
 
 # Dirección de giro de la pista para ESTE campeonato. El equipo la sabe al
 # montar la pista. Si se fija ("L" o "R"), se usa para decidir interior/exterior
@@ -695,3 +1156,23 @@ SERIAL_PORT    = "/dev/ttyS0"
 BAUDRATE       = 115200
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
+
+# ── Chequeo de cámara antes de dar LISTO (2026-09-14) ──────────────────────────
+# orillas940: la cámara arrancó mandando frames NEGROS y a los 5 s del GO libcamera
+# dio "Camera frontend has timed out"; el runtime siguió procesando el último frame
+# (ThreadedFrameGrabber.read() lo repite para siempre) con el LED de LISTO encendido.
+# Ahora el LED NO se prende hasta ver CAM_CHECK_FRAMES frames NUEVOS con imagen real
+# en CAM_CHECK_TIMEOUT_S; si falla, se cierra y reabre la cámara y se reintenta
+# (indefinidamente, LED apagado). Mientras espera el botón (desarmado) se sigue
+# vigilando: sin frames nuevos por CAM_STALE_S o CAM_BLACK_FRAMES negros seguidos ->
+# LED apagado, se cancela un botón pendiente y se repite el chequeo. Ya ARMADO no se
+# toca nada (reabrir a media ronda queda pendiente).
+CAM_CHECK_ENABLED   = True
+CAM_CHECK_FRAMES    = 15     # frames nuevos con imagen real para aprobar
+CAM_CHECK_TIMEOUT_S = 3.0    # tiempo máximo por intento
+CAM_CHECK_P99_MIN   = 60     # percentil 99 de luminancia por debajo = frame negro
+CAM_STALE_S         = 1.0    # desarmado: sin frame nuevo por esto -> cámara caída
+CAM_BLACK_FRAMES    = 15     # desarmado: frames negros seguidos -> cámara caída
+CAM_REOPEN_WAIT_S   = 4.0    # espera tras soltar la cámara antes de reabrir (igual que stop + sleep 4 + start)
+CAM_REOPEN_JOIN_S   = 35.0   # espera a que el hilo salga de un cap.read() colgado (~30 s); si no, el
+                             # proceso sale con código 3 y systemd (Restart=always) lo relanza

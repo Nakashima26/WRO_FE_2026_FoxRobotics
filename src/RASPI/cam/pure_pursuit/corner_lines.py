@@ -36,24 +36,215 @@ def _line_mask(bev_hsv: np.ndarray, ranges) -> np.ndarray:
     return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
 
 
-def _row_max_runs(mask: np.ndarray) -> np.ndarray:
+def _run_lengths(mask: np.ndarray) -> np.ndarray:
     """
-    Longitud de la corrida contigua de pixeles>0 más larga, UNA POR FILA,
+    Longitud de la corrida contigua de pixeles>0 que TERMINA en cada posición,
     para toda la máscara de una sola vez (sin loop de Python fila por fila).
 
     Truco estándar de "run-length vectorizado": running = cumsum de 1's que
     se resetea a 0 en cada 0; reset_at = el último valor de running antes de
     cada reset, propagado hacia adelante con maximum.accumulate; la longitud
-    de la corrida en curso en cada posición es running - reset_at, y el
-    máximo por fila es el resultado que antes se calculaba con
-    np.where/np.diff/np.split fila por fila (caro en Python puro sobre
-    hasta 400 filas, justo el caso más común: línea no visible).
+    de la corrida en curso en cada posición es running - reset_at. Antes se
+    calculaba con np.where/np.diff/np.split fila por fila (caro en Python puro
+    sobre hasta 400 filas, justo el caso más común: línea no visible).
+
+    El valor en (i, j) es el largo de la corrida que ACABA en j, así que
+    `>= min_run` marca exactamente los FINALES de corrida que califican — eso
+    es lo que necesita _find_near_line_col() para saber DÓNDE está la corrida,
+    no solo que existe en esa columna.
     """
     a = (mask > 0).astype(np.int32)
     running = a.cumsum(axis=1)
     reset_at = np.where(a == 0, running, 0)
     reset_at = np.maximum.accumulate(reset_at, axis=1)
-    return (running - reset_at).max(axis=1)
+    return running - reset_at
+
+
+def _row_max_runs(mask: np.ndarray) -> np.ndarray:
+    """Longitud de la corrida contigua más larga, UNA POR FILA."""
+    return _run_lengths(mask).max(axis=1)
+
+
+def _band_slice(h: int, near_y: float, half_px: float) -> tuple[int, int]:
+    return (max(0, int(near_y - half_px)), min(h, int(near_y + half_px) + 1))
+
+
+def _band_px_count(mask: np.ndarray, near_y: float, half_px: float) -> int:
+    """Pixeles de la máscara dentro de +-half_px de near_y (toda la fila)."""
+    y0, y1 = _band_slice(mask.shape[0], near_y, half_px)
+    if y1 <= y0:
+        return 0
+    return int(np.count_nonzero(mask[y0:y1, :]))
+
+
+def _core_px_count(bev_hsv: np.ndarray, near_y: float, half_px: float) -> int:
+    """
+    Pixeles de naranja SATURADO (LINE_CORE_HSV) en la banda de near_y.
+
+    La banda naranja "ancha" (LINE_ORANGE_HSV, S>=85) no distingue la cinta de
+    competencia de una marca café/tostada sobre el tapete claro: medido en
+    orillas820, los trazos del piso salen H 11-15 / S 86-112 / V 152-168 y la
+    cinta real H 10-16 / S 140-198. Con S>=140 la separación es total:
+      - frames con línea real cruzando (giros 1-4): core 14..221 px
+      - frames de la esquiva abortada (116-120): core 0,0,0,0,3 px
+    y la banda ANCHA no servía de filtro ahí (tenía 46-272 px de "masa").
+    Solo se evalúa la banda (~40 filas), sin morfología: es una cuenta, no una
+    detección, así que no hace falta cerrar huecos.
+    """
+    y0, y1 = _band_slice(bev_hsv.shape[0], near_y, half_px)
+    if y1 <= y0:
+        return 0
+    n = 0
+    for lo, hi in C.LINE_CORE_HSV:
+        n += int(np.count_nonzero(cv2.inRange(bev_hsv[y0:y1], lo, hi)))
+    return n
+
+
+def _mask_out_cones(mask: np.ndarray, hsv: np.ndarray) -> np.ndarray:
+    """
+    Borra de la máscara naranja lo que está pegado a un cono (rojo/verde) o a la
+    pared magenta. 2026-09-10, medido en el BEV limpio de orillas831/832: el
+    borde de la cuña de un cono ROJO sobre el tapete crema mezcla a H 7-8 S ~100
+    -> franjas de 1-2 px, casi radiales, que el escaneo por columna tomaba por
+    línea (el candidato seguía la y del rojo). Fuera de eso, lo que pasa la
+    máscara es la cinta. Además hace explícita la oclusión: la parte de la cinta
+    tapada o pegada a un cono no cuenta, la visible sí.
+    """
+    ranges = getattr(C, "LINE_CONE_HSV", None)
+    if not ranges:
+        return mask
+    pts = cv2.findNonZero(mask)
+    if pts is None:
+        return mask
+    # Solo alrededor de lo naranja (+ margen de la dilatación): barato.
+    k = int(getattr(C, "LINE_CONE_MASK_KERNEL", 9))
+    x, y, w, h = cv2.boundingRect(pts)
+    y0, y1 = max(0, y - k), min(mask.shape[0], y + h + k)
+    x0, x1 = max(0, x - k), min(mask.shape[1], x + w + k)
+    sub = hsv[y0:y1, x0:x1]
+    cone = np.bitwise_or.reduce([cv2.inRange(sub, lo, hi) for lo, hi in ranges])
+    if not cone.any():
+        return mask
+    cone = cv2.dilate(cone, np.ones((k, k), np.uint8))
+    out = mask.copy()
+    out[y0:y1, x0:x1][cone > 0] = 0
+    return out
+
+
+def _components(mask: np.ndarray):
+    """(n, lab, stats, ys, xs, lab_de_cada_px): los pixeles de TODAS las
+    componentes en una sola pasada (np.nonzero(lab == k) por componente recorre
+    el BEV entero cada vez)."""
+    n, lab, st, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    ys, xs = np.nonzero(lab)
+    return n, lab, st, ys, xs, lab[ys, xs]
+
+
+def _band_main_label(comp, near_y: float, half_px: float) -> int | None:
+    """Componente con más pixeles en la banda +-half_px de near_y."""
+    n, lab = comp[0], comp[1]
+    if n <= 1:
+        return None
+    y0, y1 = _band_slice(lab.shape[0], near_y, half_px)
+    cnt = np.bincount(lab[y0:y1].ravel(), minlength=n)
+    cnt[0] = 0
+    k = int(cnt.argmax())
+    return k if cnt[k] > 0 else None
+
+
+def _shape(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float]:
+    """(largo, grosor) de un conjunto de pixeles: largo = 4*sigma del eje
+    principal, grosor = area/largo."""
+    if len(xs) < 3:
+        return 0.0, 99.0
+    d = np.column_stack([xs, ys]).astype(np.float64)
+    d -= d.mean(0)
+    ev = np.linalg.eigvalsh(np.cov(d.T))
+    length = 4.0 * float(np.sqrt(max(ev[-1], 1e-9)))
+    return length, len(xs) / max(length, 1.0)
+
+
+def _is_stripe(comp, k: int) -> bool:
+    """La cinta LEJANA: franja larga y delgada. Sale pálida (S 85-130 -> 0 px de
+    núcleo) porque a esa distancia son 2-4 px de cámara mezclados con el crema,
+    pero su forma no se confunde: largo 45-150 px, grosor 2-6 px."""
+    ys, xs, lp = comp[3], comp[4], comp[5]
+    sel = lp == k
+    length, thick = _shape(xs[sel], ys[sel])
+    return (length >= float(getattr(C, "LINE_STRIPE_MIN_LEN", 40.0))
+            and thick <= float(getattr(C, "LINE_STRIPE_MAX_THICK", 7.0)))
+
+
+def _fit_curve(xs: np.ndarray, ys: np.ndarray) -> dict | None:
+    """
+    Curva de la cinta en su marco principal: t = a lo largo, s = perpendicular,
+    s = a*t^2 + b*t + c. La cinta es recta en el piso pero la lente la curva en el
+    BEV (un arco de ~40-60° de un extremo a otro en orillas832) -> una recta
+    ajustada en +-45 px de near_y (el _fit_line_near de siempre) solo agarraba el
+    pedazo de abajo, casi vertical, y el resto de la clasificación salía mal.
+    """
+    if len(xs) < int(getattr(C, "LINE_CURVE_MIN_PX", 25)):
+        return None
+    P = np.column_stack([xs, ys]).astype(np.float64)
+    mu = P.mean(0)
+    d = P - mu
+    ev, evec = np.linalg.eigh(np.cov(d.T))
+    u = evec[:, -1]
+    nrm = np.array([-u[1], u[0]])
+    t = d @ u
+    s = d @ nrm
+    deg = 2 if (t.max() - t.min()) >= float(getattr(C, "LINE_CURVE_QUAD_MIN_SPAN", 60.0)) else 1
+    coef = np.polyfit(t, s, deg)
+    # una pasada robusta: fuera pixeles lejos de la curva (borde de cono, mancha)
+    r = np.abs(s - np.polyval(coef, t))
+    keep = r <= max(3.0, 3.0 * 1.4826 * float(np.median(r)))
+    if keep.sum() >= int(getattr(C, "LINE_CURVE_MIN_PX", 25)) and not keep.all():
+        t, s = t[keep], s[keep]
+        coef = np.polyfit(t, s, deg)
+    if deg == 1:
+        coef = np.array([0.0, coef[0], coef[1]])
+    return {"mu": (float(mu[0]), float(mu[1])), "u": (float(u[0]), float(u[1])),
+            "c": (float(coef[0]), float(coef[1]), float(coef[2])),
+            "t": (float(t.min()), float(t.max())), "npx": int(len(t))}
+
+
+def curve_side(cv: dict, x, y):
+    """Distancia con signo de (x,y) a la curva (fuera de sus extremos, a la recta
+    tangente en el extremo más cercano). El signo solo sirve comparado con el de
+    otro punto (el robot). x, y pueden ser escalares o arrays."""
+    mx, my = cv["mu"]
+    ux, uy = cv["u"]
+    dx, dy = x - mx, y - my
+    t = dx * ux + dy * uy
+    s = -dx * uy + dy * ux
+    a, b, c = cv["c"]
+    t0, t1 = cv["t"]
+    te = np.clip(t, t0, t1)
+    return s - (a * te * te + b * te + c + (2.0 * a * te + b) * (t - te))
+
+
+def _curve_from(comp, near_y: float, half_px: float) -> dict | None:
+    """Curva de la línea aceptada: la componente principal de la banda + los
+    pedazos de la MISMA cinta que un cono partió (a <= LINE_CURVE_FRAG_PX de la
+    curva de la principal)."""
+    k = _band_main_label(comp, near_y, half_px)
+    if k is None:
+        return None
+    n, _lab, st, ys, xs, lp = comp
+    sel = lp == k
+    cv = _fit_curve(xs[sel], ys[sel])
+    if cv is None or n <= 2:
+        return cv
+    frag = float(getattr(C, "LINE_CURVE_FRAG_PX", 10.0))
+    others = [j for j in range(1, n) if j != k and st[j, cv2.CC_STAT_AREA] >= 15]
+    if not others:
+        return cv
+    add = sel.copy()
+    for j in others:
+        sj = lp == j
+        if float(np.median(np.abs(curve_side(cv, xs[sj], ys[sj])))) <= frag:
+            add |= sj
+    return _fit_curve(xs[add], ys[add]) if add.sum() > sel.sum() else cv
 
 
 def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
@@ -67,6 +258,50 @@ def _find_near_line_row(mask: np.ndarray, min_run_px: int) -> float | None:
     if qualifying.size == 0:
         return None
     return float(qualifying.max())
+
+
+def _find_near_line_col(mask: np.ndarray, min_run_px: int,
+                         min_group_cols: int = 1) -> float | None:
+    """
+    Y (más cercana al robot) de la línea cuando se ve CASI VERTICAL — el caso
+    del giro CCW: la naranja cruza el BEV a ~55-70° y en las filas cercanas al
+    robot sólo deja 1-4 px contiguos -> _find_near_line_row() falla ahí y engancha
+    una fila MÁS LEJOS (near_y ~40-60px corto), o no engancha nada (frames ciegos
+    en la boca de la esquina).
+
+    En vertical el patrón se invierte: hay COLUMNAS con una corrida vertical
+    larga. Se transpone la máscara y se reusa el mismo run-length vectorizado por
+    "fila" (= columna real). Complementa, no reemplaza, al escaneo por fila:
+    detect_lines() se queda con el más cercano de los dos.
+
+    Se devuelve el Y del EXTREMO INFERIOR (más cercano al robot) de una corrida
+    que califica — NO el pixel encendido más bajo de esas columnas.
+    2026-09-09: eso último era el bug que ponía la línea naranja donde no hay
+    línea. Con `ys = mask[:, cols].any(...).max()`, un speck aislado a y=293
+    que compartiera COLUMNA con la corrida real (que estaba a y=120-171, 170px
+    más lejos) reportaba near_y=293 — línea "pegada al carro" a partir de ruido
+    a media pista, con los conos de la recta cayendo del otro lado -> `beyond`
+    -> esquiva abandonada (medido en orillas818 ~22:00:27).
+
+    min_group_cols: una línea real casi vertical es una franja de ~10px de ancho
+    (20mm / MM_PER_PX) -> deja VARIAS columnas contiguas con corrida larga. Una
+    columna suelta (borde de cono, reflejo, dos specks que el cierre morfológico
+    unió) no. Solo cuentan los grupos de >= min_group_cols columnas contiguas.
+    """
+    ends = _run_lengths(mask.T) >= min_run_px      # (col, fila): fin de corrida válida
+    cols = np.flatnonzero(ends.any(axis=1))
+    if cols.size == 0:
+        return None
+    if min_group_cols > 1:
+        groups = np.split(cols, np.flatnonzero(np.diff(cols) > 1) + 1)
+        keep = [g for g in groups if g.size >= min_group_cols]
+        if not keep:
+            return None
+        cols = np.concatenate(keep)
+    rows = np.flatnonzero(ends[cols].any(axis=0))
+    if rows.size == 0:
+        return None
+    return float(rows.max())
 
 
 def _fit_line_near(mask: np.ndarray, near_y: float, band_px: float,
@@ -146,9 +381,77 @@ def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict
     se pasa, se calcula aquí como antes.
     """
     hsv = bev_hsv if bev_hsv is not None else cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-    mask = _line_mask(hsv, C.LINE_ORANGE_HSV)
-    near_y = _find_near_line_row(mask, C.LINE_MIN_RUN_PX)
-    return {"Orange": {"seen": near_y is not None, "near_y": near_y}}
+    mask = _mask_out_cones(_line_mask(hsv, C.LINE_ORANGE_HSV), hsv)
+    # Los escaneos por fila/columna solo sobre el recuadro que tiene naranja: el
+    # run-length de 400x400 (x2, fila y columna) era el grueso del costo, y fuera
+    # de ese recuadro no hay corridas -> mismo resultado.
+    pts = cv2.findNonZero(mask)
+    near_row = near_col = None
+    if pts is not None:
+        bx, by, bw, bh = cv2.boundingRect(pts)
+        sub = mask[by:by + bh, bx:bx + bw]
+        r = _find_near_line_row(sub, C.LINE_MIN_RUN_PX)
+        c = _find_near_line_col(
+            sub, int(getattr(C, "LINE_MIN_COL_RUN_PX", 10)),
+            int(getattr(C, "LINE_MIN_COL_GROUP", 1)))
+        near_row = None if r is None else r + by
+        near_col = None if c is None else c + by
+
+    # GUARDA DE MASA: donde near_y dice que cruza la línea tiene que HABER
+    # línea. Una franja real (20mm de cinta = ~10px de alto en BEV, y cruza
+    # buena parte del ancho) deja decenas/cientos de px en una banda de
+    # +-LINE_BAND_CHECK_PX; un speck de ruido deja <15. Sin esta guarda, la
+    # lectura se aceptaba con el vecindario vacío -- justo la firma de la
+    # línea falsa de orillas818 (near_y=248->291 y `line: None` 14 frames
+    # seguidos, o sea _fit_line_near ni juntaba 35px ahí).
+    # Se prueba el candidato MÁS CERCANO primero; si no tiene masa se cae al
+    # otro (más lejos) antes de darse por no vista.
+    half = float(getattr(C, "LINE_BAND_CHECK_PX", 20.0))
+    need = int(getattr(C, "LINE_BAND_MIN_PX", 25))
+    need_core = int(getattr(C, "LINE_CORE_MIN_PX", 10))
+    near_y, src, band, core = None, None, 0, 0
+    rej = None
+    comp = None
+    for cand, tag in sorted(
+            [(v, t) for v, t in ((near_row, "fila"), (near_col, "col")) if v is not None],
+            reverse=True):
+        n = _band_px_count(mask, cand, half)
+        # ...y de esa masa, algo tiene que ser naranja DE VERDAD (saturado).
+        # Sin esto, una marca café del tapete pasa la guarda de masa (tenía
+        # 46-272 px anchos) y se reporta como línea a 20 cm del carro.
+        c = _core_px_count(hsv, cand, half) if n >= need else 0
+        ok = n >= need and c >= need_core
+        if n >= need and not ok and getattr(C, "LINE_ACCEPT_STRIPE", True):
+            # Sin núcleo, pero con forma de cinta (larga y delgada): la naranja
+            # LEJANA de la esquina que viene. 2026-09-10: la guarda de núcleo sola
+            # la tiraba hasta ~25 frames antes del giro (orillas829-831 giros
+            # 4/8/12) y el verde de la recta siguiente, pegado a esa cinta, se
+            # esquivaba. Lo que "sin núcleo" dejaba pasar en orillas820 no era la
+            # línea: era clasificar contra una HORIZONTAL en su punto más cercano
+            # (ver OrangeLineTracker.classify y _fit_curve).
+            if comp is None:
+                comp = _components(mask)
+            k = _band_main_label(comp, cand, half)
+            if k is not None and _is_stripe(comp, k):
+                ok, tag = True, tag + "+franja"
+        if not ok:
+            # Se guarda el candidato rechazado MÁS CERCANO para el log: si algún
+            # día se deja de ver una línea REAL, aquí se ve por cuánto falló
+            # (band/core contra LINE_BAND_MIN_PX / LINE_CORE_MIN_PX).
+            if rej is None:
+                rej = (round(float(cand)), tag, n, c)
+            continue
+        near_y, src, band, core = cand, tag, n, c
+        break
+    out = {"seen": near_y is not None, "near_y": near_y,
+           "src": src, "band": band, "core": core}
+    if near_y is not None:
+        if comp is None:
+            comp = _components(mask)
+        out["curve"] = _curve_from(comp, near_y, float(getattr(C, "LINE_FIT_BAND_PX", 45)))
+    if near_y is None and rej is not None:
+        out["rej"] = rej
+    return {"Orange": out}
 
 
 class OrangeLineTracker:
@@ -187,12 +490,52 @@ class OrangeLineTracker:
         self._candidate: dict | None = None
         self._candidate_count = 0
         self._lost_count = 0
+        # Dead-reckon de near_y cuando la línea se pierde CERCA de la esquina
+        # (ver ORANGE_DR_* en config). `_out` es lo que devolvió update() este
+        # frame -- puede ser self.stable (real) o una lectura estimada; classify()
+        # usa _out, no self.stable.
+        self._dr_ny: float | None = None
+        self._dr_frames = 0
+        self._dr_latched = False   # el ancla estuvo "en la boca" -> no expira hasta reset()
+        self._post_turn_cd = 0     # tras reset(): ignora TODA lectura de naranja N frames
+        self._out: dict = self.stable
+        # Curvas de la cinta (ver _fit_curve). _prov = la de la lectura CRUDA de
+        # ESTE frame; _curve = la de la última lectura aplicada a la estable. Se
+        # clasifica con _prov si existe (la geometría de ahora; la estable puede
+        # estar sosteniendo un near_y viejo porque la lectura brincó > TOLERANCE)
+        # y si no con _curve SIN marcharla: una curva atrasada queda más lejos y
+        # eso solo inclina a `mia` (el lado seguro). Marcharla ds_px por frame la
+        # metía 60-84 px encima del rojo que se estaba esquivando (orillas832 recta
+        # 10: el carro rotaba, no avanzaba).
+        self._curve: dict | None = None
+        self._prov: dict | None = None
 
     def reset(self):
         self.stable = {"seen": False, "near_y": None, "line": None}
         self._candidate = None
         self._candidate_count = 0
         self._lost_count = 0
+        self._dr_ny = None
+        self._dr_frames = 0
+        self._dr_latched = False
+        # Cooldown post-giro: la línea que se ve recién girado suele ser la que
+        # se acaba de pasar (o su residual) -> no clasificar contra ella.
+        self._post_turn_cd = int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20))
+        self._out = self.stable
+        self._curve = None
+        self._prov = None
+
+    def hold_cooldown(self):
+        """Re-arma el cooldown post-giro SIN borrar el estado del tracker.
+        El caller lo llama cada frame mientras dura la maniobra de giro: así el
+        conteo de ORANGE_POST_TURN_CD_FRAMES empieza a bajar recién cuando la
+        maniobra TERMINA, no desde que arranca. La MANIOBRA reversa dura ~3s y al
+        retroceder la cámara vuelve a ver la línea del giro recién hecho -> con el
+        cooldown armado solo desde el inicio, expiraba a media maniobra y esa
+        línea latcheaba (near_y >= ORANGE_DR_LATCH_Y) toda la recta nueva."""
+        self._post_turn_cd = max(
+            self._post_turn_cd,
+            int(getattr(C, "ORANGE_POST_TURN_CD_FRAMES", 20)))
 
     def _matches_candidate(self, raw: dict) -> bool:
         if self._candidate is None or raw["seen"] != self._candidate["seen"]:
@@ -201,15 +544,32 @@ class OrangeLineTracker:
             return True
         return abs(raw["near_y"] - self._candidate["near_y"]) <= self.tolerance_px
 
-    def update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict:
+    def update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None,
+              ds_px: float = 0.0, in_turn_cooldown: bool = False) -> dict:
         """
         bev_hsv: ver detect_lines() -- si el caller ya convirtió bev_bgr a
         HSV este frame (runtime_nuevo.py lo hace para compartirla con
         detect_centerline()), pásala aquí para no repetir la conversión.
+
+        ds_px / in_turn_cooldown: para el dead-reckon de near_y cuando la línea
+        se pierde CERCA de la esquina (ver ORANGE_DR_* en config). ds_px = px
+        que la línea se acerca al robot este frame (== el ds_px de la memoria).
         """
+        # Cooldown post-giro: ignora TODA lectura de naranja estos frames (la que
+        # se ve recién girado es la del giro que se acaba de hacer). NO se
+        # re-acumula candidato ni se toca el DR.
+        if self._post_turn_cd > 0:
+            self._post_turn_cd -= 1
+            self.stable = {"seen": False, "near_y": None, "line": None}
+            self._out = self.stable
+            self._curve = None
+            self._prov = None
+            return self._out
+
         if bev_hsv is None:
             bev_hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
         raw = detect_lines(bev_bgr, bev_hsv=bev_hsv)["Orange"]
+        self._prov = raw.get("curve") if raw["seen"] else None
 
         if self._matches_candidate(raw):
             self._candidate_count += 1
@@ -226,8 +586,55 @@ class OrangeLineTracker:
         if self._candidate_count >= self.persist_frames:
             self._apply_candidate(dict(self._candidate), bev_hsv,
                                   bev_bgr.shape[1])
+        if not self.stable["seen"]:
+            self._curve = None
 
-        return self.stable
+        # self.stable es SIEMPRE la lectura real del tracker (nunca la estimada).
+        dr_min_y = float(getattr(C, "ORANGE_DR_MIN_ANCHOR_Y", 240.0))
+        dr_max_f = int(getattr(C, "ORANGE_DR_MAX_FRAMES", 8))
+        dr_latch_y = float(getattr(C, "ORANGE_DR_LATCH_Y", 290.0))
+        if self.stable["seen"]:
+            ny = self.stable["near_y"]
+            # Solo una línea con NÚCLEO (cercana, bien vista) ancla el DR/latch. La
+            # franja pálida lejana sale por el borde del campo de visión con y ~270-300
+            # sin estar en la boca de la esquina; latchearla sostendría "beyond"
+            # hasta el giro sobre conos de MI recta.
+            pale = "franja" in str(self.stable.get("src") or "")
+            # in_turn_cooldown (post-giro / INICIO): tampoco ancla -- la lectura
+            # (o la sostenida por hold) es de la maniobra, no de ir avanzando.
+            if ny is not None and ny >= dr_min_y and not pale and not in_turn_cooldown:
+                # línea real y CERCA: re-ancla el DR. Si llegó a la "boca"
+                # (>= LATCH_Y) queda latcheada -> al perderse NO expira: todo lo
+                # que se vea después es siguiente segmento hasta el giro.
+                self._dr_ny = float(ny)
+                self._dr_latched = (ny >= dr_latch_y)
+            else:
+                self._dr_ny = None
+                self._dr_latched = False
+            self._dr_frames = 0
+            self._out = self.stable
+            return self._out
+
+        # línea NO vista: ¿la mantenemos "marcada"?
+        _dr_ok = (self._dr_ny is not None and not in_turn_cooldown
+                  and (self._dr_latched or self._dr_frames < dr_max_f))
+        if _dr_ok:
+            if not self._dr_latched and ds_px > 0.0:
+                self._dr_ny += ds_px          # sin latch: marcha unos frames
+            self._dr_frames += 1              # latcheada: SIT, solo cuenta
+            self._out = {"seen": True, "near_y": self._dr_ny,
+                         "line": None, "dead_reckoned": True, "src": "dr"}
+            return self._out
+
+        self._dr_ny = None
+        self._dr_frames = 0
+        self._dr_latched = False
+        # Sin línea: si la lectura cruda tenía un candidato rechazado, pasarlo al
+        # log (ver `rej` en detect_lines) -- es la única forma de notar que se
+        # está descartando una línea real por poco.
+        self._out = (dict(self.stable, rej=raw["rej"]) if "rej" in raw
+                     else self.stable)
+        return self._out
 
     def _apply_candidate(self, cand: dict, bev_hsv: np.ndarray, w: int) -> None:
         """Acepta la lectura persistida, suavizándola contra el estado previo."""
@@ -254,13 +661,24 @@ class OrangeLineTracker:
         else:
             new_ny = raw_ny
 
-        mask = _line_mask(bev_hsv, C.LINE_ORANGE_HSV)
+        mask = _mask_out_cones(_line_mask(bev_hsv, C.LINE_ORANGE_HSV), bev_hsv)
         fitted = _fit_line_near(mask, new_ny, C.LINE_FIT_BAND_PX,
                                 C.LINE_FIT_MIN_POINTS)
+        cv = cand.get("curve")
+        self._curve = cv
         self.stable = {
             "seen": True,
             "near_y": new_ny,
             "line": self._smooth_line(fitted, w),
+            # diag (log [LINEA]): de qué escaneo salió la lectura y cuántos px
+            # naranjas hay en su banda. `src=col` + `band` bajo = sospechar ruido.
+            # `+franja` = aceptada por forma de cinta, sin núcleo saturado.
+            "src": cand.get("src"),
+            "band": cand.get("band"),
+            "core": cand.get("core"),
+            # curva: (px usados, largo en px) -- None = se clasifica con `line`
+            "cv": None if cv is None else (cv["npx"], round(cv["t"][1] - cv["t"][0])),
+            "_cv": cv,     # para el HUD (las llaves "_" no se imprimen)
         }
 
     def _smooth_line(self, fitted, w: int):
@@ -302,12 +720,62 @@ class OrangeLineTracker:
         funciona igual de bien que antes cuando la línea SÍ es horizontal,
         y es mejor que no clasificar nada.
         """
-        if not self.stable["seen"]:
+        # _out = lo que devolvió el último update(): la lectura real o la
+        # ESTIMADA (dead_reckoned). Sin update() previo, cae a self.stable.
+        s = getattr(self, "_out", None) or self.stable
+        if not s["seen"]:
+            # Línea estable todavía sin confirmar (PERSIST_FRAMES), pero la lectura
+            # CRUDA de este frame ya es cinta: solo puede decir "beyond". El verde
+            # de la recta siguiente y su cinta entran a cuadro JUNTOS (orillas831
+            # giro 4: la cinta 1 frame antes) y los 3 frames de confirmación
+            # bastaban para mandarlo como `mia` y que CRUCERO cediera.
+            if self._prov is not None and getattr(C, "LINE_PROVISIONAL", True):
+                return False if self._curve_says_near(self._prov, ox, oy,
+                                                      robot_x, robot_y) is False else None
             return None
-        line = self.stable["line"]
+        if s.get("dead_reckoned"):
+            # La línea ESTIMADA solo puede decir "beyond" (diferir la esquiva),
+            # nunca "mía" (hacerla): si se equivoca, el peor caso es no esquivar
+            # algo que debía, nunca esquivar en la boca de la esquina.
+            return False if oy <= s["near_y"] else None
+        cv = self._prov if self._prov is not None else self._curve
+        if cv is not None:
+            return self._curve_says_near(cv, ox, oy, robot_x, robot_y)
+        line = s.get("line")
         if line is not None:
             return line_side_is_near(ox, oy, line, robot_x, robot_y)
-        return oy > self.stable["near_y"]
+        # Sin curva ni recta: la horizontal en near_y solo vale en la boca de la
+        # esquina (ahí la cinta cruza el frente). Lejos, con la cinta en diagonal,
+        # manda a `beyond` conos de MI recta -- el bug de orillas820.
+        if s["near_y"] >= float(getattr(C, "LINE_HORIZ_FALLBACK_MIN_Y", 285.0)):
+            return oy > s["near_y"]
+        return None
+
+    @staticmethod
+    def _curve_says_near(cv: dict, ox: float, oy: float,
+                         robot_x: float, robot_y: float) -> bool:
+        """Mismo lado de la curva que el robot. (ox, oy) es el pie del cono (borde
+        inferior del bbox = su cara más cercana): se clasifica su CENTRO, un radio
+        más lejos sobre el rayo desde el robot. Pegado al borde de la vista (el
+        verde de la esquina en orillas831/832) el pie caía 1-6 px del lado del
+        carro con el cono del otro lado."""
+        if getattr(C, "LINE_CLASSIFY_CONE_CENTER", True):
+            vx, vy = ox - robot_x, oy - robot_y
+            norm = (vx * vx + vy * vy) ** 0.5
+            if norm > 1e-6:
+                r = float(C.OBS_PHYSICAL_R_PX)
+                ox, oy = ox + r * vx / norm, oy + r * vy / norm
+        sp = float(curve_side(cv, ox, oy))
+        sr = float(curve_side(cv, robot_x, robot_y))
+        # bool nativo: classify_and_split compara con `is False` y un np.bool_
+        # nunca "es" False -> todo salía como `mia`.
+        return bool((sp >= 0.0) == (sr >= 0.0))
+
+    def has_provisional(self) -> bool:
+        """Hay lectura cruda de cinta este frame aunque la estable no esté
+        confirmada -> runtime puede llamar classify_and_split() (solo "beyond")."""
+        return (self._prov is not None and getattr(C, "LINE_PROVISIONAL", True)
+                and not (self._out or self.stable)["seen"])
 
 
 class TurnDirectionTracker:
