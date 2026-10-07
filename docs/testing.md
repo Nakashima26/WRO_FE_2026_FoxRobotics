@@ -99,7 +99,7 @@ For each configuration we run both directions and three start sections. A config
 
 ## 7. Known limitations
 
-- Speed is open-loop: the motor has no encoder, so maneuvers depend on battery voltage (ERR-11). An encoder motor is planned for v2.
+- Speed is still open-loop: the v2 encoder motor is mounted, but the firmware doesn't use the encoder yet, so maneuvers still depend on battery voltage (ERR-11). Next step: a speed loop on the ESP32 (hardware pulse counter) and distance-based maneuvers.
 - Heading drifts within straights through the dodges, and is only corrected against a wall during parking (ERR-23).
 - The obstacle memory rotates its map with the wrong sign (ERR-21). Other parts were tuned around it, so we left it until it can be re-validated.
 - The bird's-eye calibration assumes a fixed camera angle. Any impact on the mount requires a check (ERR-18).

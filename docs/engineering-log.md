@@ -32,7 +32,7 @@ This log continues the failure log of the [README §5.5](../README.md#55-failure
 | DEC-10 | Upgrade to a **Raspberry Pi 5 (16 GB) + Active Cooler** | Optimize the Pi 4 further, or move to Picamera2 capture | Profiling showed capture was only ~5 ms of a ~65–77 ms frame; vision and path planning were the cost, and the Pi 4 throttled at 84 °C. A faster capture method would gain ≤ 5–10%. The Pi 5 runs the same pipeline at 40–41.5 fps at 52 °C (replayed run 1190). | Under test (port in progress) |
 | DEC-11 | Fix the steering: rack joints 43 → 47 mm, tie rods 18.13 mm, pinion 14 → 19 teeth | New knuckles with a shorter arm; move the rack back 6 mm | Linkage simulation matched the CAD within ~1°. Moving the rack meant reprinting the chassis, and a shorter arm risked the linkage locking up. The bigger pinion + new spacing gives 53.1° / 37.0° (~106% Ackermann) by reprinting only the rack, two linkages and the pinion. | Validated in CAD; track test pending |
 | DEC-12 | Add 4 × VL53L1X ToF as **near-field** sensors, keep the HC-SR04 | LiDAR; multi-zone VL53L8CX; ultrasonics only | The front ultrasonic produced phantom echoes (ERR-19). Teams that tested ToF on the WRO black wall report ~80–100 cm usable range, with L1X ≈ L8CX. The L8CX had initialization problems for another team. The low-cost LiDAR another team tested refreshed only ~5 scans/s, too slow at our speed. | Under test (bench) |
-| DEC-13 | **Not** adding a magnetometer or optical-flow sensor | — | Magnetometer: the motor and battery fields next to it distort it. Optical flow: the mat is mostly white with little texture to track. | Rejected |
+| DEC-13 | **Don't rely on a magnetometer heading** without testing it on the car. No optical-flow sensor. | — | Magnetometer: the motor and the LiPo sit a few centimeters away and their fields can pull it. The BNO085 we chose for v2 does include one, so its heading is checked with the motor running at standstill before it gets control. If it drifts, we use its gyro + accelerometer output instead. Optical flow: the mat is mostly white with little texture to track. | Under test (BNO085); optical flow rejected |
 
 ---
 
@@ -53,7 +53,8 @@ Logged in the README: [ERR-08](../README.md#err-08--raspberry-pi-undervoltage-fr
 - **Observed:** runs 842 (bad) vs 834 (good), 2026-09-10/11, same code.
 - **Data:** Heading swing in red dodges was −58…−82° in 842 vs −33…−54° in 834. The corner pivot, which runs at a fixed PWM with no Pi input, rotated 2.62°/frame vs 2.23–2.28: ~17% more motor power. The car left corners ~5 cm closer to the outer wall, and every following dodge started from the wrong place.
 - **Good window:** 11.70–12.15 V on the 3S pack.
-- **Mitigation:** Run inside the window (discharge a fresh pack first). **Proposed fix:** measure battery voltage on an ESP32 analog pin and scale the motor PWM by V_ref / V_batt.
+- **Mitigation:** Run inside the window (discharge a fresh pack first).
+- **Fix in progress (v2):** a Pololu 50:1 motor with encoder is now mounted. The next step is a closed speed loop on the ESP32, so the motor delivers the same speed at any charge level. A battery-voltage reading on an ESP32 analog pin remains a cheap backup.
 - **Status:** Mitigated (procedure).
 
 ### Vision

@@ -11,17 +11,17 @@
 ## Table of Contents
 
 1. [Vehicle Overview](#1-vehicle-overview)
-   - [1.1 Design goals](#11-design-goals) · [1.2 Bill of Materials](#12-bill-of-materials)
+   - [1.1 Design goals](#11-design-goals) · [1.2 Bill of Materials](#12-bill-of-materials) · [1.3 What changed in v2](#13-what-changed-for-the-international-final-v2)
 2. [Mechanical Design & Mobility](#2-mechanical-design--mobility)
-   - [2.1 Chassis selection](#21-chassis-selection) · [2.2 Wheels](#22-wheels) · [2.3 Drive system (torque vs. speed)](#23-drive-system-torque-vs-speed-analysis) · [2.4 Steering](#24-steering--rack-and-pinion-with-ackermann-geometry) · [2.5 Custom parts & assembly](#25-custom-parts--assembly)
+   - [2.1 Chassis selection](#21-chassis-selection) · [2.2 Wheels](#22-wheels) · [2.3 Drive system (torque vs. speed)](#23-drive-system-torque-vs-speed-analysis) · [2.4 Steering](#24-steering--rack-and-pinion-with-ackermann-geometry) · [2.5 Custom parts & assembly](#25-custom-parts--assembly) · [2.6 v2 chassis](#26-v2-chassis--shorter-car-pi-on-top)
 3. [Power Architecture & Sensors](#3-power-architecture--sensors)
-   - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement) · [3.3 PCB & wiring](#33-pcb--wiring)
+   - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement) · [3.3 PCB & wiring](#33-pcb--wiring) · [3.4 Raspberry Pi 5](#34-main-computer--raspberry-pi-5-v2)
 4. [Software Architecture](#4-software-architecture)
    - [4.1 System overview](#41-system-overview--two-controllers-one-link) · [4.2 Inter-controller protocol ("V2")](#42-inter-controller-protocol-v2) · [4.3 Vision pipeline](#43-vision-pipeline-raspberry-pi--pure_pursuit) · [4.4 Obstacle handling](#44-obstacle-handling-obstacle-challenge) · [4.5 ESP32 state machine](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino) · [4.6 Cascade PID](#46-cascade-pid-always-running-underneath) · [4.7 Startup handshake](#47-startup-handshake) · [4.8 Development status](#48-development-status)
 5. [Systemic Thinking & Engineering Decisions](#5-systemic-thinking--engineering-decisions)
-   - [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log) · [5.4 Risk analysis](#54-risk-analysis) · [5.5 Failure & Incident log](#55-failure--incident-log)
+   - [5.0 Design constraints](#50-design-constraints) · [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log) · [5.4 Risk analysis](#54-risk-analysis) · [5.5 Failure & Incident log](#55-failure--incident-log)
 6. [Testing & Validation](#6-testing--validation)
-   - [6.1 How we test](#61-how-we-test) · [6.2 Results to date](#62-results-to-date) · [6.3 Validation matrix](#63-validation-matrix) · [6.4 Pre-run checklist](#64-pre-run-checklist-each-venue) · [6.5 Milestones](#65-milestones)
+   - [6.1 How we test](#61-how-we-test) · [6.2 Results to date](#62-results-to-date) · [6.3 Validation matrix](#63-validation-matrix) · [6.4 Pre-run checklist](#64-pre-run-checklist-each-venue) · [6.5 Milestones](#65-milestones) · [6.6 Releases](#66-releases)
 7. [How to Build & Run](#7-how-to-build--run)
    - [7.1 Hardware](#71-hardware-requirements) · [7.2 ESP32 firmware](#72-esp32-firmware) · [7.3 Raspberry Pi software](#73-raspberry-pi-software) · [7.4 Calibration](#74-calibration-before-each-venue) · [7.5 Run](#75-run) · [7.6 Autostart & deployment](#76-autostart--deployment)
 8. [Repository Structure](#8-repository-structure)
@@ -46,7 +46,7 @@ The car uses **two controllers working together**: a Raspberry Pi runs the camer
 
 | Parameter | Value |
 |---|---|
-| Dimensions | 210 × 140 × 80 mm |
+| Dimensions | v1: 210 × 140 × 80 mm body, ≈240 mm overall with the extension added to drive out of the parking lot · v2: ≈170 × 130 × 110 mm (168.7 × 128 mm in CAD; height includes the camera ribbon over the top, §2.6) |
 | Weight | 564 g |
 | Drive type | Rear-wheel drive (RWD) |
 | Steering | Ackermann rack-and-pinion, SG90 servo — v2: 53° inner / 37° outer wheel at full lock, ~106% Ackermann (§2.4) |
@@ -55,8 +55,8 @@ The car uses **two controllers working together**: a Raspberry Pi runs the camer
 | Inter-controller link | UART @ 115200 baud, line protocol "V2" (see §4.2) |
 | Vision | Raspberry Pi Camera, NoIR wide-angle lens (FOV ≈ 120°), processed at 640 × 480; custom lens-shading calibration on the Pi 5 (ERR-03) |
 | Distance sensors | HC-SR04 (5V) × 3 — left, right, front — via 5V↔3.3V level shifter · v2: + VL53L1X ToF × 4, in integration (§3.2) |
-| IMU | MPU-6050 (gyroscope + accelerometer) |
-| Drive motor | N20 DC gear motor (50:1) + 2:1 LEGO stage → 100:1 total |
+| IMU | MPU-6050 (gyroscope + accelerometer) · v2: BNO085 with on-chip sensor fusion, in integration (§3.2) |
+| Drive motor | v1: N20 DC gear motor (50:1) · v2: Pololu 50:1 12 V gear motor **with encoder** · + 2:1 stage → 100:1 total |
 | Motor driver | TB6612FNG |
 | Battery | 3S LiPo 11.1 V 2200 mAh |
 | Logic power | MINI560 step-down, 5 V |
@@ -116,13 +116,14 @@ One reliable vehicle that finishes **both** challenges — scoring for completin
 |---|---|---|---|---|---|
 | 23 | ESP32 | Real-time controller: sensor I/O, cascade PID, finite state machine, actuator PWM. | 1 | Unit Electronics | 8 USD |
 | 24 | Raspberry Pi 5 (16 GB) + Active Cooler + M.2 HAT+ | High-level controller: computer vision and Pure Pursuit path planning. Replaced the Raspberry Pi 4 (60 USD) after the national final; price includes taxes and shipping. | 1 | Official reseller | 410 USD |
-| 25 | Mini560 5V | Step-down regulator powering the Raspberry Pi, ESP32 and peripherals. | 1 | Amazon | 6 USD |
-| 26 | MPU 6050 | 6-axis IMU used to measure angular velocity and integrate heading. | 1 | Unit Electronics | 3 USD |
+| 25 | Mini560 5V | Step-down regulators. v2 uses two: one only for the Raspberry Pi 5, one for the ESP32, servo and sensors (v1 had one for everything). | 2 | Amazon | 12 USD |
+| 26 | BNO085 | 9-axis IMU with on-chip sensor fusion (heading at 100 Hz). Replaced the MPU-6050 (3 USD) in v2. | 1 | Local purchase | 27 USD (500 MXN) |
+| 38 | VL53L1X | Laser time-of-flight distance sensors — front, left, right and rear (v2). | 4 | Local purchase | 27 USD total (500 MXN) |
 | 27 | HC-SR04 | Ultrasonic distance sensors — left, right (wall following) and front (obstacle-round cornering). | 3 | Unit Electronics | 10.5 USD |
 | 28 | Level Shifter | Logic-level converter for the 5 V HC-SR04 echo lines into the 3.3 V ESP32. | 1 | Unit Electronics | 7 USD |
 | 29 | Driver TB6612FNG | Motor driver controlling speed and direction of the DC drive motor. | 1 | Unit Electronics | 5 USD |
-| 30 | RaspiCamera V2 | Camera module used for computer vision. | 1 | Amazon | 10 USD |
-| 31 | Custom PCB | Printed circuit board for power distribution and electronic connections. | 1 | JLCPCB | 5 USD |
+| 30 | RaspiCamera V2 | Camera module used for computer vision. Came with both ribbon cables: 15-pin for the Raspberry Pi 4 and 22-to-15-pin for the Raspberry Pi 5. | 1 | Amazon | 10 USD |
+| 31 | Custom PCB | Power distribution and all signal connections. v1: single board (5 USD); v2: two-floor board, in design — price pending. | 1 | JLCPCB | 5 USD (v1) |
 
 ---
 
@@ -138,7 +139,7 @@ One reliable vehicle that finishes **both** challenges — scoring for completin
 
 | ID | Component | Description | Quantity | Supplier | Approximate Cost |
 |---|---|---|---|---|---|
-| 33 | N20 with 50:1 reduction | DC gear motor providing torque for robot movement. | 1 | Unit Electronics | 6 USD |
+| 33 | Pololu 50:1 12 V gear motor with encoder | Drive motor; the encoder measures speed and distance. Replaced the N20 50:1 (6 USD) in v2. | 1 | Pololu | 20 USD |
 | 34 | SG90 Servo | Micro servo motor used for steering control. | 1 | Unit Electronics | 6 USD |
 
 ---
@@ -153,9 +154,12 @@ One reliable vehicle that finishes **both** challenges — scoring for completin
 
 ### Total Estimated Cost
 
-| Total |
-|---|
-| ~505 USD |
+| Version | Total |
+|---|---|
+| v1 — national final | ~155 USD |
+| v2 — international final | **~576 USD** + v2 PCB (pending) |
+
+**Where the increase comes from:** +410 USD Raspberry Pi 5 bundle, +27 BNO085, +27 VL53L1X ×4, +20 encoder motor, +6 second regulator; −69 USD for the parts that left the car (Raspberry Pi 4, MPU-6050, N20). About 85% of the increase is the Raspberry Pi 5, justified by the profiling in [§3.4](#34-main-computer--raspberry-pi-5-v2): 40 fps vs ~15 fps, no thermal throttling.
 
 
 ## 1.3 What changed for the international final (v2)
@@ -167,7 +171,12 @@ After winning the national final (2026-09-19, release [`v1.0-nacional`](docs/rel
 | Steering geometry | Anti-Ackermann: the outer wheel steered *more* than the inner one (39.5° inner / 42.8° outer) | Ackermann corrected: rack joints 43 → 47 mm apart, tie rods 18.13 mm | Both front wheels now roll around the same turning center instead of fighting each other | [2.4](#24-steering--rack-and-pinion-with-ackermann-geometry) |
 | Steering pinion | Module 1, 14 teeth | Module 1, **19 teeth**; servo moved 2.5 mm away from the rack | Same servo travel moves the rack 36% further: ~37° → **53°** on the inner wheel (measured in CAD) | [2.4](#24-steering--rack-and-pinion-with-ackermann-geometry) |
 | Main computer | Raspberry Pi 4 | **Raspberry Pi 5, 16 GB** + Active Cooler | The Pi 4 was compute-bound at 14–18 fps and hit thermal throttling at 84 °C; the Pi 5 runs the same pipeline at ~40 fps at 52 °C | [3.4](#34-main-computer--raspberry-pi-5-v2) |
-| Distance sensing | 3 × HC-SR04 only | + 4 × **VL53L1X** ToF (front, left, right, rear) | The front ultrasonic produced phantom echoes in ~20% of straight-line frames; ToF gives a narrow beam and a rear sensor for reverse maneuvers | [3.2](#32-sensor-selection-and-placement) |
+| Chassis layout | ≈24 cm long; Raspberry Pi enclosed in the center; motor perpendicular to the rear axle (bevel gears) | **≈17 cm long**; battery in the center where the Pi was; Pi 5 on top, open to the air; motor parallel to the axle (spur gears, same 2:1) | Tighter turns and more room to dodge and park; the enclosed Pi overheated (84 °C, throttling) | [2.6](#26-v2-chassis--shorter-car-pi-on-top) |
+| Distance sensing | 3 × HC-SR04 only | 3 × HC-SR04 **+** 4 × **VL53L1X** ToF (front, left, right, rear), cross-checked against each other | Each sensor type fails differently against the black walls: the ultrasonic gives phantom echoes, the ToF can lose a dark wall. Using both lets each one veto the other's known failure | [3.2](#why-both-ultrasonic-and-tof) |
+| Drive motor | N20 50:1, open-loop | **Pololu 50:1 with encoder** (mounted; speed loop pending) | Maneuvers changed with battery voltage; the encoder gives measured speed and distance | [2.6](#26-v2-chassis--shorter-car-pi-on-top) |
+| IMU | MPU-6050, gyro rate integrated on the ESP32 | **BNO085**, fused heading computed on the sensor (UART-RVC, 100 Hz) | Integrated heading was 6.5% low over a run and carried a −7.5° bias after every corner maneuver | [3.2](#bno085-imu-v2-in-integration) |
+| Power | One 5 V regulator for everything | **Two** regulators: one only for the Raspberry Pi 5 | Servo current spikes must not sag the Pi's supply; the Pi 5 draws more | [3.1](#v2-power-budget) |
+| PCB | One board | **Two-floor** board: power floor + logic floor (in design) | The shorter chassis has less area, and four ToF + BNO085 need new connectors | [3.3](#v2-pcb--two-floor-board-in-design) |
 | Camera color | Fixed white-balance gains only (Pi 4) | Lens-shading table calibrated for our lens + gains, as a project tuning file | The new image processor of the Pi 5 showed a magenta ring at the frame edges, close to the pink parking walls and red pillars | [ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame) |
 | Documentation | One README | + [releases](docs/releases.md), [test record](docs/testing.md), [engineering log](docs/engineering-log.md) (ERR-10 onward) | One release per event; every failure tied to a run number and a commit | §6 |
 
@@ -298,7 +307,7 @@ The steering angle depends almost only on **how far the rack moves**, and with t
 | Rack travel per servo degree | 0.122 mm/° | **0.166 mm/°** |
 | Rack travel at ±71° servo | ±8.7 mm | **±11.8 mm** |
 | Inner / outer wheel at full lock | ~37° / ~32° (with 43 mm spacing) | **53.1° / 37.0°** (measured in the CAD assembly; the linkage model predicted ~50° / ~37°) |
-| Turning radius at the rear-axle center (L / tan δ_inner + T/2) | ~167 mm (v1 at 39.5°) | **~115 mm** (−31%) |
+| Turning radius at the rear-axle center (L / tan δ_inner + T/2) | ~208 mm (v1: 147 mm wheelbase, 39.5°) | **~115 mm** (v2: 113 mm wheelbase) — −45% |
 | Ackermann at full lock | anti-Ackermann | **~106%** (ideal outer for 53.1° inner = 37.9°, measured 37.0°) |
 
 - **Servo position.** The pitch radius grows from 7 to 9.5 mm, so the servo axis moved **2.5 mm away from the rack** with a spacer on its mount. The rack and the tie-rod joints stay at the same height, so the linkage geometry above is not affected.
@@ -327,7 +336,7 @@ Every structural part is 3D-printed in SUNLU PLA on a Bambu Lab A1. The mechanic
 | <img src="models/renders/Differential.png" width="200" alt="Differential render"> | **Differential** (Ring / Planet ×2 / Pinion / Sun) | Printed open differential — lets the rear wheels turn at different speeds through a corner. |
 | <img src="models/renders/DCsupport.png" width="200" alt="DCsupport render"> | **DCsupport** | Mounts the N20 gear motor to the chassis. |
 | <img src="models/renders/UltrasonicSupport.png" width="200" alt="UltrasonicSupport render"> | **UltrasonicSupport** ×3 | Two identical side mounts; one slightly smaller front mount, added later for the obstacle-round segmented turn. |
-| <img src="models/renders/CameraCage.png" width="200" alt="Camera cage render"> | **CameraHold** | Structure in charge of holding the camera. Sets the fixed ~15° downward tilt the BEV homography is calibrated against ([§3.2](#32-sensor-selection-and-placement)). |
+| <img src="models/renders/CameraCage.png" width="200" alt="Camera cage render"> | **CameraHold** | Structure in charge of holding the camera. Sets the fixed ~20° downward tilt the BEV homography is calibrated against ([§3.2](#32-sensor-selection-and-placement)). |
 
 #### Assembly order
 
@@ -339,6 +348,35 @@ Every structural part is 3D-printed in SUNLU PLA on a Bambu Lab A1. The mechanic
 6. **TopShell** — close the bay.
 
 All fasteners are M3 (M2 nuts on the servo horn and pinion).
+
+### 2.6 v2 chassis — shorter car, Pi on top
+
+*Status: designed in SolidWorks, being printed. Final dimensions and weight will be measured on the printed car.*
+
+For the international final we rebuilt the chassis around two problems we kept seeing at the national final:
+
+1. **The car was long for the obstacle field.** The body was 210 mm, but it reached ≈24 cm overall with an extension we added so the car could drive out of the parking lot comfortably. At that length every dodge swept a lot of floor, and the parking maneuver had little room in the lot.
+2. **The Raspberry Pi overheated.** It sat enclosed in the middle of the chassis. With the remote-view client running it reached **84 °C** and throttled its CPU ([ERR-27](docs/engineering-log.md#err-27--the-remote-desktop-client-overheated-the-pi-4)), which lowered the vision frame rate.
+
+**What we changed**
+
+| Change | How | Why |
+|---|---|---|
+| **Motor parallel to the rear axle** | The drive motor now lies along the axle and drives the differential through **spur gears** (module 1, 15-tooth pinion on the motor's D-shaft, 30-tooth ring on the differential) instead of the perpendicular bevel pair | A motor perpendicular to the axle adds its whole length to the car. Lying along the axle, it adds almost nothing. |
+| **Battery in the center** | The 3S pack sits crosswise in a side-loading tunnel, in the space the Raspberry Pi used to take | The heaviest part ends up in the middle and low, which balances the load front to rear. The side tunnel makes battery swaps quick. |
+| **Raspberry Pi 5 on top** | The Pi moves from the enclosed center bay to the top of the car | The Active Cooler needs free air. Enclosed, the Pi recirculated its own hot air. On top, it also stays reachable for the camera cable and the SSD. |
+| **Encoder motor** | Pololu 50:1 12 V gear motor with a quadrature encoder replaces the plain N20; same 50:1 ratio | Motor speed is open-loop today, so maneuvers change with battery voltage ([ERR-11](docs/engineering-log.md#err-11--a-fresh-battery-over-rotates-the-dodges)). The encoder lets the ESP32 hold a speed and measure distance, as the rules' reference build suggests. *Mounted; firmware integration pending.* |
+| **Overall length ≈24 cm → ≈17 cm** (width 128 mm) | Result of the changes above | See below |
+
+**Why a shorter car turns tighter.** For Ackermann steering, the radius of the path at the center of the rear axle is
+
+  **R = L / tan(δ_inner) + T/2**
+
+where L is the wheelbase and T the kingpin track (60 mm). Shortening L shrinks R directly, at the same steering angle. With the v2 steering (53° inner wheel, [§2.4](#24-steering--rack-and-pinion-with-ackermann-geometry)) and the v2 wheelbase of **≈113 mm** (CAD), R ≈ **115 mm**. The v1 car had a wheelbase of ≈147 mm (measured) and ~40° of steering, so R ≈ **208 mm**. The turning radius is therefore **≈45% smaller**: about half from the shorter wheelbase, about half from the bigger steering angle. A smaller radius means a dodge needs less lateral room, the stop-and-turn corner maneuver needs less space ahead of the front wall, and the car fits the parking lot with more margin.
+
+**The drivetrain keeps its ratio.** The old bevel pair was 36:18 = 2:1, and the new spur pair is 30:15 = 2:1. The total reduction stays at **100:1**, so the torque and speed analysis of [§2.3](#23-drive-system-torque-vs-speed-analysis) still holds. Spur gears are also easier to print accurately and to align than bevel gears. We checked the tooth strength with the Lewis bending equation (8 mm face, at the N20's stall torque): ≈5.7 MPa, roughly 9× below the strength of printed PLA. It is re-checked with the stall torque of the encoder motor. The gear center distance is designed at 22.6–22.7 mm (22.5 mm nominal) to leave printing clearance. The involute profiles are generated by our own script and exported as DXF; SolidWorks Standard has no gear generator.
+
+**What stayed about the same, on purpose:** the height of the chassis, for stability in fast turns (the v2 car is ≈110 mm tall, but only the camera ribbon over the top reaches that);  the LEGO axles and wheels ([§2.1](#21-chassis-selection), [§2.2](#22-wheels)); and the camera height and angle, so the bird's-eye-view calibration concept carries over (it is re-calibrated on the new mount).
 
 ---
 
@@ -359,24 +397,50 @@ The Ovonic battery is rated 120C continuous, which is theoretically 264 A. We're
 
 The Raspberry Pi and the ESP32 share the 5 V rail but the DC motor is fed straight from the battery through the TB6612FNG, so stall-current spikes on the motor never sag the logic supply.
 
-**v2 power change (Raspberry Pi 5).** The Pi 5 draws more than the Pi 4 and is sensitive to voltage drops: when its supply sags, it throttles the CPU, which directly lowers the vision frame rate. We already saw this on the Pi 4 when it was fed through Dupont jumpers (`throttled=0x50005`, CPU down to 600 MHz); replacing them with 22 AWG wire fixed it. For v2 the plan is **two Mini560 regulators: one dedicated to the Pi 5** and one for the ESP32, servo and sensors, so servo current spikes can't pull the Pi's rail down. The motor driver stays on raw battery voltage. `vcgencmd get_throttled` must read `0x0` under full load before every test session.
+#### v2 power budget
+
+*Design values from the component datasheets and the Raspberry Pi documentation. Each rail will be measured with an inline meter on the assembled v2 car, and the measured values will replace these.*
+
+The Raspberry Pi 5 draws more than the Pi 4 and is sensitive to voltage drops: when its supply sags it throttles the CPU, which directly lowers the vision frame rate. We already saw this on the Pi 4 when it was fed through Dupont jumpers (`throttled=0x50005`, CPU down to 600 MHz, [ERR-08](#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring)). v2 therefore has **two 5 V regulators**: one only for the Raspberry Pi 5, and one for everything else. The servo's current spikes can no longer pull down the Pi's supply.
+
+| Rail | Load | Typical | Design peak | Basis |
+|---|---|---:|---:|---|
+| **5 V-A** (Mini560 #1, 5 A) | Raspberry Pi 5 under vision load | 1.5 A | 2.5 A | 0.8 A bare-board active (Raspberry Pi docs) + 4 cores busy; peak covers load spikes |
+| | Camera v2 | 0.25 A | 0.25 A | Camera module figure |
+| | Active Cooler fan | 0.05 A | 0.1 A | Fan at full speed above 75 °C |
+| | **Rail total** | **1.8 A** | **2.85 A** | 57% of the regulator's 5 A at peak |
+| **5 V-B** (Mini560 #2, 5 A) | ESP32 (radio off) | 0.08 A | 0.25 A | Datasheet |
+| | SG90 servo | 0.25 A | 0.70 A | Running current; peak = stall |
+| | HC-SR04 × 3 | 0.045 A | 0.045 A | 15 mA each |
+| | VL53L1X × 4 | 0.08 A | 0.16 A | ~20 mA each ranging, 40 mA peak |
+| | BNO085 | 0.013 A | 0.013 A | Datasheet operating figure |
+| | **Rail total** | **0.47 A** | **1.17 A** | 23% of the regulator at peak |
+| **Battery 11.1 V** | Drive motor via TB6612 | — | 1.6 A | Peak measured on v1 (N20); to be re-measured with the encoder motor |
+| **5 V-B** | Motor encoder | 0.01 A | 0.01 A | Hall-effect encoder |
+
+**Battery current.** With ~90% regulator efficiency, the two 5 V rails at design peak draw 5 V × (2.85 + 1.17) A / 0.9 ≈ 22 W, which is ≈2.0 A from the 11.1 V pack. Adding the motor's 1.6 A gives **≈3.6 A worst case**. The 2200 mAh pack would last over 35 minutes even at that worst case, against a 3-minute round, so **capacity is not the constraint. Voltage is.** A freshly charged pack makes the motor ~17% stronger in low-PWM maneuvers ([ERR-11](docs/engineering-log.md#err-11--a-fresh-battery-over-rotates-the-dodges)), so we race inside an 11.70–12.15 V window.
+
+**Heat.** At its typical 1.8 A, regulator #1 loses about 1 W at 90% efficiency. It is mounted in the airflow of the Pi on top of the car.
+
+**Check before every session:** `vcgencmd get_throttled` must read `0x0` under full vision load.
 
 ### 3.2 Sensor selection and placement
 
 | Sensor | Purpose | Placement | Notes |
 |---|---|---|---|
-| Raspberry Pi Camera Module V2 | Lane, corner-line and pillar detection | Front-center, ~15° downward tilt | Main vision system, OpenCV on the Pi |
+| Raspberry Pi Camera Module V2 | Lane, corner-line and pillar detection | Front-center, ~20° downward tilt | Main vision system, OpenCV on the Pi |
 | HC-SR04 (left) | Left wall distance | Left side of the chassis | Feeds the wall-centering PID |
 | HC-SR04 (right) | Right wall distance | Right side of the chassis | Feeds the wall-centering PID |
 | HC-SR04 (front) | Distance to the wall ahead when approaching a corner | Front bumper, facing forward | Obstacle round only — triggers the CRUCERO → MANIOBRA sequence |
-| MPU-6050 | Heading integration during cornering and recovery | Center of chassis | Gyro Z integrated into `anguloGyro`, echoed back to the Pi |
-| VL53L1X ToF ×4 *(v2, in integration)* | Near-field distance with a narrow beam | Front, left, right and rear | Complements the HC-SR04, which stay as long-range sensors and as a backup |
+| MPU-6050 *(v1)* | Heading integration during cornering and recovery | Center of chassis | Gyro Z integrated into `anguloGyro`, echoed back to the Pi |
+| BNO085 *(v2, in integration)* | Fused heading at 100 Hz | Center of chassis, near the rotation axis | Replaces the MPU-6050; heading computed on the sensor |
+| VL53L1X ToF ×4 *(v2, in integration)* | Near-field distance (≤ ~80 cm) with a software-set field of view | Front, left, right and rear, ~50 mm high | Cross-checked against the HC-SR04 — see [Why both](#why-both-ultrasonic-and-tof) |
 
 #### Camera system
 
 The camera handles lane geometry (via a bird's-eye-view transform), the orange corner-line markers, and red/green pillar detection. Image processing runs on the Raspberry Pi (Pi 4 → Pi 5 in v2) with OpenCV in real time and drives the Pure Pursuit planner.
 
-It is mounted front-center with a ~15° downward tilt. We tested a horizontal mount first, but that captured too much background, which slowed detection and added noise. Tilting it down focuses the field of view on the track and the obstacle zone, which cut both false positives and computational load. The exact tilt is baked into the bird's-eye-view homography during calibration (see §4.3), so the mount must not move after calibration.
+It is mounted front-center with a ~20° downward tilt. We tested a horizontal mount first, but that captured too much background, which slowed detection and added noise. Tilting it down focuses the field of view on the track and the obstacle zone, which cut both false positives and computational load. The exact tilt is baked into the bird's-eye-view homography during calibration (see §4.3), so the mount must not move after calibration.
 
 The lens is a wide-angle **NoIR** unit (~120° FOV), chosen over the original ~63° lens so the camera sees far enough ahead to react to a pillar and read the corner on the same frame. The wide lens ships without an IR-cut filter, which gave the raw image a heavy red cast and broke every HSV mask. The libcamera capture pipeline pins white-balance instead of letting it float — `libcamerasrc awb-enable=false colour-gains=<1.2,1.5>` — so the correction holds across venue lighting, and the pillar HSV ranges were re-tuned on the corrected image (see [ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame)).
 
@@ -392,24 +456,64 @@ We originally tested VL53L0X time-of-flight sensors. On paper they win — ±3 m
 
 The MPU-6050 gives heading and rotation data during cornering and recovery. The gyro Z axis is integrated each loop into `anguloGyro`, with a 1°/s deadband to suppress MEMS thermal drift on straights. On startup the firmware averages several hundred stationary samples to compute the gyro bias (`calcGyroOffsets`); if that offset comes back unusually large the firmware halves the integration scale as a safety net. The integrated heading is also sent back to the Pi in every acknowledgement so the vision side can dead-reckon obstacle positions (see §4.4).
 
+#### BNO085 IMU (v2, in integration)
+
+**Why replace the MPU-6050.** The MPU-6050 only gives a gyro *rate*. The ESP32 integrates it once per main loop, with a 1°/s deadband and a bias measured at boot. Our logs show what that costs:
+- The integrated heading over a full run came out **6.5% low**: ≈1010° for the 1080° of 12 corners ([§6.3](#63-validation-matrix) #6).
+- After every corner maneuver the heading carried a constant **−7.5° ± 0.9°** bias ([ERR-23](docs/engineering-log.md#err-23--systematic-heading-offset-after-every-corner)).
+- The integration accuracy depends on how regular the main loop is, and the loop is busy with sensors and serial traffic.
+
+The **BNO085** is a 9-axis sensor (gyroscope, accelerometer and magnetometer) that runs the sensor fusion on its own processor, with continuous bias calibration, and outputs a finished heading.
+
+**How we connect it.** We use its **UART-RVC** mode. The sensor sends a 19-byte packet with yaw, pitch, roll and acceleration every 10 ms (100 Hz) over a single wire: BNO TX → ESP32 GPIO 25. Each packet carries a checksum. We chose this mode because it needs no driver library, keeps the IMU off the I²C bus that the four ToF sensors share, and lets the ESP32 just read the latest heading instead of integrating it. The test sketches [`BnoRvcTest`](src/ESP32/BnoRvcTest/BnoRvcTest.ino) and [`TofBnoTest`](src/ESP32/TofBnoTest/TofBnoTest.ino) report the packet rate, the longest gap, lost packets and checksum errors.
+
+**Acceptance before it gets control** (log-only next to the MPU-6050 first):
+- ≥ 99% of packets at ~100 Hz on the car, with the motor running.
+- Total rotation over 12 corners within ±1% of 1080° (the MPU-6050 was 6.5% low).
+- **Heading unchanged while the motor runs at standstill.** The BNO085 includes a magnetometer, and a magnetometer sitting a few centimeters from a motor and a LiPo pack can be pulled by their magnetic fields. If this test shows drift with the motor on, we switch to the sensor's *game rotation vector* (gyro + accelerometer only, no magnetometer) over I²C, at the cost of using its driver library.
+
 #### VL53L1X time-of-flight array (v2, in integration)
-
-**Why we are adding ToF again.** In v1 we dropped the VL53L0X because it lost the black walls (see [ERR-01](#err-01--vl53l0x-lost-the-black-wall-past-70-cm)). We are revisiting ToF because of a measured problem with the ultrasonics. In the Open Challenge logs, the front HC-SR04 reported a wall closer than 90 cm in **~20% of the frames on straight sections** where there was no wall. These readings jump more than 60 cm from one frame to the next (e.g. 199 → 65 → 179 cm), which no real wall can do. Each phantom made the car slow down in the middle of a straight. The phantoms only appear when the car runs ~25 cm from the side wall, which points to the wide ultrasonic cone grazing that wall. A ToF sensor has a much narrower field of view, so it should not see the side wall.
-
-**Why the VL53L1X and not the VL53L0X.** It has a longer range (up to ~4 m in long mode on bright targets), a configurable timing budget and a configurable region of interest. Teams that tested it against the WRO black wall reported usable readings up to about 80–100 cm. That makes it a **near-field** sensor; the HC-SR04 stay for long range and as an independent check.
 
 **Layout:**
 
 | Sensor | Position | Use | XSHUT pin (ESP32) | I²C address |
 |---|---|---|---|---|
-| Front | Front bumper | Distance to the wall ahead (corner trigger, approach speed) without side-wall phantoms | GPIO 0 | 0x30 |
+| Front | Front bumper | Distance to the wall ahead: corner approach and the forward/reverse maneuver choice | GPIO 0 | 0x30 |
 | Left | Left side | Distance to the side wall | GPIO 15 | 0x31 |
 | Right | Right side | Distance to the side wall | GPIO 5 | 0x32 |
-| Rear | Rear bumper | Reverse maneuvers: leaving the parking lot, reverse pivots and parking, which are blind today | GPIO 4 | 0x33 |
+| Rear | Rear bumper | Reverse maneuvers: leaving the lot, reverse pivots and parking, which are blind today | GPIO 4 | 0x33 |
 
-All four share the I²C bus (SDA 21, SCL 22). They all start at the same factory address (0x29), so at boot the ESP32 holds every sensor off with its XSHUT pin, then powers them one by one and gives each a new address. They run in long-distance mode with a 50 ms timing budget. Test sketches are in `src/ESP32/TofTest4/` (4 sensors), `src/ESP32/TofId/` (tells an L0X from an L1X) and `src/ESP32/TofBnoTest/`. The last one also reads a **BNO085** IMU in UART-RVC mode, which we are evaluating as a replacement for the MPU-6050 (on-chip sensor fusion, less heading drift).
+All four share the I²C bus (SDA 21, SCL 22) and all start at the same factory address (0x29). At boot the ESP32 holds every sensor off with its XSHUT pin, then turns them on one by one and gives each a new address. Test sketches: [`TofTest4`](src/ESP32/TofTest4/TofTest4.ino) (4 sensors), [`TofId`](src/ESP32/TofId/TofId.ino) (tells an L0X from an L1X).
 
-**Integration plan.** First on the bench against a real black wall, varying distance, wall angle and mounting height. Then **log-only** on the car, recorded next to the HC-SR04 values for several runs. The firmware will only use them for control after the logs show they are reliable. The ultrasonics remain as a backup in every case.
+#### Why both ultrasonic and ToF
+
+The inner walls of the WRO field are **black**, and that is the hardest surface for a distance sensor. The two sensor types fail against it in **different, recognizable ways**, so we keep both and let each one catch the other's failure:
+
+| | HC-SR04 ultrasonic | VL53L1X time-of-flight |
+|---|---|---|
+| Black wall | Sound reflects regardless of color ✔ | The black surface absorbs most of the 940 nm infrared. The return is weak: the reading drops out, or the range becomes wrong. Our VL53L0X lost the wall past ~70 cm ([ERR-01](#err-01--vl53l0x-lost-the-black-wall-past-70-cm)), and other teams report ~80–100 cm usable with the L1X ✘ |
+| False readings | The echo returns from anything inside a wide acoustic lobe, including the side wall at a grazing angle, plus multipath reflections. The front sensor reported a wall that wasn't there in ~20% of straight-line frames ([ERR-19](docs/engineering-log.md#err-19--phantom-echoes-from-the-front-ultrasonic)) ✘ | An optical cone with no echoes. Its size is set in software (region of interest), so it can be made to look only at the wall ✔ |
+| Range | Usable to ~119 cm with our timeout | Near field only (≤ ~80 cm) on a black wall |
+| Speed | One ping at a time, since sensors that fire together hear each other | 20 Hz each, all four in parallel |
+
+**Planned cross-check rule.** It runs log-only first, recorded next to the current behavior, before it gets control:
+- A ToF reading counts only if its range status is valid, it is ≤ 80 cm, and it is stable for 2 readings.
+- **Front:** if the two disagree by more than 15 cm and the ToF reading is valid, trust the ToF; the known failure on that side is the ultrasonic phantom. If the ToF is invalid or out of range, use the ultrasonic; the known failure there is a black-wall dropout.
+- **Sides:** if the ToF says "no wall" while the ultrasonic sees one closer than 100 cm, it is a black-wall dropout, so trust the ultrasonic.
+- Every disagreement is logged with both values, so the thresholds are tuned on recorded runs and not guessed.
+
+#### Sensor placement and field geometry
+
+Each position is chosen from the field dimensions in the rules: walls 100 mm high and black on the inside, pillars 50 × 50 × 100 mm, white floor mat.
+
+| Sensor | Placement | Field geometry behind it |
+|---|---|---|
+| ToF × 4 | **~50 mm above the floor**, centered on the 100 mm wall height | The VL53L1X sees a 27° cone by default. Mounted low, that cone hits the white floor at ≈4× its mounting height, and a bright floor easily wins over a dark wall. Teams who mounted them low saw exactly this. With a **wide-and-short region of interest** (16 × 4 detector cells ≈ 27° × 7°), the vertical half-angle is ≈3.4°. At 80 cm the cone spans ±4.7 cm, so at 50 mm height it stays inside the 0–100 mm wall. |
+| Ultrasonic L / R | Sides, perpendicular to the straight | They read the wall parallel to the current straight. The inside sensor reads the opening that triggers a corner. |
+| Ultrasonic F + ToF F | Front bumper, on the centerline | They read the wall ahead. Their distance decides *when* the stop-and-turn starts, and *which* maneuver is used (forward arc vs reverse pivot). |
+| ToF rear | Rear bumper | The parking lot and the reverse pivot happen backwards, where v1 had no sensor at all. |
+| Camera | Front, ~20° down, wide-angle 120° | Sees both pillar columns of the straight and the corner line on the same frame. |
+| BNO085 | Center, near the rotation axis | Keeps centripetal acceleration out of the fused heading. |
 
 ### 3.3 PCB & wiring
 
@@ -436,6 +540,17 @@ The ESP32 DevKit (`U1`) sits at the centre. Battery voltage (~11.1 V, 3S) comes 
 </p>
 
 The board is a custom non-rectangular shape (~55 mm at its widest) that nests into the chassis around the Raspberry Pi 4 and the drivetrain — the electronics-first packaging from [§1.1](#11-design-goals) in physical form. The cut-outs and the mounting-hole row let the PCB, the steering and the sensor mounts share one footprint without stacking height.
+
+#### v2 PCB — two-floor board (in design)
+
+The v1 board is a single layer of components shaped around the Raspberry Pi 4. The v2 chassis is ≈7 cm shorter, the Pi moves to the top, and the robot gains four ToF sensors (each with its own XSHUT line), the BNO085 UART and a second regulator. All of that does not fit on one footprint, so the v2 board is designed as **two stacked floors** on standoffs:
+
+| Floor | Contents | Why separate |
+|---|---|---|
+| **Power** (bottom) | Battery input (XT60), switch and fuse, two Mini560 regulators (Pi / everything else), motor driver | Keeps the switching regulators and motor currents, with their heat and noise, away from the signal lines. It is also the heaviest floor, so it sits low. |
+| **Logic** (top) | ESP32, level shifter, headers for 3 HC-SR04, 4 VL53L1X (I²C + XSHUT), BNO085 (UART), servo, start button and LEDs, the link to the Pi | All signal connectors on one accessible floor |
+
+Status: schematic and layout in progress in KiCad. The v1 project in [`electrical/WRO_RevA/`](electrical/WRO_RevA/) remains the reference until RevB is fabricated. The wiring diagram will be updated with it.
 
 ### 3.4 Main computer — Raspberry Pi 5 (v2)
 
@@ -841,6 +956,26 @@ sequenceDiagram
 ---
 
 # 5. Systemic Thinking & Engineering Decisions
+
+### 5.0 Design constraints
+
+Every decision in this section was made inside these limits:
+
+| Constraint | Source | Limit | How it shaped the robot |
+|---|---|---|---|
+| Size | Rule 11.1 | ≤ 300 × 200 × 300 mm | We stay far below it on purpose (v2 ≈17 cm long) to have room to dodge and park ([§2.6](#26-v2-chassis--shorter-car-pi-on-top)) |
+| Weight | Rule 11.2 | ≤ 1.5 kg | 564 g in v1; light enough that the N20 at 100:1 accelerates cleanly |
+| Drive | Rule 11.3 | One driving axle and one steering actuator; no differential drive | Ackermann rack-and-pinion + a printed rear differential |
+| No radio during rounds | Rule 11.10 | Wi-Fi, Bluetooth and Tailscale must be off | All debugging is offline: a recorded video and journal per run. The live view is used only in practice |
+| No manual calibration at the start | Rule 9.9 | Nothing set by hand on the table | Gyro bias measured automatically at boot; camera and color calibration done in the practice time |
+| Black walls | Field rules 13.3–13.4 | Dark, IR-absorbing walls | Ultrasonic + ToF cross-check ([§3.2](#why-both-ultrasonic-and-tof)) |
+| Round time and ranking | Rules 9.1, 10.7–10.8 | 3 minutes; points first, time breaks ties | Points over time: stop-and-turn corners ([§4.5](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino)) |
+| Processing | Raspberry Pi 4 | 14–18 fps, compute-bound (97% of one core) | Raspberry Pi 5: 40 fps on the same pipeline ([§3.4](#34-main-computer--raspberry-pi-5-v2)) |
+| Heat | Enclosed Pi 4 | 84 °C → thermal throttling | Pi 5 + Active Cooler, mounted on top ([§2.6](#26-v2-chassis--shorter-car-pi-on-top)) |
+| Power quality | Pi undervoltage | A 0.3 V drop throttled the CPU | 22 AWG wiring; a dedicated regulator for the Pi in v2 ([§3.1](#v2-power-budget)) |
+| Battery voltage | Open-loop motor (v1) | Behavior changes with charge level | Race window of 11.70–12.15 V; v2 encoder motor mounted for closed-loop speed |
+| Time | Calendar | ~11 weeks between the national (09-19) and international (12-08) finals; documentation due 11-24 | Every change must be checkable on recorded runs (replay) before it gets track time |
+| Budget | Team | v1 ≈155 USD; the Raspberry Pi 5 alone is ≈410 USD | The Pi 5 is the big v2 expense; the sensors were picked from the low-cost, widely documented ones (VL53L1X, BNO085) |
 
 ### 5.1 Subsystem interaction map
 

@@ -296,14 +296,158 @@ video and YouTube link; milestone journey.
 
 ---
 
-## Open items (as of 2026-09-06)
+## Phase 8 — National final (2026-09-07 → 09-19)
+
+### 2026-09-07 → 09-17 — Pre-final hardening (summary)
+The work between the documentation pass and the final is listed row by row in the
+[README iteration log](README.md#53-iteration-log) (v3.3 → v3.9):
+- Gyro heading-hold by default on clean straights; run 700 was the first clean 12-corner Obstacle run.
+- Start from the parking lot (`INICIO`).
+- Floor-referenced color correction.
+- Camera check before arming.
+- Obstacle-memory merge guard.
+- Red hue range for the new venue.
+- Parallel parking: perfect parks in runs 1025, 1052 and 1064. Run 1064 was a full clean Obstacle round including the park.
+
+### 2026-09-18 → 09-19 — **M14: 1st place, Mexico national final**
+Last changes before the rounds were a color calibration for the venue lighting and
+firmware tuning (`fc2bc3e`, `7c3db40`, `e18ff45`). The code that ran was committed as
+`d5cc66d` ("WRO National") and becomes release **`v1.0-nacional`**
+([releases](docs/releases.md)). Documentation score: 26/30.
+
+---
+
+## Phase 9 — After the final: check, diagnose, choose the v2 components (2026-09-21 → 09-27)
+
+### 2026-09-21 → 09-22 — Is the car still the same?
+First week back: test runs to confirm the car behaves as at the final, before changing anything. They turned up two problems the final had hidden:
+- **Strong light, run 1190:** the orange tape was read as red and a pale patch of floor as green. Fixed with two lighting-independent tests per blob (`RED_GR_MAX`, `GREEN_S_MIN_MED`). Replayed over 6 recorded runs: red detections in 1190 went 34 → 19 and green 164 → 65; every rejected detection was checked by eye and was false. → [ERR-17](docs/engineering-log.md#err-17--strong-light-tape-read-as-red-pale-floor-read-as-green).
+- **Run 1188, corner 4:** the forward/reverse corner maneuver flipped at the last moment, because the outer-wall distance sat right on its 28 cm threshold, and the arc jammed. Probably the same failure we saw at the final. Fixed with hysteresis and one shared decision. → [ERR-22](docs/engineering-log.md#err-22--the-corner-maneuver-changed-its-mind-at-the-last-moment).
+
+Both fixes are in `96145ba`.
+
+- **Bird's-eye calibration re-checked** with 9 measured floor marks. The calibration we raced with compresses depth by ~2×. A new calibration (9 px error) is saved aside; the old one stays for racing until all the pixel-based settings are moved to millimeters. A refactor of the perspective transform was tried and reverted the same day (`f30328f` → `b2d91d6`).
+
+### 2026-09-21 — Where does the time go? (Raspberry Pi 4 profiling)
+Measured on the car with the real race code:
+- The main Python thread used **97% of one core** and the loop ran at **14–18 fps**, depending on the scene.
+- Camera capture was only ~5 ms; color detection ~20 ms; bird's-eye view + centerline ~45 ms.
+- Building the debug overlay only on the frames that get recorded gained **+8.3%** (A/B test on the car: 16.7 → 18.1 fps).
+- With the remote-view client connected, the Pi reached **84 °C** and throttled ([ERR-27](docs/engineering-log.md#err-27--the-remote-desktop-client-overheated-the-pi-4)).
+
+Conclusion: a faster capture method would gain at most 5–10%. The real limit is the CPU and its temperature. → decision to move to a **Raspberry Pi 5** with an Active Cooler.
+
+### 2026-09-21 → 09-24 — What to improve, and with which parts
+We reviewed the logged failures by root cause. Most traced back to the car not knowing its own state well enough:
+- Speed was open-loop, so the behavior changed with battery charge ([ERR-11](docs/engineering-log.md#err-11--a-fresh-battery-over-rotates-the-dodges)).
+- The heading came from gyro-rate integration only ([ERR-23](docs/engineering-log.md#err-23--systematic-heading-offset-after-every-corner)).
+- The front ultrasonic produced phantom echoes ([ERR-19](docs/engineering-log.md#err-19--phantom-echoes-from-the-front-ultrasonic)).
+
+We also read the public repositories of other teams: the 2026 Mexican 30/30 documentation and the top teams of the 2025 World final. That gave us real data on distance sensors against the black wall:
+- Multi-zone ToF sensors and the VL53L1X both reach ~80–100 cm.
+- A low-cost LiDAR refreshed too slowly for our speed.
+- ToF sensors mounted low hit the floor.
+
+**Decisions:**
+
+| Need | Chosen | Instead of | Why |
+|---|---|---|---|
+| Compute and heat | Raspberry Pi 5 16 GB + Active Cooler + M.2 HAT+ | More optimization on the Pi 4 | The profiling above |
+| Near-field distance, rear sensing | 4 × VL53L1X, keeping the ultrasonics | LiDAR, multi-zone ToF | Simple driver, enough range for a near-field sensor, and teams that used it documented it well. The ultrasonics stay because the two types fail differently against the black wall |
+| Heading | BNO085 (on-chip fusion) | MPU-6050 integration | 6.5% heading loss per run, −7.5° bias per corner |
+| Speed and distance | Pololu 50:1 motor with encoder | Open-loop N20 | Battery-voltage dependence; the rules' reference build suggests an encoder |
+| Clean power for the Pi | A second Mini560 only for the Pi | One shared regulator | Servo current spikes must not reach the Pi |
+
+**All components were ordered this week.**
+
+### 2026-09-26 — Firmware cleanup
+One parking-mode switch (`PARK_MODO`: none / nose-in / parallel) replaces three booleans that had to be changed together; unused settings removed. `cdf6251`.
+
+---
+
+## Phase 10 — Components arrive; new mechanics; digital twin (2026-09-28 → 10-04)
+
+### 2026-09-28 → 10-04 — Bench tests of the new components
+The components arrived, and each one was tested alone before integration. One sketch per question:
+
+| Sketch | Question it answers |
+|---|---|
+| [`TofId`](src/ESP32/TofId/TofId.ino) | Is this sensor an L0X or an L1X? It reads the model register directly, with no library. |
+| `TofTest1`, `TofTest1_L1X` | Does one sensor range on the bus? |
+| [`TofTest4`](src/ESP32/TofTest4/TofTest4.ino) | Can all four share one I²C bus? Each one is woken up with its XSHUT line and given its own address (0x30–0x33). |
+| `BnoTest`, [`BnoRvcTest`](src/ESP32/BnoRvcTest/BnoRvcTest.ino) | BNO085 over I²C vs UART-RVC. RVC chosen: one wire, 100 Hz, checksum, no library, and it stays off the ToF bus. |
+| [`TofBnoTest`](src/ESP32/TofBnoTest/TofBnoTest.ino) | All four ToF plus the BNO085 at the same time. It reports rates (ToF ~20 Hz each, BNO ~100 Hz), lost packets and ToF error codes. |
+| `ServoTest` | The servo's real usable range for the new steering |
+
+### 2026-09-28 → 10-04 — v2 mechanical design
+Full redesign of the chassis to make the car shorter, around the new parts ([README §2.6](README.md#26-v2-chassis--shorter-car-pi-on-top)):
+- The motor turns parallel to the rear axle, driving the differential with spur gears (module 1, 15T/30T, same 2:1 as the old bevel pair). Involute profiles generated as DXF by our own script.
+- The battery moves to the center, crosswise, in a side-loading tunnel where the Raspberry Pi used to be.
+- The Raspberry Pi 5 goes on top, open to the air for its fan.
+- Overall length goes from ≈24 cm (including the extension added to leave the parking lot) to ≈17 cm (168.7 mm in CAD). Wheelbase ≈147 → ≈113 mm. Camera tilt ≈20° down.
+
+We also started reworking the steering for the shorter car (finished in Phase 11) and worked out how to fit everything.
+
+### 2026-10-02 → 10-06 — Digital twin (Jesse) — **branch** `digital-twin`, not on `main`
+A **software-in-the-loop simulator** of the whole car. It runs the real Pi code (`runtime_nuevo.py`) and the real ESP32 firmware, compiled for the PC, against a simulated field with randomized pillar layouts (one "seed" per layout). Each run produces the same logs as the real car. Highlights, with the full record in the branch's `docs/twin_plan.md`:
+- **First batch of 7 layouts:** 4 hit a green pillar 1–3 s after a right turn. One was traced frame by frame to a rule that released the "wait before turning" block too early when a green sat in the first column of the next straight.
+- **v2 hardware preset (`hw_nuevo`):** encoder, 4 ToF, BNO085 model, the new dimensions, and the Raspberry Pi 5. Frame-based settings were made independent of the frame rate (`df84b28`, `25de149`).
+- **Parallel parking planned with the map of the field:** 91/100 successful parks over a harness of start positions, and 98/100 when grazing the outer wall is allowed (`58a1338`, `87532bb`).
+- **Determinism checks** (the same seed gives the same run) and a sensor-noise ensemble, so a change can be compared across many layouts instead of one track run.
+
+---
+
+## Phase 11 — Raspberry Pi 5 bring-up, steering finalized, PCB started (2026-10-05 → 10-07)
+
+### 2026-10-06 — Raspberry Pi 5 set up for headless work
+- SSH with key-only login over Tailscale.
+- Logs that survive reboots.
+- The repository and a Python environment that reuses the system OpenCV, which has GStreamer.
+- `rpi-lgpio` in place of `RPi.GPIO`, which does not support the Pi 5.
+- The ESP32 link moved to `/dev/ttyAMA0` (on the Pi 5, `/dev/serial0` is the debug connector).
+- Boot time 53 s → 13 s after the first boot.
+
+### 2026-10-06 — Raspberry Pi 5 benchmark
+The unmodified race runtime, replaying recorded run 1190 as the camera input at 30 fps, ran at **40–41.5 fps** with the Pi at 46 → 52 °C and no throttling. The Pi 4 managed ~15.5 fps on the same run.
+
+Found on the way: the main loop doesn't wait for a new camera frame, so at 40 fps it re-processes about one frame in four. The settings counted in frames would then run ~3× faster in real time. Open item: cap the loop rate, or move those settings to seconds (the twin branch already did the latter).
+
+### 2026-10-06 → 10-07 — Camera bring-up on the Pi 5
+- The camera wasn't detected automatically → driver loaded explicitly for port CAM1.
+- The race pipeline failed with `not-negotiated` → fixed with `format=BGRx` (30 fps, ~2% CPU) — [ERR-28](docs/engineering-log.md#err-28--raspberry-pi-5-the-race-camera-pipeline-would-not-start).
+- **Magenta ring at the frame edges** (corners R/G 1.31–1.40 on a white sheet). Root cause: the factory lens-shading table, made for the stock lens. We calibrated a new table for our lens from 5 photos of a white sheet with the official Raspberry Pi tuning tool, then symmetrized its brightness part to remove the uneven lighting of the sheet. Result: R/G and B/G = 1.00 at the center and all corners. The table is shipped in the repository with the procedure, to repeat it at the venue — [ERR-29](docs/engineering-log.md#err-29--raspberry-pi-5-magenta-ring-at-the-frame-edges), [`camera_tuning/`](src/RASPI/cam/camera_tuning/README.md).
+- A browser-based live view and color-calibration tool (`cam_web.py`), because the Pi 4's remote-desktop client doesn't work on the Pi 5's desktop.
+
+### 2026-10-06 — Steering geometry finalized
+- **Diagnosis:** we simulated the linkage in Python with the CAD dimensions (model within ~1° of the CAD). The old geometry was **anti-Ackermann**: 39.5° inner wheel against 42.8° outer.
+- **Fix, reprinting only the rack, the two tie rods and the pinion:** rack joints 43 → 47 mm, tie rods 18.13 mm, pinion 14 → 19 teeth (servo moved 2.5 mm).
+- **Result in CAD:** **53.1° inner / 37.0° outer, ~106% Ackermann**. Turning radius ~208 → ~115 mm together with the shorter wheelbase ([README §2.4](README.md#24-steering--rack-and-pinion-with-ackermann-geometry)).
+
+### 2026-10-05 → 10-07 — Mechanical design finished; tests with the new parts; PCB started
+- Mechanical v2 design completed, around the final steering.
+- Tests with the new components on the car.
+- Start of the **two-floor PCB**: a power floor with both regulators, the motor driver, switch and fuse; and a logic floor with the ESP32 and the connectors for 3 ultrasonics, 4 ToF, BNO085 and servo ([README §3.3](README.md#v2-pcb--two-floor-board-in-design)).
+
+### 2026-10-06 → 10-07 — Documentation for the international final
+- The `parking` branch merged into `main` (`844195e`, `2dd11cf`). The README judged at the final is kept as the base, with v2 added on top.
+- New: [releases](docs/releases.md), [test record](docs/testing.md), [engineering log](docs/engineering-log.md) (ERR-10 onward), §5.0 design constraints, the v2 power budget, sensor placement against the field geometry, and the BNO085 + ToF sections.
+
+---
+
+## Open items (as of 2026-10-07)
 
 | Item | Milestone | State |
 |---|---|---|
-| *Mine vs. beyond the corner* classification — a can seen over the corner is sometimes assigned to the wrong straight | M10 | **Current focus** — `ERR-09`, open |
-| Parking maneuver inside the bay | M11 | Not started — after M10 |
-| Merge `SectionTurning` / `Workin` to `main` once track-tuned | M9 | On branch |
-| Evidence backlog: per-run video + SHA for the 10 Open runs; RECUPERANDO true/false-fire tally; obstacle clean-run ratio | M8, M9 | Pending |
+| Frame rate on the Pi 5: cap the loop or move per-frame settings to seconds | M15 | Open; done on the twin branch, not yet on `main` |
+| Re-check the red/green/orange/magenta thresholds under the new camera calibration | M15 | Open |
+| Encoder, BNO085 and ToF in the race firmware (ToF and BNO log-only first) | M16 | Bench-tested; twin model on branch |
+| BNO085 heading with the motor running at standstill (magnetometer check) | M16 | Pending |
+| Two-floor PCB designed, fabricated, wired; v2 wiring diagram | M16 | In design |
+| v2 CAD/STL and renders into `models/`; measure the printed car (size, weight, turning radius) | M16 | Pending |
+| Merge the `digital-twin` work into `main` | M16 | On branch |
+| Validation matrix for v2: both directions, 3 consecutive clean runs | M16 | Not started |
+| Tag `v1.0-nacional`; tag `v2.0-internacional` before the event | — | Pending |
+| Documentation deadline | — | 2026-11-24 |
 
 ---
 
