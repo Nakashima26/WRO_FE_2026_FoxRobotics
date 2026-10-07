@@ -14,10 +14,30 @@ def open_camera(cam_index=0):
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
     else:
+        # Color: el lente gran angular no tiene filtro IR -> imagen rojiza y un
+        # aro MAGENTA en las orillas. Se corrige en dos pasos (ver
+        # camera_tuning/README.md):
+        #  1) tabla de sombreado del lente (ALSC) calibrada para ESTE lente,
+        #     dentro de un tuning propio (base imx219_noir.json);
+        #  2) balance de blancos manual con ganancias fijas <rojo,azul>.
+        #  - Pi 4 (ISP VC4): <1.2,1.5> con el tuning del sistema (v1, nacional).
+        #  - Pi 5 (ISP PiSP): tuning camera_tuning/imx219_noir_wro_pi5.json +
+        #    <1.10,1.51>. Calibrado 2026-10-07 (hoja blanca, luz ~3700 K):
+        #    R/G y B/G = 1.00 en centro Y esquinas (antes las esquinas 1.3-1.4).
+        tuning_pi5 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "camera_tuning", "imx219_noir_wro_pi5.json")
+        if os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp") and os.path.exists(tuning_pi5):
+            os.environ.setdefault("LIBCAMERA_RPI_TUNING_FILE", tuning_pi5)
+            gains = "<1.10,1.51>"
+        else:
+            gains = "<1.2,1.5>"
+        # format=BGRx: en la Pi 5 (ISP PiSP) libcamerasrc sin formato explícito
+        # falla con "not-negotiated". BGRx sale directo del ISP (30 fps, ~2% CPU);
+        # NV12 también negocia pero la conversión cae al CPU y baja a ~20 fps.
         pipeline = (
-            "libcamerasrc awb-enable=false colour-gains=<1.2,1.5> "
+            f"libcamerasrc awb-enable=false colour-gains={gains} "
             "! queue max-size-buffers=1 leaky=downstream "
-            "! video/x-raw, width=1640, height=1232, framerate=30/1 "
+            "! video/x-raw, width=1640, height=1232, framerate=30/1, format=BGRx "
             "! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
             "! appsink drop=true max-buffers=1 sync=false"
         )

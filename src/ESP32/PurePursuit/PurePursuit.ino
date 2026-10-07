@@ -296,7 +296,41 @@ const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa d
 // MANIOBRA_PIVOTE_*) y la función de la rampa quedó sin llamarse: moverla no
 // hacía nada. Tras _RETRASO_MS el PID toma el servo directo.
 const unsigned long MANIOBRA_SERVO_RETRASO_MS = 50;  // reversa recta antes de empezar a girar
-const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // reversa no llegó a 88° -> frena y termina de frente
+const unsigned long MANIOBRA_REV_TIMEOUT_MS = 6000; // red de seguridad del pivote REV (ver MANIOBRA_PIVOTE_ACEPTA_DEG)
+// ── Pivote REV atorado (orillas1194 giro 2) ──────────────────────────────────
+// El pivote REV se quedó 7 s clavado a 72-75° (objetivo 80) con la cola contra
+// la pared de atrás. El timeout de arriba NO disparaba: exigía delta < EXIT_DEG
+// (80-14 = 66), una condición del pivote viejo por overshoot, y 74 > 66. Ahora,
+// por timeout O porque el gyro dejó de moverse (mismo detector que PARK_ATORO_*:
+// menos de PARK_ATORO_DEG en PARK_ATORO_MS):
+//   a <= ACEPTA_DEG del objetivo -> se da por bueno (el residual lo cuadra la
+//                                   recuperación, igual que siempre)
+//   más lejos                    -> frena y termina de frente (fase 3, lo de antes)
+const float         MANIOBRA_PIVOTE_ACEPTA_DEG = 15.0f;
+const unsigned long MANIOBRA_ATORO_GRACIA_MS   = 600;  // arranque del pivote (rampa + scrub) sin vigilar
+// ── FORWARD sin espacio: retroceder recto y hacer el arco FWD (orillas1194 g2) ─
+// Antes, si tocaba FORWARD (pegado a la exterior) pero el giro se disparaba con
+// dF <= FWD_MIN_FRONT_CM, se forzaba el pivote en REVERSA. Pegado a la exterior
+// eso mete la cola en la pared de atrás, que es justo por lo que se eligió
+// FORWARD. Ahora: coast -> reversa RECTA (heading-hold) hasta dF >= FWD_REARMA_CM
+// (o timeout) -> coast -> arco FORWARD normal (fase 7 -> 3 -> 1).
+// FWD_REARMA_CM = 0 regresa al comportamiento viejo (pivote REV).
+const int           FWD_REARMA_CM         = 55;
+const unsigned long FWD_REARMA_TIMEOUT_MS = 2000;
+// ── FORWARD sin evidencia lateral (orillas1194/1195 giro 2) ──────────────────
+// Pegado a la exterior tras esquivar el rojo de la boca, el carro entraba a
+// CRUCERO ya con dF ~48 y el lateral interior leía 63-73 TODO el acercamiento
+// (nunca > umbralPared) -> la esquina no se confirmaba y el giro solo salía por
+// "muy cerca" (dF <= 25) -> FORWARD ya no cabía -> reversa. Ahora, en modo
+// FORWARD y fuera de la esquina del cajón, basta la pared de enfrente a <= esto
+// si la lectura viene CONTINUA (sin saltos > FWD_FRENTE_SALTO_CM entre loops;
+// cualquier salto reinicia el debounce). La continuidad es lo que separa la
+// pared real del eco de reojo de la exterior (orillas1040: 200 -> 80 -> 197).
+// Riesgo residual: un eco de reojo ESTABLE pegado a la exterior (dExt <= 13
+// da un fantasma <= 50). 0 = desactivado (exige evidencia lateral como antes).
+const int           FWD_SIN_LATERAL_CM    = 50;
+const int           FWD_FRENTE_SALTO_CM   = 10;
+long                cruceroDfPrev         = 0;   // dF del loop anterior en CRUCERO (continuidad)
 const unsigned long CRUCERO_TIMEOUT_MS      = 7000; // en CRUCERO tanto sin llegar a la pared -> MANIOBRA igual (red de seguridad anti-atasco)
 const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (solo el frontal,
                                        // no los laterales) antes de disparar MANIOBRA
@@ -476,6 +510,9 @@ float         maniobraIdealRot      = 0.0f;// rotación (con signo) que deja el 
                                            // recta nueva; finalizarManiobra() pasa (anguloGyro - esto)
                                            // como residual a la recuperación (ver MANIOBRA_RESIDUAL_MAX_DEG)
 float         maniobraFase4AngIni   = 0.0f;// anguloGyro al entrar a fase 4 = setpoint del heading-hold de reversa
+bool          maniobraRetrocedeAntes = false; // FORWARD sin espacio: fase 7 (reversa recta) antes del arco
+float         maniobraAtoroAng      = 0.0f;   // detector de pivote atorado (ver giroAtorado)
+unsigned long maniobraAtoroMs       = 0;
 
 // Rectas con el cajón de estacionamiento: el borde del cajón tapa a ratos el
 // lateral que debería "abrirse" en la esquina, así que justo en el frame en
@@ -1464,6 +1501,7 @@ void resetVigilanciaEsquina() {
   direccionAproxLatch = 0;
   aproxOpenStreakIzq  = 0;
   aproxOpenStreakDer  = 0;
+  cruceroDfPrev       = 0;
 }
 
 // SIGUIENDO/RECUPERANDO -> CRUCERO.
@@ -1505,12 +1543,19 @@ void decidirManiobra(long distL, long distR) {
   long distExt = maniobraGirarDer ? distL : distR;
   maniobraDistExt  = distExt;
   maniobraReversa  = !giroModoFwd;
-  // Fallback: si pese a todo toca FORWARD con la pared de enfrente ya encima,
-  // el arco no cabe (se incrusta en fase 1) -> REVERSE.
+  maniobraRetrocedeAntes = false;
+  // Si toca FORWARD con la pared de enfrente ya encima, el arco no cabe (se
+  // incrusta en fase 1): retrocede recto primero (ver FWD_REARMA_CM). Con
+  // FWD_REARMA_CM = 0, comportamiento viejo: pivote en REVERSA.
   if (!maniobraReversa && distF_filtrada > 0 && distF_filtrada <= FWD_MIN_FRONT_CM) {
-    maniobraReversa = true;
     Serial.print("[HUG] FORWARD sin espacio (dF="); Serial.print((long)distF_filtrada);
-    Serial.println(") -> REVERSE");
+    if (FWD_REARMA_CM > 0) {
+      maniobraRetrocedeAntes = true;
+      Serial.println(") -> retrocede recto y arco FORWARD");
+    } else {
+      maniobraReversa = true;
+      Serial.println(") -> REVERSE");
+    }
   }
 
   // ── ¿RETROCEDER un poco DESPUÉS de la maniobra? ── solo si la pared exterior
@@ -1610,20 +1655,24 @@ float parkRumboParalelo() { return parkTrimListo ? parkTrimPared : 0.0f; }
 // Llamar cada loop dentro de una fase de reversa, con el parkFaseMs de esa fase.
 // true = el rumbo lleva PARK_ATORO_MS sin moverse PARK_ATORO_DEG => el carro topó.
 // Mientras siga girando se re-arma sola, así que no necesita inicialización aparte.
-bool parkAtoroDetecta(unsigned long faseMs) {
+bool giroAtorado(unsigned long faseMs, unsigned long graciaMs,
+                 float &angRef, unsigned long &msRef) {
   if (PARK_ATORO_DEG <= 0.0f) return false;          // desactivado
   unsigned long ahora = millis();
-  if (ahora - faseMs < PARK_ATORO_GRACIA_MS) {       // gracia de entrada: solo arma
-    parkAtoroAng = anguloGyro;
-    parkAtoroMs  = ahora;
+  if (ahora - faseMs < graciaMs) {                   // gracia de entrada: solo arma
+    angRef = anguloGyro;
+    msRef  = ahora;
     return false;
   }
-  if (fabs(anguloGyro - parkAtoroAng) >= PARK_ATORO_DEG) {   // sigue girando
-    parkAtoroAng = anguloGyro;
-    parkAtoroMs  = ahora;
+  if (fabs(anguloGyro - angRef) >= PARK_ATORO_DEG) { // sigue girando
+    angRef = anguloGyro;
+    msRef  = ahora;
     return false;
   }
-  return (ahora - parkAtoroMs >= PARK_ATORO_MS);
+  return (ahora - msRef >= PARK_ATORO_MS);
+}
+bool parkAtoroDetecta(unsigned long faseMs) {
+  return giroAtorado(faseMs, PARK_ATORO_GRACIA_MS, parkAtoroAng, parkAtoroMs);
 }
 
 // ── Cierre de ESTACIONANDO (apaga motor, centra servo y finaliza carrera) ─────
@@ -3245,6 +3294,8 @@ void loop() {
       // los usa (ver ECO DE REOJO abajo).
       bool _laAprox  = (direccionAproxLatch != 0);
       bool _muyCerca = (distF > 0 && distF <= FRONT_TURN_REV_CM);
+      long _dfPrevLoop = cruceroDfPrev;   // continuidad del frontal (ver FWD_SIN_LATERAL_CM)
+      cruceroDfPrev    = distF;
       bool enLaPared;
       int  debounceNecesario;
       if (esquinaConCajon) {
@@ -3293,8 +3344,13 @@ void loop() {
         // que la rama del cajón: frontal <= REV_CM, debounce CRUCERO_FRONT.
         // !_hayLataMia sigue: si es una lata, _saleLata ya la mandó a esquivar.
         // (_muyCerca se declara arriba, fuera del if)
+        // FORWARD sin evidencia lateral: pared de enfrente cerca y CONTINUA
+        // (ver FWD_SIN_LATERAL_CM). Un salto de la lectura corta la racha.
+        bool _frenteContinuo = (_dfPrevLoop > 0 && labs(distF - _dfPrevLoop) <= FWD_FRENTE_SALTO_CM);
+        bool _fwdFrente      = !_revPrev && FWD_SIN_LATERAL_CM > 0
+                               && distF <= FWD_SIN_LATERAL_CM && _frenteContinuo;
         enLaPared         = (distF > 0 && distF <= _umbralFront
-                             && (paredAbierta || giroSucioArmado || _laAprox || _muyCerca)
+                             && (paredAbierta || giroSucioArmado || _laAprox || _muyCerca || _fwdFrente)
                              && !_hayLataMia);
         debounceNecesario = (paredAbierta || _laAprox) ? CRUCERO_PARED_DEBOUNCE
                                                        : CRUCERO_FRONT_DEBOUNCE;
@@ -3347,6 +3403,7 @@ void loop() {
     //                       si FWD. -> fase 5
     //     5 COAST         : frena tras el retroceso, luego cierra
     //     3 FRENAR-Y-FWD  : coast, luego re-arranca el pivote de frente
+    //     7 REV-RECTA     : (FORWARD sin espacio) reversa recta hasta FWD_REARMA_CM -> 3
     //   Fin: endereza, resetea (recta nueva desde 0), turnsCompleted++, SIGUIENDO.
     // ═══════════════════════════════════════════════════════════════════════════
     case MANIOBRA: {
@@ -3375,7 +3432,7 @@ void loop() {
         }
         // REV -> coast (0) -> pivote en reversa (1)
         // FWD -> pivote de frente (1) directo (mismo sentido que CRUCERO, sin coast)
-        if (maniobraReversa) {
+        if (maniobraReversa || maniobraRetrocedeAntes) {
           maniobraFase   = 0;
           maniobraFaseMs = millis();
           motorCoast();
@@ -3407,22 +3464,60 @@ void loop() {
           lastRevHoldMs    = millis();
           maniobraPivoteHold = 0;
           maniobraPivoteMs = millis();
-          maniobraFase     = 1;           // pivote en reversa
+          maniobraFaseMs   = millis();
+          // FORWARD sin espacio -> reversa recta (7); si no, pivote en reversa (1)
+          maniobraFase     = maniobraRetrocedeAntes ? 7 : 1;
+        }
+        break;
+      }
+
+      // ── Fase 7: REVERSA RECTA para hacer espacio al arco FORWARD ──────────
+      //   Heading-hold a 0 (rumbo de entrada) hasta dF >= FWD_REARMA_CM o
+      //   timeout; luego fase 3 (coast) -> arco FORWARD (fase 1).
+      if (maniobraFase == 7) {
+        motorReversa();
+        aplicarReversaHold(0.0f);
+        setMotor(MANIOBRA_BACKOFF_VEL);
+        bool espacio = (distF_filtrada >= FWD_REARMA_CM);
+        bool tout    = (millis() - maniobraFaseMs >= FWD_REARMA_TIMEOUT_MS);
+        if (espacio || tout) {
+          Serial.print("MANIOBRA: reversa recta hecha dF="); Serial.print((long)distF_filtrada);
+          Serial.print(" ang="); Serial.print(anguloGyro, 1);
+          Serial.println(tout && !espacio ? " (TIMEOUT) -> arco FORWARD" : " -> arco FORWARD");
+          motorCoast();
+          escribirServo(centroServo);
+          maniobraFase   = 3;
+          maniobraFaseMs = millis();
         }
         break;
       }
 
       // ── Fase 1: PIVOTE ───────────────────────────────────────────────────
       if (maniobraFase == 1) {
-        // reversa atascada -> frenar y terminar de frente
-        if (maniobraReversa && delta < EXIT_DEG
-            && (millis() - maniobraPivoteMs) > MANIOBRA_REV_TIMEOUT_MS) {
-          maniobraReversa = false;
-          maniobraFase    = 3;
-          maniobraFaseMs  = millis();
-          motorCoast();
-          Serial.println("MANIOBRA: reversa timeout -> freno -> forward");
-          break;
+        // Pivote REV atorado o timeout (ver MANIOBRA_PIVOTE_ACEPTA_DEG): cerca
+        // del objetivo se acepta; lejos, frena y termina de frente.
+        if (maniobraReversa) {
+          bool tout    = (millis() - maniobraPivoteMs) > MANIOBRA_REV_TIMEOUT_MS;
+          bool atorado = giroAtorado(maniobraPivoteMs, MANIOBRA_ATORO_GRACIA_MS,
+                                     maniobraAtoroAng, maniobraAtoroMs);
+          if (tout || atorado) {
+            float falta = fabs(maniobraIdealRot - anguloGyro);
+            Serial.print("MANIOBRA: pivote REV "); Serial.print(atorado ? "ATORADO" : "TIMEOUT");
+            Serial.print(" ang="); Serial.print(anguloGyro, 1);
+            Serial.print(" falta="); Serial.print(falta, 1);
+            motorCoast();
+            escribirServo(centroServo);
+            maniobraFaseMs = millis();
+            if (falta <= MANIOBRA_PIVOTE_ACEPTA_DEG) {
+              Serial.println(" -> se acepta");
+              maniobraFase = 2;
+            } else {
+              Serial.println(" -> freno -> forward");
+              maniobraReversa = false;
+              maniobraFase    = 3;
+            }
+            break;
+          }
         }
 
         if (maniobraReversa) {
@@ -3575,7 +3670,7 @@ void loop() {
         break;
       }
 
-      // ── Fase 3: FRENAR tras timeout de reversa, luego pivote de frente ───
+      // ── Fase 3: FRENAR (tras pivote REV fallido o tras la fase 7), luego arco de frente
       if (maniobraFase == 3) {
         motorCoast();
         escribirServo(centroServo);
