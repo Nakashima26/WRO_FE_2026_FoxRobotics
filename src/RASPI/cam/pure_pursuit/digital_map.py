@@ -1090,10 +1090,6 @@ class DigitalMap:
                 else:
                     cv2.circle(img, px(x, y), 4, (150, 150, 150), 1, cv2.LINE_AA)
 
-        if len(self.line_world) >= 2:
-            pts = np.array([px(x, y) for x, y in self.line_world], np.int32)
-            cv2.polylines(img, [pts], False, (0, 180, 220), 2, cv2.LINE_AA)
-
         cx, cy = self.pose_xy
         rad = math.radians(self.heading)
         tip = px(cx + 80 * math.sin(rad), cy + 80 * math.cos(rad))
