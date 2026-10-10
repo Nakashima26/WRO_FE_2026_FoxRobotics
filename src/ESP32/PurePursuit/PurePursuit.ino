@@ -1362,7 +1362,10 @@ const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes del áng
 // esquina": si todavía hay lata, se sigue esquivando. El frontal es el tope.
 const int           PARK_UTURN_DEG             = 170;    // 180 menos el overshoot
 const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
-PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+// 40 -> 28 (barrido en el twin, 37 seeds con U: el margen a la lata del cuadrante inicial tras la U
+// sube de ~52/107 a ~149/190 mm CW/CCW y la U termina a ~180 mm de la pared exterior). Con ext <= 35 cm
+// al arrancar la U el radio ya es el mínimo y este valor no actúa. Del lado exterior no hay latas.
+PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
