@@ -25,7 +25,7 @@ void escribirServo(int angulo) {
 void f() {
   escribirServo(constrain(centroServo + out, 30, 160));
   escribirServo(izq ? 160 : 30);
-  int ticks = constrain((int)(delta / 46.32f * 70.0f), 28, 70);
+  int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
   parkServoU = izq ? centroServo + ticks : centroServo - ticks;
   SIL_AJ(PARK_X_MM);
 }
@@ -67,7 +67,8 @@ def test_hw_nuevo_todo_aceptado(monkeypatch):
               "inject_map_truth", "servo.fisico"):
         assert by[k].difiere, k
     assert not by["servo.centro"].difiere and not by["servo.rueda_izq"].difiere
-    assert not by["servo.rueda_max"].difiere and by["servo.rueda_der"].difiere
+    # v2: misma ganancia a los dos lados (mismo piñón), el .ino ya coincide.
+    assert not by["servo.rueda_max"].difiere and not by["servo.rueda_der"].difiere
 
 
 def test_diferencia_sin_motivo_rompe(monkeypatch):
@@ -100,7 +101,7 @@ def test_preset_contra_ino_sintetico(monkeypatch):
     assert by["servo.fuera_de_topes"].real.startswith("20 ")
     # El 0..180 de escribirServo no cuenta como tope de maniobra.
     assert by["servo.topes"].real.startswith("30..160") and not by["servo.topes"].difiere
-    assert by["servo.rueda_der"].difiere and not by["servo.rueda_izq"].difiere
+    assert not by["servo.rueda_der"].difiere and not by["servo.rueda_izq"].difiere
     joined = " | ".join(errors)
     for k in ("NO_ESTA", "FOX_SUELTO", "FOX_NADA", "PARK_Y_MM"):
         assert k in joined, k

@@ -162,6 +162,9 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
 int centroServo    = 90;
+// Dirección v2 (README §2.4): 44.54° de rueda equivalente (modelo bicicleta) a ±71° de
+// servo = 0.627°/tick, o sea 43.91° a 70 ticks (la fórmula de las U usa `delta / 43.91 * 70`).
+// Debe coincidir con config.MAX_WHEEL_STEER_DEG * 70 / SERVO_FULL_LOCK_CMD_DEG.
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -704,7 +707,7 @@ const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la 
                                                      //  pasa a la fase 2 igual; la contravuelta y la
                                                      //  reversa terminan de cuadrar lo que haya)
 const unsigned long INICIO_MID_MS      = 700; // fase 2: sale del cajón antes de la contravuelta.
-                                              //  Con batalla 113 mm y rueda a 46.32° el arco de la fase 1
+                                              //  Con batalla 113 mm y rueda a ~44.5° (equiv.) el arco de la fase 1
                                               //  termina con la nariz todavía en la punta de la madera;
                                               //  ~700 ms recto la pasan. Con 1 ms la reversa se mete en ella.
 const int  INICIO_CONTRA_CORRIGE_DEG   = 25;   // fase 3: la contravuelta hacia ADELANTE solo corrige estos grados
@@ -4412,7 +4415,7 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          int ticks = constrain((int)(delta / 46.32f * 70.0f), 28, 70);
+          int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
           parkServoU = uturnIzqP ? centroServo + ticks : centroServo - ticks;
           Serial.print("PARK U servo="); Serial.print(parkServoU);
           Serial.print(" ext="); Serial.println(extAhoraP);
@@ -5741,8 +5744,8 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          // 70 ticks (servo 160) = 46.32° de rueda, cota del CAD.
-          int ticks = constrain((int)(delta / 46.32f * 70.0f), 28, 70);
+          // 70 ticks (servo 160) = ~43.9° de rueda equivalente (README v2 §2.4).
+          int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
           puntaServoU = uturnIzq ? centroServo + ticks : centroServo - ticks;
           Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
           Serial.print(" ext="); Serial.println(extAhora);

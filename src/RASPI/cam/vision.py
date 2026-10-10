@@ -15,10 +15,25 @@ def open_camera(cam_index=0):
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
     else:
+        # Color: el lente gran angular no tiene filtro IR -> imagen rojiza y aro
+        # MAGENTA en las orillas (ver camera_tuning/README.md). Pi 5 (ISP PiSP):
+        # tuning propio imx219_noir_wro_pi5.json + ganancias <1.10,1.51>
+        # (calibrado 2026-10-07). Pi 4 (ISP VC4): <1.2,1.5> con el tuning del sistema.
+        tuning_pi5 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "camera_tuning", "imx219_noir_wro_pi5.json")
+        if os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp") and os.path.exists(tuning_pi5):
+            os.environ.setdefault("LIBCAMERA_RPI_TUNING_FILE", tuning_pi5)
+            gains = "<1.10,1.51>"
+        else:
+            gains = "<1.2,1.5>"
+        # 40 fps = máximo del modo 1640x1232 del IMX219 (el modo de 3280x2464 solo da
+        # 21). format=BGRx: en la Pi 5 libcamerasrc sin formato explícito falla con
+        # "not-negotiated"; BGRx sale directo del ISP (NV12 cae al CPU y baja fps).
+        fps = int(os.environ.get("FOX_CAM_FPS", "40"))
         pipeline = (
-            "libcamerasrc awb-enable=false colour-gains=<1.2,1.5> "
+            f"libcamerasrc awb-enable=false colour-gains={gains} "
             "! queue max-size-buffers=1 leaky=downstream "
-            "! video/x-raw, width=1640, height=1232, framerate=30/1 "
+            f"! video/x-raw, width=1640, height=1232, framerate={fps}/1, format=BGRx "
             "! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
             "! appsink drop=true max-buffers=1 sync=false"
         )

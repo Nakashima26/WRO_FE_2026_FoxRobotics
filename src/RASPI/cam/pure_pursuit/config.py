@@ -13,6 +13,7 @@ Ajusta primero CALIB_REAL_MM para que coincida con tu montaje de cámara,
 luego corre calibrate.py para generar bev_calib.npz.
 """
 
+import os
 import numpy as np
 from pathlib import Path
 
@@ -22,7 +23,9 @@ from pathlib import Path
 # PI_FPS == FPS_NOMINAL fr()/per_frame()/ema_per_frame() devuelven el valor tal
 # cual. Pi 5 (~28 fps): subir PI_FPS y las ventanas conservan su duración.
 FPS_NOMINAL = 14.0
-PI_FPS = 14.0
+# Cámara a 40 fps (vision.open_camera). Si el pipeline completo (visión + BEV + ...)
+# no alcanza 40 en la Pi, exporta FOX_PI_FPS=<fps reales> (el log imprime fps=...).
+PI_FPS = float(os.environ.get("FOX_PI_FPS", "40"))
 
 
 def fr(n):
@@ -67,47 +70,59 @@ BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0
 # NO puede importar twin/ y el twin sí puede importar config.
 # Marco: mm desde el EJE TRASERO; right + = derecha; fwd + = adelante;
 # dir 0 = adelante, +90 = derecha, 180 = atrás, 270 (= -90) = izquierda.
-ROBOT_LENGTH_MM      = 180.0    # confirmado por usuario (aprox), 2026-10-03
-ROBOT_WIDTH_MM       = 130.0    # confirmado por usuario (aprox), 2026-10-03
-WHEELBASE_MM         = 113.0    # confirmado por usuario
-REAR_OVERHANG_MM     = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 33.5 derivado, pendiente medir
-FRONT_OVERHANG_MM    = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 33.5 derivado, pendiente medir
+ROBOT_LENGTH_MM      = 170.0    # README v2 §2.6: ≈170 (168.7 en CAD), 2026-10-09
+ROBOT_WIDTH_MM       = 128.0    # README v2: 128 mm en CAD
+WHEELBASE_MM         = 113.0    # README v2: 112.85 mm (CAD)
+REAR_OVERHANG_MM     = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 28.5 derivado, pendiente medir
+FRONT_OVERHANG_MM    = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 28.5 derivado, pendiente medir
 TRACK_MM             = 110.0    # supuesto (solo dibujo); pendiente medir
 WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
-# Ángulo máximo de RUEDA. Carro nuevo: servo 0-180 (usuario); se supone ±46.32° en
-# 0/180 con centro 90, sin medir. Firmware y twin aún usan los topes 30/160 del carro
-# viejo (fc2bc3e). OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo
-# maneja otra tarea, no se cambia aquí.
-MAX_WHEEL_STEER_DEG  = 46.32    # confirmado por usuario (CAD de la mangueta)
+# Dirección v2 (README §2.4, piñón de 19 dientes, CAD): a tope de servo la rueda
+# INTERIOR gira 53.1° y la EXTERIOR 37.0° (Ackermann ~106%). La dirección del carro
+# (cremallera) mueve ambas ruedas; el modelo bicicleta del twin necesita UN ángulo
+# equivalente: el que da el mismo radio al centro del eje trasero,
+#   R = L/tan(δ_int) + T/2  (T = distancia entre pivotes, 60 mm)  →  δ_eq = atan(L/R).
+# Con L=113: R ≈ 114.8 mm, δ_eq ≈ 44.5°. (El 46.32° anterior era del CAD viejo.)
+KINGPIN_TRACK_MM         = 60.0   # README v2 §2.4 (SolidWorks)
+WHEEL_INNER_FULL_LOCK_DEG = 53.1  # README v2 §2.4 (medido en el ensamble CAD)
+WHEEL_OUTER_FULL_LOCK_DEG = 37.0  # README v2 §2.4
+# Comando de servo (° desde el centro) con el que se logra ese tope: recorrido de la
+# cremallera medido en el CAD (±71°, no el ±90° nominal).
+SERVO_FULL_LOCK_CMD_DEG   = 71.0
+MAX_WHEEL_STEER_DEG  = round(float(np.degrees(np.arctan(
+    WHEELBASE_MM / (WHEELBASE_MM / np.tan(np.radians(WHEEL_INNER_FULL_LOCK_DEG))
+                    + KINGPIN_TRACK_MM / 2.0)))), 2)   # ≈44.54° (equivalente bicicleta)
+# OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo maneja otra tarea,
+# no se cambia aquí.
 # Cámara (NoIR ancho)
 CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
 CAMERA_HEIGHT_MM     = 97.0     # supuesto: 90 + 7 mm (LiPo 3S ~24 mm acostada vs Pi4 ~17 mm); medir con regla
 CAMERA_FWD_MM        = 140.0    # supuesto: en el morro, a la altura del sonar frontal; pendiente medir
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
 # Montajes de sensores: (right_mm, fwd_mm, dir_deg). Todos pendiente medir.
-# Laterales a 15 mm hacia adentro del costado (130/2 - 15 = 50).
+# Laterales a 15 mm hacia adentro del costado (128/2 - 15 = 49).
 SENSOR_MOUNTS = {
-    "us_left":   (-50.0,  50.0, 270.0),
-    "us_right":  ( 50.0,  50.0,  90.0),
-    "us_front":  (  0.0, 140.0,   0.0),
-    "tof_left":  (-50.0,  80.0, 270.0),
-    "tof_right": ( 50.0,  80.0,  90.0),
-    # 5.5 mm adentro de la defensa trasera (-33.5)
-    "tof_rear":  (  0.0, -28.0, 180.0),
-    # NUEVO (hardware siguiente): espejo del trasero, 5.5 mm adentro de la
-    # defensa delantera (113 + 33.5 - 5.5). Supuesto, pendiente medir.
-    "tof_front": (  0.0, 141.0,   0.0),
+    "us_left":   (-49.0,  50.0, 270.0),
+    "us_right":  ( 49.0,  50.0,  90.0),
+    "us_front":  (  0.0, 138.0,   0.0),
+    "tof_left":  (-49.0,  80.0, 270.0),
+    "tof_right": ( 49.0,  80.0,  90.0),
+    # 5.5 mm adentro de la defensa trasera (-28.5)
+    "tof_rear":  (  0.0, -23.0, 180.0),
+    # Espejo del trasero, 5.5 mm adentro de la defensa delantera
+    # (113 + 28.5 - 5.5). Supuesto, pendiente medir.
+    "tof_front": (  0.0, 136.0,   0.0),
 }
 # Procedencia, para el twin (describe()) y para quien mida.
 VEHICLE_DIMS_PROVENANCE = {
-    "ROBOT_LENGTH_MM": "confirmado por usuario (aprox)",
-    "ROBOT_WIDTH_MM": "confirmado por usuario (aprox)",
-    "WHEELBASE_MM": "confirmado por usuario",
-    "REAR_OVERHANG_MM": "derivado (180-113)/2, pendiente medir",
-    "FRONT_OVERHANG_MM": "derivado (180-113)/2, pendiente medir",
+    "ROBOT_LENGTH_MM": "README v2 (CAD 168.7, ≈170); medir en el carro impreso",
+    "ROBOT_WIDTH_MM": "README v2 (CAD 128)",
+    "WHEELBASE_MM": "README v2 (CAD 112.85)",
+    "REAR_OVERHANG_MM": "derivado (170-113)/2, pendiente medir",
+    "FRONT_OVERHANG_MM": "derivado (170-113)/2, pendiente medir",
     "TRACK_MM": "supuesto, pendiente medir",
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
-    "MAX_WHEEL_STEER_DEG": "confirmado por usuario (aprox)",
+    "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
     "CAMERA_TILT_DEG": "confirmado por usuario",
     "CAMERA_HEIGHT_MM": "supuesto: +7 mm LiPo vs Pi4, medir con regla",
     "CAMERA_FWD_MM": "supuesto, pendiente medir",

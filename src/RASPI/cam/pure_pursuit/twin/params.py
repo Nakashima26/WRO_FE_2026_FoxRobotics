@@ -42,10 +42,12 @@ class VehicleParams:
 
 @dataclass
 class SteeringParams:
-    # Grados de rueda por 90° de comando de servo. Topes del .ino: 30 y 160.
-    # El CAD de la mangueta mide 46.32° en ese recorrido (antes el twin usaba 50°).
-    gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / 70.0   # servo 160 (70° de comando) → 46.32°
-    gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / 60.0  # servo 30 (60° de comando) → 46.32°
+    # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
+    # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
+    # dos lados (mismo piñón). Los topes del .ino siguen en 30 y 160 (−60/+70), así
+    # que a la derecha el firmware llega a ~37.6° y a la izquierda a ~43.9°.
+    gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
+    gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
     servo_center_deg: float = 90.0
     servo_min_deg: float = 30.0
     servo_max_deg: float = 160.0
@@ -56,9 +58,10 @@ class SteeringParams:
         _prov(
             "steering.gain_left/right",
             "supuesto",
-            "46.32° es del CAD (usuario); que se alcance justo en servo 30/160 con centro 90 "
-            "sale de los topes del firmware del carro viejo (fc2bc3e); el carro nuevo usa "
-            "servo 0-180 (usuario) — pendiente frente t16servo",
+            "README v2 §2.4 (CAD): 53.1° int./37.0° ext. a ±71° de servo → 44.5° equivalente "
+            "bicicleta (config.MAX_WHEEL_STEER_DEG). Lineal en el comando (en realidad la "
+            "cremallera es algo no lineal). Topes 30/160 = firmware (carro viejo); v2 "
+            "alcanzaría ±71° (19..161) — pendiente decidir si se amplía el tope inferior",
         )
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")

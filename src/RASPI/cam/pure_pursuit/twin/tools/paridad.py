@@ -306,8 +306,11 @@ def _servo_rows(info: InoInfo, cfg: dict[str, Any], errors: list[str]) -> list[R
     if len(set(fm)) == 1:
         deg_ino, ticks_ino = (float(x) for x in fm[0])
         where = ",".join(map(str, fl))
-        rows.append(Row("servo.rueda_max", f"ino:{where}", f"{deg_ino:g}°",
-                        f"MAX_WHEEL_STEER_DEG={wmax:g}° (config)", abs(deg_ino - wmax) > 1e-6))
+        # v2: MAX_WHEEL_STEER_DEG se alcanza a SERVO_FULL_LOCK_CMD_DEG (71) ticks, no a 70.
+        esperado = wmax * ticks_ino / float(C.SERVO_FULL_LOCK_CMD_DEG)
+        rows.append(Row("servo.rueda_max", f"ino:{where}", f"{deg_ino:g}° en {ticks_ino:g} ticks",
+                        f"{esperado:.2f}° (MAX_WHEEL_STEER_DEG={wmax:g}° a "
+                        f"{C.SERVO_FULL_LOCK_CMD_DEG:g} ticks, config)", abs(deg_ino - esperado) > 0.01))
         k_l = 90.0 / (int_hi - int_c) if s180 else 1.0
         k_r = 90.0 / (int_c - int_lo) if s180 else 1.0
         for lado, g, k in (("izq", st.gain_left, k_l), ("der", st.gain_right, k_r)):
