@@ -1362,7 +1362,7 @@ const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes del áng
 // esquina": si todavía hay lata, se sigue esquivando. El frontal es el tope.
 const int           PARK_UTURN_DEG             = 170;    // 180 menos el overshoot
 const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
-const int           PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 40;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
@@ -2215,7 +2215,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
-  SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM);
+  SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
