@@ -70,12 +70,15 @@ BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0
 # NO puede importar twin/ y el twin sí puede importar config.
 # Marco: mm desde el EJE TRASERO; right + = derecha; fwd + = adelante;
 # dir 0 = adelante, +90 = derecha, 180 = atrás, 270 (= -90) = izquierda.
-ROBOT_LENGTH_MM      = 170.0    # README v2 §2.6: ≈170 (168.7 en CAD), 2026-10-09
-ROBOT_WIDTH_MM       = 128.0    # README v2: 128 mm en CAD
-WHEELBASE_MM         = 113.0    # README v2: 112.85 mm (CAD)
-REAR_OVERHANG_MM     = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 28.5 derivado, pendiente medir
-FRONT_OVERHANG_MM    = (ROBOT_LENGTH_MM - WHEELBASE_MM) / 2.0   # 28.5 derivado, pendiente medir
-TRACK_MM             = 110.0    # supuesto (solo dibujo); pendiente medir
+# Fuente: GLB del CAD v2 (VehicleDirTest_V2.glb, SolidWorks, 2026-10-09), cajas
+# alineadas al eje; el eje trasero es el origen. Atrás: borde de la llanta trasera
+# (−21.8); adelante: cara del ultrasónico frontal (147.6; el chasis base acaba en 127.9).
+ROBOT_LENGTH_MM      = 169.4    # CAD: −21.8 … 147.6 (README: ≈170 / 168.7)
+ROBOT_WIDTH_MM       = 132.0    # CAD: llantas traseras ±66 (README 128 era sin llantas: tapa ±58.7)
+WHEELBASE_MM         = 113.0    # CAD: 112.85 (el .ino también usa 113)
+REAR_OVERHANG_MM     = 21.8     # CAD (borde de llanta trasera)
+FRONT_OVERHANG_MM    = 34.6     # CAD (147.6 − 113; cara del ultrasónico frontal)
+TRACK_MM             = 110.0    # CAD: entre centros de llantas traseras (±55; llanta de 22 mm)
 WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
 # Dirección v2 (README §2.4, piñón de 19 dientes, CAD): a tope de servo la rueda
 # INTERIOR gira 53.1° y la EXTERIOR 37.0° (Ackermann ~106%). La dirección del carro
@@ -96,37 +99,35 @@ MAX_WHEEL_STEER_DEG  = round(float(np.degrees(np.arctan(
 # no se cambia aquí.
 # Cámara (NoIR ancho)
 CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
-CAMERA_HEIGHT_MM     = 97.0     # supuesto: 90 + 7 mm (LiPo 3S ~24 mm acostada vs Pi4 ~17 mm); medir con regla
-CAMERA_FWD_MM        = 140.0    # supuesto: en el morro, a la altura del sonar frontal; pendiente medir
+CAMERA_HEIGHT_MM     = 85.0     # CAD v2: origen del nodo CameraFrnt (no el centro óptico; la caja llega a 105)
+CAMERA_FWD_MM        = 134.0    # CAD v2: origen del nodo CameraFrnt (caja 114…140)
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
-# Montajes de sensores: (right_mm, fwd_mm, dir_deg). Todos pendiente medir.
-# Laterales a 15 mm hacia adentro del costado (128/2 - 15 = 49).
+# Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
+# El CAD solo trae el ToF izquierdo (x −35.2…−27.7, fwd 100.6…120.6); el derecho se
+# supone espejo. Los ToF laterales y el ultrasónico lateral quedan en fwd distinto.
 SENSOR_MOUNTS = {
-    "us_left":   (-49.0,  50.0, 270.0),
-    "us_right":  ( 49.0,  50.0,  90.0),
-    "us_front":  (  0.0, 138.0,   0.0),
-    "tof_left":  (-49.0,  80.0, 270.0),
-    "tof_right": ( 49.0,  80.0,  90.0),
-    # 5.5 mm adentro de la defensa trasera (-28.5)
-    "tof_rear":  (  0.0, -23.0, 180.0),
-    # Espejo del trasero, 5.5 mm adentro de la defensa delantera
-    # (113 + 28.5 - 5.5). Supuesto, pendiente medir.
-    "tof_front": (  0.0, 136.0,   0.0),
+    "us_left":   (-63.5,  56.3, 270.0),
+    "us_right":  ( 63.5,  56.3,  90.0),
+    "us_front":  (  0.0, 147.6,   0.0),
+    "tof_left":  (-35.2, 110.6, 270.0),
+    "tof_right": ( 35.2, 110.6,  90.0),
+    "tof_rear":  (  0.0, -19.6, 180.0),
+    "tof_front": (  0.0, 141.4,   0.0),
 }
 # Procedencia, para el twin (describe()) y para quien mida.
 VEHICLE_DIMS_PROVENANCE = {
-    "ROBOT_LENGTH_MM": "README v2 (CAD 168.7, ≈170); medir en el carro impreso",
-    "ROBOT_WIDTH_MM": "README v2 (CAD 128)",
-    "WHEELBASE_MM": "README v2 (CAD 112.85)",
-    "REAR_OVERHANG_MM": "derivado (170-113)/2, pendiente medir",
-    "FRONT_OVERHANG_MM": "derivado (170-113)/2, pendiente medir",
-    "TRACK_MM": "supuesto, pendiente medir",
+    "ROBOT_LENGTH_MM": "CAD v2 (GLB); medir en el carro impreso",
+    "ROBOT_WIDTH_MM": "CAD v2 (GLB, con llantas)",
+    "WHEELBASE_MM": "CAD v2 (GLB, 112.85)",
+    "REAR_OVERHANG_MM": "CAD v2 (GLB)",
+    "FRONT_OVERHANG_MM": "CAD v2 (GLB)",
+    "TRACK_MM": "CAD v2 (GLB)",
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
     "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
     "CAMERA_TILT_DEG": "confirmado por usuario",
-    "CAMERA_HEIGHT_MM": "supuesto: +7 mm LiPo vs Pi4, medir con regla",
-    "CAMERA_FWD_MM": "supuesto, pendiente medir",
-    "SENSOR_MOUNTS": "supuesto, pendiente medir (tof_front nuevo)",
+    "CAMERA_HEIGHT_MM": "CAD v2: origen del nodo (no el centro óptico), medir con regla",
+    "CAMERA_FWD_MM": "CAD v2: origen del nodo, medir con regla",
+    "SENSOR_MOUNTS": "CAD v2 (GLB); tof_right supuesto espejo del izquierdo",
     "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
 }
 
