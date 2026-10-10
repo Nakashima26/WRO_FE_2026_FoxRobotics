@@ -116,6 +116,11 @@ PRESETS["hw_nuevo"] = {
         # confirmadas que la corrigieran: sonares contra paredes conocidas.
         "DIGITAL_MAP_WALL_FIX": True,
         "PI_FPS": 1.0 / 0.035,
+        # Compensación del TWIN, no del carro: con los voladizos del CAD v2 (cola a 5 mm
+        # de la madera, wro_field.stall_start_xy) la pared magenta ocupa ~0.25 del cuadro
+        # simulado y el umbral real (0.28, calibrado en el carro) no dispara el INICIO.
+        # En el carro el umbral se calibra con pick_color.py; aquí no se toca config.py.
+        "PARK_PINK_RATIO_MIN": 0.20,
     },
 }
 

@@ -67,6 +67,10 @@ ACEPTADAS: dict[str, tuple[str, str]] = {
         "supuesto; sin preset, TimingParams.pi_proc_s); el carro corre a lo que dé la "
         "Pi (PI_FPS=14 nominal). Medir fps reales"),
     "PI_FPS": ("carro", "ídem pi_period_s: escala las ventanas en frames"),
+    "PARK_PINK_RATIO_MIN": (
+        "twin", "hw_nuevo 0.20 vs 0.28 del carro: con los voladizos del CAD v2 el rosa "
+        "simulado en el cajón sale ~0.25 (antes 0.29); el umbral real se calibra con "
+        "pick_color.py en el carro, no se baja en config.py"),
     "inject_map_truth": (
         "twin", "el twin le da al mapa digital la verdad del campo; el carro usa dir= "
         "del ACK y el cajón como marco. T16infra (Mac, hw_nuevo, SOLO_CAJON=1, 21 "
