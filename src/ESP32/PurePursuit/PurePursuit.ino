@@ -1864,14 +1864,33 @@ void actualizarOdometria() {
 #if FOX_TOF && !defined(FOX_SIL)
 // Varios VL53 en el mismo I2C: todos en reset (XSHUT bajo) y se despiertan de a
 // uno para darle a cada uno su dirección antes de despertar el siguiente.
-static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre) {
+// Tasa del ToF (VL53L1X). La librería de Pololu fija en init() un presupuesto de
+// 50 ms y startContinuous(33) solo cambia el periodo entre mediciones, que no puede
+// ser menor que el presupuesto: antes de este cambio el ToF corría a ~20 Hz, no a
+// 30. Hay que fijar el presupuesto ANTES de startContinuous. Mínimo según ST:
+// 20 ms en modo Short (hasta 50 Hz, alcance ~1.3 m, mejor con luz ambiente) y
+// 33 ms en Long (30 Hz, hasta 4 m). El pasillo mide 1 m: laterales y trasero en
+// Short; el frontal ve la pared del fondo, queda en Long. Más allá de ~1.3 m los
+// laterales/trasero devuelven estado inválido (-1). El lazo principal debe tardar
+// menos que el periodo para aprovecharlo (ver pulseIn bloqueante de los HC-SR04).
+const bool TOF_LAT_TRAS_SHORT      = true;   // false = todos en Long como antes
+const uint16_t TOF_LAT_TRAS_MS     = 20;     // presupuesto = periodo, modo Short
+const uint16_t TOF_FRENTE_MS       = 33;     // presupuesto = periodo, modo Long
+
+static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
+                      bool corto) {
   digitalWrite(xshut, HIGH);
   delay(10);
   dev.setTimeout(500);
   if (!dev.init()) { Serial.print("ToF "); Serial.print(nombre); Serial.println(" fail"); return false; }
   dev.setAddress(addr);
-  dev.setDistanceMode(VL53L1X::Long);
-  dev.startContinuous(33);
+  const bool usaShort = corto && TOF_LAT_TRAS_SHORT;
+  const uint16_t ms = usaShort ? TOF_LAT_TRAS_MS : (corto ? 33 : TOF_FRENTE_MS);
+  dev.setDistanceMode(usaShort ? VL53L1X::Short : VL53L1X::Long);
+  if (!dev.setMeasurementTimingBudget((uint32_t)ms * 1000UL)) {
+    Serial.print("ToF "); Serial.print(nombre); Serial.println(" presupuesto rechazado");
+  }
+  dev.startContinuous(ms);
   return true;
 }
 
@@ -1881,10 +1900,10 @@ void initToF() {
   delay(10);
   // Si uno falla se sigue con los demás (antes un fallo dejaba a los siguientes
   // en reset); el que falló queda en -1.
-  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L");
-  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R");
-  initUnToF(tofB, TOF_XSHUT_B, 0x32, "B");
-  initUnToF(tofF, TOF_XSHUT_F, 0x33, "F");
+  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L", true);
+  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true);
+  initUnToF(tofB, TOF_XSHUT_B, 0x32, "B", true);
+  initUnToF(tofF, TOF_XSHUT_F, 0x33, "F", false);
 }
 
 void leerToF() {
