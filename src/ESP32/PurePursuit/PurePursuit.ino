@@ -1379,6 +1379,12 @@ const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // seguridad: nada más saliendo de la esquina 12 el lateral puede leer
 // "abierto" un instante por la geometría de esa esquina misma.
 PARK_AJ long         PARK_UTURN_ARRANQUE_MM      = 300;
+// Espera extra (mm de odómetro, avanzando recto) entre que la esquina 13 queda
+// detectada y que arranca la U de 180°. 0 = comportamiento anterior (arranca en
+// cuanto se detecta). El disparo por frontal muy cerca (PARK_UTURN_DF_FORZAR_CM)
+// ignora la espera. Se barre con prepark.py --par PARK_UTURN_ESPERA_MM=...
+PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
+long                 parkUturnDisparoOdom        = -1;   // odómetro al armar la espera
 // T15b2 (t15b2_esquina13, "patrón 2", seeds 7/19 CCW): tras la U (fase 25)
 // el carro puede quedar a ext 9-11 cm y la fase 0 (resetParkScan) separa con
 // el tope de rumbo PARK_PUNTA_ANG_MAX_CERCA_DEG=12 (pensado para arrancar a
@@ -2209,7 +2215,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
-  SIL_AJ(PARK_UTURN_ARRANQUE_MM);
+  SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2400,6 +2406,7 @@ void vigilarUturn(long distL, long distR, long distF) {
     // No dejes historia de "esquina" armándose a medias mientras se esquiva
     // un obstáculo de la recta — un hueco lateral visto ahí no es la esquina.
     contadorEsquina13 = max(contadorEsquina13 - 1, 0);
+    parkUturnDisparoOdom = -1;   // se esquiva algo: la espera de la U se rearma después
     return;
   }
   // Piso de seguridad: nada más saliendo de la esquina 12, el lateral puede
@@ -2415,7 +2422,12 @@ void vigilarUturn(long distL, long distR, long distF) {
   // haya armado (p.ej. el lado de la U lee corto porque el poste/pared de la
   // esquina quedó justo ahí) — dispara igual, antes de pegarse a la pared.
   bool fondo = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
-  if (!(enEsquina13 || fondo)) return;
+  if (!(enEsquina13 || fondo || parkUturnDisparoOdom >= 0)) return;   // ya armada: la espera sigue aunque el lateral vuelva a cerrarse
+  // Espera extra antes de cerrar la U: la esquina ya está detectada, se sigue
+  // recto PARK_UTURN_ESPERA_MM más (el frontal muy cerca fuerza el disparo).
+  if (parkUturnDisparoOdom < 0) parkUturnDisparoOdom = odomMm;
+  if (!fondo && (odomMm - parkUturnDisparoOdom) < PARK_UTURN_ESPERA_MM) return;
+  parkUturnDisparoOdom = -1;
   parkUturnPendiente = false;
   // Antes llamaba a iniciarEstacionandoPunta(true) directo, sin consultar
   // PARK_MODO: con PARK_MEDIA_VUELTA=true la carrera completa SIEMPRE
