@@ -23,8 +23,8 @@ void escribirServo(int angulo) {
   int pulso = map(angulo, 0, 180, 500, 2500);
 }
 void f() {
-  escribirServo(constrain(centroServo + out, 30, 160));
-  escribirServo(izq ? 160 : 30);
+  escribirServo(constrain(centroServo + out, 19, 161));
+  escribirServo(izq ? 161 : 19);
   int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
   parkServoU = izq ? centroServo + ticks : centroServo - ticks;
   SIL_AJ(PARK_X_MM);
@@ -100,7 +100,7 @@ def test_preset_contra_ino_sintetico(monkeypatch):
     assert not by["inject_map_truth"].difiere
     assert by["servo.fuera_de_topes"].real.startswith("20 ")
     # El 0..180 de escribirServo no cuenta como tope de maniobra.
-    assert by["servo.topes"].real.startswith("30..160") and not by["servo.topes"].difiere
+    assert by["servo.topes"].real.startswith("19..161") and not by["servo.topes"].difiere
     assert not by["servo.rueda_der"].difiere and not by["servo.rueda_izq"].difiere
     joined = " | ".join(errors)
     for k in ("NO_ESTA", "FOX_SUELTO", "FOX_NADA", "PARK_Y_MM"):

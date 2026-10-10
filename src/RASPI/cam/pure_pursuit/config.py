@@ -99,8 +99,10 @@ MAX_WHEEL_STEER_DEG  = round(float(np.degrees(np.arctan(
 # no se cambia aquí.
 # Cámara (NoIR ancho)
 CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
-CAMERA_HEIGHT_MM     = 85.0     # CAD v2: origen del nodo CameraFrnt (no el centro óptico; la caja llega a 105)
-CAMERA_FWD_MM        = 134.0    # CAD v2: origen del nodo CameraFrnt (caja 114…140)
+# supuesto (se mantiene el valor calibrado; el origen del nodo CameraFrnt del CAD v2 da fwd 134, altura 85 pero no es el centro óptico)
+CAMERA_HEIGHT_MM     = 97.0
+# supuesto (se mantiene el valor calibrado; el origen del nodo CameraFrnt del CAD v2 da fwd 134, altura 85 pero no es el centro óptico)
+CAMERA_FWD_MM        = 140.0
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
 # Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
 # El CAD solo trae el ToF izquierdo (x −35.2…−27.7, fwd 100.6…120.6); el derecho se
@@ -125,8 +127,8 @@ VEHICLE_DIMS_PROVENANCE = {
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
     "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
     "CAMERA_TILT_DEG": "confirmado por usuario",
-    "CAMERA_HEIGHT_MM": "CAD v2: origen del nodo (no el centro óptico), medir con regla",
-    "CAMERA_FWD_MM": "CAD v2: origen del nodo, medir con regla",
+    "CAMERA_HEIGHT_MM": "supuesto: valor calibrado contra el BEV (CAD v2 da 85 en el nodo, no el centro óptico); medir con regla",
+    "CAMERA_FWD_MM": "supuesto: valor calibrado contra el BEV (CAD v2 da 134 en el nodo); medir con regla",
     "SENSOR_MOUNTS": "CAD v2 (GLB); tof_right supuesto espejo del izquierdo",
     "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
 }

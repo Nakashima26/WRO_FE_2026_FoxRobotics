@@ -162,6 +162,8 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
 int centroServo    = 90;
+const int SERVO_MIN_DEG = 19;   // 90 - 71: tope derecho (cremallera v2, README 2.4)
+const int SERVO_MAX_DEG = 161;  // 90 + 71: tope izquierdo
 // Dirección v2 (README §2.4): 44.54° de rueda equivalente (modelo bicicleta) a ±71° de
 // servo = 0.627°/tick, o sea 43.91° a 70 ticks (la fórmula de las U usa `delta / 43.91 * 70`).
 // Debe coincidir con config.MAX_WHEEL_STEER_DEG * 70 / SERVO_FULL_LOCK_CMD_DEG.
@@ -1950,7 +1952,7 @@ void decidirManiobra(long distL, long distR) {
 void servoRumboPark(float rumboRef) {
   float out = PARK_KP_ANG * (rumboRef - anguloGyro) - PARK_KD_RATE * gyroRate;
   out = constrain(out, (float)-PARK_SERVO_MAX, (float)PARK_SERVO_MAX);
-  escribirServo(constrain(centroServo + (int)out, 30, 160));
+  escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
 
 // ── Trim de rumbo contra la pared (ver el bloque PARK_TRIM_*) ────────────────
@@ -2212,7 +2214,7 @@ void iniciarEstacionandoRetorno() {
   parkFase         = 20;
   parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorCoast();
-  escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? 160 : 30));
+  escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG));
   Serial.println("==================================================");
   Serial.print("-> MEDIA VUELTA (giro 13), luego paralelo. Pared del regreso: ");
   Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
@@ -2380,7 +2382,7 @@ void vigilarUturn(long distL, long distR, long distF) {
 void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG) {
   float out = kpAng * (rumboRef - anguloGyro) - PARK_PUNTA_KD_RATE * gyroRate;
   out = constrain(out, (float)-PARK_PUNTA_SERVO_MAX, (float)PARK_PUNTA_SERVO_MAX);
-  escribirServo(constrain(centroServo + (int)out, 30, 160));
+  escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
 
 void finalizarPunta(const char *motivo) {
@@ -2552,7 +2554,7 @@ void aplicarReversaHoldClamp(float headingRef, float outMax) {
   // Signo NEGADO vs el PID de adelante: en reversa, servo izq -> el chasis va der.
   float out = -(KpRev * err + KiRev * integralRev + KdRev * deriv);
   out = constrain(out, -outMax, outMax);
-  escribirServo(constrain(centroServo + (int)out, 30, 160));
+  escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
 // Mantiene anguloGyro en headingRef mientras el carro retrocede recto en fase 4.
 // Escribe el servo directo (como escribirServo(centroServo) al que reemplaza).
@@ -3024,7 +3026,7 @@ void controlPID(long distL, long distR) {
       }
     }
 
-    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), 30, 160);
+    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), SERVO_MIN_DEG, SERVO_MAX_DEG);
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
@@ -3056,7 +3058,7 @@ void controlPID(long distL, long distR) {
     }
 
     int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
-    servoAngle = constrain(servoAngle + (int)wallPanic, 30, 160);
+    servoAngle = constrain(servoAngle + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
 
@@ -3076,7 +3078,7 @@ void controlPID(long distL, long distR) {
   }
 
   outputFinal = constrain(outputFinal, -25, 25);
-  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, 30, 160));
+  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG));
   setMotor(velocidadMotor);
 
   // ── Debug UART ────────────────────────────────────────────────────────────
@@ -3385,7 +3387,7 @@ void loop() {
         motorAdelante();
         // El servo llega a tope ANTES de rodar (una sola vez: con delay en cada
         // loop el chequeo de ángulo corría cada ~100 ms y la fase 1 se pasaba ~25°).
-        escribirServo(inicioGirarDer ? 30 : 160);
+        escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);
         delay(100);
         Serial.print("INICIO fase 1 SWING salida=");
         Serial.print(inicioGirarDer ? "DER" : "IZQ");
@@ -3416,7 +3418,7 @@ void loop() {
       if (inicioFase == 1) {
         int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM);
         motorAdelante();
-        escribirServo(inicioGirarDer ? 30 : 160);   // full hacia el lado de salida
+        escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         setMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
         bool swingListo   = (deltaIni >= (float)(angSwing - INICIO_OVERSHOOT_DEG));
@@ -3467,7 +3469,7 @@ void loop() {
       // ── Fase 3: CONTRA — contravuelta para re-alinear con la recta ─────────
       if (inicioFase == 3) {
         motorAdelante();
-        escribirServo(inicioGirarDer ? 160 : 30);   // full al lado CONTRARIO
+        escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);   // full al lado CONTRARIO
         setMotor(INICIO_PWM);
         // Corrige solo INICIO_CONTRA_CORRIGE_DEG desde el pico (o llega al piso de
         // margen si el pico fue chico); el residuo lo cierra la reversa (fase 5).
@@ -3794,7 +3796,7 @@ void loop() {
       else                   velocidadMotor = 115;
 
       setMotor(velocidadMotor);
-      escribirServo(direccionIzquierda ? 160 : 30);
+      escribirServo(direccionIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG);
 
       if (delta >= AngGiro) {
         escribirServo(centroServo);
@@ -4090,7 +4092,7 @@ void loop() {
       float err = grObjetivo - anguloGyro;
       int pwmGr = (fabs(err) > 20.0f) ? GR_PWM : GR_PWM_FIN;
       motorAdelante();
-      int servoGr = constrain(centroServo + (int)(GR_KP * err - GR_KD * gyroRate), 30, 160);
+      int servoGr = constrain(centroServo + (int)(GR_KP * err - GR_KD * gyroRate), SERVO_MIN_DEG, SERVO_MAX_DEG);
       // Giro a la derecha + verde adelante: el lado de paso es la izquierda
       // (exterior). El servo no baja del piso, así el arco no se mete en la lata.
       bool verdeAdelante = piGv && (millis() - lastPiMsgMs < 500);
@@ -4231,7 +4233,7 @@ void loop() {
           else if (delta < EXIT_DEG - 20) velocidadMotor = 145;
           else                            velocidadMotor = 100;   // último tramo: crawl
           motorAdelante();
-          escribirServo(maniobraGirarDer ? 30 : 160);    // servo hacia el giro
+          escribirServo(maniobraGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);    // servo hacia el giro
           setMotor(velocidadMotor);
         }
 
@@ -4395,8 +4397,8 @@ void loop() {
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
-      int   servoHaciaPared = parkParedEsIzquierda ? 160 : 30;      // tope hacia la pared exterior
-      int   servoDesdePared = parkParedEsIzquierda ? 30 : 160;      // contravuelta hacia el interior
+      int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
+      int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
       if (piPark >= 1) parkRosaVisto = true;
 
@@ -5460,11 +5462,11 @@ void loop() {
     case ESTACIONANDO_PUNTA: {
       long  extRaw     = puntaParedIzq ? distL_raw : distR_raw;
       float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared" del regreso
-      int   servoTope  = puntaParedIzq ? 160 : 30;       // servo a tope hacia la pared del regreso
+      int   servoTope  = puntaParedIzq ? SERVO_MAX_DEG : SERVO_MIN_DEG;       // servo a tope hacia la pared del regreso
       // La U gira al lado contrario: hacia la pared que traes en la recta de salida.
       bool  uturnIzq   = !puntaParedIzq;
       float haciaAhora = uturnIzq ? 1.0f : -1.0f;
-      int   servoU     = uturnIzq ? 160 : 30;
+      int   servoU     = uturnIzq ? SERVO_MAX_DEG : SERVO_MIN_DEG;
       long  extAhora   = uturnIzq ? distL_raw : distR_raw;
       puntaExtRaw = extRaw;
       if (piPark >= 1) puntaRosaVisto = true;

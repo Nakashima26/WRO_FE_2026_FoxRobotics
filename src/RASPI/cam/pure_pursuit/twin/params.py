@@ -44,13 +44,12 @@ class VehicleParams:
 class SteeringParams:
     # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
     # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
-    # dos lados (mismo piñón). Los topes del .ino siguen en 30 y 160 (−60/+70), así
-    # que a la derecha el firmware llega a ~37.6° y a la izquierda a ~43.9°.
+    # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 19..161 (±71°).
     gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
     gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
     servo_center_deg: float = 90.0
-    servo_min_deg: float = 30.0
-    servo_max_deg: float = 160.0
+    servo_min_deg: float = 19.0
+    servo_max_deg: float = 161.0
     slew_deg_per_s: float = 600.0
     deadband_deg: float = 0.5
 
@@ -60,8 +59,8 @@ class SteeringParams:
             "supuesto",
             "README v2 §2.4 (CAD): 53.1° int./37.0° ext. a ±71° de servo → 44.5° equivalente "
             "bicicleta (config.MAX_WHEEL_STEER_DEG). Lineal en el comando (en realidad la "
-            "cremallera es algo no lineal). Topes 30/160 = firmware (carro viejo); v2 "
-            "alcanzaría ±71° (19..161) — pendiente decidir si se amplía el tope inferior",
+            "cremallera es algo no lineal). Topes 19/161 = ±71° (cremallera v2, README §2.4); "
+            "firmware y twin igualados en 19..161",
         )
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")
