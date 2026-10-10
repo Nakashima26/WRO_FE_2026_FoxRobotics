@@ -1,0 +1,104 @@
+--- a/src/ESP32/PurePursuit/PurePursuit.ino
++++ b/src/ESP32/PurePursuit/PurePursuit.ino
+@@ -2565,6 +2565,61 @@
+ // Sensores
+ // ═══════════════════════════════════════════════════════════════════════════════
+ 
++// ── Instrumentacion del periodo de loop() ─────────────────────────────────────
++// Mide el tiempo entre dos entradas consecutivas a loop() (incluye pulseIn de los
++// HC-SR04, mpu.update, ToF, readPiSerial, los Serial.print de debug y los delay()).
++// Una linea por segundo por el USB (Serial; NO por Serial2: no cambia el largo del ACK que
++// ve la Pi): "[LOOP] n= min= mean= max= >10ms= >20ms= >40ms=" (valores en us).
++// FOX_LOOPSTAT=0 la quita por completo; FOX_LOOPSTAT_ACK=1 ademas agrega ,lpm=,lpx= al V2.
++#ifndef FOX_LOOPSTAT
++#define FOX_LOOPSTAT 1
++#endif
++#ifndef FOX_LOOPSTAT_ACK
++#define FOX_LOOPSTAT_ACK 0     // OJO: alarga el ACK (ver nota de riesgos)
++#endif
++#ifndef FOX_LOOP_PERIOD_US
++#define FOX_LOOP_PERIOD_US 0   // >0: periodo fijo de loop() (obligatorio con pings asincronos)
++#endif
++#ifndef FOX_MPU_ONCE
++#define FOX_MPU_ONCE 1         // 1 = quita el 2o mpu.update() de loop(); 0 = como antes
++#endif
++#if FOX_LOOPSTAT
++static uint32_t lsPrevUs = 0, lsMin = 0xFFFFFFFFu, lsMax = 0;
++static uint32_t lsN = 0, lsGt10 = 0, lsGt20 = 0, lsGt40 = 0;
++static uint64_t lsSum = 0;
++static unsigned long lsPrintMs = 0;
++static unsigned long lsLastMeanUs = 0, lsLastMaxUs = 0;
++static void loopStat() {
++  uint32_t now = micros();
++  if (lsPrevUs != 0) {
++    uint32_t dt = now - lsPrevUs;
++    if (dt < lsMin) lsMin = dt;
++    if (dt > lsMax) lsMax = dt;
++    lsSum += dt;
++    lsN++;
++    if (dt > 10000u) lsGt10++;
++    if (dt > 20000u) lsGt20++;
++    if (dt > 40000u) lsGt40++;
++  }
++  lsPrevUs = now;
++  if (millis() - lsPrintMs >= 1000UL) {
++    lsPrintMs = millis();
++    if (lsN > 0) {
++      lsLastMeanUs = (unsigned long)(lsSum / lsN);
++      lsLastMaxUs  = (unsigned long)lsMax;
++      Serial.print("\n[LOOP] n=");   Serial.print((unsigned long)lsN);
++      Serial.print(" min=");         Serial.print((unsigned long)lsMin);
++      Serial.print(" mean=");        Serial.print(lsLastMeanUs);
++      Serial.print(" max=");         Serial.print(lsLastMaxUs);
++      Serial.print(" >10ms=");       Serial.print((unsigned long)lsGt10);
++      Serial.print(" >20ms=");       Serial.print((unsigned long)lsGt20);
++      Serial.print(" >40ms=");       Serial.println((unsigned long)lsGt40);
++    }
++    lsMin = 0xFFFFFFFFu; lsMax = 0; lsN = lsGt10 = lsGt20 = lsGt40 = 0; lsSum = 0;
++  }
++}
++#endif
++
+ long leerDistancia(int trig, int echo) {
+   digitalWrite(trig, LOW);
+   delayMicroseconds(2);
+@@ -2787,6 +2842,10 @@
+     // largo del ACK mueve los tiempos de UART). La Pi trata tF ausente = sin lectura.
+     Serial2.print(",tL=-1,tR=-1,tB=-1");
+ #endif
++#if FOX_LOOPSTAT && FOX_LOOPSTAT_ACK
++    Serial2.print(",lpm=");  Serial2.print(lsLastMeanUs);   // periodo medio / max de loop() del ultimo segundo (us)
++    Serial2.print(",lpx=");  Serial2.print(lsLastMaxUs);
++#endif
+     Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
+     Serial2.println();
+     return;
+@@ -3193,6 +3252,14 @@
+ // ═══════════════════════════════════════════════════════════════════════════════
+ 
+ void loop() {
++#if FOX_LOOP_PERIOD_US > 0
++  { static uint32_t lpTick = 0;
++    while ((uint32_t)(micros() - lpTick) < (uint32_t)FOX_LOOP_PERIOD_US) delayMicroseconds(50);
++    lpTick = micros(); }
++#endif
++#if FOX_LOOPSTAT
++  loopStat();
++#endif
+   mpu.update();
+   actualizarGyro();
+ #if FOX_TOF
+@@ -3284,7 +3351,13 @@
+     ultPingPuntaMs = millis();
+   }
+ 
++  // 2o mpu.update() eliminado (FOX_MPU_ONCE=1): era una 2a lectura I2C de 14 bytes
++  // (~1.5-2 ms a 100 kHz) casi pegada a la 1a. actualizarGyro() se conserva: integra el
++  // MISMO gz sobre el dt transcurrido y aplica el EMA de gyroRate 2 veces por loop, igual
++  // que antes (no cambia la constante de tiempo del filtro). FOX_MPU_ONCE=0 vuelve a lo anterior.
++#if !FOX_MPU_ONCE
+   mpu.update();
++#endif
+   actualizarGyro();
+ 
+   long distL_raw = leerL ? leerDistancia(TRIG_L, ECHO_L) : (long)distL_filtrada;

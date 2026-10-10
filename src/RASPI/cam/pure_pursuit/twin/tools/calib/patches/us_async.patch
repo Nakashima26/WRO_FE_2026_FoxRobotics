@@ -1,0 +1,114 @@
+--- a/src/ESP32/PurePursuit/PurePursuit.ino
++++ b/src/ESP32/PurePursuit/PurePursuit.ino
+@@ -2637,6 +2637,82 @@
+   return dist;
+ }
+ 
++// ── Pings HC-SR04 NO bloqueantes (FOX_US_ASYNC=1; solo hardware real) ─────────────
++// El pulseIn() de leerDistancia() bloquea hasta 7 ms por sensor (21 ms con los 3 sin eco). Aqui
++// el eco se mide por interrupcion y usService() avanza UN ping por llamada (L, R, F en ese orden y
++// de uno en uno, como antes: sin crosstalk) en ~12 us. SOLO se usa en el bloque principal de
++// loop(); los demas leerDistancia() (INICIO, estacionamiento, setup) siguen siendo bloqueantes y
++// frescos. Requiere FOX_LOOP_PERIOD_US > 0 (ver nota de riesgos).
++#ifndef FOX_US_ASYNC
++#define FOX_US_ASYNC 0
++#endif
++#if FOX_US_ASYNC && !defined(FOX_SIL)
++struct UsCh {
++  uint8_t trig, echo;
++  volatile uint32_t tRise, tFall;
++  volatile bool gotRise, gotFall;
++  uint32_t tTrig;
++  bool busy;
++  long dist;
++};
++static UsCh usCh[3] = {
++  {TRIG_L, ECHO_L, 0, 0, false, false, 0, false, 200},
++  {TRIG_R, ECHO_R, 0, 0, false, false, 0, false, 200},
++  {TRIG_F, ECHO_F, 0, 0, false, false, 0, false, 200},
++};
++static int usCur = 0;
++static void IRAM_ATTR usIsr(void *arg) {
++  UsCh *c = (UsCh *)arg;
++  uint32_t t = micros();
++  if (digitalRead(c->echo)) { c->tRise = t; c->gotRise = true; c->gotFall = false; }
++  else if (c->gotRise && !c->gotFall) { c->tFall = t; c->gotFall = true; }
++}
++static void usInit(long dL, long dR, long dF) {
++  usCh[0].dist = dL; usCh[1].dist = dR; usCh[2].dist = dF;
++  for (int i = 0; i < 3; i++)
++    attachInterruptArg(digitalPinToInterrupt(usCh[i].echo), usIsr, &usCh[i], CHANGE);
++}
++// mask: bit0=L bit1=R bit2=F; los sensores apagados (parkSoloExterior) se saltan.
++static void usService(int mask) {
++  UsCh &c = usCh[usCur];
++  if (!c.busy) {
++    if (!(mask & (1 << usCur))) { usCur = (usCur + 1) % 3; return; }
++    c.gotRise = c.gotFall = false;
++    digitalWrite(c.trig, LOW);  delayMicroseconds(2);
++    digitalWrite(c.trig, HIGH); delayMicroseconds(10);
++    digitalWrite(c.trig, LOW);
++    c.tTrig = micros();
++    c.busy = true;
++    return;
++  }
++  bool fin = false;
++  if (c.gotFall) {
++    long dur = (long)(c.tFall - c.tRise);
++    long d = (long)(dur * 0.034 / 2);                 // misma conversion que leerDistancia()
++    c.dist = (d == 0 || d > 200) ? 200 : d;
++    fin = true;
++  } else if ((uint32_t)(micros() - c.tTrig) > 7000u) { // = timeout de pulseIn(..., 7000)
++    c.dist = 200;
++    fin = true;
++  }
++  if (fin) { c.busy = false; usCur = (usCur + 1) % 3; }
++}
++static long usUltimo(int i) { return usCh[i].dist; }
++#else
++static void usInit(long, long, long) {}
++static void usService(int) {}
++#endif
++// Lectura del bloque principal de loop(): ultimo valor (async) o ping bloqueante (como antes).
++static long usRead(int idx, int trig, int echo) {
++#if FOX_US_ASYNC && !defined(FOX_SIL)
++  (void)trig; (void)echo;
++  return usUltimo(idx);
++#else
++  (void)idx;
++  return leerDistancia(trig, echo);
++#endif
++}
++
+ float filtroEMA(float nueva, float anterior) {
+   return alpha * nueva + (1.0 - alpha) * anterior;
+ }
+@@ -3205,6 +3281,7 @@
+   distL_filtrada = leerDistancia(TRIG_L, ECHO_L);
+   distR_filtrada = leerDistancia(TRIG_R, ECHO_R);
+   distF_filtrada = leerDistancia(TRIG_F, ECHO_F);
++  usInit((long)distL_filtrada, (long)distR_filtrada, (long)distF_filtrada);   // no-op si FOX_US_ASYNC=0
+ 
+   lastPIDTime  = millis();
+   lastGyroTime = millis();
+@@ -3360,8 +3437,9 @@
+ #endif
+   actualizarGyro();
+ 
+-  long distL_raw = leerL ? leerDistancia(TRIG_L, ECHO_L) : (long)distL_filtrada;
+-  long distR_raw = leerR ? leerDistancia(TRIG_R, ECHO_R) : (long)distR_filtrada;
++  usService((leerL ? 1 : 0) | (leerR ? 2 : 0) | (leerF ? 4 : 0));   // no-op si FOX_US_ASYNC=0
++  long distL_raw = leerL ? usRead(0, TRIG_L, ECHO_L) : (long)distL_filtrada;
++  long distR_raw = leerR ? usRead(1, TRIG_R, ECHO_R) : (long)distR_filtrada;
+   distL_filtrada = filtroEMA(distL_raw, distL_filtrada);
+   distR_filtrada = filtroEMA(distR_raw, distR_filtrada);
+ 
+@@ -3372,7 +3450,7 @@
+   // cerrada sirve para frenar un poco al acercarse a la pared de enfrente
+   // (FRONT_SLOWDOWN_CM). Mediana de 3 (rechaza picos) + un EMA suave encima.
+   // Apagado = 200 ("nada enfrente") para la lógica; el filtrado conserva su valor.
+-  long distF_med = leerF ? medianaFront(leerDistancia(TRIG_F, ECHO_F)) : 200;
++  long distF_med = leerF ? medianaFront(usRead(2, TRIG_F, ECHO_F)) : 200;
+   if (leerF) distF_filtrada = filtroEMA(distF_med, distF_filtrada);
+   long distF = (long)distF_filtrada;
+ 
