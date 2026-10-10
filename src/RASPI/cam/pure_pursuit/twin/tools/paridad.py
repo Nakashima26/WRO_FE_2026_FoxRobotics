@@ -233,8 +233,13 @@ def _servo_rows(info: InoInfo, cfg: dict[str, Any], errors: list[str]) -> list[R
            if m_esc else range(0))
     clamps: dict[tuple[int, int], list[int]] = {}
     locks: dict[int, list[int]] = {}
+    # El .ino v2 usa SERVO_MIN_DEG/SERVO_MAX_DEG en vez de literales: se resuelven.
+    topes_ino = {n: info.consts[n][0].val for n in ("SERVO_MIN_DEG", "SERVO_MAX_DEG")
+                 if n in info.consts}
     for i, ln in enumerate(lines, 1):
         code = ln.split("//", 1)[0]
+        for n, v in topes_ino.items():
+            code = re.sub(rf"\b{n}\b", str(v), code)
         if "ervo" not in code or i in esc:    # escribirServo va en su propia fila
             continue
         if "constrain(" in code:
