@@ -23,9 +23,6 @@
  */
 
 #include <Wire.h>
-#include <MPU6050_tockn.h>
-
-MPU6050 mpu(Wire);
 
 // ── Pines ─────────────────────────────────────────────────────────────────────
 #define TRIG_L      27
@@ -40,11 +37,32 @@ MPU6050 mpu(Wire);
 #define TRIG_F      14   // HC-SR04 frontal (ronda de obstáculos: CRUCERO/MANIOBRA)
 #define ECHO_F      33
 
+#if defined(FOX_SIL)
 #ifndef FOX_ENCODER
 #define FOX_ENCODER 0
 #endif
 #ifndef FOX_TOF
 #define FOX_TOF 0
+#endif
+#ifndef FOX_BNO
+#define FOX_BNO 0
+#endif
+#else
+// carro v2: encoder, 4 ToF y BNO085 por defecto; compilar con -DFOX_ENCODER=0 etc. para el carro viejo
+#ifndef FOX_ENCODER
+#define FOX_ENCODER 1
+#endif
+#ifndef FOX_TOF
+#define FOX_TOF 1
+#endif
+#ifndef FOX_BNO
+#define FOX_BNO 1
+#endif
+#endif
+
+#if !FOX_BNO || defined(FOX_SIL)
+#include <MPU6050_tockn.h>
+MPU6050 mpu(Wire);
 #endif
 
 #if FOX_ENCODER && !defined(FOX_SIL)
@@ -56,14 +74,26 @@ MPU6050 mpu(Wire);
 
 #if FOX_TOF && !defined(FOX_SIL)
 #include <VL53L1X.h>
-#define TOF_XSHUT_L 25
-#define TOF_XSHUT_R 4
-#define TOF_XSHUT_B 5
-// Frontal (hardware nuevo). GPIO15 es strapping con pull-up por defecto: el
-// pull-up del XSHUT del módulo VL53 no cambia el arranque. Confirmar con la PCB.
-#define TOF_XSHUT_F 15
+// pinout probado en TofBnoTest/TofTest4 (v2). GPIO0 y GPIO15 son pines de strapping del ESP32: el módulo no debe forzarlos a nivel que cambie el arranque
+#define TOF_XSHUT_F 0
+#define TOF_XSHUT_L 15
+#define TOF_XSHUT_R 5
+#define TOF_XSHUT_B 4
 #endif
 #define TOF_N 4   // 0=L 1=R 2=trasero 3=frontal (mismo orden en el ACK y en el SIL)
+
+#if FOX_BNO && !defined(FOX_SIL)
+// BNO085 en modo UART-RVC: TX del BNO -> GPIO25 (Serial1 RX). Paquetes de 19 bytes a 115200.
+const int BNO_RX_PIN = 25;
+// VERIFICAR: girar el carro a la derecha a mano; anguloGyro debe subir igual que con el MPU6050; si baja, poner -1.0f
+const float BNO_YAW_SIGN = 1.0f;
+float bnoYaw=0, bnoYawPrev=0;
+bool bnoYawValid=false, bnoYawPrevValid=false;
+uint32_t bnoLastMs=0, bnoPrevMs=0;
+uint8_t bnoBuf[19];
+int bnoN=0;
+uint32_t bnoMalos=0;
+#endif
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
@@ -2607,7 +2637,42 @@ float filtroEMA(float nueva, float anterior) {
   return alpha * nueva + (1.0 - alpha) * anterior;
 }
 
+#if FOX_BNO && !defined(FOX_SIL)
+// Lee todos los bytes disponibles de Serial1 (BNO085 en UART-RVC). Copia de BnoRvcTest.ino.
+void leerBNO() {
+  while (Serial1.available()) {
+    uint8_t b = Serial1.read();
+    if (bnoN == 0 && b != 0xAA) continue;              // busca el primer 0xAA
+    if (bnoN == 1 && b != 0xAA) { bnoN = 0; continue; } // el segundo también debe ser 0xAA
+    bnoBuf[bnoN++] = b;
+    if (bnoN < 19) continue;
+    bnoN = 0;
+    uint8_t suma = 0;
+    for (int i = 2; i < 18; i++) suma += bnoBuf[i];
+    if (suma != bnoBuf[18]) { bnoMalos++; continue; }   // checksum malo: resincroniza
+    float bnoYawNuevo = (int16_t)(bnoBuf[3] | (bnoBuf[4] << 8)) * 0.01f;
+    bnoYawPrev = bnoYaw; bnoYawPrevValid = bnoYawValid; bnoPrevMs = bnoLastMs;
+    bnoYaw = bnoYawNuevo; bnoYawValid = true; bnoLastMs = millis();
+  }
+}
+#endif
+
 void actualizarGyro() {
+#if FOX_BNO && !defined(FOX_SIL)
+  // Integra solo cuando llegó un paquete nuevo: al integrar, bnoPrevMs = bnoLastMs
+  // y las llamadas siguientes no cuentan el mismo paquete dos veces.
+  if (!bnoYawPrevValid || bnoLastMs == bnoPrevMs) return;
+  float d = bnoYaw - bnoYawPrev;
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  d *= BNO_YAW_SIGN;
+  float dt = (bnoLastMs - bnoPrevMs) / 1000.0f;
+  bnoPrevMs = bnoLastMs;
+  anguloGyro += d;
+  anguloTotal += d;
+  float gz = d / dt;
+  gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
+#else
   unsigned long now = millis();
   float dt = (now - lastGyroTime) / 1000.0;
   lastGyroTime = now;
@@ -2617,6 +2682,7 @@ void actualizarGyro() {
   anguloGyro += gz * dt;
   anguloTotal += gz * dt;
   gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
+#endif
 }
 
 bool detectarEsquina(long distL, long distR, long distF) {
@@ -2807,6 +2873,10 @@ void parsePiMessage(String line) {
     // Sin tF a propósito: el ACK del carro actual queda byte a byte igual (el
     // largo del ACK mueve los tiempos de UART). La Pi trata tF ausente = sin lectura.
     Serial2.print(",tL=-1,tR=-1,tB=-1");
+#endif
+#if FOX_BNO && !defined(FOX_SIL)
+    Serial2.print(",bno=");  Serial2.print(bnoYaw, 1);
+    Serial2.print(",bnoM="); Serial2.print(bnoMalos);
 #endif
     Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
     Serial2.println();
@@ -3141,6 +3211,9 @@ void setup() {
   Serial2.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
 
   Wire.begin();
+#if FOX_BNO && !defined(FOX_SIL)
+  // Carro v2: sin MPU6050. El yaw viene del BNO085 (Serial1 se abre al final de setup).
+#else
   mpu.begin();
   mpu.calcGyroOffsets(true);
 
@@ -3149,6 +3222,7 @@ void setup() {
   Serial.println(oz);
   gyroScale = (abs(oz) > 7.0) ? 2.0 : 1.0;
   Serial.println(gyroScale == 2.0 ? "Offset sucio → /2" : "Offset limpio");
+#endif
 
   pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
   pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
@@ -3206,6 +3280,11 @@ void setup() {
     delay(50);
   }
   Serial.println("Sistema listo (PurePursuit)");
+#if FOX_BNO && !defined(FOX_SIL)
+  // Se abre al final de setup: con el buffer grande no se pierden paquetes RVC mientras loop() se tarda.
+  Serial1.setRxBufferSize(1024);
+  Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+#endif
 }
 
 
@@ -3214,7 +3293,11 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+#if FOX_BNO && !defined(FOX_SIL)
+  leerBNO();
+#else
   mpu.update();
+#endif
   actualizarGyro();
 #if FOX_TOF
 #if defined(FOX_SIL)
@@ -3305,8 +3388,12 @@ void loop() {
     ultPingPuntaMs = millis();
   }
 
+#if FOX_BNO && !defined(FOX_SIL)
+  // BNO: leerBNO() y actualizarGyro() ya corrieron al inicio de loop() (sin paquete nuevo no integran).
+#else
   mpu.update();
   actualizarGyro();
+#endif
 
   long distL_raw = leerL ? leerDistancia(TRIG_L, ECHO_L) : (long)distL_filtrada;
   long distR_raw = leerR ? leerDistancia(TRIG_R, ECHO_R) : (long)distR_filtrada;
