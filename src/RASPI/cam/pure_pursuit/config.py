@@ -862,6 +862,11 @@ FAR_LINE_MAX_LAT_MM  = 1400.0
 # y ToF trasero. La cámara solo vota el asiento. El volante lo usa si
 # DIGITAL_MAP_STEER está prendido.
 DIGITAL_MAP_STEER = False
+# Ruta de una vuelta calculada UNA vez con route_planner (mínimo tiempo con
+# curvatura, pilares por color, paredes) en vez de rearmar _build_line en cada
+# frame. Solo tiene efecto con el mapa digital (y DIGITAL_MAP_STEER para que
+# mande el volante). Apagado: comportamiento idéntico al anterior.
+ROUTE_PLANNER = False
 # Recta del cajón = marco del mapa (convención, no dato del campo: el tapete es
 # simétrico a 90°). El carro real no tiene de dónde leerla y no la necesita.
 DIGITAL_MAP_PARKING = "W"
