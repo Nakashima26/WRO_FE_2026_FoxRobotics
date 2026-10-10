@@ -56,3 +56,6 @@ Reglas de trabajo:
 - Si un dato verificado contradice algo que dijiste, gana el dato y corrígete explícitamente.
 - Avísame de cada hallazgo o cambio de plan; no esperes al final.
 - Yo hago push desde GitHub Desktop.
+
+> 2026-10-10: leer primero docs/HANDOFF.md (Estado 2026-10-10) y docs/PLAN_v2.md; el estado de 2026-10-05 de abajo es histórico.
+

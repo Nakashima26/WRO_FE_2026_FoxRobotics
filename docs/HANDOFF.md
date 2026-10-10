@@ -20,10 +20,11 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 - Tests: `../../../.venv-sim/Scripts/python -m pytest pure_pursuit/twin/tests -q` (falla conocida previa: `test_corner_hint::test_v2_carries_hint_when_enabled`).
 
 ## Presets
-- `hw_nuevo` = hardware de competencia: 180×130 mm, batalla 113, rueda 46.32°, cámara 45° a ~97 mm,
-  encoder en motor, 4 ToF (L/R/F/B), IMU BNO085, Pi 5 (~28 fps), corrección del mapa con sonares.
-  **Servo de dirección 0-180** (dato del usuario, dicho varias veces): el firmware y el twin todavía usan
-  los topes 30/160 del carro viejo — ver "Pendiente de medir" y el frente `t16servo`.
+- `hw_nuevo` = hardware de competencia v2 (CAD GLB, 2026-10-09): 169.4×132 mm, batalla 113, giro
+  44.54° equivalente (53.1° rueda interior), cámara 45° a ~97 mm (supuesto), encoder en motor, 4 ToF,
+  IMU BNO085, Pi 5 a 40 fps (`pi_period_s` 0.025), corrección del mapa con sonares.
+  **Servo 19..161 (±71°)** desde 2026-10-09. Los datos viejos de este bullet (180×130, 46.32°, 30/160, 28 fps)
+  ya no valen: ver la sección "Estado 2026-10-10" más abajo.
   **Todo el trabajo nuevo se mide aquí.**
 - `giro_rapido` = carro actual (PWM sin encoder, MPU6050, 14 fps). Solo referencia.
 - Dimensiones/montajes: fuente única en `config.py` (bloque GEOMETRÍA DEL VEHÍCULO).
@@ -66,6 +67,95 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
 - No sondear con `sleep`: ssh en primer plano con timeout largo, o Bash `run_in_background` y esperar aviso.
 - `SOLO_CAJON=1 SEEDS="..." pure_pursuit/twin/tools/all.sh <tag> [jobs]` (en la Mac cambiar la ruta del
   python del script o llamar drive.py directo); `summ3.py runs/<tag> <seeds>` resume.
+
+## Estado 2026-10-10 (rama `fox/seed-3170839-red-object`, HEAD b1833b0, NO pusheada)
+Plan escrito con lista de tareas: `docs/PLAN_v2.md`. Lo de abajo es lo VERIFICADO; lo marcado "supuesto" o
+"sin medir" no lo está. Las cifras del twin son de la Mac (arm64), nunca comparar con Windows.
+
+**Geometría v2** (fuente: `VehicleDirTest_V2.glb` del usuario + README de `origin/main` 8117629)
+- `config.py`: largo 169.4 (−21.8…147.6 desde el eje trasero), ancho 132 (con llantas; el 128 del README
+  no las incluye), batalla 113 (CAD 112.85), vía 110, voladizos 21.8/34.6, montajes de sensores en la CARA que
+  mide (ToF izq/der ±35.2 fwd 110.6, trasero −19.6, frontal 141.4; US lat ±63.5 fwd 56.3, frontal 147.6).
+  El GLB solo trae el ToF izquierdo; el derecho es espejo (supuesto).
+- Dirección: rueda interior 53.1° / exterior 37.0° a ±71° de servo (README §2.4, piñón 19T, CAD). El twin es
+  bicicleta: ángulo equivalente 44.54° (`MAX_WHEEL_STEER_DEG`, derivado: `atan(L/(L/tan53.1+T/2))`, T=60 pivotes),
+  ganancia simétrica `44.54·90/71`. El GLB está en pose recta: NO confirma los 53°/±71° (vienen del README).
+- Servo: `SERVO_MIN_DEG=19`, `SERVO_MAX_DEG=161` en el .ino y `servo_min/max_deg` en `twin/params.py`
+  (antes 30/160 del carro viejo, que dejaban el giro a la derecha en ~37.6° y rompían la salida del cajón).
+  U de 180: `ticks = delta/43.91*70` (43.91 = giro a 70 ticks).
+- **Hallazgo abierto**: la Pi manda `steer_deg` como ángulo de rueda y el ESP lo aplica 1:1 como grados de
+  servo (`ppServoGain=1.0`), pero 1° servo ≈ 0.627° rueda → el pure pursuit trabaja a ~63 % de la ganancia
+  que cree. Probar `ppServoGain=1.6` en el twin EMPEORA (1/41 terminan, jitter 15.5°/frame): no tocar sin medir
+  servo→rueda en el carro (`twin/tools/calib/`).
+- Cámara: `CAMERA_FWD_MM=140`, `CAMERA_HEIGHT_MM=97` son SUPUESTOS no medidos (el nodo `CameraFrnt` del GLB da
+  134/85 pero es el origen del nodo, no el centro óptico). El usuario dice: no asumir dónde va la cámara;
+  `bev_calib.npz` es viejo y no se ha recalibrado. No usar la homografía para sacar la pose.
+
+**Pi 5 / cámara** (traído de `origin/main`)
+- `vision.open_camera`: tuning `camera_tuning/imx219_noir_wro_pi5.json` + ganancias `<1.10,1.51>`, `format=BGRx`,
+  `framerate=40` (máx. del modo 1640×1232 del IMX219; `FOX_CAM_FPS`). `config.PI_FPS = 40` (`FOX_PI_FPS`).
+  `cam_web.py` y `camera_tuning/` traídos. Que el pipeline completo llegue a 40 fps NO está medido.
+- Pendiente: `calibration.py` sigue con `framerate=30/1` sin BGRx (falla en Pi 5: "not-negotiated").
+- `twin/tests/conftest.py` fija `PI_FPS=FPS_NOMINAL` (14) en los tests.
+
+**INICIO / rosa**: `_park_pink` mide la fracción de píxeles en HSV 135–175 (no "si se ve rosa"). Umbral real 0.28
+(calibrado en el carro). Con los voladizos del CAD la cola queda a 5 mm de la madera (`wro_field.stall_start_xy`)
+y el rosa simulado cae de 0.29 a 0.25. `hw_nuevo` usa `PARK_PINK_RATIO_MIN=0.20` (compensación SOLO del twin,
+aceptada en `paridad.py`); `config.py` sigue en 0.28 para calibrar en el carro con `pick_color.py`.
+
+**Firmware v2** (`PurePursuit.ino`; NO compilado para ESP32: no hay toolchain; verificado solo el SIL)
+- Pinout de los sketches probados del usuario: ToF XSHUT F=0, L=15, R=5, B=4 (GPIO 0/15 son strapping); BNO085
+  UART-RVC en GPIO25 (Serial1 RX). Antes el firmware tenía L=25/R=4/B=5/F=15 (chocaba con el BNO en 25).
+- `FOX_ENCODER`, `FOX_TOF`, `FOX_BNO` por defecto 1 fuera del SIL (en SIL siguen 0; el twin pasa sus defines).
+- BNO: `leerBNO()` acumula el delta de yaw de CADA paquete (100 Hz; el loop tarda >10 ms). `BNO_YAW_SIGN=1.0`:
+  VERIFICAR girando el carro a la derecha a mano. Antes el firmware solo leía el MPU6050.
+- ToF: la librería de Pololu fija 50 ms de presupuesto en `init()`; `startContinuous(33)` no lo cambiaba → ~20 Hz.
+  Ahora L/R/trasero en Short 20 ms (50 Hz, ~1.3 m) y frontal en Long 33 ms (30 Hz, 4 m). Twin: `ToFParams`
+  por sensor. El twin da lectura inválida en pared negra/lejana con el umbral de señal actual (calibrado a 250 mm).
+- `counts_per_mm=20.73` es del N20: con el Pololu 12 CPR×50×2 serían ~8.9 (HIPÓTESIS, medir rodando 1 m).
+- `escribirServo` usa 90 fijo y no `centroServo`; `PARK_UTURN_EXT_MIN_CM` no se usa en ningún sitio.
+
+**U de 180° (esquina 13)**: `vigilarUturn` arma con pared frontal <100 cm + lateral >100 cm (2 lecturas) o
+frontal ≤26 cm. Radio = `(hueco − EXT_OBJ·10)/2`. Barrido en el twin (37 seeds que disparan la U, Mac):
+- `PARK_UTURN_ESPERA_MM` (espera recta antes de la U): NO ayuda; 200–300 mm chocan antes de la U. Default 0.
+- `PARK_UTURN_EXT_OBJ_CM` 40→**28** (ahora PARK_AJ ajustable): margen a la lata del cuadrante inicial 52/107→149/190
+  mm (CW/CCW), pared exterior a ~180 mm. 46 de 50 choques tras la U son contra la lata más cercana (42 de la
+  sección del cajón). Segundo modo de fallo SIN resolver: si la U arranca a ≤35 cm de la pared exterior el radio ya
+  es el mínimo (~115 mm, 70 ticks) y EXT_OBJ no actúa: hay que arrancar la U antes/más lejos.
+- CW 24/27 sin choque, CCW 7/10 (n pequeño; de 120 seeds solo 37 llegan a la U: 27 CW, 10 CCW; falta la
+  división por sentido de las 120). `blocks_turn` sin espejo CCW (twin_plan ~:235) es la pista.
+- `prepark.py` no ejercita la U: solo carreras completas hasta tc=12.
+
+**Planificador de ruta** (`pure_pursuit/route_planner.py`, tests `twin/tests/test_route_planner.py`, 10 pasan):
+QP periódico de toda la vuelta (SQP + punto interior en numpy; sin scipy), lado de pilar por color, huella de
+3 discos, paredes/isla. API `plan_lap(direction, pillars, params, ...)`. 30 tableros aleatorios: 6441 mm/vuelta,
+~20 s/vuelta (309–332 mm/s), 59–64 s 3 vueltas, lado correcto 30/30. Apagado (`ROUTE_PLANNER=False`), enganche
+`DigitalMap._planned_line`. NO probado conduciendo. Pendiente: correrlo en el twin (P0/P1/P2), lookahead constante,
+replan en hilo (bloquea ~0.2 s PC, 3–5× en Pi), quitar residuo `RP_DEBUG`, `OPENBLAS_NUM_THREADS=1` obligatorio.
+La comparación contra `_build_line` es aproximada (sobreestima sus fallos). Los presets del twin ya activan
+`DIGITAL_MAP_STEER=True`: la línea base de jitter ya seguía la línea del mapa, no el BEV puro.
+
+**Calibración del carro real** (`twin/tools/calib/`, `src/ESP32/CalibFox/CalibFox.ino`; no usado todavía):
+orden en `HOJA_MEDICION.md` (~2 h 10 min): cuentas/mm (1 m con regla) → velocidad vs PWM → zona muerta → tau_drive →
+coast → scrub → servo→rueda y radio mínimo → duración de `loop()` → ToF Short vs 50 ms. Dos parches sin aplicar
+(`patches/`): instrumentar `loop()` y pings HC-SR04 asíncronos (el `pulseIn` bloquea hasta 7 ms×3).
+Velocidad: solo hay ~245 mm/s a PWM 95 (twin y firmware); a PWM 120 → 309 (regla de 3) o 332 mm/s (supuesto).
+
+**Resultados del twin sobre la rama integrada** (Mac, `hw_nuevo --solo-cajon`, sin overrides): 11/41 terminan
+(F0 8/41, pre-b3f2712 4/21: diferencias = ruido), 0 excepciones, salida del cajón 41/41. Jitter en carreras >10 s:
+Δsteer std 8.8°/frame, 1.07 cambios de signo/s (antes 12.5 y 1.7; atribuido al periodo de 25 ms, NO separado de los
+ToF a 50 Hz). Steer máx 71° = tope del servo. `WHEELBASE_PX` 50 vs 56.5, lookahead 100 constante y
+`ppServoGain` 1.6: sin mejora (peor los dos últimos).
+
+**Descartado tras análisis (subagentes; datos arriba)**: STM32 (el cuello es software: `pulseIn`, doble
+`mpu.update()`, no el MCU), Gazebo (el twin ya cubre sensores/latencia; faltan choque físico y fotometría de cámara),
+Nav2/SLAM (la pose ya se corrige con sonares; robar: inflado con huella real y lattice con R mínimo), LQR (pure
+pursuit bien afinado iguala a LQR/Stanley en el modelo de bicicleta).
+
+**Reglas nuevas del usuario (2026-10-09/10)**: el código lo escriben subagentes Haiku con especificación precisa y
+el planner verifica; Mac autorizada por SSH (solo dirs `~/Projects/fox_v2_*`); no preguntar entre pasos, dejar plan
+escrito y lista de tareas; no asumir la posición de la cámara; nunca decir "implementado" sin comprobarlo (varios
+puntos de arriba se habían dado por hechos y no lo estaban: servo 30/160, pines ToF, BNO, defaults FOX_*).
 
 ## Estado (2026-10-05, rama `t15b2` HEAD e2914de, NO fusionada a `digital-twin`, NO pusheada)
 Reglamento 9.23 (decisión del usuario): el cambio de sentido para estacionar se hace **dentro de la

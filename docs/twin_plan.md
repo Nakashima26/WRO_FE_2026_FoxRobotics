@@ -483,3 +483,8 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Queda para t16gr: `holds_for_center` llama `_hold_cm()` antes de las guardas `in_stall`/`_aligned`. Hoy no falla, porque `confirmed` está vacío mientras no hay sentido.
   - Preexistente: en `sim.run()`, una excepción entre la mutación de `C` y el `try` deja `C` modificado.
 - Nota: en Windows, `build.load_ino_text("head")` decodifica con cp1252 y falla con el .ino UTF-8 (`TODAVÍA`). Los tests que usan `fw_source=head` necesitan `PYTHONUTF8=1`. `paridad.py` lee HEAD como UTF-8.
+
+### 2026-10-10 — v2 integrada en ox/seed-3170839-red-object
+Resumen de la integración del carro v2 (geometría del GLB, servo 19..161, ToF por sensor, BNO por UART-RVC, cámara a 40 fps,
+U con EXT_OBJ=28, planificador de ruta apagado) y de los análisis (STM32/Gazebo/Nav2/SLAM/LQR descartados). Detalle,
+cifras y pendientes en docs/HANDOFF.md ("Estado 2026-10-10") y la lista de tareas en docs/PLAN_v2.md.
