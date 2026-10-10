@@ -99,9 +99,12 @@ MAX_WHEEL_STEER_DEG  = round(float(np.degrees(np.arctan(
 # no se cambia aquí.
 # Cámara (NoIR ancho)
 CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
-# supuesto (se mantiene el valor calibrado; el origen del nodo CameraFrnt del CAD v2 da fwd 134, altura 85 pero no es el centro óptico)
+# SUPUESTOS NO MEDIDOS. Son los valores anteriores del twin (no hay medición ni calibración
+# detrás). El origen del nodo CameraFrnt del CAD v2 (GLB) da fwd 134 / altura 85, pero no es
+# el centro óptico (la caja llega a 105). Con 134/85 el rosa del twin bajó de 0.29 a 0.22-0.27 y
+# rompió la salida del cajón, pero eso no prueba que 140/97 sea lo correcto. Pendiente: sacar la
+# pose real de la homografía de bev_calib.npz o medirla.
 CAMERA_HEIGHT_MM     = 97.0
-# supuesto (se mantiene el valor calibrado; el origen del nodo CameraFrnt del CAD v2 da fwd 134, altura 85 pero no es el centro óptico)
 CAMERA_FWD_MM        = 140.0
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
 # Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
@@ -127,8 +130,8 @@ VEHICLE_DIMS_PROVENANCE = {
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
     "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
     "CAMERA_TILT_DEG": "confirmado por usuario",
-    "CAMERA_HEIGHT_MM": "supuesto: valor calibrado contra el BEV (CAD v2 da 85 en el nodo, no el centro óptico); medir con regla",
-    "CAMERA_FWD_MM": "supuesto: valor calibrado contra el BEV (CAD v2 da 134 en el nodo); medir con regla",
+    "CAMERA_HEIGHT_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 85 en el origen del nodo, no el centro óptico)",
+    "CAMERA_FWD_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 134 en el origen del nodo)",
     "SENSOR_MOUNTS": "CAD v2 (GLB); tof_right supuesto espejo del izquierdo",
     "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
 }
