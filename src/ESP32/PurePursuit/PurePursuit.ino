@@ -90,6 +90,8 @@ const float BNO_YAW_SIGN = 1.0f;
 float bnoYaw=0, bnoYawPrev=0;
 bool bnoYawValid=false, bnoYawPrevValid=false;
 uint32_t bnoLastMs=0, bnoPrevMs=0;
+float bnoDeltaAcc=0;        // grados de yaw acumulados desde el último actualizarGyro()
+uint32_t bnoDtAccMs=0;      // ms que cubren esos grados
 uint8_t bnoBuf[19];
 int bnoN=0;
 uint32_t bnoMalos=0;
@@ -2651,23 +2653,28 @@ void leerBNO() {
     for (int i = 2; i < 18; i++) suma += bnoBuf[i];
     if (suma != bnoBuf[18]) { bnoMalos++; continue; }   // checksum malo: resincroniza
     float bnoYawNuevo = (int16_t)(bnoBuf[3] | (bnoBuf[4] << 8)) * 0.01f;
-    bnoYawPrev = bnoYaw; bnoYawPrevValid = bnoYawValid; bnoPrevMs = bnoLastMs;
-    bnoYaw = bnoYawNuevo; bnoYawValid = true; bnoLastMs = millis();
+    // Acumula el delta de CADA paquete (llegan a 100 Hz y el loop tarda más de 10 ms:
+    // con solo los dos últimos se perdería casi todo el giro).
+    uint32_t ahora = millis();
+    if (bnoYawValid) {
+      float dd = bnoYawNuevo - bnoYaw;
+      while (dd > 180) dd -= 360;
+      while (dd < -180) dd += 360;
+      bnoDeltaAcc += dd;
+      bnoDtAccMs += ahora - bnoLastMs;
+    }
+    bnoYaw = bnoYawNuevo; bnoYawValid = true; bnoLastMs = ahora;
   }
 }
 #endif
 
 void actualizarGyro() {
 #if FOX_BNO && !defined(FOX_SIL)
-  // Integra solo cuando llegó un paquete nuevo: al integrar, bnoPrevMs = bnoLastMs
-  // y las llamadas siguientes no cuentan el mismo paquete dos veces.
-  if (!bnoYawPrevValid || bnoLastMs == bnoPrevMs) return;
-  float d = bnoYaw - bnoYawPrev;
-  while (d > 180) d -= 360;
-  while (d < -180) d += 360;
-  d *= BNO_YAW_SIGN;
-  float dt = (bnoLastMs - bnoPrevMs) / 1000.0f;
-  bnoPrevMs = bnoLastMs;
+  // Consume lo acumulado por leerBNO() desde la última llamada (varios paquetes por loop).
+  if (bnoDtAccMs == 0) return;
+  float d = bnoDeltaAcc * BNO_YAW_SIGN;
+  float dt = bnoDtAccMs / 1000.0f;
+  bnoDeltaAcc = 0; bnoDtAccMs = 0;
   anguloGyro += d;
   anguloTotal += d;
   float gz = d / dt;
