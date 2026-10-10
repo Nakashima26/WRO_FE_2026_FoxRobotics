@@ -17,10 +17,14 @@ Contexto completo en `docs/HANDOFF.md` ("Estado 2026-10-10").
 - [x] U de 180°: `EXT_OBJ` 40→28 (ajustable), `ESPERA_MM` disponible en 0.
 - [x] Planificador de ruta offline (`route_planner.py`) + tests; herramientas de calibración (`CalibFox.ino`, `twin/tools/calib/`).
 
-## En curso
-- [ ] Probar el planificador en el twin (Mac): P0 control, P1 `ROUTE_PLANNER=True`, P2 P1 + lookahead constante.
-  Criterio: sin excepciones, ruta usada (no línea vacía), margen a latas ≥ al de P0, jitter (Δsteer std, cambios de signo/s) menor.
-  Límite: el twin no modela el bloqueo de ~0.2 s del replan.
+## Planificador en el twin (2026-10-10): NO supera al control; se detuvo a pedido del usuario
+41 seeds, `hw_nuevo --solo-cajon`, Mac. Terminan: P0 control 11 (tc 6.0) · P1 (margen pilar 25/pared 50) 0 (tc 0.8, 26 choques <10 s)
+· Q1 (100/80) 3 (tc 3.4) · Q2 (150/100) 0: `LinAlgError: Matrix is not positive definite` en `route_planner._solve_qp:217`
+(el QP deja de ser factible). Causa del fallo de P1 (verificada en seed 1): ruta a 38 mm del pilar T1 de la sección del
+cajón + salida del cajón con 8–14° de rumbo desalineado → el frente (147.6 mm) lo toca; 26/41 igual. Rama `fox/plan-twin`
+(WRO_v2_plan, e3ca8c6: márgenes parametrizables `ROUTE_*_MARGIN_MM`, sin fusionar). Sin probar: P2 con margen bueno,
+replans por carrera, error lateral, tiempo por vuelta. Si se retoma: capturar la excepción del QP con fallback a `_build_line`,
+empalme de rumbo tras la salida del cajón y margen ~100 mm. El planificador sigue APAGADO (`ROUTE_PLANNER=False`).
 
 ## Siguiente (orden)
 1. [ ] Integrar el planificador al runtime si P1/P2 funcionan: lookahead constante sobre la ruta, replan en hilo al
