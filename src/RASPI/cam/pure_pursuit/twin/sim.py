@@ -107,15 +107,16 @@ PRESETS["hw_nuevo"] = {
     "fw_defines": {"FOX_ENCODER": "1", "FOX_TOF": "1"},
     # IMU nueva: BNO085 (yaw fusionado en el chip), no el MPU6050.
     "imu": "bno085",
-    # Pi 5 (~2x Pi 4): ~28 fps (supuesto, medir fps reales; la cámara está
-    # topada a 30 fps en vision.py). PI_FPS escala las ventanas en frames.
-    "pi_period_s": 0.035,
+    # Pi 5 con cámara a 40 fps (vision.open_camera); el pipeline completo a 40 fps
+    # NO está medido: si el real no llega, bajar aquí y exportar FOX_PI_FPS en la Pi.
+    # PI_FPS escala las ventanas en frames.
+    "pi_period_s": 0.025,
     "pi_overrides": {
         **PRESETS["giro_rapido"]["pi_overrides"],
         # La pose del mapa derivaba 150–430 mm (encoder + gyro) sin latas
         # confirmadas que la corrigieran: sonares contra paredes conocidas.
         "DIGITAL_MAP_WALL_FIX": True,
-        "PI_FPS": 1.0 / 0.035,
+        "PI_FPS": 1.0 / 0.025,
         # Compensación del TWIN, no del carro: con los voladizos del CAD v2 (cola a 5 mm
         # de la madera, wro_field.stall_start_xy) la pared magenta ocupa ~0.25 del cuadro
         # simulado y el umbral real (0.28, calibrado en el carro) no dispara el INICIO.

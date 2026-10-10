@@ -63,10 +63,10 @@ ACEPTADAS: dict[str, tuple[str, str]] = {
         "(carro viejo) sin el define"),
     "imu": ("carro", "BNO085 en el twin; el .ino real usa MPU6050_tockn (driver BNO085 pendiente, T14)"),
     "pi_period_s": (
-        "carro", "el twin fija el periodo de la Pi (hw_nuevo 0.035 = Pi 5 ~28 fps, "
+        "carro", "el twin fija el periodo de la Pi (hw_nuevo 0.025 = Pi 5 con cámara 40 fps, "
         "supuesto; sin preset, TimingParams.pi_proc_s); el carro corre a lo que dé la "
         "Pi (PI_FPS=14 nominal). Medir fps reales"),
-    "PI_FPS": ("carro", "ídem pi_period_s: escala las ventanas en frames"),
+    "PI_FPS": ("carro", "ídem pi_period_s (hw_nuevo 40 fps): escala las ventanas en frames"),
     "PARK_PINK_RATIO_MIN": (
         "twin", "hw_nuevo 0.20 vs 0.28 del carro: con los voladizos del CAD v2 el rosa "
         "simulado en el cajón sale ~0.25 (antes 0.29); el umbral real se calibra con "

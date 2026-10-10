@@ -1,6 +1,7 @@
 """Sensores contra geometría conocida."""
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -149,6 +150,62 @@ def test_tof_red_sign(rng):
     pose = Pose(x_rear, sign.y, 0.0)
     r = tof.read_mm(0, world, pose, 1.0)
     assert r > 200
+
+
+# Con los parámetros por defecto el umbral de señal está calibrado a pared negra
+# de 250 mm, así que ninguna pared a 1000 mm ni 2500 mm da lectura. Para aislar el
+# límite de alcance (max_range_mm_by_id) se sube black_wall_max_mm en la copia del test.
+_RANGE_TEST_BLACK_WALL_MM = 3000.0
+
+
+def test_tof_lateral_range_limit_1300(rng):
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    x_wall = OUTER_HALF_MM
+    lateral = params.mounts[1].right_mm
+    for dist, valid in ((1000.0, True), (1500.0, False)):
+        tof = ToF(params, np.random.default_rng(42))
+        world = _EastWallWorld(x_wall)
+        pose = Pose(x_wall - dist - lateral, 0.0, 0.0)
+        r = tof.read_mm(1, world, pose, 0.0)
+        if valid:
+            assert r > 0
+            assert abs(r - dist) < 60.0
+        else:
+            assert r == -1
+
+
+def test_tof_front_range_4000(rng):
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    tof = ToF(params, rng)
+    forward = params.mounts[3].forward_mm
+    dist = 2500.0
+    world = _WallWorld(dist + forward)
+    r = tof.read_mm(3, world, Pose(0.0, 0.0, 0.0), 0.0)
+    assert r > 0
+    assert abs(r - dist) < 100.0
+
+
+def test_tof_sample_period_per_sensor(rng):
+    params = TwinParams().tof
+    assert params.sample_period_s_by_id[0] == pytest.approx(0.020)
+    assert params.sample_period_s_by_id[1] == pytest.approx(0.020)
+    assert params.sample_period_s_by_id[3] == pytest.approx(1.0 / 30.0)
+    # Comportamiento: el lateral (0.020 s) re-muestrea a los 21 ms y no a los 15 ms;
+    # el frontal (1/30 s) no re-muestrea a los 20 ms.
+    lat = replace(params, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    tof = ToF(lat, np.random.default_rng(42))
+    world = _EastWallWorld(OUTER_HALF_MM)
+    near = Pose(OUTER_HALF_MM - 200.0 - lat.mounts[1].right_mm, 0.0, 0.0)
+    far = Pose(OUTER_HALF_MM - 1200.0 - lat.mounts[1].right_mm, 0.0, 0.0)
+    r0 = tof.read_mm(1, world, near, 0.0)
+    assert r0 > 0
+    assert tof.read_mm(1, world, far, 0.015) == r0
+    assert abs(tof.read_mm(1, world, far, 0.021) - 1200) < 60
+    fwd = Pose(0.0, 0.0, 0.0)
+    fw_world = _WallWorld(1000.0 + lat.mounts[3].forward_mm)
+    f0 = tof.read_mm(3, fw_world, fwd, 0.0)
+    assert f0 > 0
+    assert tof.read_mm(3, _WallWorld(3000.0), fwd, 0.020) == f0
 
 
 def test_encoder_slip(rng):

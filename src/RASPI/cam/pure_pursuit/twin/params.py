@@ -180,6 +180,10 @@ class ToFParams:
     noise_sigma_mm: float = 5.0
     noise_rel: float = 0.01
     sample_period_s: float = 1.0 / 30.0
+    # Orden = índice de tofMm[] (0=L 1=R 2=atrás 3=frente). Firmware v2: L/R/atrás
+    # en Short (50 Hz, ~1.3 m); frente en Long (30 Hz, 4 m). Sin medir en el carro.
+    sample_period_s_by_id: tuple[float, ...] = (0.020, 0.020, 0.020, 1.0 / 30.0)
+    max_range_mm_by_id: tuple[float, ...] = (1300.0, 1300.0, 1300.0, 4000.0)
     reflectivity: dict[str, float] = field(
         default_factory=lambda: {"wall": 0.04, "magenta": 0.6, "sign": 0.5}
     )
@@ -193,6 +197,7 @@ class ToFParams:
         _prov("tof.reflectivity", "supuesto", "VL53 en pared negra vs magenta vs señal")
         _prov("tof.black_wall_max_mm", "medido", "README VL53L0X fuera de rango ~300 mm negro")
         _prov("tof.mounts", "supuesto", "L/R/atrás/frente; frente nuevo, espejo del trasero; pendiente medir")
+        _prov("tof.rate_range", "supuesto", "firmware v2: L/R/atrás Short 20 ms (50 Hz, ~1.3 m), frente Long 33 ms (30 Hz, 4 m); ST: modo Short máx 50 Hz y ~1.3 m; sin medir en el carro")
 
 
 @dataclass

@@ -107,14 +107,20 @@ class ToF:
         sig = self.params.reflectivity["wall"] * 1.0 / (d * d)
         return sig * 0.95
 
+    def _sensor_value(self, table: tuple[float, ...], fallback: float, sensor_id: int) -> float:
+        """sensor_id es índice de p.mounts (0=L 1=R 2=atrás 3=frente); fuera de rango, el valor por defecto."""
+        return table[sensor_id] if 0 <= sensor_id < len(table) else fallback
+
     def read_mm(self, sensor_id: int, world: World, pose: Pose, t: float) -> int:
         p = self.params
-        if t - self._last_sample_t.get(sensor_id, -1e9) < p.sample_period_s - 1e-9:
+        period = self._sensor_value(p.sample_period_s_by_id, p.sample_period_s, sensor_id)
+        if t - self._last_sample_t.get(sensor_id, -1e9) < period - 1e-9:
             return self._held_mm.get(sensor_id, -1)
         self._last_sample_t[sensor_id] = t
         if not 0 <= sensor_id < len(p.mounts):
             self._held_mm[sensor_id] = -1
             return -1
+        max_mm = self._sensor_value(p.max_range_mm_by_id, p.max_range_mm, sensor_id)
         mount = p.mounts[sensor_id]
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)
         origin = np.array([ox, oy], dtype=np.float64)
@@ -135,14 +141,14 @@ class ToF:
         norms = np.linalg.norm(dirs, axis=1, keepdims=True)
         dirs = dirs / np.maximum(norms, 1e-12)
         origins = np.broadcast_to(origin, dirs.shape)
-        dists, mat_i, normals, _obj = world.cast(origins, dirs, p.max_range_mm)
+        dists, mat_i, normals, _obj = world.cast(origins, dirs, max_mm)
 
         clusters: dict[tuple[int, int], list[tuple[float, float]]] = {}
         for i in range(len(angles)):
             if mat_i[i] < 0:
                 continue
             d = float(dists[i])
-            if d > p.max_range_mm - 1e-3:
+            if d > max_mm - 1e-3:
                 continue
             mat = world.material_name(int(mat_i[i]))
             cos_inc = abs(float(np.dot(dirs[i], normals[i])))
@@ -163,7 +169,7 @@ class ToF:
         mean_d = sum(d * s for d, s in pts) / total_sig
         norm_sig = total_sig / len(pts)
 
-        if norm_sig < self._valid_threshold or mean_d > p.max_range_mm:
+        if norm_sig < self._valid_threshold or mean_d > max_mm:
             self._held_mm[sensor_id] = -1
             return -1
 
