@@ -111,6 +111,18 @@ def test_counts_per_mm(tmp_path):
     assert e["net_after_return_pct_of_fwd"] < 0.1
 
 
+def test_cpmm_warns_when_far_from_firmware(tmp_path):
+    (tmp_path / "enc_runs.csv").write_text("counts_fwd,dist_mm,counts_net,enc_err\n8900,1000,0,0\n8910,1000,1,0\n8905,1000,0,0\n")
+    res = fm.fit_all(tmp_path)
+    assert res["cpmm_differs_from_firmware"] is True
+    assert any("difiere" in w for w in res["warnings"])
+
+    (tmp_path / "enc_runs.csv").write_text("counts_fwd,dist_mm,counts_net,enc_err\n20730,1000,0,0\n20740,1000,1,0\n20725,1000,0,0\n")
+    res = fm.fit_all(tmp_path)
+    assert res["cpmm_differs_from_firmware"] is False
+    assert not any("difiere" in w for w in res["warnings"])
+
+
 # ── parches ───────────────────────────────────────────────────────────────────
 def _fake_res():
     return {

@@ -12,6 +12,8 @@ Antes de nada, una sola vez:
 
 Orden recomendado (el orden importa: 1 escala a todo lo demás):
 
+**La medición 1 (cuentas/mm) va SIEMPRE primero: escala todas las velocidades.**
+
 | # | Medición | Subcomando | Repeticiones | Tiempo aprox. |
 |---|----------|-----------|--------------|---------------|
 | 1 | cuentas/mm (rodar con regla) | `enc --dist 1000 --reps 5` | 5 | 8 min |
@@ -31,7 +33,7 @@ Total ≈ 2 h 10 min sin imprevistos.
 - Marca en el suelo dos líneas a **1000 mm** exactos (cinta métrica, no a ojo). Alinear el centro de la huella de una rueda motriz con la 1ª.
 - El script pide empujar el carro a mano en línea recta hasta la 2ª marca (sin patinar), luego devolverlo a la 1ª.
 - Anotar: cuentas ida: ____ ____ ____ ____ ____ | neto al volver: ____ (debe ser ~0; si no, se pierden cuentas) | `enc_err`: ____
-- Esperado con el firmware actual: ~20 730 cuentas/1000 mm (20.73). **Ojo:** ese número supone 7 PPR ×4 ×50 ×2 (encoder del N20). El Pololu tiene otro CPR (típico de micro-metal: 12 CPR de eje de motor → ~8.9 cuentas/mm); no verificado, depende del modelo exacto. Si sale muy distinto de 20.73 no es un error de la medición.
+- Hipotesis a verificar (no medida): el 20.73 del firmware (PurePursuit.ino l.434) supone 7 PPR x4 x50 x2 / (pi*43) del encoder del N20. Si el encoder del Pololu es el tipico de 12 CPR en cuadratura, son 12 x 50 x 2 / (pi*43) = ~8.9 cuentas/mm: con 20.73 la odometria (od, px, py, parking) saldria ~2.3 veces demasiado larga. calib_fit_motor avisa si lo medido difiere mas de 10 % de 20.73.
 - Criterio de calidad: dispersión < 1 %. Si `enc_err > 0`, el ISR pierde flancos (pull-ups en GPIO34/39, ruido del motor).
 
 ## 2-3. Velocidad vs PWM y zona muerta

@@ -273,6 +273,12 @@ def fit_all(d: Path, cpmm_override: float | None = None, steer_json: Path | None
         cpmm = enc["mean"]
         res["encoder"] = enc
         res["counts_per_mm_source"] = f"enc_runs.csv (n={enc['n']})"
+        rel = abs(enc["mean"] - NOMINAL_CPMM) / NOMINAL_CPMM
+        res["cpmm_differs_from_firmware"] = rel > 0.10
+        if rel > 0.10:
+            res["warnings"].append(
+                f"counts_per_mm medido {enc['mean']:.2f} difiere {100 * rel:.0f} % del firmware ({NOMINAL_CPMM}): "
+                "ENC_CUENTAS_POR_MM del .ino y el twin deben actualizarse (la odometria saldria mal por ese factor)")
         if enc["n"] < 3:
             res["warnings"].append("counts_per_mm con < 3 repeticiones")
         if enc["std"] / enc["mean"] > 0.01:
