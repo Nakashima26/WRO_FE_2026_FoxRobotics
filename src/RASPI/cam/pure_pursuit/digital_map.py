@@ -164,6 +164,11 @@ class DigitalMap:
         self._dF: float | None = None
         self._pp_turn_tc: int | None = None
         self._tpr = 12
+        # Ruta del planificador (C.ROUTE_PLANNER): se recalcula solo cuando
+        # cambia el conjunto de asientos confirmados.
+        self._route = None
+        self._route_key = None
+        self._route_i = 0
 
     def set_direction(self, direction: str) -> bool:
         """Fija el sentido UNA vez, antes del primer update(). True si lo fijó.
@@ -240,7 +245,8 @@ class DigitalMap:
         if not self.in_stall:
             self.along_mm, self.lat_mm = self._section_frame(
                 self.pose_xy[0], self.pose_xy[1], self.section)
-        self.line_world = self._build_line()
+        self.line_world = (self._planned_line() if getattr(C, "ROUTE_PLANNER", False)
+                           else self._build_line())
 
     def _pose_from_ack(self, ack: str | None) -> None:
         """Uniciclo: px/py ya integran ds del odómetro con el yaw de la IMU.
@@ -1004,6 +1010,46 @@ class DigitalMap:
                 sh = self._ease(nxt, b)
             self._put(pts, shifts, nxt, b, sh)
             b += step
+        self._line_shifts = shifts
+        self._has_pass = any(abs(s) > 12.0 for s in shifts)
+        nxt = self._next_section(sec)
+        self._steer_ok = any(s == sec or s == nxt for (s, _sid) in self.confirmed)
+        return pts
+
+    def _planned_line(self) -> list[tuple[float, float]]:
+        """Ruta de route_planner: UNA vez por conjunto de asientos confirmados.
+
+        Devuelve los puntos de la ruta por delante del carro (~1500 mm). Misma
+        interfaz que _build_line: deja _line_shifts, _has_pass y _steer_ok."""
+        if self.in_stall or self.direction is None:
+            self._line_shifts = []
+            self._has_pass = False
+            self._steer_ok = False
+            return []
+        from . import route_planner as rp
+        key = (self.direction, tuple(sorted(self.confirmed.items())))
+        if key != self._route_key:
+            self._route = rp.plan_lap(self.direction, self.confirmed)
+            self._route_key = key
+            self._route_i = -1
+        r = self._route
+        n = len(r.x)
+        px, py = self.pose_xy
+        d2 = (r.x - px) ** 2 + (r.y - py) ** 2
+        if self._route_i < 0:
+            # Primera vez: la estación más cercana que mira para donde mira el carro.
+            err = np.abs((r.heading_deg - self.heading + 180.0) % 360.0 - 180.0)
+            i = int(np.argmin(d2 + np.where(err > 90.0, 1e8, 0.0)))
+        else:
+            # Después: ventana hacia adelante, sin saltos hacia atrás.
+            win = (self._route_i + np.arange(-2, 16)) % n
+            i = int(win[np.argmin(d2[win])])
+        self._route_i = i
+        m = int(1500.0 / max(r.length_mm / n, 1.0))
+        idx = (i + np.arange(m)) % n
+        pts = [(float(r.x[j]), float(r.y[j])) for j in idx]
+        sec = self.section
+        shifts = [self._section_frame(x, y, sec)[1] for x, y in pts]
         self._line_shifts = shifts
         self._has_pass = any(abs(s) > 12.0 for s in shifts)
         nxt = self._next_section(sec)
