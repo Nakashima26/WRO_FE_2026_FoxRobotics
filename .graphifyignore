@@ -1,0 +1,11 @@
+﻿.venv-sim/
+.venv/
+t-photos/
+v-photos/
+video/
+presentacion/
+electrical/
+models/
+schemes/
+__pycache__/
+node_modules/
