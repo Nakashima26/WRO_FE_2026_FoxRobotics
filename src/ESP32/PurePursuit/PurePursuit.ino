@@ -206,6 +206,32 @@ int   turnHint     = 0;       // turn {-1, 0, +1}
 bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+
+// ── Modo RUTA: la Pi sube la vuelta como puntos en mm del tapete y el ESP la
+// sigue con pure pursuit sobre su propia odometría (encoder + IMU), a la
+// velocidad del loop y sin el atraso del UART. Mensajes de la Pi:
+//   RTB,n,paso      empieza una ruta de n puntos separados `paso` mm (cerrada)
+//   RTP,i,x,y,x,y…  puntos desde el índice i (enteros, mm)
+//   RTE,n           fin: la ruta queda activa si llegaron los n puntos
+// y en cada V2: rt=1 (seguirla) y rtx,rty,rth = odometría -> tapete
+// (mundo = (rtx,rty) + px·F + py·L con F = (sin rth, cos rth),
+// L = (-cos rth, sin rth); rumbo = rth - anguloTotal, 0 = +y, 90 = +x).
+const int   RUTA_MAX = 640;
+float rutaX[RUTA_MAX], rutaY[RUTA_MAX];
+float rutaXb[RUTA_MAX], rutaYb[RUTA_MAX];   // carga en curso (se copia en RTE)
+int   rutaVel     = -1;      // rv= : PWM máximo pedido por la Pi (-1 = sin tope)
+int   rutaN       = 0;       // puntos de la ruta activa (0 = sin ruta)
+int   rutaCarga   = 0;       // puntos anunciados en RTB (carga en curso)
+int   rutaRecib   = 0;       // puntos recibidos de la carga en curso
+float rutaPaso    = 20.0f;   // mm entre puntos
+int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
+bool  piRuta      = false;   // rt=1
+bool  rutaTfOk    = false;
+float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
+const float RUTA_LOOKAHEAD_MM   = 200.0f;
+const float RUTA_BATALLA_MM     = 113.0f;
+// Grados de servo por grado de rueda: 71° de servo = 44.54° de rueda (v2).
+const float RUTA_SERVO_POR_RUEDA = 71.0f / 44.54f;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
@@ -2732,8 +2758,101 @@ bool campoPi(const String &line, const char *clave, String &valor) {
   return true;
 }
 
+// Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
+// Devuelve false si no aplica. ruedaDeg: + = derecha.
+bool rutaSteer(float &ruedaDeg) {
+  if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
+  float th = rutaTh * DEG_TO_RAD;
+  float Fx = sinf(th), Fy = cosf(th), Lx = -cosf(th), Ly = sinf(th);
+  float x = rutaTx + poseXf * Fx + poseYf * Lx;
+  float y = rutaTy + poseXf * Fy + poseYf * Ly;
+  float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
+  float sh = sinf(h), ch = cosf(h);
+  if (rutaI < 0 || rutaI >= rutaN) {
+    // Primera vez: el punto más cercano que va para donde mira el carro.
+    float best = 1e18f;
+    for (int i = 0; i < rutaN; i++) {
+      int k = (i + 1) % rutaN;
+      float tx = rutaX[k] - rutaX[i], ty = rutaY[k] - rutaY[i];
+      if (tx * sh + ty * ch < 0.3f * rutaPaso) continue;      // más de ~70° de diferencia
+      float dx = rutaX[i] - x, dy = rutaY[i] - y;
+      float d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; rutaI = i; }
+    }
+    if (rutaI < 0) return false;
+  } else {
+    // Después: ventana hacia adelante, sin saltos hacia atrás.
+    int besti = rutaI;
+    float best = 1e18f;
+    for (int o = -5; o < 60; o++) {
+      int i = ((rutaI + o) % rutaN + rutaN) % rutaN;
+      float dx = rutaX[i] - x, dy = rutaY[i] - y;
+      float d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; besti = i; }
+    }
+    rutaI = besti;
+  }
+  int j = (rutaI + (int)(RUTA_LOOKAHEAD_MM / rutaPaso + 0.5f)) % rutaN;
+  float dx = rutaX[j] - x, dy = rutaY[j] - y;
+  float fwd = dx * sh + dy * ch;
+  float right = dx * ch - dy * sh;
+  float ld2 = fwd * fwd + right * right;
+  if (ld2 < 1.0f) ld2 = 1.0f;
+  ruedaDeg = atanf(RUTA_BATALLA_MM * 2.0f * right / ld2) * RAD_TO_DEG;
+  return true;
+}
+
+// RTB / RTP / RTE (ver modo RUTA arriba).
+void parseRuta(const String &line) {
+  if (line.startsWith("RTB,")) {
+    int c1 = line.indexOf(',', 4);
+    rutaCarga = constrain(line.substring(4, c1 < 0 ? line.length() : c1).toInt(), 0, RUTA_MAX);
+    if (c1 >= 0) rutaPaso = line.substring(c1 + 1).toFloat();
+    if (rutaPaso < 1.0f) rutaPaso = 20.0f;
+    rutaRecib = 0;
+    return;
+  }
+  if (line.startsWith("RTP,")) {
+    int p = 4;
+    int c = line.indexOf(',', p);
+    if (c < 0) return;
+    int i = line.substring(p, c).toInt();
+    p = c + 1;
+    while (p < (int)line.length() && i < rutaCarga) {
+      int c2 = line.indexOf(',', p);
+      if (c2 < 0) break;
+      int c3 = line.indexOf(',', c2 + 1);
+      float x = line.substring(p, c2).toFloat();
+      float y = line.substring(c2 + 1, c3 < 0 ? line.length() : c3).toFloat();
+      rutaXb[i] = x;
+      rutaYb[i] = y;
+      i++;
+      rutaRecib++;
+      if (c3 < 0) break;
+      p = c3 + 1;
+    }
+    return;
+  }
+  if (line.startsWith("RTE,")) {
+    int n = line.substring(4).toInt();
+    if (n == rutaCarga && rutaRecib == n && n >= 10) {
+      // Doble buffer: hasta aquí el ESP siguió la ruta anterior completa.
+      memcpy(rutaX, rutaXb, sizeof(float) * n);
+      memcpy(rutaY, rutaYb, sizeof(float) * n);
+      rutaN = n;
+      rutaI = -1;
+    }
+    return;
+  }
+}
+
 void parsePiMessage(String line) {
   line.trim();
+
+  if (line.startsWith("RT")) {
+    parseRuta(line);
+    return;
+  }
 
   // ── Handshake ──────────────────────────────────────────────────────────────
   if (line.startsWith("READY")) {
@@ -2781,6 +2900,15 @@ void parsePiMessage(String line) {
     if (campoPi(line, ",gf=", v))  piGf = v.toInt();
     piGv           = campoPi(line, ",gv=", v) && v.toInt() != 0;
     piEsquina      = campoPi(line, ",es=", v)    && v.toInt() != 0;
+    // Modo RUTA: rt=1 y la transformación odometría -> tapete.
+    piRuta         = campoPi(line, ",rt=", v) && v.toInt() != 0;
+    rutaVel        = campoPi(line, ",rv=", v) ? (int)v.toInt() : -1;
+    if (campoPi(line, ",rtx=", v)) {
+      rutaTx = v.toFloat();
+      if (campoPi(line, ",rty=", v)) rutaTy = v.toFloat();
+      if (campoPi(line, ",rth=", v)) rutaTh = v.toFloat();
+      rutaTfOk = true;
+    }
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
@@ -2885,6 +3013,7 @@ void parsePiMessage(String line) {
     Serial2.print(",od=");   Serial2.print(odomMm);
     Serial2.print(",px=");   Serial2.print(poseX);
     Serial2.print(",py=");   Serial2.print(poseY);
+    Serial2.print(",rn=");   Serial2.print(rutaN);
     Serial2.print(",enc=");  Serial2.print(FOX_ENCODER ? 1 : 0);
 #if FOX_TOF
     Serial2.print(",tL=");   Serial2.print(tofMm[0]);
@@ -3150,6 +3279,19 @@ void controlPID(long distL, long distR) {
     return;
 
   } else if (piPurePursuit) {
+    // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
+    float ruedaDeg;
+    if (rutaSteer(ruedaDeg)) {
+      float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
+                                 (float)(SERVO_MIN_DEG - centroServo), (float)(SERVO_MAX_DEG - centroServo));
+      int servoAngle = constrain(centroServo - (int)lroundf(servoDeg) + (int)wallPanic,
+                                 SERVO_MIN_DEG, SERVO_MAX_DEG);
+      escribirServo(servoAngle);
+      setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);
+      Serial.print(" | Servo:");  Serial.print(servoAngle);
+      return;
+    }
     // ── Modo Pure Pursuit ────────────────────────────────────────────────────
     // La Pi ya calculó el ángulo de dirección óptimo siguiendo la centerline.
     // obs = steer_deg / ppSteerGain  →  steerDeg = obs * ppSteerGain = steer_deg

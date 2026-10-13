@@ -244,6 +244,32 @@ def _point_in_poly(px: float, py: float, poly) -> bool:
     return inside
 
 
+def _bbox(pts) -> tuple[float, float, float, float]:
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+# Descarte rápido de collision(): con las cajas envolventes separadas más de
+# esto, ningún punto queda dentro ni ningún segmento cruza (el error de redondeo
+# de las pruebas exactas es de ~1e-9 mm). Mismo resultado, sin el bucle.
+_BBOX_MARGIN_MM = 1.0
+
+
+def _bbox_apart(a, b) -> bool:
+    m = _BBOX_MARGIN_MM
+    return a[0] > b[2] + m or b[0] > a[2] + m or a[1] > b[3] + m or b[1] > a[3] + m
+
+
+def _inside_rect(a, poly) -> bool:
+    """Caja `a` estrictamente dentro de `poly`, si `poly` es un rectángulo alineado."""
+    if len(poly) != 4 or len({p[0] for p in poly}) != 2 or len({p[1] for p in poly}) != 2:
+        return False
+    b = _bbox(poly)
+    m = _BBOX_MARGIN_MM
+    return a[0] > b[0] + m and a[1] > b[1] + m and a[2] < b[2] - m and a[3] < b[3] - m
+
+
 def _hits_polygon(corners, poly) -> bool:
     if any(_point_in_poly(x, y, poly) for x, y in corners):
         return True
@@ -273,10 +299,15 @@ def collision(
         if _point_in_island(cx, cy):
             return "isla"
     edges = list(zip(corner_list, corner_list[1:] + corner_list[:1]))
+    car_box = _bbox(corner_list)
     track = world.field
     polys = (track.inner,) if "pared exterior" in ignore else (track.outer, track.inner)
     for poly in polys:
         wall =[(float(p[0]), float(p[1])) for p in poly]
+        wall_box = _bbox(wall)
+        # Carro lejos de la isla, o bien adentro del tapete: no hay cruce.
+        if _bbox_apart(car_box, wall_box) or _inside_rect(car_box, wall):
+            continue
         wall_edges = list(zip(wall, wall[1:] + wall[:1]))
         for a, b in edges:
             for c, d in wall_edges:
@@ -290,9 +321,13 @@ def collision(
             (sign.x + half, sign.y + half),
             (sign.x - half, sign.y + half),
         ]
+        if _bbox_apart(car_box, _bbox(box)):
+            continue
         if _hits_polygon(corner_list, box):
             return f"señal {sign.color} {sign.section}/{sign.seat}"
     for box in track.barriers:
+        if _bbox_apart(car_box, _bbox(box)):
+            continue
         if _hits_polygon(corner_list, box):
             return "cajón magenta"
     return None

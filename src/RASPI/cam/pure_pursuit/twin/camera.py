@@ -52,6 +52,9 @@ _PALETTE = np.array(
     [SKY_BGR, FLOOR_BGR, WALL_BGR, RED_BGR, GREEN_BGR, MAGENTA_BGR],
     dtype=np.uint8,
 )
+# La misma paleta como tabla de cv2.LUT (id -> BGR por canal).
+_PALETTE_LUT = np.zeros((1, 256, 3), dtype=np.uint8)
+_PALETTE_LUT[0, : len(_PALETTE)] = _PALETTE
 
 # Calibración antigua 4 puntos (bev_calib.npz viejo)
 OLD_CALIB_4_MM = np.float32(
@@ -136,6 +139,20 @@ class CameraModel:
         self._ray_right = self._dirs_robot[..., 0].astype(np.float32)
         self._ray_fwd = self._dirs_robot[..., 1].astype(np.float32)
 
+    def _floor_rays(self, height_mm: float):
+        """(índices planos, adelante, right) de los píxeles que ven el piso a esa altura."""
+        cache = getattr(self, "_floor_cache", None)
+        if cache is not None and cache[0] == height_mm:
+            return cache[1]
+        t = self._floor_scale * np.float32(height_mm)
+        finite = self._floor_down & (t >= np.float32(1e-3))
+        rr = t * self._ray_right
+        ff = t * self._ray_fwd
+        idx = np.flatnonzero(finite)
+        rays = (idx, ff.ravel()[idx], rr.ravel()[idx])
+        self._floor_cache = (height_mm, rays)
+        return rays
+
     def _project(self, cam_pts: np.ndarray) -> np.ndarray:
         """Puntos en el frame de la cámara (z adelante) → píxeles."""
         x = cam_pts[:, 0]
@@ -196,32 +213,93 @@ class CameraModel:
 
         # Distancia al piso por rayo, y de ahí el punto del tapete. El giro del
         # heading se aplica al punto, no al rayo: una sola rotación por frame.
-        t = self._floor_scale * np.float32(p.height_mm)
-        finite = self._floor_down & (t >= np.float32(1e-3))
-        rr = t * self._ray_right
-        ff = t * self._ray_fwd
-        gx = np.zeros(t.shape, dtype=np.float32)
-        gy = np.zeros(t.shape, dtype=np.float32)
-        gx[finite] = np.float32(ox) + ff[finite] * np.float32(sh) + rr[finite] * np.float32(ch)
-        gy[finite] = np.float32(oy) + ff[finite] * np.float32(ch) - rr[finite] * np.float32(sh)
-        in_mat = (np.abs(gx) <= OUTER_HALF_MM) & (np.abs(gy) <= OUTER_HALF_MM)
-        in_island = (np.abs(gx) < INNER_HALF_MM) & (np.abs(gy) < INNER_HALF_MM)
-        floor = finite & in_mat & ~in_island
-        island = finite & in_island
-        best_id = np.zeros(t.shape, dtype=np.uint8)
-        best_id = np.where(floor, np.uint8(1), best_id)
-        best_id = np.where(island, np.uint8(2), best_id)
-        img = _PALETTE[best_id]
+        # (right, adelante) de cada rayo que pega en el piso no depende de la
+        # pose: se calcula una vez (_floor_rays) y por frame solo se gira y
+        # traslada, sobre esos píxeles nada más. Mismas operaciones float32 y
+        # en el mismo orden que antes: imagen bit-idéntica.
+        # La suma float es conmutativa (no asociativa): ox + a + b se arma como
+        # (a + ox) + b, igual bit a bit, pero sin arreglos temporales.
+        idx, ff, rr = self._floor_rays(p.height_mm)
+        f_sh, f_ch = np.float32(sh), np.float32(ch)
+        gx = ff * f_sh
+        gx += np.float32(ox)
+        gx += rr * f_ch
+        gy = ff * f_ch
+        gy += np.float32(oy)
+        gy -= rr * f_sh
+        # |x| <= a y |y| <= a  <=>  max(|x|, |y|) <= a.
+        np.abs(gx, out=gx)
+        np.abs(gy, out=gy)
+        np.maximum(gx, gy, out=gx)
+        ids = (gx <= OUTER_HALF_MM).view(np.uint8)
+        ids += gx < INNER_HALF_MM      # isla dentro del tapete: 1 + 1 = 2
+        best_id = np.zeros(p.height * p.width, dtype=np.uint8)
+        best_id[idx] = ids
+        best_id = best_id.reshape(p.height, p.width)
+        img = cv2.LUT(cv2.merge((best_id, best_id, best_id)), _PALETTE_LUT)
 
         oz = p.height_mm
+        # Todas las esquinas de la escena (cintas + caras) van a la cámara en
+        # una sola transformación; la geometría no depende de la pose y se arma
+        # una vez por pista (_scene). Verificado bit a bit contra la versión
+        # cara por cara (mismo resultado de _to_cam y de la profundidad media).
+        pts, n_rib, colors = self._scene(track)
+        cam_all = self._to_cam(pts, ox, oy, oz, sh, ch).reshape(-1, 4, 3)
+        for i in range(n_rib):
+            self._fill_face(img, cam_all[i], colors[i])
+
+        faces = cam_all[n_rib:]
+        z = faces[:, :, 2]
+        # Una cara toda detrás del plano cercano no pinta nada: se salta (antes
+        # solo las paredes; las demás llegaban a _fill_face y no pintaban).
+        front = z >= 8.0
+        drawn = front.any(axis=1)
+        depth = z.mean(axis=1)
+        # sorted(..., reverse=True) es estable: empates en el orden original.
+        order = np.argsort(-depth, kind="stable")
+        # Caras enteras por delante: _clip_near las devuelve rotadas un vértice
+        # (empieza en el 1); se proyectan todas juntas.
+        whole = front.all(axis=1)
+        uv = np.zeros((len(faces), 4, 2), dtype=np.int32)
+        ok = np.zeros(len(faces), dtype=bool)
+        if whole.any():
+            sel = np.roll(faces[whole], -1, axis=1)
+            puv = self._project(sel.reshape(-1, 3)).reshape(-1, 4, 2)
+            ok[whole] = ~np.any(np.abs(puv) > 20000, axis=(1, 2))
+            uv[whole] = np.round(puv).astype(np.int32)
+        f_colors = colors[n_rib:]
+        for i in order:
+            if not drawn[i]:
+                continue
+            if whole[i]:
+                if ok[i]:
+                    cv2.fillConvexPoly(img, uv[i], f_colors[i])
+            else:
+                self._fill_face(img, faces[i], f_colors[i])
+        return img
+
+    def _scene(self, track):
+        """(esquinas (N·4, 3), cuántas son cintas, color por quad), cacheado por pista."""
+        p = self.params
+        key = (
+            tuple((s.x, s.y, s.color) for s in track.signs),
+            tuple(tuple(map(tuple, box)) for box in track.barriers),
+            p.wall_height_mm,
+            p.sign_height_mm,
+        )
+        cache = getattr(self, "_scene_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        quads = []
+        colors = []
         half_line = LINE_MM / 2.0
         for seg, color in (
             *((s, ORANGE_BGR) for s in orange_segments()),
             *((s, BLUE_BGR) for s in blue_segments()),
         ):
-            self._fill_face(img, self._ribbon_to_cam(seg, half_line, ox, oy, oz, sh, ch), color)
-
-        faces = []
+            quads.append(self._ribbon(*seg, half_line))
+            colors.append(color)
+        n_rib = len(quads)
         # Pared en tramos: con el quad entero (3 m) la profundidad media del
         # pintor quedaba por delante de la madera del cajón pegada a ella y la
         # tapaba (CCW: el rosa del INICIO caía de 0.29 a 0.22). Los cortes caen
@@ -236,11 +314,8 @@ class CameraModel:
                         cuts.add(pt[1 - axis])
             cuts = sorted(cuts)
             for c0, c1 in zip(cuts[:-1], cuts[1:]):
-                corners = self._quad_corners(axis, value, c0, c1, b0, b1)
-                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-                if np.all(cam[:, 2] < 8.0):
-                    continue
-                faces.append((float(np.mean(cam[:, 2])), cam, WALL_BGR))
+                quads.append(self._quad_corners(axis, value, c0, c1, b0, b1))
+                colors.append(WALL_BGR)
         half = SIGN_MM / 2.0
         for sign in track.signs:
             color = RED_BGR if sign.color == "Red" else GREEN_BGR
@@ -251,19 +326,20 @@ class CameraModel:
                 sign.y + half,
                 p.sign_height_mm,
             ):
-                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-                faces.append((float(np.mean(cam[:, 2])), cam, color))
+                quads.append(corners)
+                colors.append(color)
         for box in track.barriers:
             xs = [pt[0] for pt in box]
             ys = [pt[1] for pt in box]
             for corners in self._box_quads(
                 min(xs), max(xs), min(ys), max(ys), p.sign_height_mm
             ):
-                cam = self._to_cam(corners, ox, oy, oz, sh, ch)
-                faces.append((float(np.mean(cam[:, 2])), cam, MAGENTA_BGR))
-        for _depth, cam, color in sorted(faces, key=lambda item: item[0], reverse=True):
-            self._fill_face(img, cam, color)
-        return img
+                quads.append(corners)
+                colors.append(MAGENTA_BGR)
+        pts = np.asarray(quads, dtype=np.float64).reshape(-1, 3)
+        scene = (pts, n_rib, colors)
+        self._scene_cache = (key, scene)
+        return scene
 
     def build_bev(self, calib_real_mm: np.ndarray | None = None) -> tuple[BEVTransformer, float]:
         xy = np.asarray(

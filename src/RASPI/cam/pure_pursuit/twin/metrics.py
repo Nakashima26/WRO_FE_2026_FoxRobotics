@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from ..wro_field import INNER_HALF_MM, OUTER_HALF_MM, SIGN_MM, SECTIONS_CW, section_to_world
+from ..wro_field import INNER_HALF_MM, OUTER_HALF_MM, SIGN_MM, SECTIONS_CW, _heading, section_to_world
 from .world import body_corners, robot_to_world
 
 
@@ -210,23 +210,29 @@ def compute_metrics(
         min_wall = min(min_wall, w)
         min_sign = min(min_sign, s)
 
+        # Cruce de cada señal en el marco de SU recta y del sentido de carrera:
+        # el carro pasa la altura de la señal (along cruza 0) estando a < 450 mm
+        # de lado. Rojo: el carro queda a la derecha de la señal (la señal a su
+        # izquierda); verde al revés. Antes se usaban los ejes intercambiados y
+        # sin el sentido (CCW), y salían "violaciones" a más de un metro.
         for si, sign in enumerate(field.signs):
-            along = _section_along_mm(sign.section, row["x"], row["y"])
+            hs = math.radians(_heading(sign.section, field.direction))
+            dx, dy = row["x"] - sign.x, row["y"] - sign.y
+            along = dx * math.sin(hs) + dy * math.cos(hs)
+            lat = dx * math.cos(hs) - dy * math.sin(hs)          # + = carro a la derecha
             prev_along = sign_cross_prev.get(si)
             sign_cross_prev[si] = along
             if prev_along is None:
                 continue
-            if prev_along < along - 50.0 and along >= 400.0:
+            if prev_along < 0.0 <= along and abs(lat) < 450.0:
                 signs_passed += 1
-                lat = _lateral_side(sign.section, row["x"], row["y"])
-                want_left = sign.color == "Red"
-                ok = lat > 0 if want_left else lat < 0
+                ok = lat > 0 if sign.color == "Red" else lat < 0
                 if not ok:
                     violations.append(
                         {
                             "sign": f"{sign.color} {sign.section}/{sign.seat}",
                             "t": t,
-                            "lateral_mm": lat,
+                            "lateral_mm": round(lat, 1),
                         }
                     )
 

@@ -60,6 +60,12 @@ LINE_MM = 20.0                        # 13.9
 PARK_BARRIER_THICK_MM = 20.0
 PARK_BARRIER_INTO_MM = 200.0          # los 20 cm de la madera, hacia el pasillo
 PARK_GAP_MM = 270.0                   # 1.5 × 180 mm (el programa oficial dibuja 300)
+# El programa oficial pone el cajón al inicio de la recta (w = 1000), pero los
+# jueces lo pueden mover a lo largo de la recta, pegado a la pared exterior
+# (pasó en el nacional 2026). w0 = cara de atrás de la primera madera.
+PARK_LEN_MM = 2.0 * PARK_BARRIER_THICK_MM + PARK_GAP_MM
+PARK_W_MIN = 1000.0
+PARK_W_MAX = 2000.0 - PARK_LEN_MM     # 1690
 
 # Coordenadas de una recta norte, como el programa oficial:
 # (h, w) con h = mm desde el borde exterior y w = mm desde el oeste del tapete.
@@ -149,6 +155,24 @@ def section_to_world(section: str, h: float, w: float) -> tuple[float, float]:
     raise ValueError(section)
 
 
+def world_to_section(section: str, x: float, y: float) -> tuple[float, float]:
+    """Inversa de section_to_world: mm del tapete -> (h, w) de esa recta."""
+    if section == "N":
+        return OUTER_HALF_MM - y, x + OUTER_HALF_MM
+    if section == "S":
+        return y + OUTER_HALF_MM, OUTER_HALF_MM - x
+    if section == "E":
+        return OUTER_HALF_MM - x, OUTER_HALF_MM - y
+    if section == "W":
+        return x + OUTER_HALF_MM, y + OUTER_HALF_MM
+    raise ValueError(section)
+
+
+def w_axis(section: str) -> tuple[float, float]:
+    """Vector unitario del tapete en el que crece w en esa recta."""
+    return {"N": (1.0, 0.0), "S": (-1.0, 0.0), "E": (0.0, -1.0), "W": (0.0, 1.0)}[section]
+
+
 @dataclass
 class Sign:
     x: float
@@ -171,6 +195,7 @@ class Field:
     start_y: float = 0.0
     start_heading: float = 0.0
     start_mode: str = "centro"   # "centro" | "cajon" | "Z3" | "Z4"
+    parking_w: float = 1000.0    # w0 del cajón (cara de atrás de la primera madera)
 
     @property
     def outer(self):
@@ -194,7 +219,7 @@ class Field:
             lines.append(f"  recta {sec}: carta {self.cards[sec]} → {seats}{mark}")
         lines.append(
             f"  arranque en recta {self.parking_section}, {self.start_mode}, "
-            f"heading {self.start_heading:.0f}°"
+            f"heading {self.start_heading:.0f}°, cajón en w={self.parking_w:.0f}"
         )
         return "\n".join(lines)
 
@@ -246,12 +271,13 @@ STALL_SIDE_GAP_MM = 2.0
 STALL_TAIL_GAP_MM = 5.0
 
 
-def stall_start_xy(section: str, direction: str) -> tuple[float, float]:
+def stall_start_xy(section: str, direction: str, w0: float = _LEFT) -> tuple[float, float]:
     """Eje trasero del arranque en el cajón. Fuente única: el twin (randomize
-    start="cajon") y el ancla del mapa digital (digital_map._stall_xy)."""
+    start="cajon") y el ancla del mapa digital (digital_map._stall_xy).
+    w0: w de la cara de atrás de la primera madera (ver PARK_W_MIN/MAX)."""
     half_len = _C.ROBOT_LENGTH_MM / 2.0
     h_center = PARK_BARRIER_INTO_MM - STALL_SIDE_GAP_MM - _C.ROBOT_WIDTH_MM / 2.0
-    rear_face = _LEFT + PARK_BARRIER_THICK_MM
+    rear_face = w0 + PARK_BARRIER_THICK_MM
     front_face = rear_face + PARK_GAP_MM
     if direction == "CW":
         w_center = (rear_face + STALL_TAIL_GAP_MM) + half_len
@@ -269,12 +295,13 @@ def _start_of(section: str) -> tuple[float, float]:
     }[section]
 
 
-def _barrier_corners(section: str) -> list[list[tuple[float, float]]]:
-    """Dos maderas junto al radio izquierdo de la recta, desde la pared exterior."""
+def _barrier_corners(section: str, w0: float = _LEFT) -> list[list[tuple[float, float]]]:
+    """Dos maderas pegadas a la pared exterior; la primera empieza en w0 (por
+    defecto el radio izquierdo de la recta, como el programa oficial)."""
     gap = PARK_GAP_MM
     t = PARK_BARRIER_THICK_MM
     into = PARK_BARRIER_INTO_MM
-    left = _LEFT
+    left = w0
     boxes = [
         (0.0, left, into, left + t),
         (0.0, left + t + gap, into, left + t + gap + t),
@@ -342,20 +369,33 @@ def _valid_zones(number: int, direction: str) -> list[str]:
     return [z for z, bad in START_ZONE_FORBIDDEN[direction].items() if not seats & set(bad)]
 
 
-def randomize(seed: int | None = None, start: str = "centro") -> Field:
+def park_w_of(seed: int, park_pos) -> float:
+    """w0 del cajón: None/"fijo" = el del programa oficial (1000); "random" =
+    uniforme en la recta con su propio Random (el sorteo de señales de la
+    semilla no cambia); un número = ese w0 (se recorta al rango válido)."""
+    if park_pos is None or str(park_pos).strip().lower() in ("", "fijo", "fixed", "none"):
+        return PARK_W_MIN
+    if str(park_pos).strip().lower() in ("random", "aleatorio", "azar"):
+        return round(random.Random(f"{seed}-cajon").uniform(PARK_W_MIN, PARK_W_MAX), 1)
+    return min(PARK_W_MAX, max(PARK_W_MIN, float(park_pos)))
+
+
+def randomize(seed: int | None = None, start: str = "centro", park_pos=None) -> Field:
     """Sorteo como randomize_and_draw_layout_for_obstacle del programa oficial.
 
     start: "centro" (eje trasero en el centro de la recta del cajón, sobre la
     línea media), "cajon" (estacionado dentro del cajón, paralelo a la pared
     exterior), "Z3" / "Z4" (centro del chasis en esa zona) o "zona" (una de
     las dos que el sorteo permite, al azar).
+    park_pos: dónde va el cajón a lo largo de la recta (ver park_w_of).
     """
     rng = random.Random(seed)
     used_seed = seed if seed is not None else rng.randrange(1, 10_000_000)
     if seed is None:
         # El randrange ya movió el Random; se regenera con la semilla guardada
         # para que --seed N reproduzca el mismo sorteo.
-        return randomize(used_seed, start=start)
+        return randomize(used_seed, start=start, park_pos=park_pos)
+    park_w = park_w_of(used_seed, park_pos)
 
     while True:
         direction = rng.choice(("CW", "CCW"))
@@ -405,7 +445,7 @@ def randomize(seed: int | None = None, start: str = "centro") -> Field:
         sx, sy = _start_of(parking)
         mode = "centro"
     elif start == "cajon":
-        sx, sy = stall_start_xy(parking, direction)
+        sx, sy = stall_start_xy(parking, direction, park_w)
         mode = "cajon"
     elif start in ("zona", "Z3", "Z4"):
         zone = start if start != "zona" else rng.choice(_valid_zones(cards[parking], direction))
@@ -422,9 +462,10 @@ def randomize(seed: int | None = None, start: str = "centro") -> Field:
         parking_section=parking,
         cards=cards,
         signs=signs,
-        barriers=_barrier_corners(parking),
+        barriers=_barrier_corners(parking, park_w),
         start_x=sx,
         start_y=sy,
         start_heading=heading,
         start_mode=mode,
+        parking_w=park_w,
     )

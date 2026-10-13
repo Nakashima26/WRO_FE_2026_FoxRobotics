@@ -99,7 +99,7 @@ with open(out / "trace.csv", "w", newline="", encoding="utf-8") as f:
     w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(r.trace)
 fld = r.field
 (out / "field.txt").write_text(
-    f"dir={fld.direction} parking={fld.parking_section} start=({fld.start_x:.0f},{fld.start_y:.0f},{fld.start_heading})\n"
+    f"dir={fld.direction} parking={fld.parking_section} parkw={getattr(fld, 'parking_w', 1000.0):.0f} start=({fld.start_x:.0f},{fld.start_y:.0f},{fld.start_heading})\n"
     + "\n".join(f"{s.color} {s.section}/{s.seat} ({s.x:.0f},{s.y:.0f})" for s in fld.signs), encoding="utf-8")
 m = dict(r.metrics); m.pop("corners", None)
 print("STOP", r.stop_reason, json.dumps(m, ensure_ascii=False, default=str))

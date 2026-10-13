@@ -420,6 +420,26 @@ class PPRuntime:
             print("[PP] Sin calibración BEV — el robot irá recto.", flush=True)
             print(f"[PP] Corre: python -m pure_pursuit.calibrate", flush=True)
 
+    # ── Modo ruta ─────────────────────────────────────────────────────────────
+
+    def _shown_line(self):
+        """Línea para el visor: la ruta del modo ruta si está activa, si no la del mapa digital."""
+        rm = getattr(self, "_rmode", None)
+        if rm is not None and rm.route is not None:
+            r = rm.route
+            return list(zip(r.x[::4].tolist(), r.y[::4].tolist()))
+        dm = getattr(self, "digital", None)
+        return list(dm.line_world) if dm is not None and dm.line_world else None
+
+    def _route_step(self, armed: bool):
+        """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
+        if not getattr(C, "ROUTE_FOLLOW", False):
+            return None, "", None
+        if getattr(self, "_rmode", None) is None:
+            from .route_mode import RouteMode
+            self._rmode = RouteMode()
+        return self._rmode.step(self.digital, self._prev_estado, getattr(self, "_prev_ack", None), armed)
+
     # ── Serial ────────────────────────────────────────────────────────────────
 
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
@@ -1413,6 +1433,7 @@ class PPRuntime:
         # Mapa digital limpio en GO: lo votado desarmado (carro en la mano,
         # otra pose) no vale, y el ancla del odómetro es el primer ACK armado.
         self.digital = DigitalMap()
+        self._rmode = None
         self._dmap_pending = []
         self.salida = SalidaCajon()
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
@@ -2076,6 +2097,17 @@ class PPRuntime:
         _turn_block = ((self._ext_corner_block > 0) or _turn_hold
                        or any(self._dmap_block) or _follow)
 
+        # ── Modo ruta: la vuelta es una curva fija en mm (ring_route) ─────
+        # Con el mapa de señales completo, el steer sale de un pure pursuit
+        # sobre la ruta con la pose por odometría (encoder + IMU del ESP),
+        # no de la imagen. prio=1: el ESP aplica el steer tal cual.
+        _route_steer, _route_suffix, _route_line = self._route_step(armed)
+        if _route_steer is not None:
+            obs_norm = _route_steer
+            state = "pp_follow"
+            pasado = False
+            _turn_block = True
+
         serial_msg = self._build_serial_message(
             obs_norm, state, len(bev_obstacles), pasado, interior,
             turn_block=_turn_block,
@@ -2086,7 +2118,13 @@ class PPRuntime:
         serial_msg += f",gv={int(self._green_ahead(new_obstacles))}"
         if self.salida.side and self._esp_inicio:
             serial_msg += f",isal={self.salida.side}"
+        if _route_steer is not None:
+            serial_msg += _route_suffix
         if armed:
+            # Subida de la ruta al ESP: una línea por frame (el UART a 115200
+            # no da para más junto con el V2).
+            if _route_line:
+                self.serial_link.send_line(_route_line)
             self.serial_link.send_line(serial_msg)
             serial_ack = self.serial_link.try_readline()
         else:
@@ -2219,7 +2257,9 @@ class PPRuntime:
 
         shown = bev_frame
         shift = (0, 0)
-        self._dig_img = self.digital.render()
+        # La imagen del mapa digital solo la lee el visor (mismo caso que
+        # warp_wide abajo); sin él son ~2 ms por frame tirados.
+        self._dig_img = self.digital.render() if need_bev_frame else None
         # warp_wide es un cv2.warpPerspective a un lienzo ~2300x1320 SOLO
         # para el HUD de depuración (bev_frame no realimenta el PP: ya se
         # usó bev_frame/bev_hsv de arriba para todo el pipeline). Los
@@ -2267,9 +2307,7 @@ class PPRuntime:
             map_localizer=self._map_localizer,
             bev_shift=shift,
             dig_map=self._dig_img,
-            line_world=(list(self.digital.line_world)
-                        if getattr(self, "digital", None) is not None
-                        and self.digital.line_world else None),
+            line_world=self._shown_line(),
         )
 
     # ── Loop principal ────────────────────────────────────────────────────────

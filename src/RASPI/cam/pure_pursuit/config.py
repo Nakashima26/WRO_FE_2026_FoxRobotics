@@ -1243,6 +1243,60 @@ LINE_CLASSIFY_FRAMES_FIRST     = 4
 # Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
 PP_STEER_GAIN     = MAX_STEER_DEG   # 60.0
+# Grados de servo por grado de rueda. El PP calcula ángulo de RUEDA y el ESP lo
+# escribe como SERVO 1:1, pero en el carro v2 71° de servo = 44.54° de rueda
+# (0.627 rueda/servo): el carro gira ~63 % de lo que pide el PP. 1.0 = sin
+# corregir (como siempre); SERVO_FULL_LOCK_CMD_DEG / MAX_WHEEL_STEER_DEG = 1.594.
+PP_SERVO_PER_WHEEL = 1.0
+
+# ─── Modo ruta (ring_route) ───────────────────────────────────────────────────
+# Con el mapa de señales completo (las 4 rectas), la vuelta se planea una vez
+# como curva en mm y se sigue con pure pursuit sobre la pose por odometría
+# (prio=1: el ESP aplica el steer sin gyro-hold ni PID de pared).
+ROUTE_FOLLOW = False
+ROUTE_LOOKAHEAD_MM = 200.0
+# Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
+ROUTE_W_KAPPA = 3.0e4
+# Frames que se adelanta la pose de odometría (llega atrasada por el UART).
+# 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
+ROUTE_PREDICT_FRAMES = 0.0
+# El ESP sigue la ruta él mismo (RTB/RTP/RTE + rt=1,rtx,rty,rth en el V2), con
+# su odometría a la velocidad del loop. False: el steer lo calcula la Pi.
+ROUTE_ON_ESP = True
+# Localización EKF (localizer.py): odometría + distancias contra el mapa conocido.
+ROUTE_LOCALIZER = True
+# Vuelta 1 en modo ruta (mapa incompleto, route_mode.py): asientos sin ver =
+# obstáculos sin lado; vacío tras ROUTE_EMPTY_FRAMES frames a buena vista
+# (ROUTE_VIEW_*); frena si el próximo sin resolver está cerca sobre la ruta.
+ROUTE_LAP1 = True
+ROUTE_EMPTY_FRAMES = 16
+ROUTE_VIEW_HALF_DEG = 45.0
+ROUTE_VIEW_MAX_MM = 550.0
+ROUTE_STOP_MM = 750.0
+ROUTE_SLOWDOWN_MM = 1300.0
+ROUTE_SLOW_PWM = 100
+# Tope de PWM en la vuelta 1 mientras quede algún asiento sin resolver.
+ROUTE_LAP1_PWM = 120
+# Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
+# El twin lo deja en False para que cada corrida sea reproducible.
+ROUTE_PLAN_ASYNC = False
+# Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
+ROUTE_LOCK_STATIONS = 7
+# Error lateral (mm, odometría) arriba del cual se baja a ROUTE_SLOW_PWM.
+ROUTE_CTE_SLOW_MM = 40.0
+# Frames máximos detenido esperando ver un asiento (luego sigue lento).
+ROUTE_STOP_MAX_FRAMES = 80
+# Votos de color con los que un asiento sin confirmar ya cuenta como señal provisional.
+ROUTE_PROVISIONAL_VOTES = 2
+# Arranque ciego (start_fix.py): el cajón puede estar en cualquier punto de la
+# recta de salida (pegado a la pared exterior). Se arranca suponiéndolo lo más
+# atrás posible y el avance se fija con los sonares (pared del fondo a ≤119 cm).
+# Lo que ve la cámara antes se guarda y se vota ya con la pose corregida.
+ROUTE_START_BLIND = True
+# Convergencia: masa del histograma en ±ROUTE_FIX_WIN_MM y lecturas informativas mínimas.
+ROUTE_FIX_MASS = 0.97
+ROUTE_FIX_WIN_MM = 20.0
+ROUTE_FIX_MIN_INFORM = 4
 
 # 2026-08-28: Excepción "interior pass". Cuando el obstáculo se esquiva hacia
 # el mismo lado que la pista va a girar, la Pi mandaba intr=1 y el ESP32 dejaba

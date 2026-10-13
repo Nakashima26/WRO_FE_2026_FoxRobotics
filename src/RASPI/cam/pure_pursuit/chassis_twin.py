@@ -418,6 +418,7 @@ def _run_once(args, seed: int, interactive: bool):
         log_dir=args.log_dir,
         field=pre_field,
         fw_params=pre_params,
+        park_pos=args.park_pos or None,
     )
     trail: list[tuple[float, float]] = []
     frames: list[np.ndarray] = []
@@ -573,7 +574,7 @@ def _run_once(args, seed: int, interactive: bool):
 
     go = True
     if interactive and view_q is not None:
-        preview = pre_field or randomize(seed, start=sim.start)
+        preview = pre_field or randomize(seed, start=sim.start, park_pos=sim.park_pos)
         view_q.put(("field", _field_payload(preview)))
         field_sent = True
         n_signs = len(preview.signs)
@@ -614,6 +615,9 @@ def _run_once(args, seed: int, interactive: bool):
                 go = False
                 break
     if go:
+        # El HUD ancho y el mapa del carro solo hacen falta en los frames que
+        # se pintan (show_cam en on_frame); en los demás la Pi se los salta.
+        on_frame.wants_images = lambda: (frame_i + 1) % args.render_every == 0
         result = sim.run(frame_callback=on_frame if (interactive or need_fig) else None)
     else:
         result = RunResult(
@@ -642,6 +646,9 @@ def main():
     ap.add_argument("--preset", default="baseline")
     ap.add_argument("--start", default="",
                     help="centro, zona o cajon; vacío = el del preset")
+    ap.add_argument("--park-pos", default="",
+                    help="cajón a lo largo de la recta: random (según la semilla) o w0 en mm "
+                         "(1000..1690); vacío = fijo en 1000 como el programa oficial")
     ap.add_argument("--calib", default="pure_pursuit/twin/calib/bev_calib_main_2026-08-19.npz")
     ap.add_argument("--fw", action="append", default=[])
     ap.add_argument("--pi", action="append", default=[])

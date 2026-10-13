@@ -173,4 +173,7 @@ class PurePursuitController:
         return steer_deg, (float(target[0]), float(target[1]))
 
     def normalize(self, steer_deg: float) -> float:
-        return max(-1.0, min(1.0, steer_deg / C.PP_STEER_GAIN))
+        # steer_deg es ángulo de RUEDA (geometría PP); el ESP lo escribe como
+        # grados de SERVO 1:1. PP_SERVO_PER_WHEEL convierte (1.0 = como antes).
+        servo_deg = steer_deg * float(getattr(C, "PP_SERVO_PER_WHEEL", 1.0))
+        return max(-1.0, min(1.0, servo_deg / C.PP_STEER_GAIN))

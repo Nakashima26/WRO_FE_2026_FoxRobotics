@@ -25,6 +25,8 @@ from .wro_field import (
     CARDS,
     INNER_HALF_MM,
     OUTER_HALF_MM,
+    PARK_W_MAX,
+    PARK_W_MIN,
     PARKING_FORBIDDEN_SEATS,
     SEATS,
     SECTIONS_CW,
@@ -53,6 +55,7 @@ _WALL_FIX_MAX_DEG = 12.0
 _WALL_GATE_MM = 150.0
 _WALL_GAIN = 0.3
 _WALL_STEP_MM = 20.0
+_WALL_STRONG_STEP_MM = 10.0
 # Rumbo por pendiente de pared: tramo mínimo, ganancia y tope por ventana.
 _YAW_WIN_MM = 400.0
 _YAW_GAIN = 0.6
@@ -103,6 +106,30 @@ def _lane_pose(section: str, direction: str, along_mm: float, lat_mm: float) -> 
     return x, y, h
 
 
+def feet_world(feet, pose_xy, heading_deg):
+    """Pies de latas (bev_x, bev_y, color) -> (x, y, color, adelante, lateral) en el
+    tapete, con la pose del eje trasero. Misma proyección que DigitalMap._vote."""
+    out = []
+    px, py = pose_xy
+    h = math.radians(heading_deg)
+    for bx, by, color in feet or ():
+        if color not in ("Red", "Green"):
+            continue
+        lat = (bx - C.ROBOT_BEV_X) * C.MM_PER_PX
+        fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX
+        if fwd < 80.0 or fwd > 2200.0 or abs(lat) > 1400.0:
+            continue
+        fwd += _BEV_AHEAD_MM
+        ray = math.hypot(fwd - _CAM_AHEAD_MM, lat)
+        if ray > 1e-6:
+            fwd += _FOOT_TO_CENTER_MM * (fwd - _CAM_AHEAD_MM) / ray
+            lat += _FOOT_TO_CENTER_MM * lat / ray
+        wx = px + fwd * math.sin(h) + lat * math.cos(h)
+        wy = py + fwd * math.cos(h) - lat * math.sin(h)
+        out.append((wx, wy, color, fwd, lat))
+    return out
+
+
 def _seat_world(section: str) -> list[tuple[str, float, float]]:
     return [(sid, *section_to_world(section, h, w)) for sid, (h, w) in SEATS.items()]
 
@@ -120,6 +147,14 @@ class DigitalMap:
         # que con el carro real basta una convención fija.
         self.parking = str(getattr(C, "DIGITAL_MAP_PARKING", "W"))
         self.section = self.parking
+        # w0 del cajón en su recta. El programa oficial lo pone en 1000, pero
+        # los jueces lo pueden correr. Arranque ciego (modo ruta): se supone el
+        # más atrás en el sentido de carrera y route_mode lo corrige con los
+        # sonares (start_fix.py); mientras tanto lo que ve la cámara se guarda
+        # (_deferred) y se vota al corregir, ya con la pose buena.
+        self.blind = bool(getattr(C, "ROUTE_FOLLOW", False) and getattr(C, "ROUTE_START_BLIND", False))
+        self.park_w = PARK_W_MIN
+        self._deferred: list | None = [] if self.blind else None
         self.along_mm = self._stall_along()
         self.lat_mm = 0.0
         # Sin sentido: rumbo/pose de relleno (solo HUD/logs). Nadie debe
@@ -132,6 +167,8 @@ class DigitalMap:
         self.confirmed: dict[tuple[str, str], str] = {}
         self._best: dict[tuple[str, str], float] = {}
         if self.direction:
+            if self.blind:
+                self.park_w = PARK_W_MIN if self.direction == "CW" else PARK_W_MAX
             self.pose_xy = self._stall_xy()
         else:
             # Centro del cajón (promedio de los dos arranques): dato del
@@ -192,6 +229,8 @@ class DigitalMap:
         self.direction = direction
         self.heading = _heading(self.section, direction)
         self._view_heading = self.heading
+        if self.blind:
+            self.park_w = PARK_W_MIN if direction == "CW" else PARK_W_MAX
         self.pose_xy = self._stall_xy()
         return True
 
@@ -203,7 +242,18 @@ class DigitalMap:
     def _stall_xy(self) -> tuple[float, float]:
         # Misma cifra que el arranque en cajón (wro_field.stall_start_xy): no
         # lee la pose real. Es el EJE TRASERO (lo que integra el odómetro).
-        return stall_start_xy(self.parking, self.direction)
+        return stall_start_xy(self.parking, self.direction, self.park_w)
+
+    def replay_deferred(self, dx: float, dy: float) -> int:
+        """Arranque ciego resuelto: vota lo guardado con la pose corrida (dx, dy)."""
+        buf, self._deferred = self._deferred or [], None
+        saved = (self.pose_xy, self._view_heading, self._orange_y, self.section, self._tc, self.in_stall)
+        for feet, pose, vh, oy, sec, tc, stall in buf:
+            self.pose_xy = (pose[0] + dx, pose[1] + dy)
+            self._view_heading, self._orange_y, self.section, self._tc, self.in_stall = vh, oy, sec, tc, stall
+            self._vote(feet)
+        (self.pose_xy, self._view_heading, self._orange_y, self.section, self._tc, self.in_stall) = saved
+        return len(buf)
 
     def section_of(self, turns: int) -> str:
         i = SECTIONS_CW.index(self.parking)
@@ -335,6 +385,10 @@ class DigitalMap:
             return
         self._live = []
         if not feet:
+            return
+        if self._deferred is not None:
+            self._deferred.append((list(feet), self.pose_xy, self._view_heading, self._orange_y,
+                                   self.section, self._tc, self.in_stall))
             return
         px, py = self.pose_xy
         h = math.radians(self._view_heading)
@@ -524,6 +578,8 @@ class DigitalMap:
         fila y nunca corregía. Se busca entre las confirmadas de esta recta y
         solo si no hay otra del mismo color que pueda ser la vista.
         """
+        if not getattr(C, "DIGITAL_MAP_SIGN_PULL", True):
+            return
         sec = self.section
         # El ACK es del frame anterior: girando, la vista sale rotada unos
         # grados y la lata cae 5–10 cm al lado (corregía hacia el lado malo).
@@ -646,6 +702,11 @@ class DigitalMap:
             if any(abs(sa - s_al) < 160.0 and min(s_lat, wall) - 30.0 < sl < max(s_lat, wall) + 30.0
                    for sa, sl in occ):
                 continue
+            # Maderas del cajón: el sonar exterior las ve 200 mm antes que la
+            # pared y 6 frames iguales pasaban como deriva "fuerte" (semilla 2:
+            # brinco de 121 mm en un frame -> el seguidor de ruta a la isla).
+            if is_outer and sec == self.parking and self._near_barrier(s_al):
+                continue
             # El cono toma la distancia perpendicular (|e| < medio cono).
             l_meas = wall - side * (d + mr * ce) - mf * se
             if abs(l_meas - l) < _WALL_GATE_MM:
@@ -699,11 +760,26 @@ class DigitalMap:
         da = max(-_WALL_STEP_MM, min(_WALL_STEP_MM, da))
         if not strong:
             dl = max(-_WALL_STEP_MM, min(_WALL_STEP_MM, dl))
+        else:
+            # Aun la corrección "fuerte" va por pasos: un brinco de la pose de
+            # más de un par de cm desestabiliza al seguidor de ruta.
+            dl = max(-_WALL_STRONG_STEP_MM, min(_WALL_STRONG_STEP_MM, dl))
         h = math.radians(_heading(sec, self.direction))
         ex = da * math.sin(h) + dl * math.cos(h)
         ey = da * math.cos(h) - dl * math.sin(h)
         self._pose_fix = (self._pose_fix[0] + ex, self._pose_fix[1] + ey)
         self.pose_xy = (self.pose_xy[0] + ex, self.pose_xy[1] + ey)
+
+    def _near_barrier(self, s_al: float, pad: float = 120.0) -> bool:
+        """El sonar (along s_al de la recta del cajón) está a la altura de las maderas."""
+        key = (self.parking, self.direction, self.park_w)
+        if getattr(self, "_barrier_key", None) != key:
+            alongs = [self._section_frame(x, y, self.parking)[0]
+                      for box in _barrier_corners(self.parking, self.park_w) for x, y in box]
+            self._barrier_span = (min(alongs), max(alongs))
+            self._barrier_key = key
+        a0, a1 = self._barrier_span
+        return a0 - pad <= s_al <= a1 + pad
 
     def _next_section(self, sec: str) -> str:
         i = SECTIONS_CW.index(sec)
@@ -816,6 +892,17 @@ class DigitalMap:
         if not cans or cans[0][1] >= -40.0:
             return None
         return cans[0]
+
+    def _can_lat(self, sec: str, along: float) -> float | None:
+        """Lateral del centro de la lata confirmada de esa recta más cercana a esa altura."""
+        best = None
+        for (s, sid), _color in self.confirmed.items():
+            if s != sec:
+                continue
+            sa, sr = self._section_frame(*self._xy_of(sec, sid), sec)
+            if best is None or abs(sa - along) < best[0]:
+                best = (abs(sa - along), sr)
+        return None if best is None or best[0] > 250.0 else best[1]
 
     def _green_ahead(self) -> tuple[float, float] | None:
         """(cuánto falta, lado) hasta el lado izquierdo del verde siguiente."""
@@ -1048,6 +1135,13 @@ class DigitalMap:
         if hold_at is not None:
             end = max(end, hold_at + 100.0)
         knee = None
+        # Lateral de la recta después de la última lata (con lead verde). Antes
+        # era car_lat siempre: con la lata todavía adelante la línea iba hacia
+        # su lado de paso y, al llegar a la altura de la lata, regresaba de
+        # golpe al lateral del carro, encima de ella (3170839 W/X2 rojo).
+        hold_lat = car_lat
+        if lead is not None and mine and along < mine[-1][0]:
+            hold_lat = mine[-1][1]
         if lead is not None:
             # La esquina la dobla el PP (prio=1). Vértice = cruce del lado del
             # carro en esta recta con el lado de paso del verde en la otra;
@@ -1062,7 +1156,13 @@ class DigitalMap:
                     sh2 = max(sh2, -outer_cap)
                 else:
                     sh2 = min(sh2, outer_cap)
-            ka = _lane_pose(sec, self.direction, 0.0, car_lat)
+            # El tope no puede meter la línea al verde: con el verde pegado a
+            # la pared (T4, centro a -100) el tope de 140 dejaba el centro del
+            # carro a 40 mm del de la lata (3170839 E/T4: 14 mm de holgura).
+            can_lat = self._can_lat(nxt, lead[0])
+            if can_lat is not None:
+                sh2 = min(sh2, can_lat - _CLEAR_MM)
+            ka = _lane_pose(sec, self.direction, 0.0, hold_lat)
             kb = _lane_pose(nxt, self.direction, 0.0, sh2)
             hs = math.radians(_heading(sec, self.direction))
             fsx, fsy = math.sin(hs), math.cos(hs)
@@ -1070,23 +1170,25 @@ class DigitalMap:
             knee = (ka[0] + fsx * t_k, ka[1] + fsy * t_k)
             end = t_k - _KNEE_MM
         a = along
+        last_lat = car_lat
         while a < end:
             target = self._ease(sec, a)
-            if lead is not None and mine and a >= mine[-1][0]:
+            if lead is not None and (not mine or a >= mine[-1][0]):
                 # No regresar al rojo: la línea de adelante se queda del lado
-                # del carro para poder subir a la izquierda del verde.
-                target = car_lat
+                # de paso (o del carro, si ya pasó) para subir a la izquierda
+                # del verde por el knee, que va sobre este mismo lateral.
+                target = hold_lat
             u = min(1.0, max(0.0, (a - along) / 280.0))
             u = u * u * (3.0 - 2.0 * u)
-            self._put(pts, shifts, sec, a, car_lat + (target - car_lat) * u)
+            last_lat = car_lat + (target - car_lat) * u
+            self._put(pts, shifts, sec, a, last_lat)
             a += step
-        if lead is not None:
-            sh0 = car_lat
-        else:
-            sh0 = self._ease(sec, max(a - 40.0, along))
+        # La curva sale del último lateral que usó la recta (antes: el de
+        # _ease o car_lat, distinto si la recta era corta -> escalón).
+        sh0 = hold_lat if lead is not None else self._ease(sec, max(a - 40.0, along))
         p0 = _lane_pose(sec, self.direction, max(a - 40.0, along), sh0)
         hrad = math.radians(_heading(sec, self.direction))
-        rx, ry = math.cos(hrad), -math.sin(hrad)
+        fx, fy = math.sin(hrad), math.cos(hrad)
         if lead is not None and knee is not None:
             bow = knee
             kn_a, _ = self._section_frame(knee[0], knee[1], nxt)
@@ -1095,6 +1197,11 @@ class DigitalMap:
         else:
             sh2 = self._ease(nxt, na + 700.0)
             p2 = _lane_pose(nxt, self.direction, na + 700.0, sh2)
+            # Vértice = cruce de esta recta (desde p0, hacia adelante) con la
+            # siguiente (por p2). Antes se corría p0 hacia la DERECHA: la curva
+            # salía perpendicular al carro y llegaba con el rumbo de la recta
+            # vieja (quiebres de ~90° en ambas puntas; y en CCW, cuerda recta).
+            rx, ry = math.cos(hrad), -math.sin(hrad)
             right_amt = max(0.0, (p2[0] - p0[0]) * rx + (p2[1] - p0[1]) * ry)
             bow = (p0[0] + rx * right_amt, p0[1] + ry * right_amt)
         for i in range(1, 13):
@@ -1111,11 +1218,17 @@ class DigitalMap:
         b = na + 700.0
         if lead is not None and knee is not None:
             b = self._section_frame(p2[0], p2[1], nxt)[0] + step
+        tail0 = b
         while b < na + 1100.0:
             if lead is not None and b < lead[0] + 220.0:
-                sh = lead[1]
+                # Mismo lateral que el knee (sh2): antes lead[1] sin el tope,
+                # 160 mm de escalón justo en el verde.
+                sh = sh2 if knee is not None else lead[1]
             else:
                 sh = self._ease(nxt, b)
+                if lead is not None and knee is not None:
+                    u = min(1.0, max(0.0, (b - max(tail0, lead[0] + 220.0)) / 300.0))
+                    sh = sh2 + (sh - sh2) * u * u * (3.0 - 2.0 * u)
             self._put(pts, shifts, nxt, b, sh)
             b += step
         self._line_shifts = shifts
@@ -1237,7 +1350,7 @@ class DigitalMap:
         inner = [(half_i, -half_i), (half_i, half_i), (-half_i, half_i), (-half_i, -half_i)]
         poly(outer, (40, 40, 40), 2)
         poly(inner, (40, 40, 40), 2)
-        for box in _barrier_corners(self.parking):
+        for box in _barrier_corners(self.parking, self.park_w):
             poly(box, (180, 0, 180), 2)
 
         for sec in SECTIONS_CW:

@@ -133,6 +133,21 @@ PRESETS["hw_nuevo"] = {
     },
 }
 
+# Modo ruta (route_mode.py): hw_nuevo + la vuelta como curva en mm que el ESP
+# sigue con su odometría; localización EKF propia (localizer.py), así que las
+# correcciones viejas del mapa (pared/lata) van apagadas. Vuelta 1 sin mapa.
+PRESETS["ruta"] = {
+    **PRESETS["hw_nuevo"],
+    "fw_overrides": {**PRESETS["hw_nuevo"]["fw_overrides"], "PARK_MODO": "PARK_NINGUNO", "MOTOR_MAX": "155"},
+    "pi_overrides": {
+        **PRESETS["hw_nuevo"]["pi_overrides"],
+        "ROUTE_FOLLOW": True,
+        "RACING_LINE": "",
+        "DIGITAL_MAP_WALL_FIX": False,
+        "DIGITAL_MAP_SIGN_PULL": False,
+    },
+}
+
 
 @dataclass
 class RunResult:
@@ -277,6 +292,7 @@ class Sim:
         fw_params: dict[str, float] | None = None,
         ignore_collisions: tuple[str, ...] = (),
         inject_map_truth: Any = None,
+        park_pos: Any = None,
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
@@ -311,6 +327,12 @@ class Sim:
         if spec is None:
             spec = cfg.get("inject_map_truth", True)
         self.inject_map_truth = map_truth_keys(spec)
+        # Dónde va el cajón en la recta (wro_field.park_w_of): argumento > env
+        # FOX_PARK_POS > preset "park_pos" > fijo (w=1000, el programa oficial).
+        # La Pi NO lo recibe: lo tiene que descubrir (route_mode, arranque ciego).
+        if park_pos is None:
+            park_pos = os.environ.get("FOX_PARK_POS") or cfg.get("park_pos")
+        self.park_pos = park_pos
         self.params = params or TwinParams()
         self.speed_scale = speed_scale
         if speed_scale != 1.0:
@@ -337,7 +359,7 @@ class Sim:
                 saved_cfg[k] = getattr(C, k)
                 setattr(C, k, v)
         rng = np.random.default_rng(self.seed)
-        field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start)
+        field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
         for key in self.inject_map_truth:
             k, attr = _MAP_TRUTH_KEYS[key]
             if k not in saved_cfg and hasattr(C, k):
@@ -650,9 +672,13 @@ class Sim:
                         frame = cam.render_camera(field, px, py, ph)
                         render_s += time.perf_counter() - t_render0
                         t_proc0 = time.perf_counter()
+                        # El visor pinta imágenes cada N frames: el callback
+                        # puede decir si este las usa (wants_images).
+                        want_img = frame_callback is not None and getattr(
+                            frame_callback, "wants_images", lambda: True)()
                         result = runtime.process_frame(
                             frame, now=t_end, armed=armed,
-                            need_bev_frame=frame_callback is not None,
+                            need_bev_frame=want_img,
                         )
                         pi_ms = (time.perf_counter() - t_proc0) * 1000.0
                         pi_s += pi_ms / 1000.0
@@ -664,6 +690,12 @@ class Sim:
                             unarmed_left -= 1
                             if unarmed_left <= 0:
                                 runtime.arm(sleep_fn=lambda _s: None)
+                                # arm() crea un DigitalMap limpio: la siembra
+                                # del mapa conocido se repite aquí (si no, se
+                                # perdía y SEED_CONFIRMED no tenía efecto).
+                                if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
+                                    for s in field.signs:
+                                        runtime.digital.confirmed[(s.section, s.seat)] = s.color
                                 armed = True
                                 armed_t = t_end
                                 progress_anchor_t = t_end
