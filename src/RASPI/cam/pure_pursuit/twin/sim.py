@@ -55,6 +55,9 @@ PRESETS: dict[str, dict[str, Any]] = {
             "GIRO_RAPIDO_MODO": "1",
             # La línea del mapa dobla sola (verde en la boca): el ESP la cuenta.
             "GIRO_PI_CUENTA_DEG": "70.0f",
+            # A PWM~155 el hold del mapa suelta tarde: con ventana 55 (grMin=40)
+            # se pierde el arco y cae a MANIOBRA en reversa (esquina del cajón).
+            "GR_VENTANA_CM": "75",
         },
         "pi_overrides": {
             "CORNER_HINT_TO_ESP": True,
@@ -80,6 +83,9 @@ PRESETS: dict[str, dict[str, Any]] = {
             # El giro rápido a 95 cm sale pegado a la isla (semillas 1 y 6).
             "DIGITAL_MAP_TURN_HOLD_CM": 65.0,
             "DIGITAL_MAP_TURN_HOLD_INNER_CM": 80.0,
+            # Recta del cajón: no abrir tanto al hueco magenta (evita llegar
+            # a la esquina SW pegado a la exterior → MANIOBRA en reversa).
+            "DIGITAL_MAP_PARK_OUTER_MAX_MM": 120.0,
             # Verde en la boca: la esquina la dobla el PP (el ESP la cuenta).
             "DIGITAL_MAP_PP_TURN_CM": 75.0,
         },
@@ -519,6 +525,16 @@ class Sim:
                     serial_link=link,
                     bev=bev,
                 )
+                if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
+                    for s in field.signs:
+                        runtime.digital.confirmed[(s.section, s.seat)] = s.color
+                    print(
+                        f"[twin] mapa: {len(runtime.digital.confirmed)} asientos "
+                        f"sembrados (camino conocido)",
+                        flush=True,
+                    )
+                freeze_at_tc = int(getattr(C, "DIGITAL_MAP_FREEZE_AT_TC", 0) or 0)
+                map_frozen = bool(getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False))
                 link.open()
                 fw.push_serial2("READY")
                 fw.setup()
@@ -569,6 +585,42 @@ class Sim:
                             pass
                     tpr_s = _parse_ack_field(link._last_ack, "tpr")
                     tpr = int(tpr_s) if tpr_s else 12
+
+                    if (
+                        freeze_at_tc > 0
+                        and not map_frozen
+                        and tc is not None
+                        and tc >= freeze_at_tc
+                        and runtime is not None
+                        # Esperar recta (no esquina): si se engancha la ruta
+                        # a mitad del giro, el índice inicial queda mal.
+                        and est in ("S", "C", "R")
+                    ):
+                        for s in field.signs:
+                            runtime.digital.confirmed[(s.section, s.seat)] = s.color
+                        if "DIGITAL_MAP_SEED_CONFIRMED" not in saved_cfg and hasattr(
+                            C, "DIGITAL_MAP_SEED_CONFIRMED"
+                        ):
+                            saved_cfg["DIGITAL_MAP_SEED_CONFIRMED"] = getattr(
+                                C, "DIGITAL_MAP_SEED_CONFIRMED"
+                            )
+                        C.DIGITAL_MAP_SEED_CONFIRMED = True
+                        # Activar planificador solo si RACING_LINE pide uno
+                        # (qp/joint). Vacío = seguir con _build_line congelado.
+                        line = str(getattr(C, "RACING_LINE", "") or "").lower()
+                        if line in ("qp", "joint") and not getattr(C, "ROUTE_PLANNER", False):
+                            if "ROUTE_PLANNER" not in saved_cfg and hasattr(C, "ROUTE_PLANNER"):
+                                saved_cfg["ROUTE_PLANNER"] = C.ROUTE_PLANNER
+                            C.ROUTE_PLANNER = True
+                        runtime.digital._route_key = None
+                        map_frozen = True
+                        print(
+                            f"[twin] mapa congelado tc={tc} est={est}: "
+                            f"{len(runtime.digital.confirmed)} asientos "
+                            f"ROUTE={getattr(C, 'ROUTE_PLANNER', False)} "
+                            f"line={line or 'build_line'}",
+                            flush=True,
+                        )
 
                     spd = abs(veh.v)
                     if spd < _STOPPED_SPEED_MM_S and fw.motor_pwm() < 30:

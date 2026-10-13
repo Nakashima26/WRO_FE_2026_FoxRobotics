@@ -169,6 +169,9 @@ class DigitalMap:
         self._route = None
         self._route_key = None
         self._route_i = 0
+        # Esquina open/closed/island (corner_planner), cache por confirmed.
+        self._corner_plan = None
+        self._corner_plan_key = None
 
     def set_direction(self, direction: str) -> bool:
         """Fija el sentido UNA vez, antes del primer update(). True si lo fijó.
@@ -320,6 +323,10 @@ class DigitalMap:
         return along, right
 
     def _vote(self, feet: list[tuple[float, float, str]]) -> None:
+        # Twin con mapa ya conocido: no dejar que la visión mueva asientos
+        # (replan thrashing + ruta distinta a la del Field).
+        if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
+            return
         self._live = []
         if not feet:
             return
@@ -715,6 +722,11 @@ class DigitalMap:
                 if abs(osr - side) < 130.0:
                     side = osr + 90.0 if color == "Red" else osr - 90.0
             side = max(-320.0, min(320.0, side))
+            # Cajón: no abrir tanto a la pared con el hueco magenta (SW en
+            # 3170839: verde en S → esquina pegada → MANIOBRA en reversa).
+            park_cap = float(getattr(C, "DIGITAL_MAP_PARK_OUTER_MAX_MM", 0.0) or 0.0)
+            if park_cap > 0.0 and sec == self.parking and side < -park_cap:
+                side = -park_cap
             out.append((sa, side))
         if latch:
             latched = self._latched.get(sec)
@@ -818,6 +830,42 @@ class DigitalMap:
         fwd = dx * math.sin(h) + dy * math.cos(h)
         return fwd, against_wall
 
+    def _corner_planner_on(self) -> bool:
+        # Solo con flag explícito. El freeze del twin NO debe torcer hold/línea
+        # (antes SEED_CONFIRMED activaba el plan y la línea/hold salían mal).
+        return bool(getattr(C, "CORNER_PLANNER", False))
+
+    def corner_plan(self):
+        """CornerPlan de la esquina al final de la recta actual, o None."""
+        if (not self._corner_planner_on() or self.direction is None
+                or self.in_stall or not self.confirmed):
+            return None
+        key = (self.direction, self.section, tuple(sorted(self.confirmed.items())))
+        if key != self._corner_plan_key:
+            from . import corner_planner as cp
+            self._corner_plan = cp.plan_corner_from_confirmed(
+                self.direction, self.section, self.confirmed,
+                parking=self.parking)
+            self._corner_plan_key = key
+            p = self._corner_plan
+            sc = p.scored or {}
+            lead = sc.get("lead") or {}
+            print(
+                f"[DMAP] corner {p.section}→{p.next_section} mode={p.mode} "
+                f"hold={p.hold_dF_cm:.0f}cm along={p.release_along_mm:.0f} "
+                f"apex={p.apex_lat_mm:.0f} entry={p.entry_lat_mm:.0f} "
+                f"lead={lead.get('color', '-')}"
+                f"@{lead.get('along', 0):.0f}/{lead.get('side', 0):.0f} "
+                f"{p.solve_ms:.0f}ms",
+                flush=True,
+            )
+        return self._corner_plan
+
+    def corner_gf_cm(self) -> float | None:
+        """gf= sugerido por el plan de esquina, o None."""
+        p = self.corner_plan()
+        return None if p is None else p.gf_cm
+
     def blocks_turn(self) -> bool:
         """Sigue bloqueado hasta que el arco del giro cabe a la izquierda del verde."""
         if self._tc >= self._tpr:
@@ -826,6 +874,10 @@ class DigitalMap:
             return False
         if self._pp_turn_tc == self._tc and not self.in_stall:
             return True
+        # Arco hacia adentro/medio: no bloquear por verde fantasma; manda hold/along.
+        plan = self.corner_plan()
+        if plan is not None and not plan.opens_out:
+            return False
         ahead = self._green_ahead()
         if ahead is None:
             return False
@@ -855,31 +907,48 @@ class DigitalMap:
     def holds_for_center(self) -> bool:
         """Giro rápido todavía no: el arco saldría pegado a la isla.
 
-        El giro rápido dispara en cuanto el frontal baja de 95 cm y con el
-        radio mínimo (~8 cm de avance) sale a ~10 cm de la isla. Se aguanta
-        hasta DIGITAL_MAP_TURN_HOLD_CM (centro del carril), o hasta
-        DIGITAL_MAP_TURN_HOLD_INNER_CM si la primera lata de la siguiente se
-        pasa por dentro (lado de paso, pero no pegado a la isla).
+        Con CORNER_PLANNER / mapa congelado: suelta si along >= release
+        o dF <= hold del CornerPlan. Si no, hold 65/80 clásico.
         """
-        hold = self._hold_cm()
-        if hold <= 0.0 or not getattr(C, "DIGITAL_MAP_STEER", False) or self._tc >= self._tpr:
+        if not getattr(C, "DIGITAL_MAP_STEER", False) or self._tc >= self._tpr:
             return False
-        if self.in_stall or not self._aligned or self._dF is None or self._dF <= 0.0:
+        if self.in_stall or not self._aligned:
             return False
         if self.along_mm < 1500.0:
             return False
         err = (self.heading - _heading(self.section, self.direction) + 180.0) % 360.0 - 180.0
         if abs(err) > 30.0:
             return False
+        plan = self.corner_plan()
+        if plan is not None:
+            dF_ok = self._dF is not None and 0.0 < self._dF <= plan.hold_dF_cm
+            along_ok = self.along_mm >= plan.release_along_mm
+            return not (dF_ok or along_ok)
+        hold = self._hold_cm()
+        if hold <= 0.0 or self._dF is None or self._dF <= 0.0:
+            return False
         return self._dF > hold
 
     def _hold_cm(self) -> float:
+        plan = self.corner_plan()
+        if plan is not None:
+            return float(plan.hold_dF_cm)
         if self._inner_lead(self._next_section(self.section)):
-            return float(getattr(C, "DIGITAL_MAP_TURN_HOLD_INNER_CM", 0.0))
-        return float(getattr(C, "DIGITAL_MAP_TURN_HOLD_CM", 0.0))
+            hold = float(getattr(C, "DIGITAL_MAP_TURN_HOLD_INNER_CM", 0.0))
+        else:
+            hold = float(getattr(C, "DIGITAL_MAP_TURN_HOLD_CM", 0.0))
+        # Salida de la recta del cajón: girar antes para no comerse la esquina.
+        if self.section == self.parking:
+            park = float(getattr(C, "DIGITAL_MAP_TURN_HOLD_PARK_CM", 0.0) or 0.0)
+            if park > 0.0:
+                hold = park if hold <= 0.0 else min(hold, park)
+        return hold
 
     def _hold_along(self) -> float | None:
         """Altura de la recta donde se suelta el giro (para que la línea no doble antes)."""
+        plan = self.corner_plan()
+        if plan is not None:
+            return float(plan.release_along_mm)
         hold = self._hold_cm()
         if hold <= 0.0:
             return None
@@ -943,6 +1012,14 @@ class DigitalMap:
         # del verde antes de doblar.
         lead = self._left_pass(nxt)
         mine = self._cans_on(sec, 0.0, 3200.0)
+        # CornerPlan solo manda hold/gf (vueltas 2–3). Geometría = _ease +
+        # knee del verde. Con mapa conocido, si ESTA recta termina en rojo no
+        # abrir el arco al verde siguiente (vuelta abierta en rojo).
+        plan = self.corner_plan() if sec == self.section else None
+        if plan is not None:
+            last_col = (plan.scored or {}).get("last") or {}
+            if last_col.get("color") == "Red" or (mine and mine[-1][1] > 40.0):
+                lead = None
         end = join - 420.0
         hold_at = self._hold_along() if lead is None and sec == self.section else None
         if hold_at is not None:
@@ -975,7 +1052,10 @@ class DigitalMap:
             u = u * u * (3.0 - 2.0 * u)
             self._put(pts, shifts, sec, a, car_lat + (target - car_lat) * u)
             a += step
-        sh0 = car_lat if lead is not None else self._ease(sec, max(a - 40.0, along))
+        if lead is not None:
+            sh0 = car_lat
+        else:
+            sh0 = self._ease(sec, max(a - 40.0, along))
         p0 = _lane_pose(sec, self.direction, max(a - 40.0, along), sh0)
         hrad = math.radians(_heading(sec, self.direction))
         rx, ry = math.cos(hrad), -math.sin(hrad)
@@ -1027,9 +1107,22 @@ class DigitalMap:
             self._steer_ok = False
             return []
         from . import route_planner as rp
-        key = (self.direction, tuple(sorted(self.confirmed.items())))
+        backend = str(getattr(C, "RACING_LINE", "qp") or "qp").lower()
+        key = (self.direction, backend, tuple(sorted(self.confirmed.items())))
         if key != self._route_key:
-            self._route = rp.plan_lap(self.direction, self.confirmed)
+            if backend == "joint":
+                from . import racing_line_astar as rla
+                pil = rp.pillars_from_seats(self.confirmed)
+                start = self.section or self.parking or "N"
+                lap = rla.plan_lap_joint(self.direction, pil, start_section=start)
+                self._route = rp.Route(
+                    x=lap.x, y=lap.y, heading_deg=lap.heading_deg,
+                    kappa=lap.kappa, s=lap.s, direction=lap.direction,
+                    length_mm=lap.length_mm, solve_ms=lap.solve_ms,
+                    kappa_ok=lap.kappa_ok,
+                )
+            else:
+                self._route = rp.plan_lap(self.direction, self.confirmed)
             self._route_key = key
             self._route_i = -1
         r = self._route
@@ -1135,6 +1228,11 @@ class DigitalMap:
                     cv2.circle(img, px(x, y), 5, (0, 170, 0), -1 if solid else 1, cv2.LINE_AA)
                 else:
                     cv2.circle(img, px(x, y), 4, (150, 150, 150), 1, cv2.LINE_AA)
+
+        # Línea planificada (corner continuo / _build_line) — visible en twin.
+        if len(self.line_world) >= 2:
+            lp = np.array([px(x, y) for x, y in self.line_world], np.int32)
+            cv2.polylines(img, [lp], False, (40, 90, 220), 2, cv2.LINE_AA)
 
         cx, cy = self.pose_xy
         rad = math.radians(self.heading)

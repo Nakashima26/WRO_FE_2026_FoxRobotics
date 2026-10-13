@@ -135,6 +135,8 @@ class FrameResult:
     bev_shift: tuple = (0, 0)
     # Mapa que el carro cree: medidas sí, latas solo las que ya vio.
     dig_map: np.ndarray | None = None
+    # Polilínea planificada en mundo (mm) para dibujar en el twin.
+    line_world: list | None = None
 
 def _shift_line_info(info: dict, dx: int, dy: int) -> dict:
     """La naranja se calculó en la hoja de 400 px. El dibujo va en la ancha."""
@@ -768,6 +770,15 @@ class PPRuntime:
         gf_def = int(getattr(C, "GR_GF_DEFAULT_CM", 50))
         gf_in = int(getattr(C, "GR_GF_INNER_CM", 60))
         gf_out = int(getattr(C, "GR_GF_OUTER_CM", 35))
+        # Mapa digital + corner planner: gf del modo open/closed/island.
+        dig_gf = None
+        if getattr(self, "digital", None) is not None:
+            try:
+                dig_gf = self.digital.corner_gf_cm()
+            except Exception:
+                dig_gf = None
+        if dig_gf is not None:
+            return f",gr=1,gf={int(dig_gf)}"
         if self._map_signmap is None:
             return f",gr={gr_def},gf={gf_def}"
         mapped = bool(self._map_signmap.signs(next_sec, "tentative"))
@@ -2250,6 +2261,9 @@ class PPRuntime:
             map_localizer=self._map_localizer,
             bev_shift=shift,
             dig_map=self._dig_img,
+            line_world=(list(self.digital.line_world)
+                        if getattr(self, "digital", None) is not None
+                        and self.digital.line_world else None),
         )
 
     # ── Loop principal ────────────────────────────────────────────────────────

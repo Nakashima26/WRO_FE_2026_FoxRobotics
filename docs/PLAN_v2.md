@@ -26,16 +26,24 @@ cajón + salida del cajón con 8–14° de rumbo desalineado → el frente (147.
 replans por carrera, error lateral, tiempo por vuelta. Si se retoma: capturar la excepción del QP con fallback a `_build_line`,
 empalme de rumbo tras la salida del cajón y margen ~100 mm. El planificador sigue APAGADO (`ROUTE_PLANNER=False`).
 
+## Línea A*/DP por carta (2026-10-12)
+- [x] Lattice Frenet + A* (recta) + DP cost-to-go (esquina): `racing_line_astar.py`.
+- [x] CLI `twin/tools/line_card.py` (métrica vs centro vs slice de `plan_lap`).
+- [x] Tests carta 26 + seed 3170839 sección N (`test_racing_line_astar.py`).
+- [x] `plan_lap_joint` (DP anillo) > `_build_line` en seed 3170839; `--lap --mode joint`.
+- [ ] Enganche DigitalMap/PP (T11) con la polilínea joint; QP global sigue apagado.
+
 ## Siguiente (orden)
-1. [ ] Integrar el planificador al runtime si P1/P2 funcionan: lookahead constante sobre la ruta, replan en hilo al
+1. [ ] Seguir A*/DP carta-por-carta (encadenar → anillo) antes de reintentar el QP global en runtime.
+2. [ ] Integrar el planificador al runtime si la línea por carta encaja: lookahead constante sobre la ruta, replan en hilo al
    confirmar un asiento nuevo (votos ≥3), histéresis, sanity-check con el BEV. Medir tiempo de replan en la Pi 5.
-2. [ ] CCW: contar cuántas de las 120 seeds llegan a la U por sentido; revisar los 2 choques CCW que no son de la U
+3. [ ] CCW: contar cuántas de las 120 seeds llegan a la U por sentido; revisar los 2 choques CCW que no son de la U
    (cajón magenta / pared exterior, s112); revisar `blocks_turn` sin espejo CCW (twin_plan ~:235).
-3. [ ] U cuando arranca a ≤35 cm de la pared exterior (radio ya mínimo): arrancarla antes / más lejos de la pared.
-4. [ ] `calibration.py`: usar `vision.open_camera` (40 fps + BGRx) en vez de su pipeline de 30 fps.
-5. [ ] Aplicar los parches de `twin/tools/calib/patches/` (medir `loop()`, `pulseIn` asíncrono) solo con datos del carro.
-6. [ ] Decidir el umbral de señal del ToF del twin (hoy 250 mm de pared negra → lecturas inválidas lejos): por sensor o por material.
-7. [ ] Choque físico del twin (rebote/empuje de pilares en vez de terminar la carrera) y jitter fotométrico de la cámara
+4. [ ] U cuando arranca a ≤35 cm de la pared exterior (radio ya mínimo): arrancarla antes / más lejos de la pared.
+5. [ ] `calibration.py`: usar `vision.open_camera` (40 fps + BGRx) en vez de su pipeline de 30 fps.
+6. [ ] Aplicar los parches de `twin/tools/calib/patches/` (medir `loop()`, `pulseIn` asíncrono) solo con datos del carro.
+7. [ ] Decidir el umbral de señal del ToF del twin (hoy 250 mm de pared negra → lecturas inválidas lejos): por sensor o por material.
+8. [ ] Choque físico del twin (rebote/empuje de pilares en vez de terminar la carrera) y jitter fotométrico de la cámara
    (`camera.py`), contrastado con el corpus real (`tools/vision_corpus.py`, `detcheck_all.py`).
 
 ## Bloqueado: necesita el carro físico

@@ -872,6 +872,18 @@ DIGITAL_MAP_STEER = False
 # frame. Solo tiene efecto con el mapa digital (y DIGITAL_MAP_STEER para que
 # mande el volante). Apagado: comportamiento idéntico al anterior.
 ROUTE_PLANNER = False
+# Backend de ROUTE_PLANNER: "qp" = route_planner.plan_lap (default),
+# "joint" = racing_line_astar.plan_lap_joint (DP en el anillo).
+RACING_LINE = "qp"
+# Esquina open/closed/island con mapa conocido (corner_planner). On también
+# si DIGITAL_MAP_SEED_CONFIRMED (freeze twin). Rojo → closed/island, nunca open.
+CORNER_PLANNER = False
+# Twin / pruebas: sembrar DigitalMap.confirmed con todas las latas del Field
+# al armar (mapa ya conocido = vueltas 2–3). El carro real no lo usa.
+DIGITAL_MAP_SEED_CONFIRMED = False
+# Twin: al llegar a este tc, sembrar confirmed desde el Field, congelar votos
+# y (si ROUTE_PLANNER) forzar replan. 0 = off. Típico 4 = tras 1ª vuelta.
+DIGITAL_MAP_FREEZE_AT_TC = 0
 # Recta del cajón = marco del mapa (convención, no dato del campo: el tapete es
 # simétrico a 90°). El carro real no tiene de dónde leerla y no la necesita.
 DIGITAL_MAP_PARKING = "W"
@@ -886,6 +898,12 @@ DIGITAL_MAP_DIRECTION = None
 # recta siguiente se pasa por dentro (ahí conviene girar temprano). 0 = off.
 DIGITAL_MAP_TURN_HOLD_CM = 0.0
 DIGITAL_MAP_TURN_HOLD_INNER_CM = 0.0   # ídem si la 1a lata siguiente va por dentro
+# Recta del cajón: el hueco magenta en la pared exterior hace que el paso por
+# fuera (verde) + hold normal lleguen pegados a la esquina → MANIOBRA en
+# reversa. 0 = mismo hold que el resto; >0 = soltar el giro antes (cm de dF).
+DIGITAL_MAP_TURN_HOLD_PARK_CM = 0.0
+# Tope del lado exterior (verde) en la recta del cajón, mm de shift. 0 = sin tope.
+DIGITAL_MAP_PARK_OUTER_MAX_MM = 0.0
 # Verde en la boca de la recta siguiente y el giro sigue bloqueado con el
 # frontal ya por debajo de esto (cm): la esquina la dobla la línea del mapa
 # (prio=1) y el ESP la cuenta por el gyro (GIRO_PI_CUENTA_DEG). 0 = off.

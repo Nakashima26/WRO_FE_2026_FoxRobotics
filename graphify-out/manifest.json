@@ -1,639 +1,639 @@
 {
   "deploy/setup-github-runner.sh": {
-    "mtime": 1791067115.1122508,
-    "seen": 1791597892.0671751,
-    "ast_hash": "b63daf7948584390c479feaa15ec0247",
-    "semantic_hash": ""
+    "mtime": 1786137790.0788484,
+    "seen": 1791847856.1964118,
+    "ast_hash": "0f3134c81160a20a664d21c579061de2",
+    "semantic_hash": "0f3134c81160a20a664d21c579061de2"
   },
   "remote/client.py": {
-    "mtime": 1791067116.8578248,
-    "seen": 1791597892.0671828,
-    "ast_hash": "e7e40dafea9a5cda911cc08ee04f013e",
-    "semantic_hash": ""
+    "mtime": 1786819760.3395634,
+    "seen": 1791847856.196414,
+    "ast_hash": "1ee64498ae495e3dfca940d709ee7276",
+    "semantic_hash": "1ee64498ae495e3dfca940d709ee7276"
   },
   "remote/server.py": {
-    "mtime": 1791067116.8683486,
-    "seen": 1791597892.067186,
-    "ast_hash": "126f4a9ca02a6492bf3e25a0713ab127",
-    "semantic_hash": ""
+    "mtime": 1786137790.563541,
+    "seen": 1791847856.196415,
+    "ast_hash": "94818b29f099ff2ce857d0c1d206329e",
+    "semantic_hash": "94818b29f099ff2ce857d0c1d206329e"
   },
   "scripts/install_autostart_pi.sh": {
-    "mtime": 1791067116.8908613,
-    "seen": 1791597892.067188,
-    "ast_hash": "3b2117698378dba4e8be5eefc56e1c88",
-    "semantic_hash": ""
+    "mtime": 1786137790.564238,
+    "seen": 1791847856.196416,
+    "ast_hash": "f1870a86a5c4331d6b754e70cb8a34c0",
+    "semantic_hash": "f1870a86a5c4331d6b754e70cb8a34c0"
   },
   "scripts/reporte_run.py": {
-    "mtime": 1791067142.7964258,
-    "seen": 1791597892.0671895,
-    "ast_hash": "5b8383f2412ce0c6ca5ec772837cca7e",
-    "semantic_hash": ""
+    "mtime": 1791261021.3381567,
+    "seen": 1791847856.196416,
+    "ast_hash": "b7910cbddeff468b49c17894996c47fb",
+    "semantic_hash": "b7910cbddeff468b49c17894996c47fb"
   },
   "src/RASPI/cam/DistGyro.py": {
-    "mtime": 1791067116.9128966,
-    "seen": 1791597892.0671906,
-    "ast_hash": "4e0abb3b1662ed80794579567f79ac3e",
-    "semantic_hash": ""
+    "mtime": 1786137790.565362,
+    "seen": 1791847856.196417,
+    "ast_hash": "30d3f96e0628a1ae01836a0228a894e7",
+    "semantic_hash": "30d3f96e0628a1ae01836a0228a894e7"
   },
   "src/RASPI/cam/Serial.py": {
-    "mtime": 1791067116.920414,
-    "seen": 1791597892.0671923,
-    "ast_hash": "f32d6b597039f5b235f749c3f5005369",
-    "semantic_hash": ""
+    "mtime": 1786137790.5654235,
+    "seen": 1791847856.196417,
+    "ast_hash": "4e3767b638e08eaf63472df5d2daf3e2",
+    "semantic_hash": "4e3767b638e08eaf63472df5d2daf3e2"
   },
   "src/RASPI/cam/_archive/control.py": {
-    "mtime": 1791067116.9357224,
-    "seen": 1791597892.0671933,
-    "ast_hash": "db819ec92078467b870b64756ccfbe76",
-    "semantic_hash": ""
+    "mtime": 1786137790.5669415,
+    "seen": 1791847856.196417,
+    "ast_hash": "3141029269a668426ee19a8fbabd0735",
+    "semantic_hash": "3141029269a668426ee19a8fbabd0735"
   },
   "src/RASPI/cam/_archive/vision_2.py": {
-    "mtime": 1791067116.942719,
-    "seen": 1791597892.0671945,
-    "ast_hash": "7b11c44f4fc61b340ccaede00e017931",
-    "semantic_hash": ""
+    "mtime": 1786137790.5669966,
+    "seen": 1791847856.196418,
+    "ast_hash": "783288787154f03822d16e4f5269c7aa",
+    "semantic_hash": "783288787154f03822d16e4f5269c7aa"
   },
   "src/RASPI/cam/_archive/wroPI.py": {
-    "mtime": 1791067116.9497242,
-    "seen": 1791597892.067196,
-    "ast_hash": "13db2b23bf24cf989dacff16928c910b",
-    "semantic_hash": ""
+    "mtime": 1786137790.5670493,
+    "seen": 1791847856.196418,
+    "ast_hash": "2bd132995648507f78fd0fd6def6a91d",
+    "semantic_hash": "2bd132995648507f78fd0fd6def6a91d"
   },
   "src/RASPI/cam/_archive/wroSave.py": {
-    "mtime": 1791067116.9567213,
-    "seen": 1791597892.067197,
-    "ast_hash": "d460f1408f2be3db6ac3eb29ffd7a359",
-    "semantic_hash": ""
+    "mtime": 1786137790.5670984,
+    "seen": 1791847856.196418,
+    "ast_hash": "c1abac54bc2c11909f3f7a1e62348a54",
+    "semantic_hash": "c1abac54bc2c11909f3f7a1e62348a54"
   },
   "src/RASPI/cam/calibration.py": {
-    "mtime": 1791067116.967915,
-    "seen": 1791597892.0671988,
-    "ast_hash": "02c8d08e1bb3f433a31dff31ab6036b4",
-    "semantic_hash": ""
+    "mtime": 1786137790.5678015,
+    "seen": 1791847856.196419,
+    "ast_hash": "d3d9ba91405a2f6ea4cc1a3d0ddda991",
+    "semantic_hash": "d3d9ba91405a2f6ea4cc1a3d0ddda991"
   },
   "src/RASPI/cam/conftest.py": {
-    "mtime": 1791067142.8190508,
-    "seen": 1791597892.0672,
-    "ast_hash": "b7ac3d576e7d797af1f1e2975a18a5d6",
-    "semantic_hash": ""
+    "mtime": 1791406520.4599097,
+    "seen": 1791847856.1964211,
+    "ast_hash": "12dca0fb0da628af5e553d137a18e08c",
+    "semantic_hash": "12dca0fb0da628af5e553d137a18e08c"
   },
   "src/RASPI/cam/controlPI.py": {
-    "mtime": 1791067116.9751718,
-    "seen": 1791597892.0672011,
-    "ast_hash": "3c7718ca43f743bfb5d982a7321d9419",
-    "semantic_hash": ""
+    "mtime": 1786137790.567881,
+    "seen": 1791847856.1964219,
+    "ast_hash": "bd7d83c28006965e1f0b4ecf8acd108a",
+    "semantic_hash": "bd7d83c28006965e1f0b4ecf8acd108a"
   },
   "src/RASPI/cam/pista/detect_orillas.py": {
-    "mtime": 1791257804.9011304,
-    "seen": 1791597892.0672023,
-    "ast_hash": "5828d15dc2413a1d4656175703ff3e17",
-    "semantic_hash": ""
+    "mtime": 1791406520.4602442,
+    "seen": 1791847856.1964219,
+    "ast_hash": "ae6715ee2edb64aedbb1c500f2beaa4d",
+    "semantic_hash": "ae6715ee2edb64aedbb1c500f2beaa4d"
   },
   "src/RASPI/cam/pista/record_orillas.py": {
-    "mtime": 1791067116.9985788,
-    "seen": 1791597892.0672033,
-    "ast_hash": "0be5dde315ba039fba2d3c8afc7ab43f",
-    "semantic_hash": ""
+    "mtime": 1786137790.5681262,
+    "seen": 1791847856.1964228,
+    "ast_hash": "83151305809d76efcc036872686a9df9",
+    "semantic_hash": "83151305809d76efcc036872686a9df9"
   },
   "src/RASPI/cam/pure_pursuit/__init__.py": {
-    "mtime": 1791067117.0105689,
-    "seen": 1791597892.0672042,
-    "ast_hash": "1577fa5eeeb619d00c3e51cbce8c8faa",
-    "semantic_hash": ""
+    "mtime": 1786137790.5683312,
+    "seen": 1791847856.1964228,
+    "ast_hash": "9478e0aec63d81cf13b5454838b45b22",
+    "semantic_hash": "9478e0aec63d81cf13b5454838b45b22"
   },
   "src/RASPI/cam/pure_pursuit/bev.py": {
-    "mtime": 1791067117.0145683,
-    "seen": 1791597892.0672057,
-    "ast_hash": "8418cadc913cec04b88ac85c197d1ea2",
-    "semantic_hash": ""
+    "mtime": 1790840317.3328762,
+    "seen": 1791847856.1964228,
+    "ast_hash": "a082c8efd4fd14dd69c6f3e75afd30ff",
+    "semantic_hash": "a082c8efd4fd14dd69c6f3e75afd30ff"
   },
   "src/RASPI/cam/pure_pursuit/bev_recorder.py": {
-    "mtime": 1791067142.826269,
-    "seen": 1791597892.0672066,
-    "ast_hash": "7f4f5688a1050d2dafa9bdadccdd5b55",
-    "semantic_hash": ""
+    "mtime": 1791261021.3409016,
+    "seen": 1791847856.196424,
+    "ast_hash": "62ae87324db4115390147db3f0c68ba2",
+    "semantic_hash": "62ae87324db4115390147db3f0c68ba2"
   },
   "src/RASPI/cam/pure_pursuit/calibra_luz.py": {
-    "mtime": 1791067142.8372686,
-    "seen": 1791597892.067208,
-    "ast_hash": "a0c8e2bbcc8b27474a2709dccc7427ee",
-    "semantic_hash": ""
+    "mtime": 1791261021.3411868,
+    "seen": 1791847856.196424,
+    "ast_hash": "4d03c85b5dfdf8c0e29fa323be653582",
+    "semantic_hash": "4d03c85b5dfdf8c0e29fa323be653582"
   },
   "src/RASPI/cam/pure_pursuit/calibrate.py": {
-    "mtime": 1791067117.0215714,
-    "seen": 1791597892.0672092,
-    "ast_hash": "b5b03d320bea49ea8472d17b99c47c00",
-    "semantic_hash": ""
+    "mtime": 1790840317.3333814,
+    "seen": 1791847856.196424,
+    "ast_hash": "fed758c07a8692bcf6a6ffd997f7ac53",
+    "semantic_hash": "fed758c07a8692bcf6a6ffd997f7ac53"
   },
   "src/RASPI/cam/pure_pursuit/centerline.py": {
-    "mtime": 1791271397.5527003,
-    "seen": 1791597892.0672102,
-    "ast_hash": "52f871fa24b3c5f38d0c9bb0b952d21e",
-    "semantic_hash": ""
+    "mtime": 1791406520.461159,
+    "seen": 1791847856.196425,
+    "ast_hash": "af4b0266787cafef7383913316e5905f",
+    "semantic_hash": "af4b0266787cafef7383913316e5905f"
   },
   "src/RASPI/cam/pure_pursuit/chassis_twin.py": {
-    "mtime": 1791257810.7338114,
-    "seen": 1791597892.067212,
-    "ast_hash": "664f8f4785a9cf50770c0a32fa45226f",
-    "semantic_hash": ""
+    "mtime": 1791852115.9481096,
+    "seen": 1791852121.2907782,
+    "ast_hash": "9a9c449346463809c7fe5ada7bc5dcd7",
+    "semantic_hash": "9a9c449346463809c7fe5ada7bc5dcd7"
   },
   "src/RASPI/cam/pure_pursuit/color_corr.py": {
-    "mtime": 1791086448.2511206,
-    "seen": 1791597892.0672133,
-    "ast_hash": "3e0de01a8b39a8d0b731dfdae8f0b8ec",
-    "semantic_hash": ""
+    "mtime": 1791406520.4614987,
+    "seen": 1791847856.196426,
+    "ast_hash": "4912b8a0a6f2e80ff3dbf45a14be1d20",
+    "semantic_hash": "4912b8a0a6f2e80ff3dbf45a14be1d20"
   },
   "src/RASPI/cam/pure_pursuit/config.py": {
-    "mtime": 1791269556.313154,
-    "seen": 1791597892.0672143,
-    "ast_hash": "4625cf251f4a7872b6770558078af2b5",
-    "semantic_hash": ""
+    "mtime": 1791852115.9480891,
+    "seen": 1791852121.290793,
+    "ast_hash": "d8f5be328032aa2c64ad3a7b51c56070",
+    "semantic_hash": "d8f5be328032aa2c64ad3a7b51c56070"
   },
   "src/RASPI/cam/pure_pursuit/controller.py": {
-    "mtime": 1791260473.3097389,
-    "seen": 1791597892.0672157,
-    "ast_hash": "1b52a5de311b9bdb7055cb9539aa47d2",
-    "semantic_hash": ""
+    "mtime": 1791406520.4625854,
+    "seen": 1791847856.196427,
+    "ast_hash": "d018e75d7c62747a1d68f77bee8ef13d",
+    "semantic_hash": "d018e75d7c62747a1d68f77bee8ef13d"
   },
   "src/RASPI/cam/pure_pursuit/corner_lines.py": {
-    "mtime": 1791086448.2291906,
-    "seen": 1791597892.067217,
-    "ast_hash": "62d3cc9721ab19e4ecd51e3527d5fe0b",
-    "semantic_hash": ""
+    "mtime": 1791406520.4630394,
+    "seen": 1791847856.196427,
+    "ast_hash": "c8290a1397d8dd0d378dc3791eee41e9",
+    "semantic_hash": "c8290a1397d8dd0d378dc3791eee41e9"
   },
   "src/RASPI/cam/pure_pursuit/digital_map.py": {
-    "mtime": 1791483559.4294395,
-    "seen": 1791597892.067218,
-    "ast_hash": "96d94bf3e4762b0db3267756fce9c2bb",
-    "semantic_hash": ""
+    "mtime": 1791852115.9837453,
+    "seen": 1791852121.2908201,
+    "ast_hash": "83190ad37e241403e91920869e0da09f",
+    "semantic_hash": "83190ad37e241403e91920869e0da09f"
   },
   "src/RASPI/cam/pure_pursuit/far_hint.py": {
-    "mtime": 1791086448.250121,
-    "seen": 1791597892.0672193,
-    "ast_hash": "29116682395cee25d4409896c0a55246",
-    "semantic_hash": ""
+    "mtime": 1791406520.4644163,
+    "seen": 1791847856.196428,
+    "ast_hash": "866afbe774c01a8a68b37ab483f8f65c",
+    "semantic_hash": "866afbe774c01a8a68b37ab483f8f65c"
   },
   "src/RASPI/cam/pure_pursuit/map_view.py": {
-    "mtime": 1791078706.6630228,
-    "seen": 1791597892.0672204,
-    "ast_hash": "5ac40dbadeb7932f4b088af33f8448bb",
-    "semantic_hash": ""
+    "mtime": 1791406520.4645486,
+    "seen": 1791847856.196428,
+    "ast_hash": "2157866efc2a3ce0cb25036fe8da769d",
+    "semantic_hash": "2157866efc2a3ce0cb25036fe8da769d"
   },
   "src/RASPI/cam/pure_pursuit/mid_turn.py": {
-    "mtime": 1791086448.2321978,
-    "seen": 1791597892.0672216,
-    "ast_hash": "657762a031efe9d303d488ab8f693e5e",
-    "semantic_hash": ""
+    "mtime": 1791406520.4647002,
+    "seen": 1791847856.196429,
+    "ast_hash": "f832f6d26de205e56f94c47a9931ffc4",
+    "semantic_hash": "f832f6d26de205e56f94c47a9931ffc4"
   },
   "src/RASPI/cam/pure_pursuit/native/__init__.py": {
-    "mtime": 1791257810.7458086,
-    "seen": 1791597892.0672228,
-    "ast_hash": "2723a815dd50ac4ef8ce6be160a7dd8c",
-    "semantic_hash": ""
+    "mtime": 1791406520.4652622,
+    "seen": 1791847856.196429,
+    "ast_hash": "8fe206830340e48d02d4f185240db796",
+    "semantic_hash": "8fe206830340e48d02d4f185240db796"
   },
   "src/RASPI/cam/pure_pursuit/native/build.py": {
-    "mtime": 1791257810.7468088,
-    "seen": 1791597892.067224,
-    "ast_hash": "73e11f27c4138735fdcd76cf2d3dfe7b",
-    "semantic_hash": ""
+    "mtime": 1791406520.4655714,
+    "seen": 1791847856.196429,
+    "ast_hash": "3443be9252c8512d62f620611da26b55",
+    "semantic_hash": "3443be9252c8512d62f620611da26b55"
   },
   "src/RASPI/cam/pure_pursuit/native/src/abi.c": {
-    "mtime": 1791257810.749811,
-    "seen": 1791597892.067225,
-    "ast_hash": "0b9c03f290cc6b99b0eb62a8557a5176",
-    "semantic_hash": ""
+    "mtime": 1791406520.4658005,
+    "seen": 1791847856.19643,
+    "ast_hash": "df0dfe32d9270e667016e145816a16c9",
+    "semantic_hash": "df0dfe32d9270e667016e145816a16c9"
   },
   "src/RASPI/cam/pure_pursuit/native/src/fox_native.h": {
-    "mtime": 1791257810.753811,
-    "seen": 1791597892.0672264,
-    "ast_hash": "25df8c6fac627434f7c298ab94b8268d",
-    "semantic_hash": ""
+    "mtime": 1791406520.4660113,
+    "seen": 1791847856.19643,
+    "ast_hash": "e2c41140c1fc7e6fcfe28a98eb75804b",
+    "semantic_hash": "e2c41140c1fc7e6fcfe28a98eb75804b"
   },
   "src/RASPI/cam/pure_pursuit/obstacle_memory.py": {
-    "mtime": 1791086448.2471218,
-    "seen": 1791597892.0672274,
-    "ast_hash": "87604877b1c3c1bec1693c4f33c77178",
-    "semantic_hash": ""
+    "mtime": 1791406520.4662466,
+    "seen": 1791847856.19643,
+    "ast_hash": "2eef1b7a7ac61fc4401d5a3c66b64206",
+    "semantic_hash": "2eef1b7a7ac61fc4401d5a3c66b64206"
   },
   "src/RASPI/cam/pure_pursuit/odometry.py": {
-    "mtime": 1791067142.939865,
-    "seen": 1791597892.0672286,
-    "ast_hash": "21d03e25198ce35b295681ab208e80ae",
-    "semantic_hash": ""
+    "mtime": 1791406520.4665718,
+    "seen": 1791847856.1964312,
+    "ast_hash": "a4a1beb0e717a0a44a646b1a22623ff0",
+    "semantic_hash": "a4a1beb0e717a0a44a646b1a22623ff0"
   },
   "src/RASPI/cam/pure_pursuit/pick_color.py": {
-    "mtime": 1791067142.9562554,
-    "seen": 1791597892.0672297,
-    "ast_hash": "d7de12fbb6a0b85caf84f8a71e4d1a84",
-    "semantic_hash": ""
+    "mtime": 1791261021.3472579,
+    "seen": 1791847856.1964312,
+    "ast_hash": "634a8bf400aff9d4031b793a84b37fa2",
+    "semantic_hash": "634a8bf400aff9d4031b793a84b37fa2"
   },
   "src/RASPI/cam/pure_pursuit/planner.py": {
-    "mtime": 1791067117.0917597,
-    "seen": 1791597892.0672307,
-    "ast_hash": "4dfd02d0f87dc3293337542744f65657",
-    "semantic_hash": ""
+    "mtime": 1786137790.5689552,
+    "seen": 1791847856.1964319,
+    "ast_hash": "63d1d53aec167e2690984db9916c0746",
+    "semantic_hash": "63d1d53aec167e2690984db9916c0746"
   },
   "src/RASPI/cam/pure_pursuit/pure_pursuit_sim.py": {
-    "mtime": 1791067117.0997548,
-    "seen": 1791597892.067232,
-    "ast_hash": "6a50a2d7dcb03e4af1edec05ae19dfbe",
-    "semantic_hash": ""
+    "mtime": 1786819760.3404152,
+    "seen": 1791847856.1964319,
+    "ast_hash": "6e0b358b1b1a83574bb8e3c52e962cf2",
+    "semantic_hash": "6e0b358b1b1a83574bb8e3c52e962cf2"
   },
   "src/RASPI/cam/pure_pursuit/runtime.py": {
-    "mtime": 1791067117.1087556,
-    "seen": 1791597892.0672333,
-    "ast_hash": "2c36d2964631d610c9c040d30521e605",
-    "semantic_hash": ""
+    "mtime": 1786137790.5690393,
+    "seen": 1791847856.1964328,
+    "ast_hash": "32c5f8643c05bb332eb846a624078f8c",
+    "semantic_hash": "32c5f8643c05bb332eb846a624078f8c"
   },
   "src/RASPI/cam/pure_pursuit/runtime_nuevo.py": {
-    "mtime": 1791483559.428432,
-    "seen": 1791597892.0672345,
-    "ast_hash": "2c53959f5736fb902e32d64b883fd584",
-    "semantic_hash": ""
+    "mtime": 1791852115.9487498,
+    "seen": 1791852121.291013,
+    "ast_hash": "f3df4f04e67d32f8aae93fbb52d27561",
+    "semantic_hash": "f3df4f04e67d32f8aae93fbb52d27561"
   },
   "src/RASPI/cam/pure_pursuit/salida_cajon.py": {
-    "mtime": 1791092975.4657526,
-    "seen": 1791597892.0672362,
-    "ast_hash": "e65e3d2442ca4426f424d33bb7698c35",
-    "semantic_hash": ""
+    "mtime": 1791406520.4674401,
+    "seen": 1791847856.1964328,
+    "ast_hash": "08b9bed340c2e2c6b96632f0bb9dca79",
+    "semantic_hash": "08b9bed340c2e2c6b96632f0bb9dca79"
   },
   "src/RASPI/cam/pure_pursuit/test_vision.py": {
-    "mtime": 1791067117.133379,
-    "seen": 1791597892.0672379,
-    "ast_hash": "b7fe3ed42227d77a09f3a6eff17f4f27",
-    "semantic_hash": ""
+    "mtime": 1790840317.3346627,
+    "seen": 1791847856.196434,
+    "ast_hash": "9c0bf08f66ce522e6a1c0f0f38966ca5",
+    "semantic_hash": "9c0bf08f66ce522e6a1c0f0f38966ca5"
   },
   "src/RASPI/cam/pure_pursuit/track_map.py": {
-    "mtime": 1791078706.6680193,
-    "seen": 1791597892.0672393,
-    "ast_hash": "7f3b21275d7fdc224a7f2ef6d583862d",
-    "semantic_hash": ""
+    "mtime": 1791406520.4676974,
+    "seen": 1791847856.196434,
+    "ast_hash": "8d4af05c5484325ef0bb402f1de06793",
+    "semantic_hash": "8d4af05c5484325ef0bb402f1de06793"
   },
   "src/RASPI/cam/pure_pursuit/twin/__init__.py": {
-    "mtime": 1791067142.990051,
-    "seen": 1791597892.0672402,
-    "ast_hash": "3d4c0a51f01cd41bda00b669937e0d1d",
-    "semantic_hash": ""
+    "mtime": 1791406520.4679387,
+    "seen": 1791847856.196435,
+    "ast_hash": "9b20980e9c6c37f5cee63f14eedc3017",
+    "semantic_hash": "9b20980e9c6c37f5cee63f14eedc3017"
   },
   "src/RASPI/cam/pure_pursuit/twin/batch.py": {
-    "mtime": 1791067143.002656,
-    "seen": 1791597892.0672414,
-    "ast_hash": "8a8fb84b861020ce9c546675e96a9976",
-    "semantic_hash": ""
+    "mtime": 1791406520.4681122,
+    "seen": 1791847856.196435,
+    "ast_hash": "8723e5d75d8e9e3e94ec98c2a64274ef",
+    "semantic_hash": "8723e5d75d8e9e3e94ec98c2a64274ef"
   },
   "src/RASPI/cam/pure_pursuit/twin/camera.py": {
-    "mtime": 1791404207.6054273,
-    "seen": 1791597892.0672424,
-    "ast_hash": "8f4b56d16253e98b05263cea36236a17",
-    "semantic_hash": ""
+    "mtime": 1791406520.4683921,
+    "seen": 1791847856.196435,
+    "ast_hash": "b52110bdc9436e1a92fe7e3d2cd5ef32",
+    "semantic_hash": "b52110bdc9436e1a92fe7e3d2cd5ef32"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/__init__.py": {
-    "mtime": 1791067143.0276556,
-    "seen": 1791597892.0672438,
-    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
+    "mtime": 1791852115.9836853,
+    "seen": 1791852121.2910998,
+    "ast_hash": "68b329da9893e34099c7d8ad5cb9c940",
+    "semantic_hash": "68b329da9893e34099c7d8ad5cb9c940"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/build.py": {
-    "mtime": 1791257810.7618086,
-    "seen": 1791597892.0672448,
-    "ast_hash": "434a7b14b006c48a19e1719f7f8c6488",
-    "semantic_hash": ""
+    "mtime": 1791406520.468925,
+    "seen": 1791847856.196436,
+    "ast_hash": "6e3c3139706299b1df4b24c91a2d785c",
+    "semantic_hash": "6e3c3139706299b1df4b24c91a2d785c"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/fw.py": {
-    "mtime": 1791069436.657984,
-    "seen": 1791597892.0672457,
-    "ast_hash": "312c346395c46d5563edc0d94f0d803f",
-    "semantic_hash": ""
+    "mtime": 1791406520.469032,
+    "seen": 1791847856.196436,
+    "ast_hash": "b7da08da973ccf8424f217c430e64308",
+    "semantic_hash": "b7da08da973ccf8424f217c430e64308"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/sil/Arduino.h": {
-    "mtime": 1791101291.320538,
-    "seen": 1791597892.0672472,
-    "ast_hash": "24eef1609a779b7b6a21b1e5d641eccc",
-    "semantic_hash": ""
+    "mtime": 1791406520.4691932,
+    "seen": 1791847856.196437,
+    "ast_hash": "33289820060eb16a49a0308087856a1d",
+    "semantic_hash": "33289820060eb16a49a0308087856a1d"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/sil/MPU6050_tockn.h": {
-    "mtime": 1791067145.3769076,
-    "seen": 1791597892.067248,
-    "ast_hash": "16b6b67db3e1b57a349b7de85cfb3002",
-    "semantic_hash": ""
+    "mtime": 1791406520.469397,
+    "seen": 1791847856.196437,
+    "ast_hash": "281ce4a2015fb2673e79e397112d86f3",
+    "semantic_hash": "281ce4a2015fb2673e79e397112d86f3"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/sil/Wire.h": {
-    "mtime": 1791067145.377911,
-    "seen": 1791597892.0672493,
-    "ast_hash": "7664a5e7dd883189983ebb8b8d12b543",
-    "semantic_hash": ""
+    "mtime": 1791406520.469684,
+    "seen": 1791847856.196438,
+    "ast_hash": "a9bf096349aa2652f3b0e90196f95615",
+    "semantic_hash": "a9bf096349aa2652f3b0e90196f95615"
   },
   "src/RASPI/cam/pure_pursuit/twin/firmware/sil/sil_core.cpp": {
-    "mtime": 1791101291.3265374,
-    "seen": 1791597892.0672507,
-    "ast_hash": "6bdf62f2713514d4b84a625a5c75e315",
-    "semantic_hash": ""
+    "mtime": 1791406520.4698114,
+    "seen": 1791847856.196438,
+    "ast_hash": "5e374792ce455bd418701268c2444283",
+    "semantic_hash": "5e374792ce455bd418701268c2444283"
   },
   "src/RASPI/cam/pure_pursuit/twin/metrics.py": {
-    "mtime": 1791067145.38091,
-    "seen": 1791597892.067252,
-    "ast_hash": "1d404d14380579d96065156be37204f7",
-    "semantic_hash": ""
+    "mtime": 1791406520.4699996,
+    "seen": 1791847856.196438,
+    "ast_hash": "fda090bc2551b6a0a0a538b7f0579bb7",
+    "semantic_hash": "fda090bc2551b6a0a0a538b7f0579bb7"
   },
   "src/RASPI/cam/pure_pursuit/twin/params.py": {
-    "mtime": 1791257810.7648084,
-    "seen": 1791597892.0672529,
-    "ast_hash": "922f72c680c43d4f65acaa360a5245ba",
-    "semantic_hash": ""
+    "mtime": 1791845613.9255593,
+    "seen": 1791847856.196439,
+    "ast_hash": "addeb436bccb6799c35292d248f3515c",
+    "semantic_hash": "addeb436bccb6799c35292d248f3515c"
   },
   "src/RASPI/cam/pure_pursuit/twin/pi_link.py": {
-    "mtime": 1791067145.4030967,
-    "seen": 1791597892.0672543,
-    "ast_hash": "9374eafe2a42802e7f418697967f4130",
-    "semantic_hash": ""
+    "mtime": 1791406520.4705327,
+    "seen": 1791847856.196439,
+    "ast_hash": "c5652dc0e3b86bdd2d8da27a69d92a2f",
+    "semantic_hash": "c5652dc0e3b86bdd2d8da27a69d92a2f"
   },
   "src/RASPI/cam/pure_pursuit/twin/prepark.py": {
-    "mtime": 1791101291.3325253,
-    "seen": 1791597892.0672555,
-    "ast_hash": "55cf5b3153aba453a864faf9ebd0d4b9",
-    "semantic_hash": ""
+    "mtime": 1791406520.4706326,
+    "seen": 1791847856.19644,
+    "ast_hash": "b0a99df78118a0b8d6e0039fb269c2a7",
+    "semantic_hash": "b0a99df78118a0b8d6e0039fb269c2a7"
   },
   "src/RASPI/cam/pure_pursuit/twin/sensors.py": {
-    "mtime": 1791404207.6094286,
-    "seen": 1791597892.067257,
-    "ast_hash": "5bce49c347e7e23e13659e169db14338",
-    "semantic_hash": ""
+    "mtime": 1791845613.9257908,
+    "seen": 1791847856.19644,
+    "ast_hash": "dea1ad8c5d50e7fc6c807a2650f474ba",
+    "semantic_hash": "dea1ad8c5d50e7fc6c807a2650f474ba"
   },
   "src/RASPI/cam/pure_pursuit/twin/sim.py": {
-    "mtime": 1791404567.7930357,
-    "seen": 1791597892.0672581,
-    "ast_hash": "d1d99747b4f8b485f1222049705c3039",
-    "semantic_hash": ""
+    "mtime": 1791852115.983749,
+    "seen": 1791852121.291275,
+    "ast_hash": "e5da413167939dd47f0d732c0d5085fd",
+    "semantic_hash": "e5da413167939dd47f0d732c0d5085fd"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/__init__.py": {
-    "mtime": 1791067145.4220972,
-    "seen": 1791597892.067259,
+    "mtime": 1791406520.4710975,
+    "seen": 1791847856.1964412,
     "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": ""
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/_render_ref.py": {
-    "mtime": 1791257810.7728112,
-    "seen": 1791597892.0672605,
-    "ast_hash": "a34a871776fbe5621cacaf258de92615",
-    "semantic_hash": ""
+    "mtime": 1791406520.4713757,
+    "seen": 1791847856.1964412,
+    "ast_hash": "c97d665a6626bfa859aa04025770f8d0",
+    "semantic_hash": "c97d665a6626bfa859aa04025770f8d0"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_camera.py": {
-    "mtime": 1791404207.6163392,
-    "seen": 1791597892.0672615,
-    "ast_hash": "8659fbb38095337503621c17044a38b2",
-    "semantic_hash": ""
+    "mtime": 1791406520.4717016,
+    "seen": 1791847856.1964421,
+    "ast_hash": "f9fc0197b75c056861aad1a01dfbda6b",
+    "semantic_hash": "f9fc0197b75c056861aad1a01dfbda6b"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_corner_hint.py": {
-    "mtime": 1791067145.434098,
-    "seen": 1791597892.067263,
-    "ast_hash": "e8ee3a28cd76d76a03524c06fb7033e3",
-    "semantic_hash": ""
+    "mtime": 1791406520.4719698,
+    "seen": 1791847856.1964428,
+    "ast_hash": "41395777f484de9b25ef2f1ffb3f92ea",
+    "semantic_hash": "41395777f484de9b25ef2f1ffb3f92ea"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_digital_dir.py": {
-    "mtime": 1791257810.7808113,
-    "seen": 1791597892.067264,
-    "ast_hash": "3b132b3a3f604099637a9b1af906be3b",
-    "semantic_hash": ""
+    "mtime": 1791406520.472181,
+    "seen": 1791847856.1964428,
+    "ast_hash": "57fa0d284ac32bbb98dfb038727f0a1b",
+    "semantic_hash": "57fa0d284ac32bbb98dfb038727f0a1b"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_firmware_sil.py": {
-    "mtime": 1791067145.4383807,
-    "seen": 1791597892.067265,
-    "ast_hash": "9e258d57a75b839924b379e9e304ae01",
-    "semantic_hash": ""
+    "mtime": 1791406520.4723947,
+    "seen": 1791847856.1964438,
+    "ast_hash": "07f4675100a907c1672741c50dde29b9",
+    "semantic_hash": "07f4675100a907c1672741c50dde29b9"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_fw_odom.py": {
-    "mtime": 1791078706.6790628,
-    "seen": 1791597892.0672662,
-    "ast_hash": "7f9459ccc56b8f0aa947a99d9b17bdf6",
-    "semantic_hash": ""
+    "mtime": 1791406520.4725084,
+    "seen": 1791847856.1964438,
+    "ast_hash": "59677a4ed3b30d35b837bf7216c4247c",
+    "semantic_hash": "59677a4ed3b30d35b837bf7216c4247c"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_giro_rapido.py": {
-    "mtime": 1791067145.4511366,
-    "seen": 1791597892.0672677,
-    "ast_hash": "690d20599e632b1737eab1318f925988",
-    "semantic_hash": ""
+    "mtime": 1791406520.4726992,
+    "seen": 1791847856.1964438,
+    "ast_hash": "c099c79185b37ae1b37ed4fce32388c4",
+    "semantic_hash": "c099c79185b37ae1b37ed4fce32388c4"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_native_build.py": {
-    "mtime": 1791257810.7828104,
-    "seen": 1791597892.0672686,
-    "ast_hash": "74bf8374fa22140a56102aa6ce5eee62",
-    "semantic_hash": ""
+    "mtime": 1791406520.4729147,
+    "seen": 1791847856.196445,
+    "ast_hash": "5309b574005b1b2e2847d47594cca2e8",
+    "semantic_hash": "5309b574005b1b2e2847d47594cca2e8"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_paridad.py": {
-    "mtime": 1791404571.4667225,
-    "seen": 1791597892.0672698,
-    "ast_hash": "747a12e14618ee65f9518dbb1fe55b1b",
-    "semantic_hash": ""
+    "mtime": 1791845613.9263506,
+    "seen": 1791847856.196445,
+    "ast_hash": "3e1a051ce2fbcf72035cb7d212ad8296",
+    "semantic_hash": "3e1a051ce2fbcf72035cb7d212ad8296"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_physics.py": {
-    "mtime": 1791067145.4581356,
-    "seen": 1791597892.0672712,
-    "ast_hash": "c9d8e60df79ab597e9f5ec0d0b7f2e25",
-    "semantic_hash": ""
+    "mtime": 1791406520.4734683,
+    "seen": 1791847856.196445,
+    "ast_hash": "5afb1baa7fd5b10da1d458c244848386",
+    "semantic_hash": "5afb1baa7fd5b10da1d458c244848386"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_render_equiv.py": {
-    "mtime": 1791404207.6194775,
-    "seen": 1791597892.0672722,
-    "ast_hash": "4f4ffd1bd7ad88dbacaea0a254a65bcb",
-    "semantic_hash": ""
+    "mtime": 1791406520.4737947,
+    "seen": 1791847856.196446,
+    "ast_hash": "96118a25d4249b4d35a79f9ebcccadd7",
+    "semantic_hash": "96118a25d4249b4d35a79f9ebcccadd7"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_runtime_map.py": {
-    "mtime": 1791404207.6219907,
-    "seen": 1791597892.0672734,
-    "ast_hash": "3e647726207e8781bcd63bfe62ad9caf",
-    "semantic_hash": ""
+    "mtime": 1791406520.474028,
+    "seen": 1791847856.196447,
+    "ast_hash": "c07a722787616b755e2db6920057ec08",
+    "semantic_hash": "c07a722787616b755e2db6920057ec08"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_runtime_step.py": {
-    "mtime": 1791067145.4771347,
-    "seen": 1791597892.0672748,
-    "ast_hash": "609248d9f97249f6912c5c123dd9de65",
-    "semantic_hash": ""
+    "mtime": 1791406520.4742208,
+    "seen": 1791847856.196447,
+    "ast_hash": "45b0ed6f70329521e90d53e3a152f2a7",
+    "semantic_hash": "45b0ed6f70329521e90d53e3a152f2a7"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_salida_cajon.py": {
-    "mtime": 1791092975.470759,
-    "seen": 1791597892.0672758,
-    "ast_hash": "9bf25cc69c04a4403102977d3fd51624",
-    "semantic_hash": ""
+    "mtime": 1791406520.474328,
+    "seen": 1791847856.196447,
+    "ast_hash": "fc596ea38a26f706e4dc8c99b59c32bf",
+    "semantic_hash": "fc596ea38a26f706e4dc8c99b59c32bf"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_sensors.py": {
-    "mtime": 1791067145.484133,
-    "seen": 1791597892.0672772,
-    "ast_hash": "d5fbd9987ff91536fe8703c362b8c847",
-    "semantic_hash": ""
+    "mtime": 1791845613.9266822,
+    "seen": 1791847856.196448,
+    "ast_hash": "598563f9d5670d2e6e97286db868919b",
+    "semantic_hash": "598563f9d5670d2e6e97286db868919b"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_sim_smoke.py": {
-    "mtime": 1791067145.491133,
-    "seen": 1791597892.0672784,
-    "ast_hash": "fc0bcff26e7ea6a638943c3b3d37df52",
-    "semantic_hash": ""
+    "mtime": 1791406520.4746945,
+    "seen": 1791847856.196448,
+    "ast_hash": "f28193081d6313dc67bd9b79d6ae5bd7",
+    "semantic_hash": "f28193081d6313dc67bd9b79d6ae5bd7"
   },
   "src/RASPI/cam/pure_pursuit/twin/tests/test_track_map.py": {
-    "mtime": 1791067145.4981332,
-    "seen": 1791597892.0672796,
-    "ast_hash": "f7f3a7912d558155c1c2f3f9c22300a7",
-    "semantic_hash": ""
+    "mtime": 1791406520.474965,
+    "seen": 1791847856.196449,
+    "ast_hash": "2bef6215943f2566c4c821a8ea577b23",
+    "semantic_hash": "2bef6215943f2566c4c821a8ea577b23"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/align.py": {
-    "mtime": 1791088079.157842,
-    "seen": 1791597892.0672805,
+    "mtime": 1791406520.4754176,
+    "seen": 1791847856.196449,
     "ast_hash": "ec752b5e2ee2c57ea9507023a87c509c",
-    "semantic_hash": ""
+    "semantic_hash": "ec752b5e2ee2c57ea9507023a87c509c"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/all.sh": {
-    "mtime": 1791257810.795816,
-    "seen": 1791597892.067282,
-    "ast_hash": "48521167b7bd2326be2c6ec22fd919c3",
-    "semantic_hash": ""
+    "mtime": 1791406520.4757657,
+    "seen": 1791847856.196449,
+    "ast_hash": "5ab0e32c2206d22f17bd9ab44391a79a",
+    "semantic_hash": "5ab0e32c2206d22f17bd9ab44391a79a"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/bench_stages.py": {
-    "mtime": 1791257810.7978158,
-    "seen": 1791597892.067283,
-    "ast_hash": "8dc2055e180d6a7b1391e72c9d2f4c01",
-    "semantic_hash": ""
+    "mtime": 1791406520.4759955,
+    "seen": 1791847856.19645,
+    "ast_hash": "d91cf58806b13c2285024f7359c2a9f1",
+    "semantic_hash": "d91cf58806b13c2285024f7359c2a9f1"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/detcheck.py": {
-    "mtime": 1791257810.7998157,
-    "seen": 1791597892.067284,
-    "ast_hash": "64618bea18d47f013fc839c24e6354bc",
-    "semantic_hash": ""
+    "mtime": 1791406520.4762642,
+    "seen": 1791847856.1964538,
+    "ast_hash": "381b7b484acf1ebb090b2cb250bf70b3",
+    "semantic_hash": "381b7b484acf1ebb090b2cb250bf70b3"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/detcheck_all.py": {
-    "mtime": 1791257810.8018167,
-    "seen": 1791597892.0672855,
-    "ast_hash": "7dc817c0abce3ba3a8563cbe8b5cca0a",
-    "semantic_hash": ""
+    "mtime": 1791406520.476458,
+    "seen": 1791847856.196455,
+    "ast_hash": "b88332c4bc14e91f9a16590319ebcd70",
+    "semantic_hash": "b88332c4bc14e91f9a16590319ebcd70"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/drive.py": {
-    "mtime": 1791257810.804815,
-    "seen": 1791597892.0672867,
-    "ast_hash": "92baba7ba1d9a52bca798b80e7cd5b68",
-    "semantic_hash": ""
+    "mtime": 1791406520.4767787,
+    "seen": 1791847856.196455,
+    "ast_hash": "eb3110d30048ae9a94ff0664f31f3644",
+    "semantic_hash": "eb3110d30048ae9a94ff0664f31f3644"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/hderr.py": {
-    "mtime": 1791088079.7214966,
-    "seen": 1791597892.067288,
+    "mtime": 1791406520.4768767,
+    "seen": 1791847856.196455,
     "ast_hash": "16c34ff60c8ec379113dfccfc125aca8",
-    "semantic_hash": ""
+    "semantic_hash": "16c34ff60c8ec379113dfccfc125aca8"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/odoerr.py": {
-    "mtime": 1791088079.9031367,
-    "seen": 1791597892.0672903,
+    "mtime": 1791406520.477069,
+    "seen": 1791847856.196456,
     "ast_hash": "ad658c0cf1c5afbd2d857c455d4bad54",
-    "semantic_hash": ""
+    "semantic_hash": "ad658c0cf1c5afbd2d857c455d4bad54"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/paridad.py": {
-    "mtime": 1791404570.2492547,
-    "seen": 1791597892.0672915,
-    "ast_hash": "127be17cf11619dd7c21cffc08524780",
-    "semantic_hash": ""
+    "mtime": 1791845613.9289875,
+    "seen": 1791847856.196456,
+    "ast_hash": "73e63fb43adf562e273fb83458b576e2",
+    "semantic_hash": "73e63fb43adf562e273fb83458b576e2"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/park_viz.py": {
-    "mtime": 1791257810.8103209,
-    "seen": 1791597892.0672927,
-    "ast_hash": "bfe659f3a00d097681caac94ee76518f",
-    "semantic_hash": ""
+    "mtime": 1791406520.4774997,
+    "seen": 1791847856.196457,
+    "ast_hash": "1dc16e6c75029ffac5f6f5db853b7d1c",
+    "semantic_hash": "1dc16e6c75029ffac5f6f5db853b7d1c"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/parkcheck.py": {
-    "mtime": 1791088079.5307968,
-    "seen": 1791597892.067294,
+    "mtime": 1791406520.4775841,
+    "seen": 1791847856.196457,
     "ast_hash": "3121fac348b9735e9a4c9a4fa56bf855",
-    "semantic_hash": ""
+    "semantic_hash": "3121fac348b9735e9a4c9a4fa56bf855"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/prepark.py": {
-    "mtime": 1791257810.814832,
-    "seen": 1791597892.0672953,
-    "ast_hash": "b660fbcdbd7be37950c0fd13da2e998f",
-    "semantic_hash": ""
+    "mtime": 1791406520.4776964,
+    "seen": 1791847856.196457,
+    "ast_hash": "c61700141b1df87f8eac41945116b0d0",
+    "semantic_hash": "c61700141b1df87f8eac41945116b0d0"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/salida.py": {
-    "mtime": 1791257804.9161303,
-    "seen": 1791597892.0672965,
-    "ast_hash": "8696692fbdaec6557d3c0f1032081b75",
-    "semantic_hash": ""
+    "mtime": 1791406520.4778278,
+    "seen": 1791847856.196458,
+    "ast_hash": "be1d0b120d459bde3e5c46281504a8b1",
+    "semantic_hash": "be1d0b120d459bde3e5c46281504a8b1"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/summ3.py": {
-    "mtime": 1791257810.8188326,
-    "seen": 1791597892.0672975,
-    "ast_hash": "8a1dc8bb29d4ae2c1a49eaa8531188e2",
-    "semantic_hash": ""
+    "mtime": 1791406520.478136,
+    "seen": 1791847856.196458,
+    "ast_hash": "ffe41dfda1a50640fdb9a0e46a2d242b",
+    "semantic_hash": "ffe41dfda1a50640fdb9a0e46a2d242b"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/triage.py": {
-    "mtime": 1791088079.3416648,
-    "seen": 1791597892.067299,
+    "mtime": 1791406520.4782197,
+    "seen": 1791847856.196459,
     "ast_hash": "2959f9139ee3b1436d5a07d719b0c3a6",
-    "semantic_hash": ""
+    "semantic_hash": "2959f9139ee3b1436d5a07d719b0c3a6"
   },
   "src/RASPI/cam/pure_pursuit/twin/tools/vision_corpus.py": {
-    "mtime": 1791257810.822835,
-    "seen": 1791597892.0673,
-    "ast_hash": "f3f8385d8fa34676a9cbc6b3de142f25",
-    "semantic_hash": ""
+    "mtime": 1791406520.4784634,
+    "seen": 1791847856.196459,
+    "ast_hash": "75f5d347e59b5918793295dad42298b5",
+    "semantic_hash": "75f5d347e59b5918793295dad42298b5"
   },
   "src/RASPI/cam/pure_pursuit/twin/vehicle.py": {
-    "mtime": 1791067145.504133,
-    "seen": 1791597892.0673013,
-    "ast_hash": "30a5ff93e227dabfe71b17a9715ca257",
-    "semantic_hash": ""
+    "mtime": 1791406520.478668,
+    "seen": 1791847856.19646,
+    "ast_hash": "01e65194b3d389b979df465944997d38",
+    "semantic_hash": "01e65194b3d389b979df465944997d38"
   },
   "src/RASPI/cam/pure_pursuit/twin/world.py": {
-    "mtime": 1791404207.6249912,
-    "seen": 1791597892.0673025,
-    "ast_hash": "bee2495ddad28a3f3c9f912aadab3a3e",
-    "semantic_hash": ""
+    "mtime": 1791406520.4787848,
+    "seen": 1791847856.19646,
+    "ast_hash": "57f89a694801dde9c3191ef89e0c80c9",
+    "semantic_hash": "57f89a694801dde9c3191ef89e0c80c9"
   },
   "src/RASPI/cam/pure_pursuit/wro_field.py": {
-    "mtime": 1791080636.3799646,
-    "seen": 1791597892.0673037,
-    "ast_hash": "0d2bb86ffa2374e527e542f26c74b339",
-    "semantic_hash": ""
+    "mtime": 1791849834.066401,
+    "seen": 1791850086.6916769,
+    "ast_hash": "8a424c7e4e8947e31827a0744c3839e0",
+    "semantic_hash": "8a424c7e4e8947e31827a0744c3839e0"
   },
   "src/RASPI/cam/vision.py": {
-    "mtime": 1791404207.6269906,
-    "seen": 1791597892.0673048,
-    "ast_hash": "d177edcec9d4e0968962f48b7f8c83f5",
-    "semantic_hash": ""
+    "mtime": 1791845613.9292,
+    "seen": 1791847856.196461,
+    "ast_hash": "f93cea0b3d16ebdf83d5d896119718eb",
+    "semantic_hash": "f93cea0b3d16ebdf83d5d896119718eb"
   },
   "src/RASPI/cam/wro.py": {
-    "mtime": 1791067117.1463888,
-    "seen": 1791597892.0673063,
-    "ast_hash": "2689bf550b21152d7fd1baef41bf05e3",
-    "semantic_hash": ""
+    "mtime": 1786137790.5694115,
+    "seen": 1791847856.196461,
+    "ast_hash": "c78338baa6fc908d42fb226882cea22f",
+    "semantic_hash": "c78338baa6fc908d42fb226882cea22f"
   },
   "src/RASPI/cam/wro_runtime.py": {
-    "mtime": 1791067145.5401366,
-    "seen": 1791597892.0673075,
-    "ast_hash": "211e6937e6ed5a08b02f1424b0e9fbfe",
-    "semantic_hash": ""
+    "mtime": 1791261021.3601856,
+    "seen": 1791847856.1964622,
+    "ast_hash": "432231f70dbe988a07a03a1eed4c539f",
+    "semantic_hash": "432231f70dbe988a07a03a1eed4c539f"
   },
   "src/RASPI/tests/diagnose_uart.py": {
-    "mtime": 1791067117.1626177,
-    "seen": 1791597892.0673084,
-    "ast_hash": "7c87e5d7721872d924acfd46d6b0f1f1",
-    "semantic_hash": ""
+    "mtime": 1786137790.569647,
+    "seen": 1791847856.1964622,
+    "ast_hash": "febcf9c89ac677d1dba5081a2f853ac0",
+    "semantic_hash": "febcf9c89ac677d1dba5081a2f853ac0"
   },
   "src/RASPI/tests/simulacion.py": {
-    "mtime": 1791067117.1696308,
-    "seen": 1791597892.0673099,
-    "ast_hash": "f1d1baf4a1caf9aae0f9ae6662041dd5",
-    "semantic_hash": ""
+    "mtime": 1786137790.5697446,
+    "seen": 1791847856.1964622,
+    "ast_hash": "7af78b80779940b40d23dc5de22a9606",
+    "semantic_hash": "7af78b80779940b40d23dc5de22a9606"
   },
   "src/RASPI/tests/simulacion_v2.py": {
-    "mtime": 1791067117.1786299,
-    "seen": 1791597892.0673108,
-    "ast_hash": "8e19c90dc4e51d82c00d240474923307",
-    "semantic_hash": ""
+    "mtime": 1786137790.569858,
+    "seen": 1791847856.196463,
+    "ast_hash": "45f10733e17fd0a6f47f0b5a40bc2b89",
+    "semantic_hash": "45f10733e17fd0a6f47f0b5a40bc2b89"
   },
   "src/RASPI/tests/test_serial_debug.py": {
-    "mtime": 1791067117.1866398,
-    "seen": 1791597892.0673122,
-    "ast_hash": "7488176afa66201833b3604395eec95e",
-    "semantic_hash": ""
+    "mtime": 1786137790.5699444,
+    "seen": 1791847856.196463,
+    "ast_hash": "baa7492150de749bceb3c3ecf928bf0b",
+    "semantic_hash": "baa7492150de749bceb3c3ecf928bf0b"
   },
   "src/RASPI/tests/test_uart_simple.py": {
-    "mtime": 1791067117.193783,
-    "seen": 1791597892.0673134,
-    "ast_hash": "b1cb5a6d816087754597e995a97a2ff1",
-    "semantic_hash": ""
+    "mtime": 1786137790.570014,
+    "seen": 1791847856.196464,
+    "ast_hash": "9851a4ba2ebc551da5e0a56360a60e5e",
+    "semantic_hash": "9851a4ba2ebc551da5e0a56360a60e5e"
   },
   ".github/workflows/deploy-pi.yml": {
     "mtime": 1791067115.1042502,
@@ -724,5 +724,119 @@
     "seen": 1791597892.067331,
     "ast_hash": "d0646ca6774d577c1520c25d1c470fa7",
     "semantic_hash": ""
+  },
+  "src/RASPI/cam/camera_tuning/captura_alsc.py": {
+    "mtime": 1791845613.9235635,
+    "seen": 1791847856.196419,
+    "ast_hash": "4460a219c0e7b26bc594c504e7416a78",
+    "semantic_hash": "4460a219c0e7b26bc594c504e7416a78"
+  },
+  "src/RASPI/cam/camera_tuning/imx219_noir_wro_pi5.json": {
+    "mtime": 1791845613.923851,
+    "seen": 1791847856.1964202,
+    "ast_hash": "8d284a33c75a1c10d6360e2f5b3c187e",
+    "semantic_hash": "8d284a33c75a1c10d6360e2f5b3c187e"
+  },
+  "src/RASPI/cam/camera_tuning/simetriza_luminancia.py": {
+    "mtime": 1791845613.9240196,
+    "seen": 1791847856.1964202,
+    "ast_hash": "9d7291f42b109c2b7be918bf81ff93cf",
+    "semantic_hash": "9d7291f42b109c2b7be918bf81ff93cf"
+  },
+  "src/RASPI/cam/pure_pursuit/cam_web.py": {
+    "mtime": 1791845613.9243033,
+    "seen": 1791847856.196425,
+    "ast_hash": "9c3ebd6dd5452fd9a1cd625c5fa7112c",
+    "semantic_hash": "9c3ebd6dd5452fd9a1cd625c5fa7112c"
+  },
+  "src/RASPI/cam/pure_pursuit/route_planner.py": {
+    "mtime": 1791845613.9251063,
+    "seen": 1791847856.1964319,
+    "ast_hash": "e8f793f585f10346e37886c9e06f8c80",
+    "semantic_hash": "e8f793f585f10346e37886c9e06f8c80"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tests/conftest.py": {
+    "mtime": 1791845613.9260993,
+    "seen": 1791847856.1964421,
+    "ast_hash": "96cde6854af812cc8d14cee707dbf1a7",
+    "semantic_hash": "96cde6854af812cc8d14cee707dbf1a7"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tests/test_calib_tools.py": {
+    "mtime": 1791845613.9261782,
+    "seen": 1791847856.1964421,
+    "ast_hash": "3172b08103e813ad399d42b718e876fc",
+    "semantic_hash": "3172b08103e813ad399d42b718e876fc"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tests/test_route_planner.py": {
+    "mtime": 1791845613.9264934,
+    "seen": 1791847856.196446,
+    "ast_hash": "d38c5e67395741906717e0a5276761e9",
+    "semantic_hash": "d38c5e67395741906717e0a5276761e9"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/__init__.py": {
+    "mtime": 1791845613.9268634,
+    "seen": 1791847856.19645,
+    "ast_hash": "58f500c979a0ba60859c112cb9cd5f30",
+    "semantic_hash": "58f500c979a0ba60859c112cb9cd5f30"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_capture.py": {
+    "mtime": 1791845613.9270396,
+    "seen": 1791847856.1964512,
+    "ast_hash": "a4d0bed2360ca58c9ab1b5b5f37bbe64",
+    "semantic_hash": "a4d0bed2360ca58c9ab1b5b5f37bbe64"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_common.py": {
+    "mtime": 1791845613.9271185,
+    "seen": 1791847856.1964512,
+    "ast_hash": "a2824b8c96f144978c31be2f5bb92493",
+    "semantic_hash": "a2824b8c96f144978c31be2f5bb92493"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_fit_motor.py": {
+    "mtime": 1791845613.9272025,
+    "seen": 1791847856.1964512,
+    "ast_hash": "92525d0cbc19c741a99808c068a547f7",
+    "semantic_hash": "92525d0cbc19c741a99808c068a547f7"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_fit_steer.py": {
+    "mtime": 1791845613.9272869,
+    "seen": 1791847856.1964521,
+    "ast_hash": "75153f025f67de54afc16039d2260f88",
+    "semantic_hash": "75153f025f67de54afc16039d2260f88"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/mock/Arduino.h": {
+    "mtime": 1791845613.9273756,
+    "seen": 1791847856.1964521,
+    "ast_hash": "7cdcca97df425ddb083288dae8168e78",
+    "semantic_hash": "7cdcca97df425ddb083288dae8168e78"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/mock/MPU6050_tockn.h": {
+    "mtime": 1791845613.927435,
+    "seen": 1791847856.1964521,
+    "ast_hash": "c4197f262609cc07d32dd41cdfd868d3",
+    "semantic_hash": "c4197f262609cc07d32dd41cdfd868d3"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/mock/VL53L1X.h": {
+    "mtime": 1791845613.9275763,
+    "seen": 1791847856.196453,
+    "ast_hash": "095aca81ff1806fc4c78facddaf7d4f4",
+    "semantic_hash": "095aca81ff1806fc4c78facddaf7d4f4"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/mock/Wire.h": {
+    "mtime": 1791845613.9276364,
+    "seen": 1791847856.196453,
+    "ast_hash": "43ab9c4a5a11c3b6e98304b23688ba9d",
+    "semantic_hash": "43ab9c4a5a11c3b6e98304b23688ba9d"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/mock/mock_main.cpp": {
+    "mtime": 1791845613.9277923,
+    "seen": 1791847856.1964538,
+    "ast_hash": "6ef90d6fda261c7093c0baa2a5a9ad90",
+    "semantic_hash": "6ef90d6fda261c7093c0baa2a5a9ad90"
+  },
+  "src/RASPI/cam/pure_pursuit/twin/tools/calib/mock_build.py": {
+    "mtime": 1791845613.9278994,
+    "seen": 1791847856.1964538,
+    "ast_hash": "c8de0165c8ec65709657d47780ea613e",
+    "semantic_hash": "c8de0165c8ec65709657d47780ea613e"
   }
 }

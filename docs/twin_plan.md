@@ -488,3 +488,15 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
 Resumen de la integración del carro v2 (geometría del GLB, servo 19..161, ToF por sensor, BNO por UART-RVC, cámara a 40 fps,
 U con EXT_OBJ=28, planificador de ruta apagado) y de los análisis (STM32/Gazebo/Nav2/SLAM/LQR descartados). Detalle,
 cifras y pendientes en docs/HANDOFF.md ("Estado 2026-10-10") y la lista de tareas en docs/PLAN_v2.md.
+
+### 2026-10-12 — línea A*/DP por carta (vueltas 2–3, sin parking)
+Offline: `racing_line_astar.py` + CLI `twin/tools/line_card.py`. Unidad = una carta (recta + esquina); métrica
+`T≈∫ds/v(κ)` + holgura; κ_max bicicleta 44.54°/R≈115 (no mezclar ppServoGain). Carta 26 N: clear 109 mm,
+side_ok; seed 3170839 N: T 5.32 s, clear 56 mm (mejor que centro inválido). QP global sigue apagado en runtime.
+Tests: `test_racing_line_astar.py` (5). `REQUIRED_CARDS` ya es (26,27,32,33).
+
+### 2026-10-12 — vuelta joint-dp vs `_build_line` (seed 3170839)
+El chain carta-a-carta dejaba gap N→E ~560 mm (óptimos locales incompatibles). `plan_lap_joint`: DP en todo el
+anillo → una polilínea continua (lo que PP seguiría). seed 3170839: joint T≈30.6 s clear≈17 mm κ_ok vs
+`_build_line` T≈33.1 s clear 0 κ malo (ΔT −2.5 s, ΔL −576 mm). QP `plan_lap` sigue mejor en T/clear cuando
+no revienta; en runtime `ROUTE_PLANNER` apagado. CLI: `--lap --mode joint|chain`.

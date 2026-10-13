@@ -226,7 +226,10 @@ START_ZONE_FORBIDDEN = {
     "CCW": {"Z3": ("X1", "X2"), "Z4": ("T2", "T4")},
 }
 PARKING_FORBIDDEN_SEATS = ("T3", "T4", "X2")
-REQUIRED_CARDS = (22, 23, 28, 29)
+# Corregido 2026-10-12: la app oficial usa required_obstacles_sets = [21,22,27,28]
+# como ÍNDICES de su lista deduplicada de 32 → cartas 26, 27, 32, 33.
+# El port anterior los tomó como número de carta en la lista de 36.
+REQUIRED_CARDS = (26, 27, 32, 33)
 
 
 def _rear_axle_at_center(section: str, direction: str, h: float, w: float) -> tuple[float, float]:

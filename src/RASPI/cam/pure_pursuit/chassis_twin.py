@@ -221,6 +221,11 @@ def _paint(field, trail, pose, bev, cam=None, dig=None):
     if len(trail) > 1:
         pts = np.array([_to_px(x, y) for x, y in trail], np.int32)
         cv2.polylines(world, [pts], False, (140, 140, 140), 1, cv2.LINE_AA)
+    # Línea planificada del mapa digital (corner continuo / PP).
+    if pose is not None and pose.get("line"):
+        lp = np.array([_to_px(x, y) for x, y in pose["line"]], np.int32)
+        if len(lp) >= 2:
+            cv2.polylines(world, [lp], False, (40, 90, 220), 2, cv2.LINE_AA)
     if pose is not None:
         poly(pose["car"], (30, 30, 30), fill=True)
         y = 22
@@ -541,6 +546,7 @@ def _run_once(args, seed: int, interactive: bool):
                 else fr.processed_frame.copy(),
                 "dig": None if not show_cam or fr.dig_map is None
                 else fr.dig_map.copy(),
+                "line": None if fr is None else getattr(fr, "line_world", None),
                 "hud": _hud(est, view.t, ack, "pausa" if keys["pause"] else "corriendo"),
             }))
             return _pace(view.t)

@@ -280,7 +280,11 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
 `t16-perf` ya está en t15b2; `t16-oracle` descartado.)
 
 ## Siguiente (en orden)
-0. Sesión 2026-10-05 (ola T16, reemplaza A/B/C): B (REV) cerrado sin solución robusta (fc0d6db).
+0. **Línea A*/DP** (2026-10-12): `racing_line_astar.py` + `twin/tools/line_card.py --lap`.
+   Preferir `mode=joint` (DP anillo) sobre chain (gaps). seed 3170839: joint gana a `_build_line`
+   (~−2.5 s, clear 17 vs 0). En runtime solo seguir la polilínea (PP); no parking/U. Enganche DigitalMap
+   = T11. QP `ROUTE_PLANNER` sigue apagado.
+1. Sesión 2026-10-05 (ola T16, reemplaza A/B/C): B (REV) cerrado sin solución robusta (fc0d6db).
    - `t16u`: U geométrica en la esquina 13 (arco a tope → recta perpendicular cerrada con sonar F →
      arco), armado de la U por odometría, servo 30/160, re-referencia de rumbo con la pared, harness `pre_U`.
    - `t16gr`: ventana del giro rápido calculada (REVERSA) + holgura geométrica del arco contra la primera
@@ -291,12 +295,13 @@ validar con `tools/all.sh` y `tools/salida.py all`, y borrar el worktree.
      internas 30..160 (= tope); `escribirServo` las mapea a valor de servo 0..180 bajo un define del carro
      nuevo; el twin `hw_nuevo` modela 0-180 → ±46.32°. Validar equivalencia (21 seeds + prepark contra
      baseline) y luego dinámica del SG90 (600°/s, deadband 10 µs). `t16u`/`t16gr` diseñan en unidades internas.
-1. ~~T16 rendimiento~~ hecho (t16-perf + 0e3f6f1); oráculo descartado.
-2. T15c esquinas (rama WIP `t15c-esquinas`) — evaluar si sirve al frente C.
-3. T12 escenarios explícitos por cartas (`--scenario`, `--noise-seed`, enumerador) y corregir
-   `REQUIRED_CARDS` en wro_field.py:226 (debe ser 26, 27, 32, 33) después de guardar los escenarios de las seeds actuales.
-4. T11 mapa congelado tras vuelta 1 + ruta fija vueltas 2-3 (visión solo como sanity check).
-5. T14 driver BNO085 en el firmware real; recalibrar `bev_calib.npz` al mover la cámara.
+2. ~~T16 rendimiento~~ hecho (t16-perf + 0e3f6f1); oráculo descartado.
+3. T15c esquinas (rama WIP `t15c-esquinas`) — evaluar si sirve al frente C.
+4. T12 escenarios explícitos por cartas (`--scenario`, `--noise-seed`, enumerador).
+   `REQUIRED_CARDS` ya corregido a (26, 27, 32, 33).
+5. T11 mapa congelado tras vuelta 1 + ruta fija vueltas 2-3 (visión solo como sanity check);
+   alimentar con la polilínea de `racing_line_astar` encadenada.
+6. T14 driver BNO085 en el firmware real; recalibrar `bev_calib.npz` al mover la cámara.
 
 ## Pendiente de medir en el carro nuevo
 Altura real del lente y grosor de la LiPo; montajes de US/ToF; PPR del encoder y pull-ups (GPIO 34/39);
