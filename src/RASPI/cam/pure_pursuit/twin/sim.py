@@ -80,9 +80,11 @@ PRESETS: dict[str, dict[str, Any]] = {
             "CENTERLINE_TOP_Y": 30,
             # La línea la arma el mapa (lado de paso), no el BEV.
             "DIGITAL_MAP_STEER": True,
-            # El giro rápido a 95 cm sale pegado a la isla (semillas 1 y 6).
+            # Outer: hold clásico. Inner/cerrado: más alto = suelta antes
+            # (dF<=hold); con 80 la línea se quedaba recta y el carro esperaba
+            # aunque el arco cerrado ya estaba dibujado.
             "DIGITAL_MAP_TURN_HOLD_CM": 65.0,
-            "DIGITAL_MAP_TURN_HOLD_INNER_CM": 80.0,
+            "DIGITAL_MAP_TURN_HOLD_INNER_CM": 95.0,
             # Recta del cajón: no abrir tanto al hueco magenta (evita llegar
             # a la esquina SW pegado a la exterior → MANIOBRA en reversa).
             "DIGITAL_MAP_PARK_OUTER_MAX_MM": 120.0,
@@ -605,14 +607,14 @@ class Sim:
                                 C, "DIGITAL_MAP_SEED_CONFIRMED"
                             )
                         C.DIGITAL_MAP_SEED_CONFIRMED = True
-                        # Activar planificador solo si RACING_LINE pide uno
-                        # (qp/joint). Vacío = seguir con _build_line congelado.
+                        # Planificador de vuelta solo si RACING_LINE pide qp/joint.
                         line = str(getattr(C, "RACING_LINE", "") or "").lower()
                         if line in ("qp", "joint") and not getattr(C, "ROUTE_PLANNER", False):
                             if "ROUTE_PLANNER" not in saved_cfg and hasattr(C, "ROUTE_PLANNER"):
                                 saved_cfg["ROUTE_PLANNER"] = C.ROUTE_PLANNER
                             C.ROUTE_PLANNER = True
                         runtime.digital._route_key = None
+                        runtime.digital._frozen_build_key = None
                         map_frozen = True
                         print(
                             f"[twin] mapa congelado tc={tc} est={est}: "

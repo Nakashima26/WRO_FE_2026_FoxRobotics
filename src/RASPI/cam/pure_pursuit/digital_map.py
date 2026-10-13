@@ -169,6 +169,10 @@ class DigitalMap:
         self._route = None
         self._route_key = None
         self._route_i = 0
+        # Fallback si ruta conocida pero ROUTE_PLANNER apagado: no _build_line
+        # cada frame (solo al cambiar sección/tc/confirmed).
+        self._frozen_build: list[tuple[float, float]] = []
+        self._frozen_build_key = None
         # Esquina open/closed/island (corner_planner), cache por confirmed.
         self._corner_plan = None
         self._corner_plan_key = None
@@ -248,6 +252,8 @@ class DigitalMap:
         if not self.in_stall:
             self.along_mm, self.lat_mm = self._section_frame(
                 self.pose_xy[0], self.pose_xy[1], self.section)
+        # joint/qp: vuelta fija + ventana. _build_line: arco local (debe
+        # rearmarse con la pose; cachearlo tras freeze deja la curva atrás).
         self.line_world = (self._planned_line() if getattr(C, "ROUTE_PLANNER", False)
                            else self._build_line())
 
@@ -830,9 +836,11 @@ class DigitalMap:
         fwd = dx * math.sin(h) + dy * math.cos(h)
         return fwd, against_wall
 
+    def _route_known(self) -> bool:
+        """Mapa congelado / semilla: la línea ya sabe cómo pasar las latas."""
+        return bool(getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False))
+
     def _corner_planner_on(self) -> bool:
-        # Solo con flag explícito. El freeze del twin NO debe torcer hold/línea
-        # (antes SEED_CONFIRMED activaba el plan y la línea/hold salían mal).
         return bool(getattr(C, "CORNER_PLANNER", False))
 
     def corner_plan(self):
@@ -866,29 +874,36 @@ class DigitalMap:
         p = self.corner_plan()
         return None if p is None else p.gf_cm
 
+    def follow_line(self) -> bool:
+        """Tras freeze: PP manda (prio=1) sin waits de verde/hold."""
+        return (self._route_known()
+                and bool(getattr(C, "DIGITAL_MAP_STEER", False))
+                and not self.in_stall
+                and self._aligned
+                and self._tc < self._tpr
+                and len(self.line_world) >= 4)
+
     def blocks_turn(self) -> bool:
-        """Sigue bloqueado hasta que el arco del giro cabe a la izquierda del verde."""
+        """Vuelta 1: prio=1 si hay verde en la boca (evita CRUCERO/reversa).
+
+        Tras freeze → False; manda follow_line. Sin esto el ESP ignora el
+        arco del PP y cae a MANIOBRA en reversa.
+        """
+        if self._route_known():
+            return False
         if self._tc >= self._tpr:
-            # Vuelta 12 cerrada: no hay más esquinas. Con prio=1 el ESP nunca
-            # arrancaba la U del estacionamiento (vigilarUturn espera libre).
             return False
         if self._pp_turn_tc == self._tc and not self.in_stall:
             return True
-        # Arco hacia adentro/medio: no bloquear por verde fantasma; manda hold/along.
+        if self._inner_lead(self._next_section(self.section)):
+            return False
         plan = self.corner_plan()
         if plan is not None and not plan.opens_out:
             return False
         ahead = self._green_ahead()
         if ahead is None:
             return False
-        # Antes aquí se soltaba "ya en la esquina y del lado de afuera". Falso
-        # con el verde en la primera columna de la recta siguiente (3170839,
-        # S/T4): el giro rápido desde la exterior sale por dentro de la lata.
         block = ahead[0] > (480.0 if ahead[1] else 260.0)
-        # Ya cerca de la pared y sin soltar: el giro rápido no alcanza (la
-        # ventana es 40-95 cm y el ESP tarda ~15 cm en entrar). La esquina
-        # la dobla la línea del mapa con prio=1 hasta que el ESP la cuente
-        # por el gyro (GIRO_PI_CUENTA_DEG) y suba tc.
         pp_cm = float(getattr(C, "DIGITAL_MAP_PP_TURN_CM", 0.0))
         if block and pp_cm > 0.0 and self._dF is not None and 0.0 < self._dF <= pp_cm:
             self._pp_turn_tc = self._tc
@@ -905,11 +920,9 @@ class DigitalMap:
         return side > 40.0 if self.direction == "CW" else side < -40.0
 
     def holds_for_center(self) -> bool:
-        """Giro rápido todavía no: el arco saldría pegado a la isla.
-
-        Con CORNER_PLANNER / mapa congelado: suelta si along >= release
-        o dF <= hold del CornerPlan. Si no, hold 65/80 clásico.
-        """
+        """Vuelta 1: retrasar GR hasta dF<=hold. Tras freeze → no."""
+        if self._route_known():
+            return False
         if not getattr(C, "DIGITAL_MAP_STEER", False) or self._tc >= self._tpr:
             return False
         if self.in_stall or not self._aligned:
@@ -919,8 +932,12 @@ class DigitalMap:
         err = (self.heading - _heading(self.section, self.direction) + 180.0) % 360.0 - 180.0
         if abs(err) > 30.0:
             return False
+        if self._inner_lead(self._next_section(self.section)):
+            return False
         plan = self.corner_plan()
         if plan is not None:
+            if not plan.opens_out:
+                return False
             dF_ok = self._dF is not None and 0.0 < self._dF <= plan.hold_dF_cm
             along_ok = self.along_mm >= plan.release_along_mm
             return not (dF_ok or along_ok)
@@ -1021,10 +1038,14 @@ class DigitalMap:
             if last_col.get("color") == "Red" or (mine and mine[-1][1] > 40.0):
                 lead = None
         end = join - 420.0
-        hold_at = self._hold_along() if lead is None and sec == self.section else None
+        # Vuelta 1 sin lead verde: no doblar tan pronto (corta isla). Tras
+        # freeze (_route_known) la curva va sin alargar — no es el wait de
+        # sonar/prio; solo geometría.
+        hold_at = None
+        if (not self._route_known() and lead is None and sec == self.section
+                and not self._inner_lead(nxt)):
+            hold_at = self._hold_along()
         if hold_at is not None:
-            # Recto hasta el punto de giro: con prio=1 el PP seguiría la curva
-            # y doblaría antes de tiempo.
             end = max(end, hold_at + 100.0)
         knee = None
         if lead is not None:
@@ -1034,6 +1055,13 @@ class DigitalMap:
             # carril: con el carro del lado de adentro la curva terminaba
             # detrás de él y el PP seguía derecho a la pared.
             sh2 = max(-320.0, min(320.0, lead[1]))
+            # 2ª+ vuelta: el knee al verde iba demasiado a la pared exterior.
+            outer_cap = float(getattr(C, "DIGITAL_MAP_KNOWN_OUTER_CAP_MM", 140.0))
+            if self._route_known() and outer_cap > 0.0:
+                if self.direction == "CW":
+                    sh2 = max(sh2, -outer_cap)
+                else:
+                    sh2 = min(sh2, outer_cap)
             ka = _lane_pose(sec, self.direction, 0.0, car_lat)
             kb = _lane_pose(nxt, self.direction, 0.0, sh2)
             hs = math.radians(_heading(sec, self.direction))

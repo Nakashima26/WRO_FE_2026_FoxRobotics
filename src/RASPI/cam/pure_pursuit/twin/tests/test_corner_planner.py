@@ -62,9 +62,11 @@ def test_digital_map_uses_corner_plan(field, monkeypatch):
     assert plan is not None
     assert not plan.opens_out
     assert dm._hold_cm() == plan.hold_dF_cm
-    assert dm.holds_for_center() is True  # dF 90 > hold, along < release
-    dm.along_mm = plan.release_along_mm + 10.0
+    monkeypatch.setattr(C, "DIGITAL_MAP_SEED_CONFIRMED", True, raising=False)
+    dm.line_world = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)]
     assert dm.holds_for_center() is False
+    assert dm.blocks_turn() is False
+    assert dm.follow_line() is True
 
 
 def test_closed_plan_line_not_open_for_next_green(field, monkeypatch):

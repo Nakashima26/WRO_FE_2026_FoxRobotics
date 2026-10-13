@@ -1661,20 +1661,24 @@ class PPRuntime:
                         _oy_line is not None
                         and _oy_line >= getattr(C, "CORNER_EXT_PASS_NEAR_ORANGE_Y", 285.0))
                     _rescue_fn = None
+                    # Con mapa congelado la línea ya pasa el verde: no
+                    # reactivar el "espera al exterior" de vuelta 1.
+                    _route_known = bool(getattr(
+                        C, "DIGITAL_MAP_SEED_CONFIRMED", False))
                     if (getattr(C, "CORNER_EXTERIOR_PASS_ENABLED", False)
+                            and not _route_known
                             and _corner_imminent and _turn_dir_eff is not None):
                         _band = float(getattr(C, "CORNER_EXT_PASS_BAND_PX", 70.0))
                         def _rescue_fn(ox, oy, color, _td=_turn_dir_eff,
                                        _nyl=_oy_line, _b=_band):
-                            # Exterior = el lado de paso WRO NO coincide
-                            # con el giro. Y solo en la boca de la
-                            # esquina (no metido en la recta siguiente).
                             if is_interior_pass(_td, color):
                                 return False
                             if oy < _nyl - _b:
                                 return False
                             self._ext_corner_hold = True
                             return True
+                    else:
+                        _rescue_fn = None
 
                     # Clasificación PEGAJOSA por objeto (ver
                     # ObstacleMemory.classify_and_split()) -- una vez
@@ -2065,10 +2069,12 @@ class PPRuntime:
             self._turn_delay_frames -= 1
             _turn_hold = True
         # El bloqueo del mapa digital va aparte para que salga en [DIR].
+        # Ruta conocida: follow_line → prio=1 y solo PP (sin wait verde/hold).
+        _follow = bool(getattr(self.digital, "follow_line", lambda: False)())
         self._dmap_block = (int(self.digital.blocks_turn()), int(self.digital.needs_line()),
                             int(self.digital.holds_for_center()))
         _turn_block = ((self._ext_corner_block > 0) or _turn_hold
-                       or any(self._dmap_block))
+                       or any(self._dmap_block) or _follow)
 
         serial_msg = self._build_serial_message(
             obs_norm, state, len(bev_obstacles), pasado, interior,

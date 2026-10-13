@@ -904,6 +904,9 @@ DIGITAL_MAP_TURN_HOLD_INNER_CM = 0.0   # ídem si la 1a lata siguiente va por de
 DIGITAL_MAP_TURN_HOLD_PARK_CM = 0.0
 # Tope del lado exterior (verde) en la recta del cajón, mm de shift. 0 = sin tope.
 DIGITAL_MAP_PARK_OUTER_MAX_MM = 0.0
+# Tras freeze (mapa conocido): tope del knee al verde en esquinas, mm.
+# Sin esto la 2ª vuelta abre hasta la pared exterior. 0 = sin tope.
+DIGITAL_MAP_KNOWN_OUTER_CAP_MM = 140.0
 # Verde en la boca de la recta siguiente y el giro sigue bloqueado con el
 # frontal ya por debajo de esto (cm): la esquina la dobla la línea del mapa
 # (prio=1) y el ESP la cuenta por el gyro (GIRO_PI_CUENTA_DEG). 0 = off.
