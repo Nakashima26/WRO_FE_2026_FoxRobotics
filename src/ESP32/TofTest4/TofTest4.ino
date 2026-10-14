@@ -10,6 +10,9 @@
  *
  * Orden de arranque: todos nacen en 0x29. Se apagan los 4 con XSHUT en bajo
  * y se prenden uno por uno, asignándole a cada uno su dirección.
+ *
+ * "usado" en la tabla de abajo elige qué sensores se leen. Uno sin usar se
+ * queda apagado (XSHUT en bajo), así que puede estar conectado o no.
  */
 
 #include <Wire.h>
@@ -22,14 +25,16 @@ struct Tof {
   int         xshut;
   uint8_t     dir;
   VL53L1X     s;
+  bool        usado;
   bool        ok;
 };
 
+// Por ahora sin el trasero montado: solo frontal y laterales.
 Tof tofs[] = {
-  {"TRAS", XSHUT_TRAS, 0x33},
-  {"FREN", 0,          0x30},
-  {"IZQ",  15,         0x31},
-  {"DER",  5,          0x32},
+  {"TRAS", XSHUT_TRAS, 0x33, false},
+  {"FREN", 0,          0x30, true},
+  {"IZQ",  15,         0x31, true},
+  {"DER",  5,          0x32, true},
 };
 const int N = sizeof(tofs) / sizeof(tofs[0]);
 
@@ -82,6 +87,11 @@ void setup() {
   Wire.setClock(400000);
 
   for (int i = 0; i < N; i++) {
+    if (!tofs[i].usado) {
+      tofs[i].ok = false;
+      Serial.printf("%-4s 0x%02X : sin usar\n", tofs[i].nombre, tofs[i].dir);
+      continue;
+    }
     tofs[i].ok = arrancar(tofs[i]);
     Serial.printf("%-4s 0x%02X : %s\n", tofs[i].nombre, tofs[i].dir,
                   tofs[i].ok ? "OK" : "NO RESPONDE");
@@ -109,6 +119,7 @@ void loop() {
   for (int i = 0; i < N; i++) if (tofs[i].ok && !nuevo[i]) return;
 
   for (int i = 0; i < N; i++) {
+    if (!tofs[i].usado) continue;
     if (!tofs[i].ok) { Serial.printf("%s:  ---    ", tofs[i].nombre); continue; }
     if (estado[i] == VL53L1X::RangeValid) Serial.printf("%s:%5u   ", tofs[i].nombre, mm[i]);
     else Serial.printf("%s:%5u(%s)   ", tofs[i].nombre, mm[i],

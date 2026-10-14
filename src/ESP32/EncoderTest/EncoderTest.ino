@@ -3,21 +3,24 @@
  * con el encoder del motor. La distancia sube al empujar el robot hacia
  * adelante y baja hacia atrás. Sin librerías. Monitor a 115200.
  *
- * Motorreductor N20 con encoder, 7 pulsos por vuelta del motor, 100:1:
- *   7 x 4 (cuadratura) x 100.184 = 2805 cuentas por vuelta de llanta.
+ * Motorreductor N20 50:1 con encoder Hall de 12 CPR (RobotShop):
+ *   12 CPR = 3 pulsos por canal -> 3 x 4 (cuadratura) x 50 x 2 (engranes)
+ *   = 1200 cuentas por vuelta de llanta.
  *
  * PINES (colores del cable del motor):
- *   Negro    -> 3.3V       (¡OJO! aquí el negro es el + del encoder)
- *   Azul     -> GND        (- del encoder)
- *   Amarillo -> GPIO 34
- *   Verde    -> GPIO 36 ("SP")
- *   Rojo / Blanco son el motor: NUNCA al ESP.
+ *   Café     -> 5V         (+ del encoder; pide mínimo 3.5V)
+ *   Verde    -> GND
+ *   Azul     -> GPIO 34    (señal A) + pull-up 4.7k a 3.3V
+ *   Morado   -> GPIO 36    (señal B, "SP") + pull-up 4.7k a 3.3V
+ *   Negro / Rojo son el motor: NUNCA al ESP.
+ *   Las salidas son de colector abierto y 34/36 no tienen pull-up interna:
+ *   sin las 4.7k a 3.3V (no a 5V) no se lee nada.
  *
  * Comandos:
  *   r -> distancia en 0
  *   c -> comprobar: marca la llanta, manda 'r', gírala VUELTAS_CALIB vueltas
  *        exactas en el sentido de AVANZAR y manda 'c'. Compara las cuentas
- *        medidas con las ~2805 esperadas y dice si hay que cambiar SIGNO.
+ *        medidas con las ~1200 esperadas y dice si hay que cambiar SIGNO.
  *
  * Imprime cada 100 ms la distancia (cm) y las RPM de la llanta. Si aparece
  * "errores", el encoder está metiendo ruido o se saltó pasos.
@@ -27,11 +30,11 @@ const int ENC_A = 34;
 const int ENC_B = 36;
 
 const float DIAMETRO_MM   = 42.7f;
-const float PULSOS_MOTOR  = 7.0f;    // pulsos por vuelta del eje del motor (ficha)
-const float RELACION      = 50.092f * 2;  // caja 50.092:1 x engranes 15T/30T
-const float VUELTAS_CALIB = 1.0f;    // más vueltas = comprobación más precisa
+const float PULSOS_MOTOR  = 3.0f;        // 12 CPR = 3 pulsos por canal por vuelta del motor
+const float RELACION      = 50.0f * 2;   // caja 50:1 x engranes 15T/30T
+const float VUELTAS_CALIB = 1.0f;        // más vueltas = comprobación más precisa
 
-const float CUENTAS_POR_VUELTA = PULSOS_MOTOR * 4 * RELACION;   // ~2805
+const float CUENTAS_POR_VUELTA = PULSOS_MOTOR * 4 * RELACION;   // 1200
 int SIGNO = 1;                       // -1 si adelante baja (lo dice 'c')
 
 // Tabla de cuadratura: índice = (estado anterior << 2) | estado nuevo, con
