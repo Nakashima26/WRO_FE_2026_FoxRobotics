@@ -1280,6 +1280,10 @@ ROUTE_CTE_PWM = None     # tope lejos de la ruta (None = ROUTE_SLOW_PWM)
 ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_PWM)
 # Tope de PWM en la vuelta 1 mientras quede algún asiento sin resolver.
 ROUTE_LAP1_PWM = 120
+# Medición (seat_roi.py): registra [ROI] por asiento de frente a la cámara. Solo log.
+SEAT_ROI_LOG = False
+SEAT_ROI_MIN_FRAC = 0.25   # fracción mínima de píxeles de un color en la ROI para decidir color
+SEAT_ROI_MAX_MM = 3500.0   # distancia máxima cámara -> asiento a medir
 # Perfil de velocidad por curvatura (route_mode._profile_pwm): rápido en las
 # rectas y frena antes de cada curva según su κ. False: sin cambio.
 ROUTE_PROFILE = False                 # perfil de velocidad por curvatura (rectas rápidas)

@@ -34,6 +34,7 @@ from . import config as C
 from . import ring_route as RR
 from .digital_map import feet_world
 from .localizer import Localizer
+from .seat_roi import classify, seat_span
 from .start_fix import StartFix
 from .wro_field import (PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS, SECTIONS_CW,
                         section_to_world, world_to_section)
@@ -101,6 +102,10 @@ class RouteMode:
         self._pre_poses: list = []
         self._fence = None
         self._pre_key = None
+        self.frame = None            # frame de perspectiva BGR (SEAT_ROI_LOG)
+        self.bev = None              # BEVTransformer del runtime (H_inv para la ROI)
+        self._roi_t = 0
+        self._roi_err = False
 
     # ── asientos ──────────────────────────────────────────────────────────
     def _resolved(self, dm) -> tuple[dict, set]:
@@ -174,6 +179,54 @@ class RouteMode:
             if n >= int(getattr(C, "ROUTE_EMPTY_FRAMES", 16)):
                 self.empty.add(key)
 
+    def _log_seats(self, conf, empty, pose) -> None:
+        """SEAT_ROI_LOG: clasifica en la imagen cada asiento de frente a la cámara (solo medición)."""
+        if not (getattr(C, "SEAT_ROI_LOG", False) and self.frame is not None
+                and self.bev is not None and self.bev.is_calibrated and self.fixed):
+            return
+        try:
+            self._roi_t += 1
+            x, y, hd = pose
+            h = math.radians(hd)
+            fx, fy = math.sin(h), math.cos(h)
+            cam_fwd = float(getattr(C, "CAMERA_FWD_MM", 140.0))
+            cx, cy = x + fx * cam_fwd, y + fy * cam_fwd
+            known = [section_to_world(s, *SEATS[t]) for (s, t) in conf]
+            max_mm = float(getattr(C, "SEAT_ROI_MAX_MM", 3500.0))
+            for key in self._all_seats():
+                sx, sy = section_to_world(key[0], *SEATS[key[1]])
+                dx, dy = sx - cx, sy - cy
+                fwd = dx * fx + dy * fy
+                lat = dx * fy - dy * fx
+                dist = math.hypot(dx, dy)
+                if fwd < 150.0 or dist > max_mm:
+                    continue
+                # tapado por una señal confirmada más cercana en la línea de vista (como _update_views)
+                hidden = False
+                for kx, ky in known:
+                    ex, ey = kx - cx, ky - cy
+                    t = (ex * dx + ey * dy) / max(dist * dist, 1.0)
+                    if 0.0 < t < 1.0 and abs(ex * dy - ey * dx) / max(dist, 1.0) < 60.0:
+                        hidden = True
+                        break
+                if hidden:
+                    continue
+                b = math.degrees(math.atan2(lat, fwd))
+                span = seat_span(self.bev.H_inv, pose, sx, sy)
+                if span is None:
+                    print(f"[ROI-OUT] t={self._roi_t} sec={key[0]} seat={key[1]} d={dist:.0f} b={b:.1f}",
+                          flush=True)
+                    continue
+                (u0, v0, u1, v1), w = span
+                cls, fr, fg = classify(self.frame, (u0, v0, u1, v1))
+                unk = 0 if (key in conf or key in empty) else 1
+                print(f"[ROI] t={self._roi_t} sec={key[0]} seat={key[1]} d={dist:.0f} b={b:.1f} "
+                      f"w={w:.0f} cls={cls} fr={fr:.2f} fg={fg:.2f} unk={unk}", flush=True)
+        except Exception as e:
+            if not self._roi_err:
+                self._roi_err = True
+                print(f"[ROI] error: {e!r}", flush=True)
+
     # ── paso por frame ────────────────────────────────────────────────────
     def step(self, dm, est: str | None, ack: str | None, armed: bool):
         """(obs normalizado o None, sufijo del V2, línea de subida o None)."""
@@ -227,6 +280,7 @@ class RouteMode:
         if lap1 and self.fixed:
             self._update_views(conf, empty, pose)
             conf, empty = self._resolved(dm)
+        self._log_seats(conf, empty, pose)
         unknown = [k for k in self._all_seats() if k not in conf and k not in empty]
         # Color provisional: el mapa confirma ya cerca (la detección tiene que
         # caer a <=160 mm del asiento); los votos de color llegan antes. Con
