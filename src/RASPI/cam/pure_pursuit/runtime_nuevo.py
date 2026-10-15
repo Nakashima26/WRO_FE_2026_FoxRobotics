@@ -431,13 +431,17 @@ class PPRuntime:
         dm = getattr(self, "digital", None)
         return list(dm.line_world) if dm is not None and dm.line_world else None
 
-    def _route_step(self, armed: bool):
+    def _route_step(self, armed: bool, frame=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
         if not getattr(C, "ROUTE_FOLLOW", False):
             return None, "", None
         if getattr(self, "_rmode", None) is None:
             from .route_mode import RouteMode
             self._rmode = RouteMode()
+        # Frame de perspectiva sin anotar (antes de Vision.process_frame) para SEAT_ROI_LOG
+        self._rmode.frame = frame
+        self._rmode.color_ranges = getattr(self.vision, "color_ranges", None)
+        self._rmode.bev = self.bev
         return self._rmode.step(self.digital, self._prev_estado, getattr(self, "_prev_ack", None), armed)
 
     # ── Serial ────────────────────────────────────────────────────────────────
@@ -2101,7 +2105,10 @@ class PPRuntime:
         # Con el mapa de señales completo, el steer sale de un pure pursuit
         # sobre la ruta con la pose por odometría (encoder + IMU del ESP),
         # no de la imagen. prio=1: el ESP aplica el steer tal cual.
-        _route_steer, _route_suffix, _route_line = self._route_step(armed)
+        # Mismo espejo que Vision.process_frame, sin sus anotaciones (solo si se usa la ROI)
+        _roi_frame = (cv2.flip(frame, 1) if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
+                      or getattr(C, "SEAT_ROI_LOG", False)) else None)
+        _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame)
         if _route_steer is not None:
             obs_norm = _route_steer
             state = "pp_follow"
