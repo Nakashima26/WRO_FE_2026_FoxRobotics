@@ -228,6 +228,7 @@ int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en t
 bool  piRuta      = false;   // rt=1
 bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
+int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
 // Grados de servo por grado de rueda: 71° de servo = 44.54° de rueda (v2).
@@ -468,6 +469,9 @@ const float GR_RECTO_DEG         = 12.0f;
 // Desde que TERMINA un giro (lastTurnTime en completarTurnoObstaculos).
 // Sin esto, al salir todavía ves la pared de la esquina y disparas otra.
 const unsigned long GR_GAP_MS    = 4000;
+// Modo RUTA (rt=1): la cuenta GIRO PI usa su propio gap. Una esquina de la ruta dura ~3.3 s y
+// el residual se guarda entero (ver completarTurnoObstaculos), así que no hay doble cuenta.
+const unsigned long GR_GAP_RUTA_MS = 1000;
 // es=1 de la Pi cuenta como evidencia lateral de esquina (un cono de la recta que
 // sigue suele tapar el sonar del lado del giro) mientras el V2 sea reciente.
 const unsigned long GR_PI_ESQUINA_MS = 300;
@@ -1655,6 +1659,10 @@ const bool MODO_CONTINUO = false;
 // durante TERMINANDO_MS, para meterse en el área de salida y ahí sí frenar.
 // Sube/baja este tiempo según la distancia que falte hasta la zona de salida.
 const unsigned long TERMINANDO_MS = 1000;
+// Modo RUTA: la cuenta 12 cae a ~70° de la última curva, a veces antes de la diagonal; tras
+// TERMINANDO_MS se sigue hasta estar en la sección de salida a este margen de la diagonal (tope MAX_MS).
+const float TERMINANDO_RUTA_MARGEN_MM = 100.0f;
+const unsigned long TERMINANDO_RUTA_MAX_MS = 3000;
 unsigned long terminandoEntryMs   = 0;
 
 // ── Filtro EMA para ultrasonidos ──────────────────────────────────────────────
@@ -2517,9 +2525,11 @@ void iniciarTerminando() {
 
 // Cierre de MANIOBRA / GIRO_RAPIDO: bookkeeping compartido (sin coast/backoff/settle).
 void completarTurnoObstaculos() {
-  motorAdelante();
-  escribirServo(centroServo);
-  setMotor(0);
+  if (!piRuta) {   // Modo RUTA: la cuenta es solo contabilidad; servo al centro y motor 0 a media curva abrían el arco
+    motorAdelante();
+    escribirServo(centroServo);
+    setMotor(0);
+  }
   velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
@@ -2527,6 +2537,9 @@ void completarTurnoObstaculos() {
     Serial.print("MANIOBRA 13: cuadrado contra la pared, residual descartado=");
     Serial.println(anguloGyro - maniobraIdealRot, 1);
     anguloGyro = 0.0f;
+  } else if (piRuta) {
+    // Modo RUTA: residual entero (sin tope), la cuenta alcanza al giro real y la Pi suma 90 exactos por tc.
+    anguloGyro -= maniobraIdealRot;
   } else {
     anguloGyro     = constrain(anguloGyro - maniobraIdealRot,
                                -MANIOBRA_RESIDUAL_MAX_DEG, MANIOBRA_RESIDUAL_MAX_DEG);
@@ -2766,14 +2779,32 @@ bool campoPi(const String &line, const char *clave, String &valor) {
   return true;
 }
 
+// Pose del eje trasero en el tapete (modo RUTA): mundo = (rtx,rty) + px·F + py·L.
+void rutaPoseTapete(float &x, float &y) {
+  float th = rutaTh * DEG_TO_RAD;
+  float Fx = sinf(th), Fy = cosf(th), Lx = -cosf(th), Ly = sinf(th);
+  x = rutaTx + poseXf * Fx + poseYf * Lx;
+  y = rutaTy + poseXf * Fy + poseYf * Ly;
+}
+
+// Sección del tapete (cuadrante partido por las diagonales): 0=N 1=E 2=S 3=W.
+int seccionTapete(float x, float y) {
+  return fabsf(x) >= fabsf(y) ? (x > 0 ? 1 : 3) : (y > 0 ? 0 : 2);
+}
+
+// Servo para un ángulo de rueda de la ruta (+ = derecha), sin wallPanic.
+int rutaServo(float ruedaDeg) {
+  float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
+                             (float)(SERVO_MIN_DEG - centroServo), (float)(SERVO_MAX_DEG - centroServo));
+  return centroServo - (int)lroundf(servoDeg);
+}
+
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
 // Devuelve false si no aplica. ruedaDeg: + = derecha.
 bool rutaSteer(float &ruedaDeg) {
   if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
-  float th = rutaTh * DEG_TO_RAD;
-  float Fx = sinf(th), Fy = cosf(th), Lx = -cosf(th), Ly = sinf(th);
-  float x = rutaTx + poseXf * Fx + poseYf * Lx;
-  float y = rutaTy + poseXf * Fy + poseYf * Ly;
+  float x, y;
+  rutaPoseTapete(x, y);
   float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
   float sh = sinf(h), ch = cosf(h);
   if (rutaI < 0 || rutaI >= rutaN) {
@@ -2916,6 +2947,7 @@ void parsePiMessage(String line) {
       if (campoPi(line, ",rty=", v)) rutaTy = v.toFloat();
       if (campoPi(line, ",rth=", v)) rutaTh = v.toFloat();
       rutaTfOk = true;
+      if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
@@ -3290,10 +3322,7 @@ void controlPID(long distL, long distR) {
     // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
     float ruedaDeg;
     if (rutaSteer(ruedaDeg)) {
-      float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
-                                 (float)(SERVO_MIN_DEG - centroServo), (float)(SERVO_MAX_DEG - centroServo));
-      int servoAngle = constrain(centroServo - (int)lroundf(servoDeg) + (int)wallPanic,
-                                 SERVO_MIN_DEG, SERVO_MAX_DEG);
+      int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
       // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
       // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
@@ -3372,10 +3401,19 @@ void terminando(long distL, long distR) {
   velocidadMotor = MOTOR_MAX;
   controlPID(distL, distR);
 
-  if (millis() - terminandoEntryMs >= TERMINANDO_MS) {
+  unsigned long dt = millis() - terminandoEntryMs;
+  bool listo = dt >= TERMINANDO_MS;
+  float x, y;
+  if (listo && piRuta && rutaTfOk && rutaSecSalida >= 0 && dt < TERMINANDO_RUTA_MAX_MS) {
+    rutaPoseTapete(x, y);
+    // |(|x|-|y|)|/√2 = distancia a la diagonal más cercana.
+    listo = seccionTapete(x, y) == rutaSecSalida
+            && fabsf(fabsf(x) - fabsf(y)) >= TERMINANDO_RUTA_MARGEN_MM * 1.41421f;
+  }
+  if (listo) {
     raceFinished = true;
     setMotor(0);
-    escribirServo(centroServo);
+    if (!piRuta) escribirServo(centroServo);   // Modo RUTA: el servo lo sigue llevando la ruta hasta parar (ver loop)
     Serial.println("TERMINANDO completado -> STOP");
   }
 }
@@ -3505,7 +3543,14 @@ void loop() {
 
   if (raceFinished) {
     setMotor(0);
-    escribirServo(centroServo);
+    // Modo RUTA: rodando hasta parar sigue la ruta; con el servo al centro a la salida de la curva iba recto a la isla.
+    float ruedaDeg;
+    if (piRuta && rutaSteer(ruedaDeg)) {
+      escribirServo(rutaServo(ruedaDeg));
+      actualizarOdometria();
+    } else {
+      escribirServo(centroServo);
+    }
     Serial.print(" | TERMINADO giros="); Serial.print(turnsCompleted);
     Serial.print("/"); Serial.println(TURNS_PER_RACE);
     delay(20);
@@ -3938,7 +3983,7 @@ void loop() {
       // Sin esto turnsCompleted no sube y el mapa/estacionamiento se desfasan.
       if (GIRO_PI_CUENTA_DEG > 0.0f && rondaObstaculos && primerGiro
           && !parkBuscando && !parkUturnPendiente && piPriority
-          && (lastTurnTime == 0 || (millis() - lastTurnTime) > GR_GAP_MS)) {
+          && (lastTurnTime == 0 || (millis() - lastTurnTime) > (piRuta ? GR_GAP_RUTA_MS : GR_GAP_MS))) {
         float sgPi = direccionIzquierda ? 1.0f : -1.0f;
         if (anguloGyro * sgPi >= GIRO_PI_CUENTA_DEG) {
           maniobraGirarDer = !direccionIzquierda;
