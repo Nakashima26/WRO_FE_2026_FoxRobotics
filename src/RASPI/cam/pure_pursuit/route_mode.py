@@ -379,7 +379,7 @@ class RouteMode:
             if r["cls"] == "Empty":
                 self.empty.update((r["sec"], t) for t in r["seats"] if (r["sec"], t) not in conf and (r["sec"], t) not in empty)
                 self.roi_color.pop(key, None)
-            else:
+            elif getattr(C, "SEAT_ROI_COLOR", False):
                 self.roi_color[key] = r["cls"]
         self._col_run = run
 

@@ -1294,6 +1294,9 @@ SEAT_ROI_USE_MAX_MM = 1800.0   # distancia máxima a la columna para usar su cla
 SEAT_ROI_FRAMES = 3            # frames seguidos con la misma clase (y gates) para decidir
 SEAT_ROI_MAX_YAW = 1.0         # |yaw| máx del carro (grados/frame) para usar la clasificación
 SEAT_ROI_MAX_BEARING = 40.0    # |rumbo| máx a la columna (grados) para usar la clasificación
+# Usar también el color de la columna (provisional, sin frenar por ella). Sin la fila
+# exacta la ruta se corregía tarde a toda velocidad (seeds 20/36): solo vacíos por defecto.
+SEAT_ROI_COLOR = False
 # Perfil de velocidad por curvatura (route_mode._profile_pwm): rápido en las
 # rectas y frena antes de cada curva según su κ. False: sin cambio.
 ROUTE_PROFILE = False                 # perfil de velocidad por curvatura (rectas rápidas)
