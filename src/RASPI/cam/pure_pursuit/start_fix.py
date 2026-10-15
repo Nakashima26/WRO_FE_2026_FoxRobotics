@@ -246,6 +246,13 @@ class StartFix:
         if prev is None or abs((od[2] - prev[2] + 180.0) % 360.0 - 180.0) > _MAX_YAW_STEP:
             return
         self.n_frames += 1
+        # Peso por avance: casi quieto, el sonar repite la misma lectura (no es evidencia nueva).
+        step = getattr(C, "ROUTE_FIX_STEP_MM", None)
+        w = 1.0
+        if step is not None:
+            w = min(1.0, math.hypot(od[0] - prev[0], od[1] - prev[1]) / max(float(step), 1e-6))
+        if w <= 0.0:
+            return
         for key, mname in _SENSORS:
             raw = _ack_num(ack, key)
             if raw is None:
@@ -260,9 +267,9 @@ class StartFix:
                 maybe = (np.isfinite(es) & (z >= es - 60.0)
                          & (~np.isfinite(e0) | (z < e0 - 30.0)))
                 lik = np.where(maybe, np.maximum(lik, _P_SIGN), lik)
-            if lik.max() > 3.0 * lik.min():
+            if lik.max() > 3.0 * lik.min() and w >= 0.5:
                 self.n_inform += 1
-            self.logp += np.log(lik)
+            self.logp += w * np.log(lik)
         self.logp -= self.logp.max()
 
     def posterior(self) -> np.ndarray:

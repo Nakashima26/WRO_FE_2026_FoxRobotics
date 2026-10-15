@@ -1329,6 +1329,12 @@ ROUTE_PROFILE_ISLAND_NEAR_MM = 200.0
 # retraso tau ~ 0.25 s) y el piso baja a ROUTE_PROFILE_BRAKE_FLOOR_PWM.
 ROUTE_PROFILE_BRAKE_FF_S = None
 ROUTE_PROFILE_BRAKE_FLOOR_PWM = 60
+# Arranque ciego (start_fix): cada lectura de sonar pesa min(1, avance/STEP) en el
+# histograma, con el avance en mm de odometría desde el frame anterior usado. Con el
+# carro casi quieto el sonar repite la misma lectura y contarla N veces fijaba un δ
+# falso con masa 0.97 (semilla 8: 9 lecturas iguales, δ=700 con la verdad en 290).
+# None = como antes (cada frame pesa 1).
+ROUTE_FIX_STEP_MM = None
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm
