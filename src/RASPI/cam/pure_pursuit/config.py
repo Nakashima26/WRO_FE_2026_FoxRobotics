@@ -1335,6 +1335,11 @@ ROUTE_PROFILE_BRAKE_FLOOR_PWM = 60
 # falso con masa 0.97 (semilla 8: 9 lecturas iguales, δ=700 con la verdad en 290).
 # None = como antes (cada frame pesa 1).
 ROUTE_FIX_STEP_MM = None
+# Perfil: aceleración lateral menor en curvas muy cerradas (|κ| > TIGHT_KAPPA, 1/mm).
+# Con radio < lookahead (200 mm) el pure pursuit corta hacia adentro (esquinas de la
+# isla, semilla 3). None = apagado (todas las curvas con A_LAT_MM_S2).
+ROUTE_PROFILE_TIGHT_KAPPA = None
+ROUTE_PROFILE_A_LAT_TIGHT_MM_S2 = 1500.0
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm

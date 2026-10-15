@@ -607,6 +607,7 @@ class RouteMode:
         (a <= ROUTE_PROFILE_SIGN_NEAR_MM) a la base (en SIGN_MM); sin NEAR, la base.
         ROUTE_PROFILE_ISLAND_MM (si no es None): igual cerca de las 4 esquinas de la isla.
         ROUTE_PROFILE_BRAKE_FF_S (si no es None): al frenar hacia adelante pide menos (retraso del motor).
+        ROUTE_PROFILE_TIGHT_KAPPA (si no es None): curvas más cerradas usan A_LAT_TIGHT.
         Manda la más lenta. None si el perfil está apagado o no hay ruta.
         """
         if not getattr(C, "ROUTE_PROFILE", False) or self.follower is None:
@@ -638,8 +639,11 @@ class RouteMode:
         j = idx[win:win + m]
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
+        tight = getattr(C, "ROUTE_PROFILE_TIGHT_KAPPA", None)
+        a_c = a_lat if tight is None else np.where(
+            kmax > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
         v_c = np.where(kmax < 1e-9, v_max,
-                       np.clip(np.sqrt(a_lat / np.maximum(kmax, 1e-12)), v_min, v_max))
+                       np.clip(np.sqrt(a_c / np.maximum(kmax, 1e-12)), v_min, v_max))
         if signs is not None and len(signs):
             # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
             sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))
