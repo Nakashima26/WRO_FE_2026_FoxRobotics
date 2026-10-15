@@ -10,9 +10,9 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 ## Resultado en una línea
 
-De ~65 s (v3b) a ~57 s de mediana en el twin. Las fallas bajan de 17 a 16 (de 210 corridas).
+De ~65 s (v3b) a ~56.5 s de mediana en el twin. Las fallas bajan de 17 a 16 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "g3")
+## Mejor configuración (base actual, bench "u2")
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -20,13 +20,15 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 {"pi": {"ROUTE_PROFILE_BASE_PWM": 205, "ROUTE_TIME_COST": true,
         "ROUTE_LAP1_PWM": 155, "ROUTE_UNSEEN_PWM": 155, "ROUTE_PROFILE_MIN_PWM": 155,
         "ROUTE_CTE_PWM": 205, "ROUTE_PROFILE_SIGN_MM": 220.0,
-        "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0}}
+        "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0,
+        "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.25,
+        "ROUTE_CTE_URGENT_MM": 120.0}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -40,10 +42,10 @@ Todos apagados por defecto salvo el del ESP32.
 | `f5b1ef9` | **ESP32 modo ruta: conteo de giros al día y paro dentro de la sección de salida.** Antes el conteo ("GIRO PI contado") tenía un hueco de 4 s y se paraba 1-3 secciones tarde. | Activo. −7.3 s en el twin. **Cargar al ESP antes de probar el modo ruta en el carro.** |
 | `dc36952` | Perfil v3: piso propio (`ROUTE_PROFILE_MIN_PWM`) y freno proporcional cerca de señales (`SIGN_NEAR_MM`). | Usado en la base |
 | `71acf75` | `ROUTE_PROFILE_ISLAND_MM`: frenar cerca de las 4 esquinas de la isla. | Probado: −3 fallas pero +0.47 s. No se usa |
-| `4b5cf81` | `ROUTE_PROFILE_BRAKE_FF_S`: al frenar pide v − τ·a (compensa el retraso del motor) y deja bajar el PWM hasta 60. | Candidato (ver g4) |
+| `4b5cf81` | `ROUTE_PROFILE_BRAKE_FF_S`: al frenar pide v − τ·a (compensa el retraso del motor) y deja bajar el PWM hasta 60. | Usado en la base (0.25) |
 | `e4238af` | **`ROUTE_FIX_STEP_MM`: arranque ciego pesa cada lectura por el avance.** Con el carro casi quieto el sonar repetía la misma lectura, y contarla 9 veces fijaba el cajón 400 mm mal con 97 % de confianza (semilla 8). | Usado en la base (8 mm) |
 | `8ded2c4` | `ROUTE_PROFILE_TIGHT_KAPPA`: aceleración lateral menor en curvas muy cerradas (radio menor que el lookahead de 200 mm). | Probado (h1/h2): no arregla la semilla 3. No se usa |
-| `92fd3c4` | `ROUTE_CTE_URGENT_MM`: **freno por urgencia al salirse.** Si el carro está fuera de la ruta, se corre la ruta de adelante (600 mm) el mismo desvío. Solo si así quedaría a menos de 120 mm de la isla, una señal o la pared, frena a `ROUTE_CTE_URGENT_PWM`. Si se sale poquito pero tiene espacio, no frena. | En prueba (u1/u2) |
+| `92fd3c4` | `ROUTE_CTE_URGENT_MM`: **freno por urgencia al salirse.** Si el carro está fuera de la ruta, se corre la ruta de adelante (600 mm) el mismo desvío. Solo si así quedaría a menos de 120 mm de la isla, una señal o la pared, frena a `ROUTE_CTE_URGENT_PWM`. Si se sale poquito pero tiene espacio, no frena. | Usado en la base (120 mm, PWM 120) |
 
 ## Cómo se decide (banco estándar)
 
@@ -73,6 +75,8 @@ que nunca fallaba falla en ≥ 2 ruidos. Cada bench ocupa ~1.7 GB: revisar `df -
 | g4 + `TIGHT_KAPPA` 0.004 (h1) / 0.003 (h2) | h1: −0.11 s, 15 fallas; h2: +0.62 s, 14 fallas (vs 16 de g3). La semilla 3 sigue chocando | No |
 | Causa de la semilla 3 | Tras la S cerca de (−750, −230) sale a ~790 mm/s unos 60 mm por dentro de la ruta, hacia la isla, antes de la esquina. Bajar la velocidad de la esquina no ayuda: el problema es el desvío | → freno por urgencia |
 | Urgencia en la semilla 3 (sobre g4, 5 ruidos) | 120 mm / PWM 120: choca 2/5 (g4: 4/5), mismo tiempo. Frenar más fuerte (PWM 100) o margen 160 mm: peor, salen choques nuevos a los ~34 s | 120/120 al banco |
+| **u1 = g3 + urgencia** | Mismo tiempo, 14 fallas vs 16, solo-u1 2 vs solo-g3 4. La urgencia no cuesta tiempo | Sí |
+| **u2 = g4 + urgencia** | −0.50 s vs g3, 16 fallas (igual), solo-u2 6 vs 6, sin semillas nuevas. Contra g4: mismo tiempo y 16 fallas vs 19. Semilla 3: 2/5 (antes 4/5) | **Sí, base nueva** |
 
 ## Cuánto queda (estimación)
 
@@ -83,6 +87,6 @@ que nunca fallaba falla en ≥ 2 ruidos. Cada bench ocupa ~1.7 GB: revisar `df -
 
 ## Siguientes pasos
 
-1. Terminar u1 (g3 + urgencia) y u2 (g4 + urgencia). Si u2 pasa la regla, pasa a ser la base (~−0.5 s).
+1. Con la urgencia puesta, volver a probar A_LAT 2500 o BASE_PWM más alto (antes los frenaba la semilla 3).
 2. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
 3. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
