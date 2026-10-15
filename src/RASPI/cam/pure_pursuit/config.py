@@ -1275,6 +1275,9 @@ ROUTE_VIEW_MAX_MM = 550.0
 ROUTE_STOP_MM = 750.0
 ROUTE_SLOWDOWN_MM = 1300.0
 ROUTE_SLOW_PWM = 100
+ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
+ROUTE_CTE_PWM = None     # tope lejos de la ruta (None = ROUTE_SLOW_PWM)
+ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_PWM)
 # Tope de PWM en la vuelta 1 mientras quede algún asiento sin resolver.
 ROUTE_LAP1_PWM = 120
 # Perfil de velocidad por curvatura (route_mode._profile_pwm): rápido en las

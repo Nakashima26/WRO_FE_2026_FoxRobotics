@@ -54,6 +54,14 @@ def _ack_est(ack):
     return ack.split("est=", 1)[1][:1]
 
 
+def _pwm(name):
+    """Tope de PWM de `name`; None en config = ROUTE_SLOW_PWM."""
+    v = getattr(C, name, None)
+    if v is not None:
+        return int(v)
+    return int(getattr(C, "ROUTE_SLOW_PWM", 100))
+
+
 _COL = {"T4": 0, "T2": 0, "X2": 1, "X1": 1, "T3": 2, "T1": 2}    # columna (w 1000/1500/2000)
 
 
@@ -304,11 +312,12 @@ class RouteMode:
             self.rv = slow
         if abs(self.follower.cte) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
-            self.rv = slow if self.rv is None else min(self.rv, slow)
+            cte_cap = _pwm("ROUTE_CTE_PWM")
+            self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
         if self.upload:
             # Mientras la ruta nueva no llega completa al ESP, lento; detenido
             # si cambió desde la pose (otro carril cerca del carro).
-            cap = 0 if self.hold else slow
+            cap = 0 if self.hold else _pwm("ROUTE_UPLOAD_PWM")
             self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
@@ -599,10 +608,10 @@ class RouteMode:
             self.stopped += 1
             if self.stopped <= int(getattr(C, "ROUTE_STOP_MAX_FRAMES", 80)):
                 return 0
-            return min(cap, int(getattr(C, "ROUTE_SLOW_PWM", 100)))
+            return min(cap, _pwm("ROUTE_UNSEEN_PWM"))
         self.stopped = 0
         if best <= slow_mm:
-            return min(cap, int(getattr(C, "ROUTE_SLOW_PWM", 100)))
+            return min(cap, _pwm("ROUTE_UNSEEN_PWM"))
         return cap
 
     def _suffix(self) -> str:
