@@ -3296,10 +3296,9 @@ void controlPID(long distL, long distR) {
                                  SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
       // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
-      // (velocidadMotor >= MOTOR_MAX) y no es la última sección (TERMINANDO frena al llegar).
-      // Si no, igual que antes: min(rutaVel, velocidadMotor) con tope MOTOR_MAX.
-      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX
-          && turnsCompleted < TURNS_PER_RACE - 1) {
+      // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
+      // el carro se para al cruzar la meta. Si no, igual que antes: min(rutaVel, velocidadMotor).
+      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
         setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
       } else {
         setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
