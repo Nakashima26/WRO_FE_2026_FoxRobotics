@@ -1312,6 +1312,12 @@ ROUTE_PROFILE_KAPPA_WIN = 5           # muestras (20 mm c/u, route_planner out_d
 ROUTE_PROFILE_SIGN_MM = 300.0
 ROUTE_PROFILE_K_MM_S_PER_PWM = 3.5    # modelo v = K*(PWM-PWM0) (twin/params.py MotorParams)
 ROUTE_PROFILE_PWM0 = 25.0
+# Perfil v3 (None = igual que antes). MIN_PWM: piso real del perfil; las curvas cerradas
+# (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
+ROUTE_PROFILE_MIN_PWM = None
+# Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
+# es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
+ROUTE_PROFILE_SIGN_NEAR_MM = None
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm

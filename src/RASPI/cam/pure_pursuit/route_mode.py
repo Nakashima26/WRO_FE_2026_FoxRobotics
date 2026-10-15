@@ -597,11 +597,14 @@ class RouteMode:
     def _profile_pwm(self, signs=None) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
-        En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [base, max]
+        En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
         (max en recta) y, para llegar a ella frenando con A_BRAKE desde la
         distancia d (menos la latencia), v_permitida = sqrt(v_curva² + 2·A·d).
         Las muestras a menos de ROUTE_PROFILE_SIGN_MM de una señal (signs, mm)
         tienen v_curva = base: se llega a la señal a velocidad base.
+        Perfil v3 (ROUTE_PROFILE_MIN_PWM): el piso baja a MIN_PWM y, cerca de la
+        señal, v_curva = min(v_curva, v_señal), donde v_señal sube lineal de MIN_PWM
+        (a <= ROUTE_PROFILE_SIGN_NEAR_MM) a la base (en SIGN_MM); sin NEAR, la base.
         Manda la más lenta. None si el perfil está apagado o no hay ruta.
         """
         if not getattr(C, "ROUTE_PROFILE", False) or self.follower is None:
@@ -614,6 +617,10 @@ class RouteMode:
         top = int(C.ROUTE_PROFILE_MAX_PWM)
         v_base = K * (base - pwm0)
         v_max = K * (top - pwm0)
+        # Perfil v3: piso real del perfil (MIN_PWM, sin pasar de la base). None: la base.
+        mn = getattr(C, "ROUTE_PROFILE_MIN_PWM", None)
+        floor = base if mn is None else min(int(mn), base)
+        v_min = K * (floor - pwm0)
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
         win = int(C.ROUTE_PROFILE_KAPPA_WIN)
@@ -630,18 +637,29 @@ class RouteMode:
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
         v_c = np.where(kmax < 1e-9, v_max,
-                       np.clip(np.sqrt(a_lat / np.maximum(kmax, 1e-12)), v_base, v_max))
+                       np.clip(np.sqrt(a_lat / np.maximum(kmax, 1e-12)), v_min, v_max))
         if signs is not None and len(signs):
             # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
             sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))
             pxy = np.stack((r.x[j], r.y[j]), axis=1)                       # (m, 2)
             dd = np.hypot(pxy[:, None, 0] - signs[None, :, 0],
                           pxy[:, None, 1] - signs[None, :, 1]).min(axis=1)  # (m,)
-            v_c = np.where(dd < sign_mm, v_base, v_c)
+            if mn is None:
+                v_c = np.where(dd < sign_mm, v_base, v_c)                  # igual que antes
+            else:
+                # Cerca de señal: nunca más que v_señal ni que la curva (ya no se fuerza a la base).
+                near = getattr(C, "ROUTE_PROFILE_SIGN_NEAR_MM", None)
+                if near is None:
+                    v_sign = np.full_like(dd, v_base)
+                else:
+                    near = float(near)
+                    f = np.clip((dd - near) / max(sign_mm - near, 1.0), 0.0, 1.0)
+                    v_sign = v_min + (v_base - v_min) * f
+                v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
         allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
         v_allow = min(v_max, float(allowed[dist <= span].min()))
         pwm = v_allow / K + pwm0
-        return int(round(min(max(pwm, base), top)))
+        return int(round(min(max(pwm, floor), top)))
 
     def _past_straight(self, dm, pose) -> bool:
         """El frente del carro ya llegó (en el marco supuesto) al final de la recta del cajón."""
