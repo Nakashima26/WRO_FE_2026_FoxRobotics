@@ -1340,6 +1340,14 @@ ROUTE_FIX_STEP_MM = None
 # isla, semilla 3). None = apagado (todas las curvas con A_LAT_MM_S2).
 ROUTE_PROFILE_TIGHT_KAPPA = None
 ROUTE_PROFILE_A_LAT_TIGHT_MM_S2 = 1500.0
+# Freno por urgencia al salirse de la ruta. None = apagado (solo ROUTE_CTE_PWM).
+# Con |cte| > ROUTE_CTE_SLOW_MM se proyecta la ruta de adelante (ROUTE_CTE_HORIZON_MM)
+# corrida el mismo cte: si en algún punto queda a menos de URGENT_MM de la isla, una
+# señal posible o la pared, y más cerca que la ruta misma, el tope es URGENT_PWM.
+# Si no hay peligro, el tope es ROUTE_CTE_PWM (poner 255 para no frenar).
+ROUTE_CTE_URGENT_MM = None
+ROUTE_CTE_URGENT_PWM = 120
+ROUTE_CTE_HORIZON_MM = 600.0
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm

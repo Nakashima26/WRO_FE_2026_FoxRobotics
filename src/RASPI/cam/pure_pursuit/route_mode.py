@@ -37,8 +37,8 @@ from . import ring_route as RR
 from .digital_map import feet_world
 from .localizer import Localizer
 from .start_fix import StartFix
-from .wro_field import (INNER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS, SECTIONS_CW,
-                        section_to_world, world_to_section)
+from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
+                        SECTIONS_CW, section_to_world, world_to_section)
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
 _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
@@ -561,6 +561,8 @@ class RouteMode:
         if abs(self.follower.cte) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
             cte_cap = _pwm("ROUTE_CTE_PWM")
+            if getattr(C, "ROUTE_CTE_URGENT_MM", None) is not None and self._cte_urgent(conf, empty):
+                cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
         if self.upload:
             # Mientras la ruta nueva no llega completa al ESP, lento; detenido
@@ -583,6 +585,41 @@ class RouteMode:
             self.esp_shift = self.upload_shift
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
+
+    def _cte_urgent(self, conf, empty) -> bool:
+        """El carro, corrido |cte| de la ruta, va hacia la isla, una señal o la pared.
+
+        Se corre la ruta de adelante (ROUTE_CTE_HORIZON_MM) el mismo cte hacia el
+        lado del carro y se mide la holgura a la isla, a las señales posibles y a la
+        pared. Urgente si en algún punto queda bajo ROUTE_CTE_URGENT_MM y más cerca
+        (20 mm o más) que la ruta sin correr.
+        """
+        r = self.follower.route
+        n = len(r.kappa)
+        i = max(self.follower.i, 0)
+        step = r.length_mm / n
+        m = int(float(getattr(C, "ROUTE_CTE_HORIZON_MM", 600.0)) / step) + 1
+        j = (i + np.arange(m)) % n
+        h = np.radians(r.heading_deg[j])
+        # Derecha de la ruta: (cos h, -sin h); cte > 0 = carro a la derecha.
+        rx, ry = np.cos(h), -np.sin(h)
+        cte = float(self.follower.cte)
+        signs = self._sign_xy(conf, empty)
+
+        def clearance(px, py):
+            ih = float(INNER_HALF_MM)
+            isl = np.hypot(np.maximum(np.abs(px) - ih, 0.0), np.maximum(np.abs(py) - ih, 0.0))
+            wall = float(OUTER_HALF_MM) - np.maximum(np.abs(px), np.abs(py))
+            c = np.minimum(isl, wall)
+            if len(signs):
+                ds = np.hypot(px[:, None] - signs[None, :, 0], py[:, None] - signs[None, :, 1]).min(axis=1)
+                c = np.minimum(c, ds - 25.0)
+            return c
+
+        c0 = clearance(r.x[j], r.y[j])
+        c1 = clearance(r.x[j] + cte * rx, r.y[j] + cte * ry)
+        lim = float(C.ROUTE_CTE_URGENT_MM)
+        return bool(np.any((c1 < lim) & (c1 < c0 - 20.0)))
 
     def _sign_xy(self, conf, empty) -> np.ndarray:
         """Posiciones (x, y) en mm del tapete de las señales y asientos sin resolver.
