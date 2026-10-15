@@ -606,6 +606,7 @@ class RouteMode:
         señal, v_curva = min(v_curva, v_señal), donde v_señal sube lineal de MIN_PWM
         (a <= ROUTE_PROFILE_SIGN_NEAR_MM) a la base (en SIGN_MM); sin NEAR, la base.
         ROUTE_PROFILE_ISLAND_MM (si no es None): igual cerca de las 4 esquinas de la isla.
+        ROUTE_PROFILE_BRAKE_FF_S (si no es None): al frenar hacia adelante pide menos (retraso del motor).
         Manda la más lenta. None si el perfil está apagado o no hay ruta.
         """
         if not getattr(C, "ROUTE_PROFILE", False) or self.follower is None:
@@ -670,9 +671,17 @@ class RouteMode:
             v_isl = v_min + (v_base - v_min) * f
             v_c = np.where(di < isl_mm, np.minimum(v_c, v_isl), v_c)
         allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
-        v_allow = min(v_max, float(allowed[dist <= span].min()))
+        inside = np.nonzero(dist <= span)[0]
+        k_min = inside[int(np.argmin(allowed[inside]))]
+        v_allow = min(v_max, float(allowed[k_min]))
+        lo = floor
+        ff = getattr(C, "ROUTE_PROFILE_BRAKE_FF_S", None)
+        if ff is not None and d[k_min] > 0.0 and v_allow < v_max:
+            # Frenando hacia una muestra de adelante: se adelanta el retraso del motor.
+            v_allow -= float(ff) * a_brk
+            lo = min(floor, int(getattr(C, "ROUTE_PROFILE_BRAKE_FLOOR_PWM", 60)))
         pwm = v_allow / K + pwm0
-        return int(round(min(max(pwm, floor), top)))
+        return int(round(min(max(pwm, lo), top)))
 
     def _past_straight(self, dm, pose) -> bool:
         """El frente del carro ya llegó (en el marco supuesto) al final de la recta del cajón."""
