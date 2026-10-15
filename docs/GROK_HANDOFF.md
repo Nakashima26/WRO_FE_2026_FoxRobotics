@@ -58,3 +58,19 @@ Rechazado: subir también el tope de 100 (sin ver la señal) llega a 58.2 s (-7 
 2. Hacer el ruido por (semilla, sensor, tick) en el twin.
 3. Medir holgura mínima de TERMINANDO en 42 seeds y decidir cuánto bajarlo.
 4. Si todo cuadra, adoptar `ROUTE_LAP1_PWM = 155` y probarlo en el carro con velocidad escalonada.
+
+## 6. Reproducción independiente de 100/155 (twin, sin Grok)
+
+Config: `--preset ruta --solo-cajon`, `FOX_PARK_POS=random`, 42 seeds (1-41 + 3170839; suposición, no confirmada con Grok), base `ROUTE_LAP1_PWM=120` vs candidato 155 (override Pi, sin editar config.py). Ruido: `TWIN_NOISE_SEED` (otro flujo con la misma pista; en la rama `fox/verify-lap1-155`, `sim.py`). El ruido sigue siendo un solo flujo, así que no se atribuyen fallas a pares concretos.
+
+| Prueba | Base | Candidato 155 |
+|---|---|---|
+| 42 seeds × 5 ruidos (210 corridas c/u): fallas | 14 | 17 |
+| Tiempo pareado (ambas limpias, n=193) | | mediana **-0.95 s** (-0.85 a -1.02 por ruido) |
+| Seeds 4, 19, 36 × 20 ruidos más (60 c/u): fallas | 5 | 4 |
+| Tiempo pareado (n=53) | | mediana -1.38 s |
+
+- Las 14 fallas de la base se repiten idénticas (mismo instante) en el candidato salvo 3 pares del ruido 5 (seeds 4, 19, 36). En la repetición con 20 ruidos más, la seed 36 no falla nunca, la 19 falla en ambas, y las fallas de la seed 4 son choques con la isla a 61-63 s, en la fase final, **también en la base** (2/20 en ambas).
+- Pares discordantes en total: 5 solo-candidato contra 3 solo-base. No hay evidencia de que 155 agregue fallas; tampoco prueba de que no lo haga.
+- Hallazgo independiente del candidato: choque con la isla en la fase final (TERMINANDO) en ~10 % de las corridas de la seed 4, ya en la base. Coincide con el riesgo de TERMINANDO de la sección 4.
+- Datos crudos (no versionados): `src/RASPI/cam/runs/v155/` y `runs/v155b/` en el worktree `FoxRobotics-wt-verify155`. El barrido inicial con `hw_nuevo` fue inválido (sin modo ruta) y se descartó.
