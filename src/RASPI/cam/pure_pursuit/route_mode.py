@@ -27,16 +27,18 @@ transformación del marco viejo hasta tener la ruta nueva completa.
 from __future__ import annotations
 
 import math
+import os
 
+import cv2
 import numpy as np
 
 from . import config as C
 from . import ring_route as RR
 from .digital_map import feet_world
 from .localizer import Localizer
-from .seat_roi import classify, seat_span
+from .seat_roi import classify, classify_window, column_sign_area, column_window, island_hidden, seat_span
 from .start_fix import StartFix
-from .wro_field import (PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS, SECTIONS_CW,
+from .wro_field import (INNER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS, SECTIONS_CW,
                         section_to_world, world_to_section)
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
@@ -106,6 +108,11 @@ class RouteMode:
         self.bev = None              # BEVTransformer del runtime (H_inv para la ROI)
         self._roi_t = 0
         self._roi_err = False
+        self._roi_prev = None       # (rumbo, frame) del último frame medido (yaw)
+        self._col_err = False
+        self._dump_n = 0             # frames volcados a SEAT_ROI_DUMP_DIR
+        self.roi_color: dict = {}    # (sec, columna) -> "Red"/"Green" por ROI (ROUTE_SEAT_ROI)
+        self._col_run: dict = {}     # (sec, columna) -> (clase, frames seguidos) (ROUTE_SEAT_ROI)
 
     # ── asientos ──────────────────────────────────────────────────────────
     def _resolved(self, dm) -> tuple[dict, set]:
@@ -179,13 +186,45 @@ class RouteMode:
             if n >= int(getattr(C, "ROUTE_EMPTY_FRAMES", 16)):
                 self.empty.add(key)
 
-    def _log_seats(self, conf, empty, pose) -> None:
-        """SEAT_ROI_LOG: clasifica en la imagen cada asiento de frente a la cámara (solo medición)."""
-        if not (getattr(C, "SEAT_ROI_LOG", False) and self.frame is not None
-                and self.bev is not None and self.bev.is_calibrated and self.fixed):
-            return
+    def _roi_yaw(self, pose) -> float:
+        """Avanza el contador de frames de ROI; devuelve el yaw (grados/frame) desde el frame anterior."""
+        self._roi_t += 1
+        yaw = float("nan")
+        hd = pose[2]
+        if self._roi_prev is not None:
+            dh = (hd - self._roi_prev[0] + 180.0) % 360.0 - 180.0
+            yaw = dh / max(self._roi_t - self._roi_prev[1], 1)
+        self._roi_prev = (hd, self._roi_t)
+        return yaw
+
+    def _seat_roi(self, conf, empty, pose) -> bool:
+        """Clasificación en la imagen (lap1): [ROI]/[COL] con SEAT_ROI_LOG y, con ROUTE_SEAT_ROI, la compuerta por columna. True si cambió self.empty."""
+        use = bool(getattr(C, "ROUTE_SEAT_ROI", False))
+        log = bool(getattr(C, "SEAT_ROI_LOG", False))
+        if not ((use or log) and self.frame is not None and self.bev is not None
+                and self.bev.is_calibrated and self.fixed):
+            return False
+        yaw = self._roi_yaw(pose)
+        if log:
+            self._log_seats(conf, empty, pose)
         try:
-            self._roi_t += 1
+            cols = self._classify_columns(conf, empty, pose, yaw)
+            if log:
+                self._log_columns(cols, pose)
+        except Exception as e:
+            if not self._col_err:
+                self._col_err = True
+                print(f"[COL] error: {e!r}", flush=True)
+            return False
+        if not use:
+            return False
+        before = set(self.empty)
+        self._col_gate(cols, conf, empty)
+        return self.empty != before
+
+    def _log_seats(self, conf, empty, pose) -> None:
+        """SEAT_ROI_LOG: [ROI] por asiento de frente a la cámara (solo medición)."""
+        try:
             x, y, hd = pose
             h = math.radians(hd)
             fx, fy = math.sin(h), math.cos(h)
@@ -226,6 +265,134 @@ class RouteMode:
             if not self._roi_err:
                 self._roi_err = True
                 print(f"[ROI] error: {e!r}", flush=True)
+
+    def _col_occluded(self, conf, empty, pose, sec: str, col: int, win, dist: float) -> int:
+        """0 si la columna se ve; 2 si la isla central la tapa; 1 si la tapa una señal más cercana
+        (confirmada o sin resolver) o una columna confirmada más cercana (solape en u y v)."""
+        cx, cy = pose[0] + math.sin(math.radians(pose[2])) * float(getattr(C, "CAMERA_FWD_MM", 140.0)), \
+            pose[1] + math.cos(math.radians(pose[2])) * float(getattr(C, "CAMERA_FWD_MM", 140.0))
+        seats = [t for t in SEATS if _COL[t] == col]
+        if island_hidden(pose, sec, seats, float(getattr(C, "SEAT_COL_MARGIN_MM", 80.0)), INNER_HALF_MM):
+            return 2
+
+        def overlap(a, b):
+            return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+        for s2, t2 in self._all_seats():
+            if s2 == sec and _COL[t2] == col:
+                continue
+            if (s2, t2) in empty:
+                continue
+            sx, sy = section_to_world(s2, *SEATS[t2])
+            if math.hypot(sx - cx, sy - cy) >= dist:
+                continue
+            span = seat_span(self.bev.H_inv, pose, sx, sy)
+            if span is None:
+                continue
+            (u0, v0, u1, v1), _w = span
+            hw = 0.75 * (u1 - u0)                       # ROI x1.5 de ancho
+            cu = (u0 + u1) / 2.0
+            if overlap(win, (cu - hw, v0, cu + hw, v1)):
+                return 1
+        for s2 in SECTIONS_CW:
+            for c2 in (0, 1, 2):
+                if (s2 == sec and c2 == col) or not any((s2, t) in conf for t in SEATS if _COL[t] == c2):
+                    continue
+                cols2 = [t for t in SEATS if _COL[t] == c2]
+                sx, sy = section_to_world(s2, *SEATS[cols2[0]])
+                if math.hypot(sx - cx, sy - cy) >= dist:
+                    continue
+                box2 = column_window(self.bev.H_inv, pose, s2, cols2, float(getattr(C, "SEAT_COL_MARGIN_MM", 80.0)))
+                if box2 is not None and overlap(win, box2):
+                    return 1
+        return 0
+
+    def _classify_columns(self, conf, empty, pose, yaw: float) -> list:
+        """Clasificación de cada columna (dos asientos con el mismo w) en el frame: lista de dicts."""
+        x, y, hd = pose
+        h = math.radians(hd)
+        fx, fy = math.sin(h), math.cos(h)
+        cam_fwd = float(getattr(C, "CAMERA_FWD_MM", 140.0))
+        cx, cy = x + fx * cam_fwd, y + fy * cam_fwd
+        max_mm = float(getattr(C, "SEAT_ROI_MAX_MM", 3500.0))
+        margin = float(getattr(C, "SEAT_COL_MARGIN_MM", 80.0))
+        res = []
+        for sec in SECTIONS_CW:
+            for col in (0, 1, 2):
+                seats = [t for t in SEATS if _COL[t] == col]
+                wx, wy = section_to_world(sec, 500.0, SEATS[seats[0]][1])
+                dx, dy = wx - cx, wy - cy
+                fwd = dx * fx + dy * fy
+                lat = dx * fy - dy * fx
+                dist = math.hypot(dx, dy)
+                if fwd < 150.0 or dist > max_mm:
+                    continue
+                unk = sum(1 for t in seats if (sec, t) not in conf and (sec, t) not in empty)
+                r = dict(sec=sec, col=col, seats=seats, d=dist, b=math.degrees(math.atan2(lat, fwd)),
+                         yaw=yaw, unk=unk, win=None, area=0.0, cls="Empty", nr=0, ng=0, occ=1)
+                win = column_window(self.bev.H_inv, pose, sec, seats, margin)
+                area = column_sign_area(self.bev.H_inv, pose, sec, seats, margin)
+                if win is not None and area is not None:
+                    r.update(win=win, area=area, occ=self._col_occluded(conf, empty, pose, sec, col, win, dist))
+                    r["cls"], r["nr"], r["ng"] = classify_window(self.frame, win, area)
+                res.append(r)
+        return res
+
+    def _log_columns(self, cols, pose) -> None:
+        """SEAT_ROI_LOG: [COL] por columna. Solo medición."""
+        dump_dir = getattr(C, "SEAT_ROI_DUMP_DIR", None)
+        marks = [] if (dump_dir and self._roi_t % 15 == 0 and self._dump_n < 80) else None
+        for r in cols:
+            print(f"[COL] t={self._roi_t} sec={r['sec']} col={r['col']} d={r['d']:.0f} b={r['b']:.1f} "
+                  f"yaw={r['yaw']:.2f} cls={r['cls']} nr={r['nr']} ng={r['ng']} area={r['area']:.0f} "
+                  f"occ={r['occ']} unk={r['unk']}", flush=True)
+            if marks is not None and r["win"] is not None:
+                marks.append((r["win"], r["occ"], f"{r['sec']} {r['col']} {r['d']:.0f} {r['cls']}"))
+        if marks is not None:
+            self._dump_frame(dump_dir, marks, pose)
+
+    def _col_gate(self, cols, conf, empty) -> None:
+        """ROUTE_SEAT_ROI: una columna con la misma clase SEAT_ROI_FRAMES frames seguidos (y gates OK)
+        marca sus asientos sin resolver como vacíos (Empty) o guarda su color (Red/Green)."""
+        n_need = int(getattr(C, "SEAT_ROI_FRAMES", 3))
+        max_mm = float(getattr(C, "SEAT_ROI_USE_MAX_MM", 1800.0))
+        max_yaw = float(getattr(C, "SEAT_ROI_MAX_YAW", 1.0))
+        max_b = float(getattr(C, "SEAT_ROI_MAX_BEARING", 40.0))
+        run = {}                                  # contadores de este frame: un frame sin gates los reinicia
+        for r in cols:
+            key = (r["sec"], r["col"])
+            if not (r["occ"] == 0 and r["d"] <= max_mm and abs(r["yaw"]) <= max_yaw
+                    and abs(r["b"]) <= max_b and r["unk"] > 0 and r["cls"] in ("Red", "Green", "Empty")):
+                continue
+            prev = self._col_run.get(key)
+            n = prev[1] + 1 if prev is not None and prev[0] == r["cls"] else 1
+            run[key] = (r["cls"], n)
+            if n < n_need:
+                continue
+            if r["cls"] == "Empty":
+                self.empty.update((r["sec"], t) for t in r["seats"] if (r["sec"], t) not in conf and (r["sec"], t) not in empty)
+                self.roi_color.pop(key, None)
+            else:
+                self.roi_color[key] = r["cls"]
+        self._col_run = run
+
+    def _dump_frame(self, dump_dir: str, marks, pose) -> None:
+        """SEAT_ROI_DUMP_DIR: frame con las ventanas de columna y el pie de cada asiento (diagnóstico)."""
+        os.makedirs(dump_dir, exist_ok=True)
+        img = self.frame.copy()
+        for key in self._all_seats():
+            sx, sy = section_to_world(key[0], *SEATS[key[1]])
+            span = seat_span(self.bev.H_inv, pose, sx, sy)
+            if span is not None:
+                (u0, _v0, u1, v1), _w = span
+                cv2.circle(img, (int((u0 + u1) / 2), int(v1)), 3, (255, 255, 0), -1)
+        for (x0, y0, x1, y1), occ, label in marks:
+            color = (128, 128, 128) if occ else (0, 255, 255)
+            cv2.rectangle(img, (x0, y0), (x1, y1), color, 1)
+            cv2.putText(img, label, (x0, max(y0 - 2, 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+        cv2.imwrite(os.path.join(dump_dir, f"f{self._roi_t}.png"), img)
+        cv2.imwrite(os.path.join(dump_dir, f"f{self._roi_t}_raw.png"), self.frame)
+        self._dump_n += 1
 
     # ── paso por frame ────────────────────────────────────────────────────
     def step(self, dm, est: str | None, ack: str | None, armed: bool):
@@ -280,21 +447,27 @@ class RouteMode:
         if lap1 and self.fixed:
             self._update_views(conf, empty, pose)
             conf, empty = self._resolved(dm)
-        self._log_seats(conf, empty, pose)
+        if self._seat_roi(conf, empty, pose):
+            conf, empty = self._resolved(dm)
         unknown = [k for k in self._all_seats() if k not in conf and k not in empty]
         # Color provisional: el mapa confirma ya cerca (la detección tiene que
         # caer a <=160 mm del asiento); los votos de color llegan antes. Con
         # >=2 votos y ventaja, la ruta ya toma el lado de ese color (semilla 87:
         # rojo confirmado a 585 mm, la ruta lo rodeaba por el lado malo).
+        # Sin votos, el color de la ROI de la columna (ROUTE_SEAT_ROI); los votos ganan.
         prov = {}
+        roi_seats = set()
         nmin = int(getattr(C, "ROUTE_PROVISIONAL_VOTES", 2))
         for k in unknown:
             v = getattr(dm, "_votes", {}).get(k)
-            if not v:
-                continue
-            for col, oth in (("Red", "Green"), ("Green", "Red")):
-                if v.get(col, 0) >= nmin and v.get(col, 0) >= v.get(oth, 0) + 1:
-                    prov[k] = col
+            if v:
+                for col, oth in (("Red", "Green"), ("Green", "Red")):
+                    if v.get(col, 0) >= nmin and v.get(col, 0) >= v.get(oth, 0) + 1:
+                        prov[k] = col
+            rc = self.roi_color.get((k[0], _COL[k[1]]))
+            if rc is not None:
+                roi_seats.add(k)
+                prov.setdefault(k, rc)
         plan_seats = {**conf, **prov}
         plan_unknown = [k for k in unknown if k not in prov]
         extra, extra_key, anchor_replan = None, None, False
@@ -360,7 +533,9 @@ class RouteMode:
         obs = max(-1.0, min(1.0, servo / C.PP_STEER_GAIN))
         slow = int(getattr(C, "ROUTE_SLOW_PWM", 100))
         if self.fixed:
-            self.rv = self._speed(unknown, (x - ds * ax, y - ds * ay, hd)) if lap1 else None
+            # Los asientos con color por ROI ya tienen lado: no frenan (ni cuentan para la parada).
+            speed_unknown = [k for k in unknown if k not in roi_seats]
+            self.rv = self._speed(speed_unknown, (x - ds * ax, y - ds * ay, hd)) if lap1 else None
         else:
             # Sin el avance: lento, la esquina todavía no se sabe dónde está.
             self.rv = slow

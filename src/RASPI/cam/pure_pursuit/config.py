@@ -1284,6 +1284,16 @@ ROUTE_LAP1_PWM = 120
 SEAT_ROI_LOG = False
 SEAT_ROI_MIN_FRAC = 0.25   # fracción mínima de píxeles de un color en la ROI para decidir color
 SEAT_ROI_MAX_MM = 3500.0   # distancia máxima cámara -> asiento a medir
+SEAT_COL_MARGIN_MM = 80.0  # margen de la ventana de columna (dos asientos del mismo w)
+SEAT_COL_MIN_FRAC = 0.3    # fracción del área de una señal que tiene que cubrir el color en la columna
+SEAT_ROI_DUMP_DIR = None   # carpeta para volcar frames con las ventanas (diagnóstico)
+# Usa la clasificación por columna en la ruta (route_mode._col_gate): Empty -> asientos vacíos;
+# Red/Green -> color provisional, sin frenar por esos asientos. False: sin cambio.
+ROUTE_SEAT_ROI = False
+SEAT_ROI_USE_MAX_MM = 1800.0   # distancia máxima a la columna para usar su clasificación
+SEAT_ROI_FRAMES = 3            # frames seguidos con la misma clase (y gates) para decidir
+SEAT_ROI_MAX_YAW = 1.0         # |yaw| máx del carro (grados/frame) para usar la clasificación
+SEAT_ROI_MAX_BEARING = 40.0    # |rumbo| máx a la columna (grados) para usar la clasificación
 # Perfil de velocidad por curvatura (route_mode._profile_pwm): rápido en las
 # rectas y frena antes de cada curva según su κ. False: sin cambio.
 ROUTE_PROFILE = False                 # perfil de velocidad por curvatura (rectas rápidas)

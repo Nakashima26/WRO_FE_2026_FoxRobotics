@@ -1,6 +1,7 @@
 """Evalúa la clasificación por ROI (líneas [ROI] de log.txt) contra la verdad (field.txt).
 
 Uso: python seat_roi_eval.py <dir1> [<dir2> ...]
+     python seat_roi_eval.py --col <dir1> [<dir2> ...]   (líneas [COL]: clasificación por columna)
 Cada dir es la salida de drive.py: log.txt y pi.log con [ROI]/[ROI-OUT], y field.txt con la verdad.
 Asiento sin línea en field.txt = vacío.
 """
@@ -15,6 +16,8 @@ CLASSES = ["Red", "Green", "Empty"]
 ROI_RE = re.compile(r"^\[ROI\] t=\d+ sec=(\w) seat=(\w+) d=(\d+) b=\S+ w=\S+ cls=(\w+) fr=\S+ fg=\S+ unk=(\d)")
 OUT_RE = re.compile(r"^\[ROI-OUT\] t=\d+ sec=(\w) seat=(\w+) d=(\d+)")
 FIELD_RE = re.compile(r"^(Red|Green) (\w)/(\w+) \(")
+COL_RE = re.compile(r"^\[COL\] t=\d+ sec=(\w) col=(\d) d=(\d+) b=(\S+) yaw=(\S+) cls=(\w+) nr=\d+ ng=\d+ area=\S+ occ=(\d)")
+COL_SEATS = {"0": ["T4", "T2"], "1": ["X2", "X1"], "2": ["T3", "T1"]}   # = _COL de route_mode.py
 
 
 def load(d: Path):
@@ -80,7 +83,63 @@ def main(dirs):
     print(f"mediciones con unk=1 (sin resolver en el mapa): {unk}")
 
 
+def load_col(d: Path):
+    truth = {}
+    for line in (d / "field.txt").read_text(encoding="utf-8").splitlines()[1:]:
+        m = FIELD_RE.match(line)
+        if m:
+            truth[(m.group(2), m.group(3))] = m.group(1)
+    rows = []
+    logs = [d / n for n in ("log.txt", "pi.log") if (d / n).exists()]
+    for p in logs:
+        for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = COL_RE.match(line)
+            if not m or m.group(7) != "0":
+                continue
+            sec, col, dist = m.group(1), m.group(2), int(m.group(3))
+            colors = {truth[(sec, t)] for t in COL_SEATS[col] if (sec, t) in truth}
+            tr = "Empty" if not colors else colors.pop() if len(colors) == 1 else "Mixed"
+            b, yaw = float(m.group(4)), float(m.group(5))
+            rows.append((tr, m.group(6), dist, b, yaw))
+    return rows
+
+
+def col_table(title, rows):
+    per = defaultdict(list)
+    for r in rows:
+        per[band(r[2])].append(r)
+    print(title)
+    print(f"{'banda mm':>10} {'n':>6} {'acierto':>8} {'peligr':>7}   matriz (filas verdad, cols predicho: Red Green Empty Mixed)")
+    cls4 = CLASSES + ["Mixed"]
+    for i, (lo, hi) in enumerate(BANDS):
+        items = per.get(i, [])
+        n = len(items)
+        ok = sum(1 for t, p, *_ in items if t == p)
+        danger = sum(1 for t, p, *_ in items if t in ("Red", "Green") and p != t)
+        acc = f"{100.0 * ok / n:.1f}%" if n else "-"
+        cm = defaultdict(int)
+        for t, p, *_ in items:
+            cm[(t, p)] += 1
+        mat = " | ".join(f"{t[:3]}: " + " ".join(f"{cm[(t, p)]:4d}" for p in cls4) for t in cls4)
+        print(f"{lo:>4}-{hi:<5} {n:>6} {acc:>8} {danger:>7}   {mat}")
+    print()
+
+
+def col_main(dirs):
+    rows = []
+    for d in map(Path, dirs):
+        r = load_col(d)
+        print(f"{d}: {len(r)} columnas (occ=0)")
+        rows += r
+    print()
+    col_table("TODAS (occ=0)", rows)
+    col_table("FILTRO |yaw|<=1.0 deg/frame y |b|<=40 deg", [r for r in rows if abs(r[4]) <= 1.0 and abs(r[3]) <= 40.0])
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    main(sys.argv[1:])
+    if sys.argv[1] == "--col":
+        col_main(sys.argv[2:])
+    else:
+        main(sys.argv[1:])
