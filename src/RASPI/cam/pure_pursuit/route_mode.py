@@ -605,6 +605,7 @@ class RouteMode:
         Perfil v3 (ROUTE_PROFILE_MIN_PWM): el piso baja a MIN_PWM y, cerca de la
         señal, v_curva = min(v_curva, v_señal), donde v_señal sube lineal de MIN_PWM
         (a <= ROUTE_PROFILE_SIGN_NEAR_MM) a la base (en SIGN_MM); sin NEAR, la base.
+        ROUTE_PROFILE_ISLAND_MM (si no es None): igual cerca de las 4 esquinas de la isla.
         Manda la más lenta. None si el perfil está apagado o no hay ruta.
         """
         if not getattr(C, "ROUTE_PROFILE", False) or self.follower is None:
@@ -656,6 +657,18 @@ class RouteMode:
                     f = np.clip((dd - near) / max(sign_mm - near, 1.0), 0.0, 1.0)
                     v_sign = v_min + (v_base - v_min) * f
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
+        if getattr(C, "ROUTE_PROFILE_ISLAND_MM", None) is not None:
+            # Cerca de las esquinas de la isla: misma rampa que las señales (v_min -> base).
+            h = float(INNER_HALF_MM)
+            cxy = np.array([[h, h], [h, -h], [-h, h], [-h, -h]])
+            pxy = np.stack((r.x[j], r.y[j]), axis=1)                       # (m, 2)
+            di = np.hypot(pxy[:, None, 0] - cxy[None, :, 0],
+                          pxy[:, None, 1] - cxy[None, :, 1]).min(axis=1)    # (m,)
+            isl_mm = float(C.ROUTE_PROFILE_ISLAND_MM)
+            isl_near = float(getattr(C, "ROUTE_PROFILE_ISLAND_NEAR_MM", 200.0))
+            f = np.clip((di - isl_near) / max(isl_mm - isl_near, 1.0), 0.0, 1.0)
+            v_isl = v_min + (v_base - v_min) * f
+            v_c = np.where(di < isl_mm, np.minimum(v_c, v_isl), v_c)
         allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
         v_allow = min(v_max, float(allowed[dist <= span].min()))
         pwm = v_allow / K + pwm0

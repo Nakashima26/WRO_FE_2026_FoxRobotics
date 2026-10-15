@@ -1318,6 +1318,11 @@ ROUTE_PROFILE_MIN_PWM = None
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
 ROUTE_PROFILE_SIGN_NEAR_MM = None
+# Perfil: frenar también cerca de las 4 esquinas de la isla (±INNER_HALF_MM, ±INNER_HALF_MM).
+# None = apagado. Rampa de v_min (dist <= ISLAND_NEAR_MM) a la base (dist >= ISLAND_MM),
+# igual que con las señales. Distancia medida desde la muestra de la ruta a la esquina.
+ROUTE_PROFILE_ISLAND_MM = None
+ROUTE_PROFILE_ISLAND_NEAR_MM = 200.0
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm
