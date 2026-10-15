@@ -51,12 +51,17 @@ Todos apagados por defecto salvo el del ESP32.
 
 Herramientas en `src/RASPI/cam/pure_pursuit/twin/tools/banco/`:
 
-- `bench.sh <worktree> <nombre> ruta ruta_perfil '<json>'`: 42 semillas × 5 ruidos, base + candidato. Copiar antes `runs/combo1/base_n*` para no recorrer la base. Si se corta, relanzar el mismo comando: se salta las corridas ya hechas.
+- `bench.sh <worktree> <nombre> ruta ruta_perfil '<json>'`: 42 semillas × 5 ruidos, base + candidato. Con `BASE_REF=<ruta a runs/combo1>` enlaza la base ya corrida en vez de recorrerla o copiarla. Si se corta, relanzar el mismo comando: se salta las corridas ya hechas.
 - `vsref.py REF VAR...`: compara corrida por corrida contra una referencia. Da las fallas, los pares que fallan solo en uno de los dos lados, las semillas nuevas que fallan, y la mediana de dt del total y de la vuelta 1 y las vueltas 2 y 3 (medidas geométricamente desde trace.csv).
 - `startfix.py RUNS/<nombre>`: error del arranque ciego contra la verdad (`parkw` de field.txt).
 
 **Regla:** ahorra ≥ 0.5 s mediano **y** solo-candidato ≤ solo-referencia + 2 **y** ninguna semilla
-que nunca fallaba falla en ≥ 2 ruidos. Cada bench ocupa ~1.7 GB: revisar `df -h` antes.
+que nunca fallaba falla en ≥ 2 ruidos.
+
+**Disco:** cada bench ocupa ~0.7 GB (con `BASE_REF`; ~1.7 GB si se copia la base). Revisar `df -h /` antes
+de lanzar. **Limpiar al analizar:** en cuanto un bench se compara y se descarta, borrar su carpeta
+`runs/<nombre>` y anotar el resultado en la tabla de abajo. Se conservan solo la base actual,
+la anterior y las referencias (combo1).
 
 ## Lo que se probó (contra la base de cada momento)
 
@@ -77,6 +82,12 @@ que nunca fallaba falla en ≥ 2 ruidos. Cada bench ocupa ~1.7 GB: revisar `df -
 | Urgencia en la semilla 3 (sobre g4, 5 ruidos) | 120 mm / PWM 120: choca 2/5 (g4: 4/5), mismo tiempo. Frenar más fuerte (PWM 100) o margen 160 mm: peor, salen choques nuevos a los ~34 s | 120/120 al banco |
 | **u1 = g3 + urgencia** | Mismo tiempo, 14 fallas vs 16, solo-u1 2 vs solo-g3 4. La urgencia no cuesta tiempo | Sí |
 | **u2 = g4 + urgencia** | −0.50 s vs g3, 16 fallas (igual), solo-u2 6 vs 6, sin semillas nuevas. Contra g4: mismo tiempo y 16 fallas vs 19. Semilla 3: 2/5 (antes 4/5) | **Sí, base nueva** |
+| Sobre u2: A_LAT 2500 (v1) | −0.53 s, pero 19 fallas, 7 solo-v1; la semilla 3 vuelve a 5/5 | No |
+| Sobre u2: frenada 800 (v4) | −0.12 s, 14 fallas | No llega a 0.5 s; más seguro |
+| Sobre u2: BASE_PWM 225 cerca de señales (v2) | −0.33 s, 17 fallas, semilla 3 5/5 | No |
+| Sobre u2: vuelta 1 a 170 (v3) | −0.30 s (−0.24 en vuelta 1), 13 fallas | No llega a 0.5 s; la vuelta 1 no la frena el tope |
+| Sobre u2: ver asientos desde 900 mm, vacío en 10 frames (w1) | −0.1 s, 23 fallas | No |
+| **Dónde está el tiempo (u2)** | Vuelta 1: 21.9 s a 315 mm/s, 1.7 s detenido, 19.6 s a PWM ≤ 160. Vueltas 2-3: 11.3 s a 655 mm/s. Arranque + primera sección a PWM 95-110 (~10 s) | La vuelta 1 tiene ~10 s de margen |
 
 ## Cuánto queda (estimación)
 
