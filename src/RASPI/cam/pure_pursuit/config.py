@@ -1292,11 +1292,20 @@ ROUTE_PROFILE_KAPPA_WIN = 5           # muestras (20 mm c/u, route_planner out_d
 ROUTE_PROFILE_SIGN_MM = 300.0
 ROUTE_PROFILE_K_MM_S_PER_PWM = 3.5    # modelo v = K*(PWM-PWM0) (twin/params.py MotorParams)
 ROUTE_PROFILE_PWM0 = 25.0
+# Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
+ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
+ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm
+ROUTE_W_CLEAR = 8.0          # RouteParams.w_clear
+# El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
+ROUTE_TIME_COST = False
 # Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
 # El twin lo deja en False para que cada corrida sea reproducible.
 ROUTE_PLAN_ASYNC = False
 # Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
 ROUTE_LOCK_STATIONS = 7
+# Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.
+# False: no se baja (el ESP sigue la anterior hasta el RTE); el ALTO (cap 0) se queda.
+ROUTE_UPLOAD_SLOW = True
 # Error lateral (mm, odometría) arriba del cual se baja a ROUTE_SLOW_PWM.
 ROUTE_CTE_SLOW_MM = 40.0
 # Frames máximos detenido esperando ver un asiento (luego sigue lento).

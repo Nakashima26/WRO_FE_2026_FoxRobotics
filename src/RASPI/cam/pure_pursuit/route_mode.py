@@ -45,7 +45,18 @@ _FENCE_STEP_MM = 100.0
 
 def _route_params():
     """Parámetros del planificador con lo ajustable desde config.py."""
-    return RR.RouteParams(w_kappa=float(getattr(C, "ROUTE_W_KAPPA", 3.0e4)))
+    K = float(getattr(C, "ROUTE_PROFILE_K_MM_S_PER_PWM", 3.5))
+    pwm0 = float(getattr(C, "ROUTE_PROFILE_PWM0", 25.0))
+    return RR.RouteParams(
+        w_kappa=float(getattr(C, "ROUTE_W_KAPPA", 3.0e4)),
+        hard_clear_mm=float(getattr(C, "ROUTE_HARD_CLEAR_MM", 55.0)),
+        soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
+        w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),
+        time_cost=bool(getattr(C, "ROUTE_TIME_COST", False)),
+        v_min_mm_s=K * (float(getattr(C, "ROUTE_PROFILE_BASE_PWM", 155)) - pwm0),
+        v_max_mm_s=K * (float(getattr(C, "ROUTE_PROFILE_MAX_PWM", 255)) - pwm0),
+        a_lat_mm_s2=float(getattr(C, "ROUTE_PROFILE_A_LAT_MM_S2", 1500.0)),
+    )
 
 
 def _ack_est(ack):
@@ -308,8 +319,11 @@ class RouteMode:
         if self.upload:
             # Mientras la ruta nueva no llega completa al ESP, lento; detenido
             # si cambió desde la pose (otro carril cerca del carro).
-            cap = 0 if self.hold else slow
-            self.rv = cap if self.rv is None else min(self.rv, cap)
+            # ROUTE_UPLOAD_SLOW=False: el ESP sigue la ruta anterior completa
+            # (doble buffer, swap en RTE), así que solo se frena en el ALTO.
+            if self.hold or bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)):
+                cap = 0 if self.hold else slow
+                self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).

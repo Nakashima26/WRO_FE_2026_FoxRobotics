@@ -69,6 +69,12 @@ class RouteParams:
     w_len: float = 1.0              # costo por mm recorrido
     w_kappa: float = 3.0e4          # por mm · κ² (4e5 abría las esquinas: 38/42 limpias vs 42/42)
     w_clear: float = 8.0            # por mm · ((soft - clear)/soft)²
+    # Costo por tiempo (False: largo + curvatura, como antes). Con True, el
+    # término de largo se multiplica por v_max/v(κ) con el modelo del perfil.
+    time_cost: bool = False
+    v_min_mm_s: float = 455.0       # piso de velocidad (ROUTE_PROFILE_BASE_PWM)
+    v_max_mm_s: float = 805.0       # techo de velocidad en recta (ROUTE_PROFILE_MAX_PWM)
+    a_lat_mm_s2: float = 1500.0     # aceleración lateral máxima del perfil
     max_angle_deg: float = 55.0     # tramo contra la dirección del pasillo (duro)
     # Asiento sin ver: pasar pegado a él (por cualquier lado) para que, si al
     # revelarse toca el otro lado, el cambio sea de ~300 mm y no de ~550.
@@ -412,7 +418,14 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         lac = np.hypot(ac[..., 0], ac[..., 1])
         kap = 2.0 * cross / np.maximum(lab * lbc * lac, 1e-9)       # (m,m,m)
         ds = lbc                                                    # (1,m,m)
-        step = ds * (prm.w_len + prm.w_kappa * kap * kap + pen[k2][None, :, :]) + bonus[k2][None, :, :]
+        if prm.time_cost:
+            # Costo de tiempo: el tramo cuesta w_len·ds·(v_max/v(κ)), con v(κ) del
+            # perfil (sqrt(a_lat/|κ|) acotado). En recta el factor es 1.
+            v_k = np.clip(np.sqrt(prm.a_lat_mm_s2 / np.maximum(np.abs(kap), 1e-9)), prm.v_min_mm_s, prm.v_max_mm_s)
+            wl = prm.w_len * (prm.v_max_mm_s / v_k)                 # (m,m,m)
+        else:
+            wl = prm.w_len
+        step = ds * (wl + prm.w_kappa * kap * kap + pen[k2][None, :, :]) + bonus[k2][None, :, :]
         step = np.where((np.abs(kap) > kmax) | bad[k2][None, :, :] | ~allowed_d[k2][None, None, :]
                         | ~side_ok[k1][None, :, :], INF, step)
         tot = Vc[:, :, None] + step                                 # (a,b,c)
