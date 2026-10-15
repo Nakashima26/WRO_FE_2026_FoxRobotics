@@ -42,7 +42,8 @@ Todos apagados por defecto salvo el del ESP32.
 | `71acf75` | `ROUTE_PROFILE_ISLAND_MM`: frenar cerca de las 4 esquinas de la isla. | Probado: −3 fallas pero +0.47 s. No se usa |
 | `4b5cf81` | `ROUTE_PROFILE_BRAKE_FF_S`: al frenar pide v − τ·a (compensa el retraso del motor) y deja bajar el PWM hasta 60. | Candidato (ver g4) |
 | `e4238af` | **`ROUTE_FIX_STEP_MM`: arranque ciego pesa cada lectura por el avance.** Con el carro casi quieto el sonar repetía la misma lectura, y contarla 9 veces fijaba el cajón 400 mm mal con 97 % de confianza (semilla 8). | Usado en la base (8 mm) |
-| `8ded2c4` | `ROUTE_PROFILE_TIGHT_KAPPA`: aceleración lateral menor en curvas muy cerradas (radio menor que el lookahead de 200 mm). | En prueba (h1/h2) |
+| `8ded2c4` | `ROUTE_PROFILE_TIGHT_KAPPA`: aceleración lateral menor en curvas muy cerradas (radio menor que el lookahead de 200 mm). | Probado (h1/h2): no arregla la semilla 3. No se usa |
+| `92fd3c4` | `ROUTE_CTE_URGENT_MM`: **freno por urgencia al salirse.** Si el carro está fuera de la ruta, se corre la ruta de adelante (600 mm) el mismo desvío. Solo si así quedaría a menos de 120 mm de la isla, una señal o la pared, frena a `ROUTE_CTE_URGENT_PWM`. Si se sale poquito pero tiene espacio, no frena. | En prueba (u1/u2) |
 
 ## Cómo se decide (banco estándar)
 
@@ -69,6 +70,9 @@ que nunca fallaba falla en ≥ 2 ruidos. Cada bench ocupa ~1.7 GB: revisar `df -
 | `ROUTE_FIX_STEP_MM` 15 / 8 | 15: converge tarde, 28 fallas. 8: 16 fallas vs 19, mismo tiempo | 8 sí |
 | Ruta más pegada a las señales (holgura 60) | Más corta (−0.2 m) pero más lenta (+0.37 s/vuelta): entra más a la zona de freno de señal | No |
 | Freno de señal solo donde hay curva (cálculo en papel) | −0.13 s/vuelta como mucho | Pendiente, poca ganancia |
+| g4 + `TIGHT_KAPPA` 0.004 (h1) / 0.003 (h2) | h1: −0.11 s, 15 fallas; h2: +0.62 s, 14 fallas (vs 16 de g3). La semilla 3 sigue chocando | No |
+| Causa de la semilla 3 | Tras la S cerca de (−750, −230) sale a ~790 mm/s unos 60 mm por dentro de la ruta, hacia la isla, antes de la esquina. Bajar la velocidad de la esquina no ayuda: el problema es el desvío | → freno por urgencia |
+| Urgencia en la semilla 3 (sobre g4, 5 ruidos) | 120 mm / PWM 120: choca 2/5 (g4: 4/5), mismo tiempo. Frenar más fuerte (PWM 100) o margen 160 mm: peor, salen choques nuevos a los ~34 s | 120/120 al banco |
 
 ## Cuánto queda (estimación)
 
@@ -79,7 +83,6 @@ que nunca fallaba falla en ≥ 2 ruidos. Cada bench ocupa ~1.7 GB: revisar `df -
 
 ## Siguientes pasos
 
-1. Terminar h1/h2 (A_LAT menor solo en curvas cerradas). Si arreglan la semilla 3, g4 + TIGHT pasa a ser la base (−0.5 s).
-2. Freno por urgencia al salirse de la ruta: frenar solo si va hacia una señal o la isla, no por salirse poquito.
-3. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
-4. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
+1. Terminar u1 (g3 + urgencia) y u2 (g4 + urgencia). Si u2 pasa la regla, pasa a ser la base (~−0.5 s).
+2. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
+3. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
