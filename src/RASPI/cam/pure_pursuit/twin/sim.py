@@ -148,6 +148,13 @@ PRESETS["ruta"] = {
     },
 }
 
+# Modo ruta + perfil por curvatura: rectas hasta 255, curvas al tope de hoy (155).
+PRESETS["ruta_perfil"] = {
+    **PRESETS["ruta"],
+    "fw_overrides": {**PRESETS["ruta"]["fw_overrides"], "RUTA_PWM_MAX": "255"},
+    "pi_overrides": {**PRESETS["ruta"]["pi_overrides"], "ROUTE_PROFILE": True},
+}
+
 
 @dataclass
 class RunResult:

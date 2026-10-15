@@ -232,6 +232,8 @@ const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
 // Grados de servo por grado de rueda: 71° de servo = 44.54° de rueda (v2).
 const float RUTA_SERVO_POR_RUEDA = 71.0f / 44.54f;
+// 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
+const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
@@ -1716,8 +1718,10 @@ const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
 int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
 unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
 
-void setMotor(int velocidad) {
-  velocidad = constrain(velocidad, 0, MOTOR_MAX);
+// setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
+// rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
+void setMotorTope(int velocidad, int tope) {
+  velocidad = constrain(velocidad, 0, tope);
   if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
     unsigned long t = millis() - motorDirMs;
     if (t < MOTOR_REV_RAMPA_MS) {
@@ -1727,6 +1731,10 @@ void setMotor(int velocidad) {
   }
   ledcWrite(PWMA, velocidad);
   pwmActual = velocidad;
+}
+
+void setMotor(int velocidad) {
+  setMotorTope(velocidad, MOTOR_MAX);
 }
 
 // Motor en coast (terminales flotando) — para frenar suave y dejar caer la
@@ -3287,7 +3295,15 @@ void controlPID(long distL, long distR) {
       int servoAngle = constrain(centroServo - (int)lroundf(servoDeg) + (int)wallPanic,
                                  SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
-      setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
+      // (velocidadMotor >= MOTOR_MAX) y no es la última sección (TERMINANDO frena al llegar).
+      // Si no, igual que antes: min(rutaVel, velocidadMotor) con tope MOTOR_MAX.
+      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX
+          && turnsCompleted < TURNS_PER_RACE - 1) {
+        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+      } else {
+        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      }
       Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);
       Serial.print(" | Servo:");  Serial.print(servoAngle);
       return;

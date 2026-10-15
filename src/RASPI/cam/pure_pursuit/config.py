@@ -1277,6 +1277,21 @@ ROUTE_SLOWDOWN_MM = 1300.0
 ROUTE_SLOW_PWM = 100
 # Tope de PWM en la vuelta 1 mientras quede algún asiento sin resolver.
 ROUTE_LAP1_PWM = 120
+# Perfil de velocidad por curvatura (route_mode._profile_pwm): rápido en las
+# rectas y frena antes de cada curva según su κ. False: sin cambio.
+ROUTE_PROFILE = False                 # perfil de velocidad por curvatura (rectas rápidas)
+ROUTE_PROFILE_BASE_PWM = 155          # piso: velocidad de curva de hoy
+ROUTE_PROFILE_MAX_PWM = 255           # techo en recta
+ROUTE_PROFILE_A_LAT_MM_S2 = 1500.0    # aceleración lateral máxima
+ROUTE_PROFILE_A_BRAKE_MM_S2 = 600.0   # desaceleración disponible para frenar antes de una curva
+ROUTE_PROFILE_LATENCY_S = 0.25        # adelanto por latencia Pi->ESP->motor
+ROUTE_PROFILE_HORIZON_MM = 1500.0     # cuánto mirar hacia adelante
+ROUTE_PROFILE_KAPPA_WIN = 5           # muestras (20 mm c/u, route_planner out_ds_mm) para el máximo móvil de |kappa|
+# Cerca de una señal o asiento sin resolver (a menos de esto, mm) la ruta va a la velocidad base:
+# el carro llega a la señal a velocidad base.
+ROUTE_PROFILE_SIGN_MM = 300.0
+ROUTE_PROFILE_K_MM_S_PER_PWM = 3.5    # modelo v = K*(PWM-PWM0) (twin/params.py MotorParams)
+ROUTE_PROFILE_PWM0 = 25.0
 # Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
 # El twin lo deja en False para que cada corrida sea reproducible.
 ROUTE_PLAN_ASYNC = False

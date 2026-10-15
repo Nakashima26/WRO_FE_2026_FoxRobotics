@@ -312,6 +312,10 @@ class RouteMode:
             self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
+        # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
+        prof = self._profile_pwm(self._sign_xy(conf, empty))
+        if prof is not None:
+            self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
                     self.follower.i, self.rv, len(unknown))
         line = self.upload.pop(0) if (self.upload and getattr(C, "ROUTE_ON_ESP", False)) else None
@@ -319,6 +323,65 @@ class RouteMode:
             self.esp_shift = self.upload_shift
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
+
+    def _sign_xy(self, conf, empty) -> np.ndarray:
+        """Posiciones (x, y) en mm del tapete de las señales y asientos sin resolver.
+
+        Todo asiento que no está marcado vacío: las confirmadas y las que aún no
+        se saben (podrían ser señal). Mismo marco que la ruta (section_to_world).
+        """
+        pts = [section_to_world(sec, *SEATS[seat]) for sec, seat in self._all_seats()
+               if (sec, seat) in conf or (sec, seat) not in empty]
+        return np.asarray(pts, dtype=float).reshape(-1, 2)
+
+    def _profile_pwm(self, signs=None) -> int | None:
+        """PWM máximo según la curvatura por delante (perfil de velocidad).
+
+        En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [base, max]
+        (max en recta) y, para llegar a ella frenando con A_BRAKE desde la
+        distancia d (menos la latencia), v_permitida = sqrt(v_curva² + 2·A·d).
+        Las muestras a menos de ROUTE_PROFILE_SIGN_MM de una señal (signs, mm)
+        tienen v_curva = base: se llega a la señal a velocidad base.
+        Manda la más lenta. None si el perfil está apagado o no hay ruta.
+        """
+        if not getattr(C, "ROUTE_PROFILE", False) or self.follower is None:
+            return None
+        r = self.follower.route
+        n = len(r.kappa)
+        K = float(C.ROUTE_PROFILE_K_MM_S_PER_PWM)
+        pwm0 = float(C.ROUTE_PROFILE_PWM0)
+        base = int(C.ROUTE_PROFILE_BASE_PWM)
+        top = int(C.ROUTE_PROFILE_MAX_PWM)
+        v_base = K * (base - pwm0)
+        v_max = K * (top - pwm0)
+        a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
+        a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
+        win = int(C.ROUTE_PROFILE_KAPPA_WIN)
+        # Adelanto por latencia a la velocidad máxima (conservador).
+        lead = v_max * float(C.ROUTE_PROFILE_LATENCY_S)
+        span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
+        step = r.length_mm / n
+        m = int(span / step) + 1
+        i = max(self.follower.i, 0)
+        # Anillo cerrado: índices módulo n. Ventana ±win para |κ| máximo móvil.
+        idx = (i + np.arange(-win, m + win)) % n
+        kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
+        j = idx[win:win + m]
+        dist = np.mod(r.s[j] - r.s[i], r.length_mm)
+        d = np.maximum(dist - lead, 0.0)
+        v_c = np.where(kmax < 1e-9, v_max,
+                       np.clip(np.sqrt(a_lat / np.maximum(kmax, 1e-12)), v_base, v_max))
+        if signs is not None and len(signs):
+            # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
+            sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))
+            pxy = np.stack((r.x[j], r.y[j]), axis=1)                       # (m, 2)
+            dd = np.hypot(pxy[:, None, 0] - signs[None, :, 0],
+                          pxy[:, None, 1] - signs[None, :, 1]).min(axis=1)  # (m,)
+            v_c = np.where(dd < sign_mm, v_base, v_c)
+        allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
+        v_allow = min(v_max, float(allowed[dist <= span].min()))
+        pwm = v_allow / K + pwm0
+        return int(round(min(max(pwm, base), top)))
 
     def _past_straight(self, dm, pose) -> bool:
         """El frente del carro ya llegó (en el marco supuesto) al final de la recta del cajón."""
