@@ -132,7 +132,8 @@ def _col_geom(H_inv, pose, sec: str, col_seats: list, margin_mm: float):
 
 
 def column_window(H_inv, pose, sec: str, col_seats: list, margin_mm: float):
-    """(u0, v0, u1, v1) de la columna (asientos con el mismo w) en la imagen, recortada; o None."""
+    """((u0, v0, u1, v1), entera) de la columna en la imagen, recortada; o None.
+    entera=False si la ventana sin recortar sale de la imagen."""
     g = _col_geom(H_inv, pose, sec, col_seats, margin_mm)
     if g is None:
         return None
@@ -140,7 +141,8 @@ def column_window(H_inv, pose, sec: str, col_seats: list, margin_mm: float):
     v0 = v_min - 3.0 * w_far                 # altura de la señal por encima de la base más lejana
     if u1 < 0 or u0 >= _IMG_W or v1 < 0 or v0 >= _IMG_H:
         return None
-    return (int(max(0.0, u0)), int(max(0.0, v0)), int(min(float(_IMG_W), u1)), int(min(float(_IMG_H), v1)))
+    entera = u0 >= 0.0 and v0 >= 0.0 and u1 <= _IMG_W and v1 <= _IMG_H
+    return (int(max(0.0, u0)), int(max(0.0, v0)), int(min(float(_IMG_W), u1)), int(min(float(_IMG_H), v1))), entera
 
 
 def column_sign_area(H_inv, pose, sec: str, col_seats: list, margin_mm: float):
@@ -199,23 +201,25 @@ assert _seg_hits_square(-1000, -1000, 1000, 1000, 500)   # diagonal por el centr
 assert not _seg_hits_square(600, 600, 1000, 1000, 500)   # esquina fuera
 
 
-def classify_window(frame_bgr, win, sign_px_area: float):
-    """("Red"|"Green"|"Empty"|"Mixed", n_red, n_green) sobre la ventana de la columna."""
+def classify_window(frame_bgr, win, sign_px_area: float, color_ranges=None):
+    """("Red"|"Green"|"Empty"|"Mixed", n_red, n_green) sobre la ventana de la columna.
+    color_ranges: rangos HSV del runtime (Vision.color_ranges); None -> COLOR_RANGES."""
     x0, y0, x1, y1 = win
     sub = frame_bgr[y0:y1, x0:x1]
     if sub.size == 0 or sign_px_area <= 0:
         return "Empty", 0, 0
+    ranges = color_ranges or COLOR_RANGES
     hsv = cv2.cvtColor(sub, cv2.COLOR_BGR2HSV)
     counts = {}
     for color in ("Red", "Green"):
-        mask = np.bitwise_or.reduce([cv2.inRange(hsv, lo, hi) for lo, hi in COLOR_RANGES[color]])
+        mask = np.bitwise_or.reduce([cv2.inRange(hsv, lo, hi) for lo, hi in ranges[color]])
         counts[color] = int(np.count_nonzero(mask))
     nr, ng = counts["Red"], counts["Green"]
     thr = float(getattr(C, "SEAT_COL_MIN_FRAC", 0.3)) * sign_px_area
-    if nr >= thr and ng >= thr:
-        return "Mixed", nr, ng
+    if nr < 0.5 * thr and ng < 0.5 * thr:
+        return "Empty", nr, ng
     if nr >= thr and nr > 2 * ng:
         return "Red", nr, ng
     if ng >= thr and ng > 2 * nr:
         return "Green", nr, ng
-    return "Empty", nr, ng
+    return "Mixed", nr, ng
