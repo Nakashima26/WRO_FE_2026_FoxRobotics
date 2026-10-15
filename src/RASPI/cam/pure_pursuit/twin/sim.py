@@ -358,7 +358,9 @@ class Sim:
             if hasattr(C, k):
                 saved_cfg[k] = getattr(C, k)
                 setattr(C, k, v)
-        rng = np.random.default_rng(self.seed)
+        # TWIN_NOISE_SEED: otra realización del ruido de sensores con la misma pista (sin la variable = igual que antes).
+        _ns = os.environ.get("TWIN_NOISE_SEED")
+        rng = np.random.default_rng(self.seed if _ns is None else [self.seed, int(_ns)])
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
         for key in self.inject_map_truth:
             k, attr = _MAP_TRUTH_KEYS[key]
