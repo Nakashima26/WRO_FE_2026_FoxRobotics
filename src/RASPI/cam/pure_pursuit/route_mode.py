@@ -58,6 +58,8 @@ def _route_params():
         v_min_mm_s=K * (float(getattr(C, "ROUTE_PROFILE_BASE_PWM", 155)) - pwm0),
         v_max_mm_s=K * (float(getattr(C, "ROUTE_PROFILE_MAX_PWM", 255)) - pwm0),
         a_lat_mm_s2=float(getattr(C, "ROUTE_PROFILE_A_LAT_MM_S2", 1500.0)),
+        w_visible=float(getattr(C, "ROUTE_W_VISIBLE", 60.0)),
+        w_unknown_near=float(getattr(C, "ROUTE_W_UNKNOWN_NEAR", 1.5)),
     )
 
 
