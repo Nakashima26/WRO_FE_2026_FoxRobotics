@@ -12,7 +12,7 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "y2")
+## Mejor configuración (base actual, bench "o1" = y2 + `"ROUTE_LAP1_OPEN": true`)
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -23,13 +23,13 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
         "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0,
         "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.25,
         "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_STOP_MM": 0.0,
-        "ROUTE_UPLOAD_DIFF_MM": 60.0}}
+        "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -98,6 +98,8 @@ la anterior y las referencias (combo1).
 | Sobre y2: `ROUTE_UPLOAD_DIFF_MM` 100 (z1) | 0.00 s, 17 fallas | No |
 | Sobre y2: vuelta 1 a 170 (z2) | −0.22 s, 16 fallas | No (poca ganancia) |
 | Vuelta 1 siguiendo el BEV en vez de la ruta (`ROUTE_LAP1` false sobre y2, `MOTOR_MAX` 180; y `hw_nuevo` puro a 120/155/180, 12 semillas, ruido 1) | Dentro de ruta: semilla 1 vuelta 1 en 31.8 s y choca con el cajón, semilla 5 no cuenta giros. BEV puro: completan la vuelta 1 4/12 a 120, 1/12 a 155, 1/12 a 180, en 26.9-31 s (y2: ~21 s, 196/210 sin falla). Más rápido falla más | No: el BEV es más lento y choca |
+| Sobre y2: un replan por señal, reglas de la recta con el color provisional (`ROUTE_PROV_RULES`, p1) | −0.08 s, 13 fallas. Menos replans (p. ej. 17→10) | Neutral en el twin (latencia 0); puede ayudar en la Pi |
+| **Sobre y2: sin tope de vuelta 1 donde ya no queda nada sin ver adelante, `ROUTE_LAP1_OPEN` (o1)** | −0.75 s (−0.67 en vuelta 1), 12 fallas vs 14, solo-o1 3 vs 5 | **Sí, base nueva** |
 
 ## Cuánto queda (estimación)
 
