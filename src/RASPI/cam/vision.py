@@ -43,6 +43,10 @@ def open_camera(cam_index=0):
             "! appsink drop=true max-buffers=1 sync=false"
         )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        if not cap.isOpened() and os.environ.get("FOX_CAM_PIPE") != "old":
+            # GStreamer viejo sin n-threads: reintenta con la cadena original
+            os.environ["FOX_CAM_PIPE"] = "old"
+            return open_camera(cam_index)
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
 
