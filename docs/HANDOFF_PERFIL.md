@@ -113,6 +113,9 @@ la anterior y las referencias (combo1).
 | Sobre obf: `ROUTE_LAP1_PWM` 170 sola (ol17) / `ROUTE_UNSEEN_PWM` 170 sola (ou17) | Idénticas a la base: lo no visto usa `min(LAP1_PWM, UNSEEN_PWM)`, hay que subir las dos | — |
 | Sobre obf: PWM base 225 (ob225); `MIN_PWM` 170 (om17) | ob225: −0.49 s, 13 fallas, semillas 9 y 32 nuevas. om17: −0.23 s, 14 fallas | No |
 | **Sobre obf: `LAP1_PWM` = `UNSEEN_PWM` = 163 / 170 / 185 / 200 (lu16/lu17/lu185/lu20)** | 163: −0.2 s, 9 fallas. 170: −0.38 s, 9. **185: −0.67 s (vuelta 1 −0.65), 9 fallas, solo 5 vs 4.** 200: −0.77 s, 10 fallas, solo 7 vs 5 | **Sí: 185 (base).** 200 también pasa, pero da una falla más por 0.1 s |
+| Sobre lu185: firmware `VEL_INICIAL` 185 sola (fv185) | Idéntica: en la primera sección manda el arranque ciego (`ROUTE_SLOW_PWM` 100) | — |
+| Sobre lu185: arranque ciego + `VEL_INICIAL` a 185 (fb185) / 170 (fb170); `INICIO_PWM` 130 (fi130) | fb185: −0.62 s, 27 fallas (pared, semilla 30 5/5). fb170: −0.42 s, 21 fallas. fi130: −0.2 s, semillas 18 y 20 nuevas | No. El arranque ciego tiene que ir lento |
+| Sobre lu185: settle de la salida del cajón con motor, firmware `INICIO_SETTLE_MOTOR` (sm, 1742c19) / + arranque ciego 120 (smb) | Antes el settle hacía coast y el carro casi paraba (230 → 30 mm/s, ~0.3 s). sm: −0.31 s, 16 fallas, semilla 15 5/5 (llega a S/T2 aún en arranque ciego). smb: −0.43 s, 21 fallas | No |
 | Sobre y2: `ROUTE_UPLOAD_DIFF_MM` 100 (z1) | 0.00 s, 17 fallas | No |
 | Sobre y2: vuelta 1 a 170 (z2) | −0.22 s, 16 fallas | No (poca ganancia) |
 | Vuelta 1 siguiendo el BEV en vez de la ruta (`ROUTE_LAP1` false sobre y2, `MOTOR_MAX` 180; y `hw_nuevo` puro a 120/155/180, 12 semillas, ruido 1) | Dentro de ruta: semilla 1 vuelta 1 en 31.8 s y choca con el cajón, semilla 5 no cuenta giros. BEV puro: completan la vuelta 1 4/12 a 120, 1/12 a 155, 1/12 a 180, en 26.9-31 s (y2: ~21 s, 196/210 sin falla). Más rápido falla más | No: el BEV es más lento y choca |
