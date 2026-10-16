@@ -977,7 +977,7 @@ class RouteMode:
         self.follower = RR.RouteFollower(route, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0)))
         self.key = key
         self.n_plans += 1
-        self.upload = self._upload_lines(route)
+        self.upload = self._upload_lines(route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
         self.upload_shift = shift
         self.hold = hold
         self.loc.set_map(conf, unknown, dm.parking, self.park_w)

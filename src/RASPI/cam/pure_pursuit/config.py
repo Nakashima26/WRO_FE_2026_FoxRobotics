@@ -1372,6 +1372,7 @@ ROUTE_CTE_HORIZON_MM = 600.0
 # sigue la anterior). Con DIFF_MM se frena solo si la ruta nueva se aparta más de DIFF_MM de la
 # que tiene el ESP en los próximos HORIZON_MM delante del carro. None: siempre (como antes).
 ROUTE_UPLOAD_DIFF_MM = None
+ROUTE_UPLOAD_STEP_MM = 40.0   # separación de puntos de la ruta subida al ESP (más = menos líneas RTP = subida más corta)
 ROUTE_UPLOAD_HORIZON_MM = 700.0
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
