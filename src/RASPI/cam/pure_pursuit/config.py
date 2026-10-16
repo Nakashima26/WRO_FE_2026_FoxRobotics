@@ -1285,6 +1285,10 @@ ROUTE_LAP1_PWM = 120
 # Aplica las reglas de la recta también con el color provisional: un replan por señal en vez de dos.
 ROUTE_PROV_RULES = False
 ROUTE_LAP1_OPEN = False   # vuelta 1: sin asiento sin ver a < ROUTE_SLOWDOWN_MM adelante, sin el tope ROUTE_LAP1_PWM
+# Vuelta 1: cerca de un asiento sin ver, en vez del escalón a ROUTE_UNSEEN_PWM dentro de
+# ROUTE_SLOWDOWN_MM, rampa física: llegar a ROUTE_UNSEEN_PWM a esta distancia (mm) del asiento
+# frenando con ROUTE_PROFILE_A_BRAKE_MM_S2 y latencia ROUTE_PROFILE_LATENCY_S. None = escalón.
+ROUTE_UNSEEN_RAMP_MM = None
 # Medición (seat_roi.py): registra [ROI] por asiento de frente a la cámara. Solo log.
 SEAT_ROI_LOG = False
 SEAT_ROI_MIN_FRAC = 0.25   # fracción mínima de píxeles de un color en la ROI para decidir color

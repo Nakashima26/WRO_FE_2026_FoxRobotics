@@ -993,7 +993,19 @@ class RouteMode:
             return min(cap, _pwm("ROUTE_UNSEEN_PWM"))
         self.stopped = 0
         if best <= slow_mm:
-            return min(cap, _pwm("ROUTE_UNSEEN_PWM"))
+            unseen = min(cap, _pwm("ROUTE_UNSEEN_PWM"))
+            ramp = getattr(C, "ROUTE_UNSEEN_RAMP_MM", None)
+            if ramp is None or best <= float(ramp):
+                return unseen
+            # v tal que, con latencia y frenando a A_BRAKE, llega a v_unseen a `ramp` mm del asiento.
+            K = float(C.ROUTE_PROFILE_K_MM_S_PER_PWM)
+            pwm0 = float(C.ROUTE_PROFILE_PWM0)
+            a = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
+            lat = float(C.ROUTE_PROFILE_LATENCY_S)
+            vu = K * (unseen - pwm0)
+            v = -a * lat + math.sqrt((a * lat) ** 2 + vu * vu + 2.0 * a * (best - float(ramp)))
+            top = cap if open_cap is not None else int(C.ROUTE_PROFILE_MAX_PWM)
+            return int(round(min(max(v / K + pwm0, unseen), top)))
         return open_cap
 
     def _suffix(self) -> str:
