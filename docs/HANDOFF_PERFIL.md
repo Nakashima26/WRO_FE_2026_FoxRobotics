@@ -110,7 +110,8 @@ la anterior y las referencias (combo1).
 
 ## Siguientes pasos
 
-1. Medir en el twin el costo de la latencia real del plan: y2 con `ROUTE_PLAN_DELAY_S` ~0.3-1.0 (con 1.0 la semilla 1 chocó a los 8.6 s). El plan ya es ~2x más rápido (e44a2b4, 410fbca: frío ~170 ms, tibio ~50-60 ms en Mac; Pi 5 sin medir, OpenMP sin probar).
-2. El arranque y la primera sección (~10 s a PWM 95-110).
-3. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
-4. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
+1. **Latencia del plan (medido sobre o1):** con `ROUTE_PLAN_DELAY_S` 0.3 las fallas suben de 12 a 61, y con 0.6 a 123 de 210. En el twin el plan es instantáneo (~60 ms en Mac). Hay que medir cuánto tarda la DP en la Pi 5 (C + OpenMP) antes de creerle al twin. Banco con 0.15 s en curso.
+2. **Odometría / arranque ciego (medido en o1, 42 semillas):** con el retraso de ~150 ms descontado, el EKF queda en ~15 mm laterales p95 cuando el cajón se fija bien. El 25 % de los arranques se fija FORZADO (no converge antes de acabar la recta); siempre pasa cuando el cajón está a <200 mm del supuesto. Si el error del cajón es >50 mm, falla el 31 % de las corridas (5/16); si es ≤50 mm, falla el 3.6 % (7/194). Rutas abiertas: fijar el avance también con la línea naranja/azul de la esquina (la cámara ya la ve; route_mode no la usa), o frenar antes del límite de la recta si no ha convergido. El ruido de sonar del twin (3 mm) es optimista.
+3. El arranque y la primera sección (~10 s a PWM 95-110).
+4. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
+5. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
