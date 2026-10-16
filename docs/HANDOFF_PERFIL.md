@@ -95,6 +95,8 @@ la anterior y las referencias (combo1).
 | Sobre u2: x1 + x2 (x3) | −1.81 s, 26 fallas, semilla 14 nueva | No |
 | **Sobre x1: al subir la ruta frenar solo si cambia >60 mm en los próximos 700 mm, `ROUTE_UPLOAD_DIFF_MM` 60 (y2)** | −0.75 s (−0.62 en vuelta 1), 14 fallas (igual), solo-y2 6 vs 6 | **Sí, base nueva** |
 | Sobre x1: lo mismo con 30 mm (y1) | −0.60 s, 13 fallas | Pasa, pero y2 gana más |
+| Sobre y2: `ROUTE_UPLOAD_DIFF_MM` 100 (z1) | 0.00 s, 17 fallas | No |
+| Sobre y2: vuelta 1 a 170 (z2) | −0.22 s, 16 fallas | No (poca ganancia) |
 
 ## Cuánto queda (estimación)
 
@@ -105,7 +107,7 @@ la anterior y las referencias (combo1).
 
 ## Siguientes pasos
 
-1. Probar `ROUTE_UPLOAD_DIFF_MM` 100 y volver a probar la vuelta 1 a 170 sobre y2.
+1. Medir en el twin el costo de la latencia real del plan: y2 con `ROUTE_PLAN_DELAY_S` ~0.3-1.0 (con 1.0 la semilla 1 chocó a los 8.6 s). El plan ya es ~2x más rápido (e44a2b4, 410fbca: frío ~170 ms, tibio ~50-60 ms en Mac; Pi 5 sin medir, OpenMP sin probar).
 2. El arranque y la primera sección (~10 s a PWM 95-110).
 3. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
 4. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
