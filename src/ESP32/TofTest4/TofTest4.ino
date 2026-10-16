@@ -18,14 +18,21 @@
 #include <Wire.h>
 #include <VL53L1X.h>
 
+// Tiempo por medición. Más tiempo = más alcance en superficies oscuras (pared
+// negra), pero menos lecturas por segundo. Prueba 33, 50, 100, 200.
+const uint32_t BUDGET_MS = 50;
+// Zona de visión (ROI) en SPADs, 4-16. 16 = cono completo (~27°); más chico =
+// cono más angosto (para que los laterales no vean el piso sin pared).
+const uint8_t  ROI = 8;
+
 const int XSHUT_TRAS = 4;    // -1 = sin XSHUT (siempre encendido)
 
 struct Tof {
   const char* nombre;
   int         xshut;
   uint8_t     dir;
+  bool        usado;   // antes de 's': la tabla de abajo llena los campos en este orden
   VL53L1X     s;
-  bool        usado;
   bool        ok;
 };
 
@@ -45,8 +52,9 @@ bool responde(uint8_t dir) {
 
 void configurar(Tof& t) {
   t.s.setDistanceMode(VL53L1X::Long);       // Short / Medium / Long
-  t.s.setMeasurementTimingBudget(50000);    // 50 ms por medición
-  t.s.startContinuous(50);
+  t.s.setROISize(ROI, ROI);
+  t.s.setMeasurementTimingBudget(BUDGET_MS * 1000UL);
+  t.s.startContinuous(BUDGET_MS);
 }
 
 // Enciende (si tiene XSHUT), inicializa en 0x29 y le asigna su dirección.

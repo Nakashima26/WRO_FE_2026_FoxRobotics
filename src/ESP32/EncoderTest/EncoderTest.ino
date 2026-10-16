@@ -35,7 +35,7 @@ const float RELACION      = 50.0f * 2;   // caja 50:1 x engranes 15T/30T
 const float VUELTAS_CALIB = 1.0f;        // más vueltas = comprobación más precisa
 
 const float CUENTAS_POR_VUELTA = PULSOS_MOTOR * 4 * RELACION;   // 1200
-int SIGNO = 1;                       // -1 si adelante baja (lo dice 'c')
+int SIGNO = -1;                      // con azul->34 y morado->36, adelante cuenta negativo
 
 // Tabla de cuadratura: índice = (estado anterior << 2) | estado nuevo, con
 // estado = (A << 1) | B. 0 = sin cambio, ±1 = un paso, 2 = salto imposible.

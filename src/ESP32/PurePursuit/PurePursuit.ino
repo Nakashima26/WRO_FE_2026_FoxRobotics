@@ -41,8 +41,8 @@ MPU6050 mpu(Wire);
 #define ECHO_F      33
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
-const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
-const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
+const bool rondaObstaculos  = false;    // false = giro continuo de siempre (ronda abierta)
+const int TURNS_PER_RACE = 12;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
 
 // ── ESTACIONAMIENTO: ÚNICO switch ─────────────────────────────────────────────
 // Antes eran PARK_ENABLED + PARK_DE_PUNTA + PARK_MODO_PARALELO y había que mover
@@ -189,6 +189,9 @@ bool piReadyReceived = false;
 bool piFirstV2Received = false;
 unsigned long readyMs = 0;                          // millis() cuando llegó READY
 const unsigned long FIRST_V2_TIMEOUT_MS = 3000;     // si tras READY nunca llega V2, seguir igual
+// Ronda abierta (rondaObstaculos=false): NO se espera READY de la Pi. Tras
+// calibrar el gyro se espera esto y arranca solo.
+const unsigned long ARRANQUE_ABIERTA_MS = 5000;
 
 // One-shot: la primera vez que el carro va a rodar de verdad (tras pasar el gate
 // de WAIT_FIRST_V2) se re-anclan lastTurnTime y timeStart a ESE instante. Sin
@@ -2376,16 +2379,8 @@ void controlPID(long distL, long distR) {
   float outputVision = 0.0;
   float outputFinal  = 0.0;
 
-  if (!piAlive) {
-    // Pi desconectada → fallback autónomo: paredes + gyro
-    piPriority    = false;
-    piMemoryFrames = 0;
-    piPurePursuit = false;
-    turnHint      = 0;
-    obsBiasNorm   = 0.0;
-    outputFinal   = outputWall + outputGyro;
-
-  } else if (!rondaObstaculos) {
+  // Ronda abierta va primero: no depende de la Pi (puede ni estar conectada).
+  if (!rondaObstaculos) {
     // ── Ronda ABIERTA (sin obstáculos) ─────────────────────────────────────
     // Se ignora por completo la visión / Pure Pursuit de la Pi: el carro se
     // maneja con wall PID (centra entre paredes) + gyro PID (mantiene el
@@ -2401,6 +2396,15 @@ void controlPID(long distL, long distR) {
     // a la esquina 1. Es un test para aislar si la inclinación del centrado es
     // lo que traba/retrasa el giro 1. DESPUÉS del 1er giro -> wall + gyro normal.
     outputFinal    = primerGiro ? (outputWall + outputGyro) : outputGyro;
+
+  } else if (!piAlive) {
+    // Pi desconectada → fallback autónomo: paredes + gyro
+    piPriority    = false;
+    piMemoryFrames = 0;
+    piPurePursuit = false;
+    turnHint      = 0;
+    obsBiasNorm   = 0.0;
+    outputFinal   = outputWall + outputGyro;
 
   } else if (estado == RECUPERANDO
              || (estado == CRUCERO && cruceroCerca)
@@ -2598,6 +2602,21 @@ void setup() {
   lastGyroTime = millis();
   lastPiMsgMs  = 0;
   anguloObjetivo = 0;
+
+  // Ronda abierta: la Pi no maneja nada -> sin READY ni primer V2. Espera
+  // ARRANQUE_ABIERTA_MS tras calibrar y arranca.
+  if (!rondaObstaculos) {
+    Serial.printf("Ronda abierta: arranca en %lu s (sin esperar a la Pi)\n", ARRANQUE_ABIERTA_MS / 1000);
+    delay(ARRANQUE_ABIERTA_MS);
+    piReadyReceived   = true;
+    piFirstV2Received = true;
+    timeStart    = millis();
+    readyMs      = millis();
+    lastPIDTime  = millis();
+    lastGyroTime = millis();
+    Serial.println("Sistema listo (PurePursuit, ronda abierta)");
+    return;
+  }
 
   // Esperar READY de la Pi (igual que Controller_PI.ino). Bloquea SIN timeout:
   // loop() siempre arranca con piReadyReceived = true.
