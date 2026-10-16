@@ -12,7 +12,7 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "lu185" = obf + `ROUTE_LAP1_PWM` y `ROUTE_UNSEEN_PWM` 185)
+## Mejor configuración (base actual, bench "st80" = lu185 + `ROUTE_UPLOAD_STEP_MM` 80)
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -25,14 +25,14 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
         "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_STOP_MM": 0.0,
         "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true,
         "ROUTE_FIX_LINE": true, "ROUTE_UNSEEN_RAMP_MM": 850.0,
-        "DIGITAL_MAP_ORANGE_BEHIND_MM": 1500.0},
+        "DIGITAL_MAP_ORANGE_BEHIND_MM": 1500.0, "ROUTE_UPLOAD_STEP_MM": 80.0},
  "fw": {"INICIO_PWM": "120", "VEL_INICIAL": "155"}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=185 --pi ROUTE_UNSEEN_PWM=185 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True --pi ROUTE_UNSEEN_RAMP_MM=850 --pi DIGITAL_MAP_ORANGE_BEHIND_MM=1500 --fw INICIO_PWM=120 --fw VEL_INICIAL=155
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=185 --pi ROUTE_UNSEEN_PWM=185 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True --pi ROUTE_UNSEEN_RAMP_MM=850 --pi DIGITAL_MAP_ORANGE_BEHIND_MM=1500 --pi ROUTE_UPLOAD_STEP_MM=80 --fw INICIO_PWM=120 --fw VEL_INICIAL=155
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -118,6 +118,7 @@ la anterior y las referencias (combo1).
 | Sobre lu185: settle de la salida del cajón con motor, firmware `INICIO_SETTLE_MOTOR` (sm, 1742c19) / + arranque ciego 120 (smb) | Antes el settle hacía coast y el carro casi paraba (230 → 30 mm/s, ~0.3 s). sm: −0.31 s, 16 fallas, semilla 15 5/5 (llega a S/T2 aún en arranque ciego). smb: −0.43 s, 21 fallas | No |
 | Sobre lu185: solo el tope del arranque ciego `ROUTE_BLIND_PWM` 120 (bl12) / 135 (bl135) | bl12: −0.2 s, 12 fallas (semilla 3 isla 4/5). bl135: −0.34 s, 10 fallas, semilla 18 nueva | No |
 | Plan tras fijar el arranque (e3aa662) | Al cambiar `park_w` se recalculaban paredes, isla, señales y vista (la clave de caché incluía el cajón): 113 ms contra ~12 ms normal. Ahora la caché va por malla y las maderas del cajón aparte: 37 ms, ruta idéntica bit a bit (mismo tiempo en el twin) | Sí (sin flag, mismo resultado) |
+| **Sobre lu185: subir la ruta al ESP con un punto cada 60 / 80 mm en vez de 40, `ROUTE_UPLOAD_STEP_MM` (st60/st80, c70a9aa)** | Cada subida (~190 puntos, 21 líneas, una por frame) dejaba ~0.5 s a PWM 100 en la vuelta 1. 60: −0.48 s, 8 fallas. **80: −0.93 s (vuelta 1 −0.8), 10 fallas, solo 5 vs 4, sin semillas nuevas.** Mediana total de lu185: 41.1 s | **Sí: 80 (base).** En el carro: el ESP sigue la ruta con puntos a 80 mm (`RUTA_LOOKAHEAD_MM / rutaPaso`) |
 | Sobre y2: `ROUTE_UPLOAD_DIFF_MM` 100 (z1) | 0.00 s, 17 fallas | No |
 | Sobre y2: vuelta 1 a 170 (z2) | −0.22 s, 16 fallas | No (poca ganancia) |
 | Vuelta 1 siguiendo el BEV en vez de la ruta (`ROUTE_LAP1` false sobre y2, `MOTOR_MAX` 180; y `hw_nuevo` puro a 120/155/180, 12 semillas, ruido 1) | Dentro de ruta: semilla 1 vuelta 1 en 31.8 s y choca con el cajón, semilla 5 no cuenta giros. BEV puro: completan la vuelta 1 4/12 a 120, 1/12 a 155, 1/12 a 180, en 26.9-31 s (y2: ~21 s, 196/210 sin falla). Más rápido falla más | No: el BEV es más lento y choca |
