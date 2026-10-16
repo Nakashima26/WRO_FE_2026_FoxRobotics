@@ -807,6 +807,7 @@ const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto
 const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
 const int  INICIO_CONTRA_FIN_DEG       = 6;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
+const bool INICIO_SETTLE_MOTOR         = false; // fase 6: true = sigue a INICIO_PWM con el servo al centro mientras se aquieta el giro (no pierde la inercia); false = coast
 
 
 // Estado interno de INICIO
@@ -2598,7 +2599,7 @@ void iniciarSettleManiobra() {
 void finalizarInicio() {
   motorAdelante();
   escribirServo(centroServo);
-  setMotor(0);
+  if (!INICIO_SETTLE_MOTOR) setMotor(0);   // con settle a motor, no cortar: SIGUIENDO toma la velocidad en el mismo loop
   velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
@@ -3815,7 +3816,7 @@ void loop() {
           Serial.print(" ang="); Serial.print(anguloGyro, 1);
           Serial.print(" lat="); Serial.println(fabs(poseYf - inicioY0), 0);
           escribirServo(centroServo);
-          motorCoast();
+          if (INICIO_REVERSA || !INICIO_SETTLE_MOTOR) motorCoast();
           inicioFaseMs = millis();
           if (INICIO_REVERSA) {
             inicioFase = 4;
@@ -3908,7 +3909,7 @@ void loop() {
 
       // ── Fase 6: SETTLE — espera a que deje de rotar y cierra ───────────────
       if (inicioFase == 6) {
-        motorCoast();
+        if (INICIO_SETTLE_MOTOR) { motorAdelante(); setMotor(INICIO_PWM); } else motorCoast();  // motorCoast deja A1/A2 en LOW
         escribirServo(centroServo);
         unsigned long nowMs = millis();
         if (nowMs - inicioSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
