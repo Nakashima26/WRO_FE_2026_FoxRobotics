@@ -368,8 +368,14 @@ class DigitalMap:
         ny = orange.get("near_y")
         if ny is None:
             return
-        self._orange_y = float(ny)
         fwd = (C.ROBOT_BEV_Y - float(ny)) * C.MM_PER_PX
+        # Recién girado se sigue viendo la cinta de la esquina que quedó atrás:
+        # tomada como la siguiente, la lata de adelante "pasaba la cinta" y se
+        # buscaba en la recta siguiente (semilla 6: S/X1 ~45 vistas perdidas).
+        behind = getattr(C, "DIGITAL_MAP_ORANGE_BEHIND_MM", None)
+        if behind is not None and not self.in_stall and self.along_mm + _BEV_AHEAD_MM + fwd < float(behind):
+            return
+        self._orange_y = float(ny)
         # La cinta pegada al carro es el final de esta recta: toca girar.
         self._at_corner = fwd < 350.0
 

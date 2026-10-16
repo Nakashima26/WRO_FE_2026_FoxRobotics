@@ -917,6 +917,7 @@ DIGITAL_MAP_PP_TURN_CM = 0.0
 # isla, frontal contra la pared del fondo). Ver digital_map._wall_fix.
 DIGITAL_MAP_WALL_FIX = False
 DIGITAL_MAP_WALL_YAW = True    # con WALL_FIX: también el rumbo por la pendiente de la pared
+DIGITAL_MAP_ORANGE_BEHIND_MM = None   # p. ej. 1500: cinta vista con along < esto = la esquina de atrás, se ignora
 
 FAR_HINT_ENABLED     = True
 FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)
