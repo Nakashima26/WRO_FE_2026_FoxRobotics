@@ -12,7 +12,7 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "l1" = o1 + `"ROUTE_FIX_LINE": true`)
+## Mejor configuración (base actual, bench "r85" = l1 + `"ROUTE_UNSEEN_RAMP_MM": 850`)
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -24,13 +24,13 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
         "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.25,
         "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_STOP_MM": 0.0,
         "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true,
-        "ROUTE_FIX_LINE": true}}
+        "ROUTE_FIX_LINE": true, "ROUTE_UNSEEN_RAMP_MM": 850.0}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True --pi ROUTE_UNSEEN_RAMP_MM=850
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -50,6 +50,7 @@ Todos apagados por defecto salvo el del ESP32.
 | `92fd3c4` | `ROUTE_CTE_URGENT_MM`: **freno por urgencia al salirse.** Si el carro está fuera de la ruta, se corre la ruta de adelante (600 mm) el mismo desvío. Solo si así quedaría a menos de 120 mm de la isla, una señal o la pared, frena a `ROUTE_CTE_URGENT_PWM`. Si se sale poquito pero tiene espacio, no frena. | Usado en la base (120 mm, PWM 120) |
 | `3456498` | `ROUTE_UPLOAD_DIFF_MM`: mientras sube la ruta nueva al ESP, frenar solo si se aparta de la que tiene el ESP en los próximos 700 mm. | Usado en la base (60 mm) |
 | `e4490bd` | **`ROUTE_FIX_LINE`: arranque forzado con la línea naranja.** Si el sonar no converge antes de acabar la recta, el δ del cajón sale de la mediana de la línea naranja de la esquina: el punto de la recta del BEV en la columna central se lleva al mundo con la pose supuesta y se corta con la cinta. Offline (42 semillas): peor error forzado 106 → 58 mm. | Usado en la base. Banco l1 vs o1: fallas 12 → 6, mismo tiempo, sin semillas nuevas |
+| `763a72b` | `ROUTE_UNSEEN_RAMP_MM`: en vuelta 1, a más de esa distancia de lo no visto, sube el PWM según la distancia de frenado en vez de quedarse en `UNSEEN_PWM`. | Usado en la base (850). Sobre l1: 800 = −0.67 s pero 7 fallas solo suyas (no pasa, semilla 3 isla); 850 = −0.53 s, 5 fallas (pasa); 900 = −0.43 s, 6; 1000 = −0.2 s, 5 |
 
 ## Cómo se decide (banco estándar)
 
