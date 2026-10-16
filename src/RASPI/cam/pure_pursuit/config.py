@@ -1274,6 +1274,9 @@ ROUTE_LAP1 = True
 ROUTE_EMPTY_FRAMES = 16
 ROUTE_VIEW_HALF_DEG = 45.0
 ROUTE_VIEW_MAX_MM = 550.0
+# Planificador (ring_route.RouteParams): premio por estación que ve un asiento sin ver y castigo por pasar lejos de él
+ROUTE_W_VISIBLE = 60.0
+ROUTE_W_UNKNOWN_NEAR = 1.5
 ROUTE_STOP_MM = 750.0
 ROUTE_SLOWDOWN_MM = 1300.0
 ROUTE_SLOW_PWM = 100
