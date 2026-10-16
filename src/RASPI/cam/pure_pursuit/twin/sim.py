@@ -342,10 +342,16 @@ class Sim:
             park_pos = os.environ.get("FOX_PARK_POS") or cfg.get("park_pos")
         self.park_pos = park_pos
         self.params = params or TwinParams()
+        # Relación de engranes (estudio): TWIN_SPEED_SCALE escala mm/s por PWM y
+        # TWIN_TAU_SCALE la constante de tiempo de arranque (menos torque = más lento).
+        speed_scale = float(os.environ.get("TWIN_SPEED_SCALE", speed_scale))
         self.speed_scale = speed_scale
         if speed_scale != 1.0:
             self.params.motor.k_mm_s_per_pwm *= speed_scale
             self.params.motor.k_rev_mm_s_per_pwm *= speed_scale
+        tau_scale = float(os.environ.get("TWIN_TAU_SCALE", 1.0))
+        if tau_scale != 1.0:
+            self.params.motor.tau_drive_s *= tau_scale
         self.max_time_s = max_time_s
         if pi_period_s is None:
             pi_period_s = cfg.get("pi_period_s", self.params.timing.pi_proc_s)
