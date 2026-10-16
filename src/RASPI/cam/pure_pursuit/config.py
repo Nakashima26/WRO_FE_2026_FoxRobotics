@@ -1374,6 +1374,9 @@ ROUTE_PLAN_ASYNC = False
 # Twin: retraso (s) entre que se pide un plan y que se adopta, como la DP en la Pi 5 (~1 s).
 # Se cuenta en frames de la Pi (PI_FPS). None: al instante (como antes). Solo sin ROUTE_PLAN_ASYNC.
 ROUTE_PLAN_DELAY_S = None
+# Tope de PWM mientras hay un plan en curso (hilo de ROUTE_PLAN_ASYNC o ROUTE_PLAN_DELAY_S):
+# la ruta vieja puede pasar por la señal recién vista. None = sin tope.
+ROUTE_PENDING_PWM = None
 # Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
 ROUTE_LOCK_STATIONS = 7
 # Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.

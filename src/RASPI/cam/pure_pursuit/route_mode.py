@@ -604,6 +604,10 @@ class RouteMode:
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
+        if getattr(C, "ROUTE_PENDING_PWM", None) is not None and (self._delay_left is not None or self._job is not None):
+            # Plan en curso (la DP tarda en la Pi): la ruta vieja puede pasar por la señal recién vista.
+            cap = int(C.ROUTE_PENDING_PWM)
+            self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
         prof = self._profile_pwm(self._sign_xy(conf, empty))
         if prof is not None:
