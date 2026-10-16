@@ -12,7 +12,7 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "i120" = r85 + firmware `INICIO_PWM` 120)
+## Mejor configuración (base actual, bench "obf" = i120 + firmware `VEL_INICIAL` 155 + `DIGITAL_MAP_ORANGE_BEHIND_MM` 1500)
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -24,14 +24,15 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
         "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.25,
         "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_STOP_MM": 0.0,
         "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true,
-        "ROUTE_FIX_LINE": true, "ROUTE_UNSEEN_RAMP_MM": 850.0},
- "fw": {"INICIO_PWM": "120"}}
+        "ROUTE_FIX_LINE": true, "ROUTE_UNSEEN_RAMP_MM": 850.0,
+        "DIGITAL_MAP_ORANGE_BEHIND_MM": 1500.0},
+ "fw": {"INICIO_PWM": "120", "VEL_INICIAL": "155"}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True --pi ROUTE_UNSEEN_RAMP_MM=850 --fw INICIO_PWM=120
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True --pi ROUTE_UNSEEN_RAMP_MM=850 --pi DIGITAL_MAP_ORANGE_BEHIND_MM=1500 --fw INICIO_PWM=120 --fw VEL_INICIAL=155
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -105,6 +106,9 @@ la anterior y las referencias (combo1).
 | **Sobre r85: firmware `VEL_INICIAL` 155 (f1) / 140 (f140)** (fw JSON `{"VEL_INICIAL": "155"}`) | f1: **−0.89 s** (vuelta 1), 8 fallas, solo-f1 4 vs solo-r85 1 (límite 3). f150: −0.62 s, 11 fallas (semillas 32 y 3 nuevas). f140: −0.48 s, 6 fallas, semilla 3 2/5. Con arranque ciego 155 también (f2): −1.45 s pero 22 fallas (asientos T1) | Casi. Es la palanca más grande que queda: la primera sección va a 110 por el firmware. Hace falta un cambio en el ESP (en modo ruta no usar `VEL_INICIAL`) y arreglar las fallas que suma |
 | Subir la ruta al ESP más rápido | A 115200 baud cada frame ya lleva ~290 bytes (V2 ~190 + una RTP ~100); el límite es ~288. Haría falta subir el baud en Pi y ESP; gana ≤0.2 s | No por ahora |
 | **Sobre r85: salida del cajón más rápida, firmware `INICIO_PWM` 95 → 120 (i120)** | **−0.72 s** (−0.55 s en la salida), 6 fallas vs 5, solo-i120 4 vs solo-r85 3, sin semillas nuevas. Promedio r85: 43.6 s (mejor 37.3 s) | **Sí (base).** Es firmware: hay que cambiar `INICIO_PWM` en el .ino y revisar en el tapete que la S no se pase por inercia (`INICIO_OVERSHOOT_DEG`) |
+| Sobre i120: `INICIO_PWM` 140 (i140) | −0.25 s, 10 fallas | No |
+| Sobre i120: `VEL_INICIAL` 155 (fi); + `ROUTE_UNSEEN_PWM` 140 (fu); + paso justo a señal `ROUTE_PROFILE_SIGN_TIGHT_MM` 125/PWM 110 (ft) o 145/100 (ft2) | fi: −0.89 s, 10 fallas, semilla 6 nueva. fu: −0.54 s, 19 fallas. ft: −0.95 s, 8 fallas (solo 6 vs 4). ft2: −0.89 s, 10 fallas | No. La semilla 6 no es de velocidad: ver la fila siguiente |
+| Semilla 6 (CW, cajón E): S/X1 verde se ve a ~870 mm pero se confirma ~500 mm después | Recién girado a S la cámara sigue viendo la cinta naranja de la esquina que quedó atrás (`near_y`≈340). El mapa la toma por la siguiente, la lata queda "pasada la cinta" y se busca en la recta W (sin asiento a <320 mm): ~45 vistas tiradas. `DIGITAL_MAP_ORANGE_BEHIND_MM` (a439ceb, apagado): ignora la cinta si `along + adelante < 1500` | Sobre i120 solo (ob): 0.00 s, 6 fallas, misma lista; semilla 6 39.8 → 37.7 s. **Con `VEL_INICIAL` 155 (obf): −1.07 s (vuelta 1 −1.0), 8 fallas, solo-obf 7 vs solo-i120 5, sin semillas nuevas → base nueva.** Firmware: `VEL_INICIAL` 110 → 155 en el .ino |
 | Sobre y2: `ROUTE_UPLOAD_DIFF_MM` 100 (z1) | 0.00 s, 17 fallas | No |
 | Sobre y2: vuelta 1 a 170 (z2) | −0.22 s, 16 fallas | No (poca ganancia) |
 | Vuelta 1 siguiendo el BEV en vez de la ruta (`ROUTE_LAP1` false sobre y2, `MOTOR_MAX` 180; y `hw_nuevo` puro a 120/155/180, 12 semillas, ruido 1) | Dentro de ruta: semilla 1 vuelta 1 en 31.8 s y choca con el cajón, semilla 5 no cuenta giros. BEV puro: completan la vuelta 1 4/12 a 120, 1/12 a 155, 1/12 a 180, en 26.9-31 s (y2: ~21 s, 196/210 sin falla). Más rápido falla más | No: el BEV es más lento y choca |
