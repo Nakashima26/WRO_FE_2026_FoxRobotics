@@ -203,6 +203,15 @@ def _key_name(k: int) -> str | None:
 
 
 _STATIC: dict = {"field": None, "img": None}
+_CAR_TOP: list = []
+
+
+def _car_top() -> list:
+    if not _CAR_TOP:
+        import json
+        _CAR_TOP.extend(json.loads(
+            (Path(__file__).parent / "twin" / "assets" / "car_top.json").read_text()))
+    return _CAR_TOP
 
 
 def _paint(field, trail, pose, bev, cam=None, dig=None):
@@ -227,7 +236,13 @@ def _paint(field, trail, pose, bev, cam=None, dig=None):
         if len(lp) >= 2:
             cv2.polylines(world, [lp], False, (40, 90, 220), 2, cv2.LINE_AA)
     if pose is not None:
-        poly(pose["car"], (30, 30, 30), fill=True)
+        # Vista de arriba del modelo 3D (twin/assets/car_top.json), solo dibujo.
+        h = math.radians(pose["h"])
+        rot = np.array([[math.cos(h), -math.sin(h)], [math.sin(h), math.cos(h)]])
+        for part in _car_top():
+            pts = np.asarray(part["pts"]) @ rot + pose["xy"]
+            cv2.fillPoly(world, [np.array([_to_px(x, y) for x, y in pts], np.int32)],
+                         part["bgr"], cv2.LINE_AA)
         y = 22
         for line in (pose.get("hud") or f"t={pose['t']:.1f}s {pose['est']}").split("\n"):
             cv2.putText(world, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
@@ -536,7 +551,7 @@ def _run_once(args, seed: int, interactive: bool):
                 )
             ack = view.frame_result.serial_ack if view.frame_result is not None else ""
             _offer(view_q, ("frame", {
-                "car": _body_polygon(veh.x, veh.y, veh.heading_deg, params).tolist(),
+                "h": veh.heading_deg,
                 "xy": (veh.x, veh.y),
                 "est": est,
                 "t": view.t,
@@ -580,10 +595,8 @@ def _run_once(args, seed: int, interactive: bool):
         n_signs = len(preview.signs)
 
         def _parked() -> None:
-            car = _body_polygon(
-                preview.start_x, preview.start_y, preview.start_heading, params)
             _offer(view_q, ("frame", {
-                "car": car.tolist(),
+                "h": preview.start_heading,
                 "xy": (preview.start_x, preview.start_y),
                 "est": "WAIT",
                 "t": 0.0,
