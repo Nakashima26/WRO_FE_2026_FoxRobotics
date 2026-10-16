@@ -137,8 +137,7 @@ class RouteMode:
             if (dm.parking, seat) not in conf:
                 empty.add((dm.parking, seat))
         for sec in SECTIONS_CW:
-            mine = [s for (sc, s) in conf if sc == sec]
-            if not mine:
+            if not any(sc == sec for (sc, _s) in conf):
                 # Toda recta tiene al menos una señal: si los 6 asientos
                 # quedaron "vacíos" la visión se la perdió; se vuelven a mirar.
                 if all((sec, s) in empty for s in SEATS):
@@ -147,16 +146,25 @@ class RouteMode:
                             self.empty.discard((sec, s))
                             empty.discard((sec, s))
                             self.view_count[(sec, s)] = 0
+        empty |= self._rule_empty(conf)
+        return conf, empty
+
+    def _rule_empty(self, seats: dict) -> set:
+        """Asientos que las reglas de la recta dejan vacíos, dado {(sec, asiento): color}."""
+        out = set()
+        for sec in SECTIONS_CW:
+            mine = [s for (sc, s) in seats if sc == sec]
+            if not mine:
                 continue
             cols = {_COL[s] for s in mine}
             for seat in SEATS:
-                if (sec, seat) in conf:
+                if (sec, seat) in seats:
                     continue
                 # X va sola; nunca dos en la misma columna; máximo dos por recta.
                 if (any(s.startswith("X") for s in mine) or seat.startswith("X")
                         or _COL[seat] in cols or len(mine) >= 2):
-                    empty.add((sec, seat))
-        return conf, empty
+                    out.add((sec, seat))
+        return out
 
     def _all_seats(self):
         return [(sec, seat) for sec in SECTIONS_CW for seat in SEATS]
@@ -492,6 +500,9 @@ class RouteMode:
                 prov.setdefault(k, rc)
         plan_seats = {**conf, **prov}
         plan_unknown = [k for k in unknown if k not in prov]
+        if getattr(C, "ROUTE_PROV_RULES", False) and prov:
+            rule = self._rule_empty(plan_seats)
+            plan_unknown = [k for k in plan_unknown if k not in rule]
         extra, extra_key, anchor_replan = None, None, False
         if not self.fixed:
             # Recta del cajón sin el avance: sus asientos no se pueden ubicar;
