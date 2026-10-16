@@ -976,8 +976,10 @@ class RouteMode:
             if (sec, seat) in self.visible:
                 best_vis = s if best_vis is None else min(best_vis, s)
         cap = int(getattr(C, "ROUTE_LAP1_PWM", 120))
+        # Nada sin ver cerca adelante: lo ya visto no frena (manda el perfil).
+        open_cap = None if getattr(C, "ROUTE_LAP1_OPEN", False) else cap
         if best is None:
-            return cap
+            return open_cap
         stop = float(getattr(C, "ROUTE_STOP_MM", 750.0))
         slow_mm = float(getattr(C, "ROUTE_SLOWDOWN_MM", 1300.0))
         # Detenerse solo sirve si la cámara lo está viendo (en ~0.4 s queda
@@ -992,7 +994,7 @@ class RouteMode:
         self.stopped = 0
         if best <= slow_mm:
             return min(cap, _pwm("ROUTE_UNSEEN_PWM"))
-        return cap
+        return open_cap
 
     def _suffix(self) -> str:
         tf = self.loc.transform() if self.loc is not None else None

@@ -1282,6 +1282,7 @@ ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_
 ROUTE_LAP1_PWM = 120
 # Aplica las reglas de la recta también con el color provisional: un replan por señal en vez de dos.
 ROUTE_PROV_RULES = False
+ROUTE_LAP1_OPEN = False   # vuelta 1: sin asiento sin ver a < ROUTE_SLOWDOWN_MM adelante, sin el tope ROUTE_LAP1_PWM
 # Medición (seat_roi.py): registra [ROI] por asiento de frente a la cámara. Solo log.
 SEAT_ROI_LOG = False
 SEAT_ROI_MIN_FRAC = 0.25   # fracción mínima de píxeles de un color en la ROI para decidir color
