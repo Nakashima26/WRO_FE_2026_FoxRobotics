@@ -19,7 +19,7 @@ from pure_pursuit.runtime_nuevo import PPConfig, PPRuntime
 from pure_pursuit.twin.camera import CameraModel
 from pure_pursuit.twin.firmware.fw import FirmwareSIL, FirmwareSetupError
 from pure_pursuit.twin.metrics import compute_metrics, _parse_ack_field, _parse_est
-from pure_pursuit.twin.params import TwinParams, max_wheel_deg
+from pure_pursuit.twin.params import TwinParams, max_wheel_deg, wheel_deg_from_servo
 from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
 from pure_pursuit.twin.vehicle import Vehicle
@@ -470,6 +470,12 @@ class Sim:
             row.update(extra)
             trace.append(row)
 
+        # Locales para advance (~566k llamadas por corrida).
+        veh_substep, enc_update = veh._integrate_substep, enc.update
+        servo_angle, motor_pwm, motor_dir = fw.servo_angle, fw.motor_pwm, fw.motor_dir
+        sil_now_us, hist_append = fw._lib.sil_now_us, history.append
+        st_params = self.params.steering
+
         def advance(us: int) -> None:
             nonlocal last_yaw_rate, last_ds, last_coll_check, collision_cause, collision_t, stop_reason, world
             dt_total = us / 1e6
@@ -477,17 +483,14 @@ class Sim:
             while remaining > 1e-12:
                 sub = min(remaining, 0.001)
                 remaining -= sub
-                info = veh.step(
-                    sub,
-                    fw.servo_angle(),
-                    float(fw.motor_pwm()),
-                    fw.motor_dir(),
-                )
-                last_ds = info.ds_true_mm
-                last_yaw_rate = info.yaw_rate_ccw_dps
-                enc.update(info.ds_true_mm, veh.wheel_deg, info.accel_mm_s2, w_max)
-                t = _t_s()
-                history.append((t, veh.x, veh.y, veh.heading_deg))
+                # = veh.step(sub, ...) con sub <= 1 ms (un solo sub-paso), sin StepInfo.
+                h0, v0 = veh.heading_deg, veh.v
+                veh_substep(sub, servo_angle(), float(motor_pwm()), motor_dir())
+                last_ds = 0.0 + veh.v * sub
+                last_yaw_rate = -(veh.heading_deg - h0) / sub
+                enc_update(last_ds, wheel_deg_from_servo(veh.servo_deg, st_params), (veh.v - v0) / sub, w_max)
+                t = int(sil_now_us()) / 1e6
+                hist_append((t, veh.x, veh.y, veh.heading_deg))
                 if t - last_coll_check >= _COLLISION_INTERVAL_S:
                     last_coll_check = t
                     hit = collision(

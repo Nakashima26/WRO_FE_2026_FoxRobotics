@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,23 @@ OLD_CALIB_4_MM = np.float32(
         [150.0, 380.0],
     ]
 )
+
+
+_FLOOR_KERNEL: list = []
+
+
+def _floor_kernel():
+    """fox_twin_floor de la biblioteca nativa, o None (FOX_NATIVE=0 o sin compilador)."""
+    if not _FLOOR_KERNEL:
+        fn = None
+        try:
+            from ..native import get_kernel
+            vp, f32 = ctypes.c_void_p, ctypes.c_float
+            fn = get_kernel("fox_twin_floor", [ctypes.c_int64, vp, vp, vp] + [f32] * 6 + [vp], None)
+        except Exception:
+            pass
+        _FLOOR_KERNEL.append(fn)
+    return _FLOOR_KERNEL[0]
 
 
 @dataclass
@@ -220,21 +238,27 @@ class CameraModel:
         # La suma float es conmutativa (no asociativa): ox + a + b se arma como
         # (a + ox) + b, igual bit a bit, pero sin arreglos temporales.
         idx, ff, rr = self._floor_rays(p.height_mm)
-        f_sh, f_ch = np.float32(sh), np.float32(ch)
-        gx = ff * f_sh
-        gx += np.float32(ox)
-        gx += rr * f_ch
-        gy = ff * f_ch
-        gy += np.float32(oy)
-        gy -= rr * f_sh
-        # |x| <= a y |y| <= a  <=>  max(|x|, |y|) <= a.
-        np.abs(gx, out=gx)
-        np.abs(gy, out=gy)
-        np.maximum(gx, gy, out=gx)
-        ids = (gx <= OUTER_HALF_MM).view(np.uint8)
-        ids += gx < INNER_HALF_MM      # isla dentro del tapete: 1 + 1 = 2
         best_id = np.zeros(p.height * p.width, dtype=np.uint8)
-        best_id[idx] = ids
+        kern = _floor_kernel()
+        if kern is not None:
+            # Mismo cálculo en C (native/src/twin_floor.c), ~5x más rápido.
+            kern(len(idx), idx.ctypes.data, ff.ctypes.data, rr.ctypes.data, sh, ch, ox, oy,
+                 OUTER_HALF_MM, INNER_HALF_MM, best_id.ctypes.data)
+        else:
+            f_sh, f_ch = np.float32(sh), np.float32(ch)
+            gx = ff * f_sh
+            gx += np.float32(ox)
+            gx += rr * f_ch
+            gy = ff * f_ch
+            gy += np.float32(oy)
+            gy -= rr * f_sh
+            # |x| <= a y |y| <= a  <=>  max(|x|, |y|) <= a.
+            np.abs(gx, out=gx)
+            np.abs(gy, out=gy)
+            np.maximum(gx, gy, out=gx)
+            ids = (gx <= OUTER_HALF_MM).view(np.uint8)
+            ids += gx < INNER_HALF_MM      # isla dentro del tapete: 1 + 1 = 2
+            best_id[idx] = ids
         best_id = best_id.reshape(p.height, p.width)
         img = cv2.LUT(cv2.merge((best_id, best_id, best_id)), _PALETTE_LUT)
 

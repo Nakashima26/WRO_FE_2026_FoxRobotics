@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 from .params import (
     TwinParams,
-    steady_speed_mm_s,
     wheel_deg_from_servo,
 )
 
@@ -67,48 +66,65 @@ class Vehicle:
         pwm: float,
         direction: int,
     ) -> None:
+        # Llamado ~575k veces por corrida: params en locales y wheel_deg_from_servo /
+        # steady_speed_mm_s en línea (mismas operaciones, mismos floats).
         st = self.params.steering
         mot = self.params.motor
         veh = self.params.vehicle
 
         # Slew servo
-        target = max(st.servo_min_deg, min(st.servo_max_deg, servo_cmd_deg))
-        err = target - self.servo_deg
-        if abs(err) <= st.deadband_deg:
-            pass
-        else:
+        hi = st.servo_max_deg
+        lo = st.servo_min_deg
+        target = servo_cmd_deg if servo_cmd_deg < hi else hi
+        target = target if target > lo else lo
+        servo = self.servo_deg
+        err = target - servo
+        if abs(err) > st.deadband_deg:
             step = st.slew_deg_per_s * dt
             if err > 0:
-                self.servo_deg = min(target, self.servo_deg + step)
+                servo = servo + step
+                servo = servo if servo < target else target
             else:
-                self.servo_deg = max(target, self.servo_deg - step)
+                servo = servo - step
+                servo = servo if servo > target else target
+            self.servo_deg = servo
 
-        wheel = wheel_deg_from_servo(self.servo_deg, st)
-        v_ss = steady_speed_mm_s(pwm, wheel, mot, st)
-        if direction > 0:
-            v_target = v_ss
-        elif direction < 0:
-            v_target = -steady_speed_mm_s(pwm, wheel, mot, st)
-        else:
-            v_target = 0.0
-
+        center = st.servo_center_deg
+        gl = st.gain_left
+        gr = st.gain_right
+        delta = center - servo
+        wheel = delta * gr / 90.0 if delta >= 0.0 else delta * gl / 90.0
         if direction == 0:
-            tau = mot.tau_coast_s
-            self.v += (v_target - self.v) * (dt / tau)
+            v_target = 0.0
+        elif pwm <= mot.pwm0:
+            v_target = 0.0 if direction > 0 else -0.0
         else:
-            tau = mot.tau_drive_s
-            self.v += (v_target - self.v) * (dt / tau)
+            v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
+            d = center - lo
+            w_min = d * gr / 90.0 if d >= 0.0 else d * gl / 90.0
+            d = center - hi
+            w_hi = d * gr / 90.0 if d >= 0.0 else d * gl / 90.0
+            w_max = max(abs(w_min), abs(w_hi))
+            if w_max > 1e-6:
+                v *= 1.0 - mot.scrub_coeff * (abs(wheel) / w_max) ** 2
+            v_ss = max(0.0, v)
+            v_target = v_ss if direction > 0 else -v_ss
 
-        wh = math.radians(wheel)
+        tau = mot.tau_coast_s if direction == 0 else mot.tau_drive_s
+        vel = self.v + (v_target - self.v) * (dt / tau)
+        self.v = vel
+
+        wh = _radians(wheel)
         if abs(wh) > 1e-9 and abs(veh.wheelbase_mm) > 1e-6:
-            yaw_rate_rad = self.v / veh.wheelbase_mm * math.tan(wh)
-            self.heading_deg += math.degrees(yaw_rate_rad * dt)
-        else:
-            yaw_rate_rad = 0.0
+            yaw_rate_rad = vel / veh.wheelbase_mm * _tan(wh)
+            self.heading_deg += _degrees(yaw_rate_rad * dt)
 
-        h = math.radians(self.heading_deg)
-        self.x += self.v * dt * math.sin(h)
-        self.y += self.v * dt * math.cos(h)
+        h = _radians(self.heading_deg)
+        self.x += vel * dt * _sin(h)
+        self.y += vel * dt * _cos(h)
+
+
+_radians, _degrees, _sin, _cos, _tan = math.radians, math.degrees, math.sin, math.cos, math.tan
 
 
 def servo_from_ledc(ledc_duty: float, center: float = 90.0) -> float:

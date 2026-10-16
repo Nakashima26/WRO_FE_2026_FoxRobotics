@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass, field
 
@@ -29,6 +30,14 @@ def _body_dir_world(heading_deg: float, direction_deg: float) -> np.ndarray:
     return d / n if n > 1e-12 else fwd
 
 
+@functools.lru_cache(maxsize=None)
+def _body_dirs(start: float, stop: float, step: float) -> tuple[np.ndarray, np.ndarray]:
+    """(ángulos, direcciones en el cuerpo) del abanico de un sensor; no dependen de la pose.
+    Solo lectura: el mismo arreglo se reusa en cada lectura."""
+    angles = np.arange(start, stop, step)
+    return angles, np.stack([_body_dir_world(0.0, a) for a in angles], axis=0)
+
+
 class Ultrasonic:
     def __init__(self, params: UltrasonicParams, rng: np.random.Generator) -> None:
         self.params = params
@@ -41,14 +50,10 @@ class Ultrasonic:
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)
         origin = np.array([ox, oy], dtype=np.float64)
 
-        angles = np.arange(
+        angles, dirs_body = _body_dirs(
             mount.direction_deg - p.cone_half_deg,
             mount.direction_deg + p.cone_half_deg + 0.5 * p.ray_step_deg,
             p.ray_step_deg,
-        )
-        dirs_body = np.stack(
-            [_body_dir_world(0.0, a) for a in angles],
-            axis=0,
         )
         # Rotar al mundo
         h = math.radians(pose.heading_deg)
@@ -125,12 +130,11 @@ class ToF:
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)
         origin = np.array([ox, oy], dtype=np.float64)
 
-        angles = np.arange(
+        angles, dirs_body = _body_dirs(
             mount.direction_deg - p.half_fov_deg,
             mount.direction_deg + p.half_fov_deg + 0.5 * p.ray_step_deg,
             p.ray_step_deg,
         )
-        dirs_body = np.stack([_body_dir_world(0.0, a) for a in angles], axis=0)
         h = math.radians(pose.heading_deg)
         dirs = np.column_stack(
             [
