@@ -65,28 +65,25 @@ def _widest_free_segment_bounds(row_mask: np.ndarray, min_width: int) -> tuple[i
     Expone los bordes (no solo el centro) para poder ajustar la tendencia del
     borde de la pared a lo largo de varias filas — ver `detect_centerline()`.
     """
-    free_cols = np.where(row_mask > 0)[0]
+    free_cols = np.flatnonzero(row_mask > 0)
     if len(free_cols) < min_width:
         return None
 
-    best_l = best_r = -1
-    best_w = 0
-    seg_l = seg_prev = int(free_cols[0])
+    # Cortes entre segmentos; el primer máximo gana, como el bucle anterior.
+    cut = np.flatnonzero(free_cols[1:] - free_cols[:-1] != 1)
+    if len(cut) == 0:
+        best_l, best_r = int(free_cols[0]), int(free_cols[-1])
+    else:
+        starts = np.empty(len(cut) + 1, free_cols.dtype)
+        starts[0] = free_cols[0]
+        starts[1:] = free_cols[cut + 1]
+        ends = np.empty(len(cut) + 1, free_cols.dtype)
+        ends[:-1] = free_cols[cut]
+        ends[-1] = free_cols[-1]
+        i = int(np.argmax(ends - starts))
+        best_l, best_r = int(starts[i]), int(ends[i])
 
-    for c in free_cols[1:]:
-        ci = int(c)
-        if ci > seg_prev + 1:
-            w = seg_prev - seg_l + 1
-            if w > best_w:
-                best_w, best_l, best_r = w, seg_l, seg_prev
-            seg_l = ci
-        seg_prev = ci
-
-    w = seg_prev - seg_l + 1
-    if w > best_w:
-        best_w, best_l, best_r = w, seg_l, seg_prev
-
-    if best_w < min_width:
+    if best_r - best_l + 1 < min_width:
         return None
     return best_l, best_r
 

@@ -15,6 +15,7 @@ carril corrido al lado de paso: verde a la izquierda, rojo a la derecha.
 
 from __future__ import annotations
 
+import functools
 import math
 
 import cv2
@@ -130,8 +131,17 @@ def feet_world(feet, pose_xy, heading_deg):
     return out
 
 
-def _seat_world(section: str) -> list[tuple[str, float, float]]:
-    return [(sid, *section_to_world(section, h, w)) for sid, (h, w) in SEATS.items()]
+@functools.cache
+def _seat_world(section: str) -> tuple[tuple[str, float, float], ...]:
+    return tuple((sid, *section_to_world(section, h, w)) for sid, (h, w) in SEATS.items())
+
+
+@functools.cache
+def _lane_frame(section: str, direction: str) -> tuple[float, float, float, float]:
+    """(x0, y0, sin, cos) del origen del carril: lo pide _section_frame cientos de veces por frame."""
+    x0, y0, h = _lane_pose(section, direction, 0.0, 0.0)
+    rad = math.radians(h)
+    return x0, y0, math.sin(rad), math.cos(rad)
 
 
 class DigitalMap:
@@ -364,18 +374,16 @@ class DigitalMap:
         self._at_corner = fwd < 350.0
 
     def _along_of(self, x: float, y: float, section: str) -> float:
-        x0, y0, h = _lane_pose(section, self.direction, 0.0, 0.0)
+        x0, y0, sn, cs = _lane_frame(section, self.direction)
         dx, dy = x - x0, y - y0
-        rad = math.radians(h)
-        return dx * math.sin(rad) + dy * math.cos(rad)
+        return dx * sn + dy * cs
 
     def _section_frame(self, x: float, y: float, section: str) -> tuple[float, float]:
         """(along desde la pared de atrás, derecha del sentido)."""
-        x0, y0, h = _lane_pose(section, self.direction, 0.0, 0.0)
+        x0, y0, sn, cs = _lane_frame(section, self.direction)
         dx, dy = x - x0, y - y0
-        rad = math.radians(h)
-        along = dx * math.sin(rad) + dy * math.cos(rad)
-        right = dx * math.cos(rad) - dy * math.sin(rad)
+        along = dx * sn + dy * cs
+        right = dx * cs - dy * sn
         return along, right
 
     def _vote(self, feet: list[tuple[float, float, str]]) -> None:
@@ -833,9 +841,11 @@ class DigitalMap:
         pts.append((x, y))
         shifts.append(shift)
 
-    def _ease(self, sec: str, along: float) -> float:
-        """Lado de paso de la lata que toca. Verde a la izquierda, rojo a la derecha."""
-        cans = self._cans_on(sec, 0.0, 3200.0)
+    def _ease(self, sec: str, along: float, cans=None) -> float:
+        """Lado de paso de la lata que toca. Verde a la izquierda, rojo a la derecha.
+        cans: _cans_on(sec, 0, 3200) ya calculado (el bucle de _build_line lo repite)."""
+        if cans is None:
+            cans = self._cans_on(sec, 0.0, 3200.0)
         if not cans:
             return 0.0
 
@@ -1172,7 +1182,7 @@ class DigitalMap:
         a = along
         last_lat = car_lat
         while a < end:
-            target = self._ease(sec, a)
+            target = self._ease(sec, a, mine)
             if lead is not None and (not mine or a >= mine[-1][0]):
                 # No regresar al rojo: la línea de adelante se queda del lado
                 # de paso (o del carro, si ya pasó) para subir a la izquierda
@@ -1185,17 +1195,18 @@ class DigitalMap:
             a += step
         # La curva sale del último lateral que usó la recta (antes: el de
         # _ease o car_lat, distinto si la recta era corta -> escalón).
-        sh0 = hold_lat if lead is not None else self._ease(sec, max(a - 40.0, along))
+        sh0 = hold_lat if lead is not None else self._ease(sec, max(a - 40.0, along), mine)
         p0 = _lane_pose(sec, self.direction, max(a - 40.0, along), sh0)
         hrad = math.radians(_heading(sec, self.direction))
         fx, fy = math.sin(hrad), math.cos(hrad)
+        nxt_cans = self._cans_on(nxt, 0.0, 3200.0)
         if lead is not None and knee is not None:
             bow = knee
             kn_a, _ = self._section_frame(knee[0], knee[1], nxt)
             p2 = _lane_pose(nxt, self.direction, kn_a + _KNEE_MM, sh2)
             p2 = (p2[0], p2[1])
         else:
-            sh2 = self._ease(nxt, na + 700.0)
+            sh2 = self._ease(nxt, na + 700.0, nxt_cans)
             p2 = _lane_pose(nxt, self.direction, na + 700.0, sh2)
             # Vértice = cruce de esta recta (desde p0, hacia adelante) con la
             # siguiente (por p2). Antes se corría p0 hacia la DERECHA: la curva
@@ -1225,7 +1236,7 @@ class DigitalMap:
                 # 160 mm de escalón justo en el verde.
                 sh = sh2 if knee is not None else lead[1]
             else:
-                sh = self._ease(nxt, b)
+                sh = self._ease(nxt, b, nxt_cans)
                 if lead is not None and knee is not None:
                     u = min(1.0, max(0.0, (b - max(tail0, lead[0] + 220.0)) / 300.0))
                     sh = sh2 + (sh - sh2) * u * u * (3.0 - 2.0 * u)
