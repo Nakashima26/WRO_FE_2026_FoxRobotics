@@ -27,6 +27,7 @@ digital): con cinemática de bicicleta el eje trasero va tangente a la ruta.
 
 from __future__ import annotations
 
+import ctypes
 import math
 import time
 from dataclasses import dataclass, field
@@ -194,6 +195,8 @@ def _square_pts(cx, cy, half, n=5):
 
 
 _STATIC_CACHE: dict = {}
+_GEOM_CACHE: dict = {}
+_NATIVE_DP = True                  # False: bucle de la DP en numpy (sin fox_route_dp)
 
 
 def _station_poses(P):
@@ -224,6 +227,50 @@ def _static_clearance(x, y, hd_rad, obst_pts):
     if obst_pts is not None and len(obst_pts):
         clear = np.minimum(clear, _rect_dist_pose(obst_pts[:, 0], obst_pts[:, 1], x, y, hd_rad).min(-1))
     return clear
+
+
+def _dp_geometry(P, prm, side_ok):
+    """Por estación k1: G = wl + w_κ·κ² (n,m,m,m), DS = |bc| (n,m,m) y
+    MASK = κ fuera de rango o lado no permitido (n,m,m,m). No ve obstáculos."""
+    n, m = P.shape[0], P.shape[1]
+    kmax = 1.0 / prm.r_min_mm
+    G = np.empty((n, m, m, m))
+    DS = np.empty((n, m, m))
+    MASK = np.empty((n, m, m, m), dtype=bool)
+    for k1 in range(n):
+        k0, k2 = (k1 - 1) % n, (k1 + 1) % n
+        A = P[k0][:, None, None, :]
+        B = P[k1][None, :, None, :]
+        Cc = P[k2][None, None, :, :]
+        ab = B - A
+        bc = Cc - B
+        ac = Cc - A
+        cross = ab[..., 0] * bc[..., 1] - ab[..., 1] * bc[..., 0]
+        lab = np.hypot(ab[..., 0], ab[..., 1])
+        lbc = np.hypot(bc[..., 0], bc[..., 1])
+        lac = np.hypot(ac[..., 0], ac[..., 1])
+        kap = 2.0 * cross / np.maximum(lab * lbc * lac, 1e-9)       # (m,m,m)
+        if prm.time_cost:
+            # Costo de tiempo: el tramo cuesta w_len·ds·(v_max/v(κ)), con v(κ) del
+            # perfil (sqrt(a_lat/|κ|) acotado). En recta el factor es 1.
+            v_k = np.clip(np.sqrt(prm.a_lat_mm_s2 / np.maximum(np.abs(kap), 1e-9)), prm.v_min_mm_s, prm.v_max_mm_s)
+            wl = prm.w_len * (prm.v_max_mm_s / v_k)                 # (m,m,m)
+        else:
+            wl = prm.w_len
+        G[k1] = wl + prm.w_kappa * kap * kap
+        DS[k1] = lbc[0]
+        MASK[k1] = (np.abs(kap) > kmax) | ~side_ok[k1][None, :, :]
+    return G, DS, MASK
+
+
+def _dp_kernel():
+    """fox_route_dp de la biblioteca nativa, o None si no está disponible."""
+    try:
+        from .native import get_kernel
+        i32, vp = ctypes.c_int32, ctypes.c_void_p
+        return get_kernel("fox_route_dp", [i32, i32, i32] + [vp] * 10, None)
+    except Exception:
+        return None
 
 
 def plan(direction: str, seats: dict, parking: str | None = None,
@@ -385,54 +432,53 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     for k, dval in (lock or {}).items():
         allowed_d[int(k) % n] &= np.abs(D - dval) <= 0.5 * prm.d_step
 
-    # Ángulo de cada tramo (b en k -> c en k+1) contra la dirección del pasillo:
-    # sin esto la DP "brinca" de lado entre estaciones (la curvatura de 3 puntos
-    # no lo ve y la holgura solo se mide en las estaciones).
-    lane_t = P[(np.arange(n) + 1) % n] - P                         # (n, m, 2) mismo d
-    lane_t /= np.linalg.norm(lane_t, axis=-1, keepdims=True)
-    max_cos = math.cos(math.radians(prm.max_angle_deg))
-    side_ok = np.empty((n, m, m), dtype=bool)
-    for k in range(n):
-        seg = P[(k + 1) % n][None, :, :] - P[k][:, None, :]      # (b, c, 2)
-        ln = np.linalg.norm(seg, axis=-1)
-        cosang = (seg[..., 0] * lane_t[k][:, None, 0] + seg[..., 1] * lane_t[k][:, None, 1]) / np.maximum(ln, 1e-9)
-        side_ok[k] = cosang >= max_cos
-
-    kmax = 1.0 / prm.r_min_mm
     INF = 1e18
     N = laps * n
+    # Geometría de la DP (no depende de obstáculos): caché por sentido, cajón de
+    # salida, malla y parámetros de costo/curvatura.
+    gkey = (direction, start_section or "N", n, prm.d_min, prm.d_max, prm.d_step, prm.w_len, prm.w_kappa,
+            prm.time_cost, prm.a_lat_mm_s2, prm.v_min_mm_s, prm.v_max_mm_s, prm.r_min_mm, prm.max_angle_deg)
+    geo = _GEOM_CACHE.get(gkey)
+    if geo is None:
+        # Ángulo de cada tramo (b en k -> c en k+1) contra la dirección del pasillo:
+        # sin esto la DP "brinca" de lado entre estaciones (la curvatura de 3 puntos
+        # no lo ve y la holgura solo se mide en las estaciones).
+        lane_t = P[(np.arange(n) + 1) % n] - P                     # (n, m, 2) mismo d
+        lane_t /= np.linalg.norm(lane_t, axis=-1, keepdims=True)
+        max_cos = math.cos(math.radians(prm.max_angle_deg))
+        side_ok = np.empty((n, m, m), dtype=bool)
+        for k in range(n):
+            seg = P[(k + 1) % n][None, :, :] - P[k][:, None, :]      # (b, c, 2)
+            ln = np.linalg.norm(seg, axis=-1)
+            cosang = (seg[..., 0] * lane_t[k][:, None, 0] + seg[..., 1] * lane_t[k][:, None, 1]) / np.maximum(ln, 1e-9)
+            side_ok[k] = cosang >= max_cos
+        geo = _GEOM_CACHE[gkey] = _dp_geometry(P, prm, side_ok)
+    G, DS, MASK = geo
     # V[a, b]: costo de llegar con d_{t-1}=a, d_t=b. Arranque libre en t=1.
     Vc = np.where(bad[1] | ~allowed_d[1][None, :], INF, 0.0)
     back = np.zeros((N, m, m), dtype=np.int16)
-    for t in range(1, N - 1):
-        k0, k1, k2 = (t - 1) % n, t % n, (t + 1) % n
-        A = P[k0][:, None, None, :]
-        B = P[k1][None, :, None, :]
-        Cc = P[k2][None, None, :, :]
-        ab = B - A
-        bc = Cc - B
-        ac = Cc - A
-        cross = ab[..., 0] * bc[..., 1] - ab[..., 1] * bc[..., 0]
-        lab = np.hypot(ab[..., 0], ab[..., 1])
-        lbc = np.hypot(bc[..., 0], bc[..., 1])
-        lac = np.hypot(ac[..., 0], ac[..., 1])
-        kap = 2.0 * cross / np.maximum(lab * lbc * lac, 1e-9)       # (m,m,m)
-        ds = lbc                                                    # (1,m,m)
-        if prm.time_cost:
-            # Costo de tiempo: el tramo cuesta w_len·ds·(v_max/v(κ)), con v(κ) del
-            # perfil (sqrt(a_lat/|κ|) acotado). En recta el factor es 1.
-            v_k = np.clip(np.sqrt(prm.a_lat_mm_s2 / np.maximum(np.abs(kap), 1e-9)), prm.v_min_mm_s, prm.v_max_mm_s)
-            wl = prm.w_len * (prm.v_max_mm_s / v_k)                 # (m,m,m)
-        else:
-            wl = prm.w_len
-        step = ds * (wl + prm.w_kappa * kap * kap + pen[k2][None, :, :]) + bonus[k2][None, :, :]
-        step = np.where((np.abs(kap) > kmax) | bad[k2][None, :, :] | ~allowed_d[k2][None, None, :]
-                        | ~side_ok[k1][None, :, :], INF, step)
-        tot = Vc[:, :, None] + step                                 # (a,b,c)
-        arg = np.argmin(tot, axis=0)                                # (b,c)
-        back[t + 1] = arg
-        Vc = np.take_along_axis(tot, arg[None], axis=0)[0]
-        Vc = np.minimum(Vc, INF)
+    kern = _dp_kernel() if _NATIVE_DP else None
+    if kern is not None:
+        # Mismo bucle en C (fox_route_dp): mismas operaciones y orden, bit a bit.
+        penc = np.ascontiguousarray(pen, dtype=np.float64)
+        bonc = np.ascontiguousarray(bonus, dtype=np.float64)
+        badu = np.ascontiguousarray(bad).view(np.uint8)
+        alu = np.ascontiguousarray(allowed_d).view(np.uint8)
+        Vc = np.ascontiguousarray(Vc, dtype=np.float64)
+        Vtmp = np.empty((m, m))
+        kern(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
+             penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
+             Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data)
+    else:
+        for t in range(1, N - 1):
+            k1, k2 = t % n, (t + 1) % n
+            step = DS[k1][None, :, :] * (G[k1] + pen[k2][None, :, :]) + bonus[k2][None, :, :]
+            step = np.where(MASK[k1] | bad[k2][None, :, :] | ~allowed_d[k2][None, None, :], INF, step)
+            tot = Vc[:, :, None] + step                                 # (a,b,c)
+            arg = np.argmin(tot, axis=0)                                # (b,c)
+            back[t + 1] = arg
+            Vc = np.take_along_axis(tot, arg[None], axis=0)[0]
+            Vc = np.minimum(Vc, INF)
     # Reconstrucción
     b, c = np.unravel_index(int(np.argmin(Vc)), Vc.shape)
     feasible = Vc[b, c] < INF / 2
