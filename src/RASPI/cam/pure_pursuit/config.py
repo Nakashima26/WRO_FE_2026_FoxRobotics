@@ -1344,6 +1344,9 @@ ROUTE_PROFILE_BRAKE_FLOOR_PWM = 60
 # falso con masa 0.97 (semilla 8: 9 lecturas iguales, δ=700 con la verdad en 290).
 # None = como antes (cada frame pesa 1).
 ROUTE_FIX_STEP_MM = None
+# Arranque forzado: δ del cajón = mediana de lo que dice la línea naranja (recta del BEV en la columna central) si hay ≥ ROUTE_FIX_LINE_MIN lecturas; None = solo sonar
+ROUTE_FIX_LINE = None
+ROUTE_FIX_LINE_MIN = 3
 # Perfil: aceleración lateral menor en curvas muy cerradas (|κ| > TIGHT_KAPPA, 1/mm).
 # Con radio < lookahead (200 mm) el pure pursuit corta hacia adentro (esquinas de la
 # isla, semilla 3). None = apagado (todas las curvas con A_LAT_MM_S2).

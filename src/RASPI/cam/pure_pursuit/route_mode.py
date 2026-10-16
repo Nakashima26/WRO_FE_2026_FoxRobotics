@@ -38,7 +38,7 @@ from .digital_map import feet_world
 from .localizer import Localizer
 from .start_fix import StartFix
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
-                        SECTIONS_CW, section_to_world, world_to_section)
+                        SECTIONS_CW, orange_segments, section_to_world, world_to_section)
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
 _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
@@ -104,6 +104,8 @@ class RouteMode:
         # Arranque ciego
         self.blind = bool(getattr(C, "ROUTE_START_BLIND", False))
         self.fix = None              # StartFix mientras no se sabe el avance
+        self.orange = None           # estado de la línea naranja (OrangeLineTracker) del frame
+        self._line_d: list = []      # δ por lectura de la línea naranja (ROUTE_FIX_LINE)
         self.fixed = not self.blind
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
         self.axis = (0.0, 0.0)
@@ -464,12 +466,15 @@ class RouteMode:
         if not self.fixed:
             self._pre_poses.append(pose)
             self.fix.update(ack, pose)
+            if getattr(C, "ROUTE_FIX_LINE", None): self._line_vote(dm, pose)
             delta = self.fix.converged()
             forced = False
             if delta is None and self._past_straight(dm, pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
                 # decidan, el histograma queda plano cerca de lo supuesto).
                 delta = self.fix.mean()
+                if getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3)):
+                    delta = float(np.median(self._line_d))
                 forced = True
             if delta is not None:
                 pose = self._apply_fix(dm, ack, delta, forced)
@@ -783,6 +788,36 @@ class RouteMode:
         front = w + sgn * RR._FRONT_MM
         return front >= 1900.0 if sgn > 0 else front <= 1100.0
 
+    def _line_vote(self, dm, pose):
+        """δ del cajón según la línea naranja: punto de la recta en la columna central del BEV, llevado al mundo con la pose supuesta."""
+        o = self.orange
+        if not o or not o.get("seen") or not o.get("line") or o.get("dead_reckoned"):
+            return
+        vx, vy, x0, y0 = o["line"]
+        if abs(vx) < 1e-6:
+            return
+        by = y0 + (float(C.ROBOT_BEV_X) - x0) * vy / vx
+        fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
+        if not 100.0 <= fwd <= 600.0:
+            return
+        h = math.radians(pose[2])
+        p = np.array([pose[0] + fwd * math.sin(h), pose[1] + fwd * math.cos(h)])
+        a = np.array(self.axis)
+        span = PARK_W_MAX - PARK_W_MIN
+        lo, hi = (-150.0, span + 150.0) if dm.direction == "CW" else (-span - 150.0, 150.0)
+        best = None
+        for (sx, sy), (ex, ey) in orange_segments():
+            u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
+            n = np.array([-u[1], u[0]])
+            if abs(n @ a) < 0.3:
+                continue
+            d = (n @ np.array([sx, sy]) - n @ p) / (n @ a)
+            dist = math.hypot(sx - p[0], sy - p[1])
+            if lo <= d <= hi and (best is None or dist < best[1]):
+                best = (float(d), dist)
+        if best is not None:
+            self._line_d.append(best[0])
+
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""
         ax, ay = self.axis
@@ -803,6 +838,8 @@ class RouteMode:
                 self._update_views(conf, empty, (px + dx, py + dy, ph))
         self._pre_poses = []
         how = "FORZADO" if forced else f"masa {mass:.2f}"
+        if getattr(C, "ROUTE_FIX_LINE", None):
+            how += f" línea n={len(self._line_d)}"
         print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, {how}) tras "
               f"{self.fix.n_frames} lecturas ({self.fix.n_inform} informativas); "
               f"{n} frames de cámara votados", flush=True)

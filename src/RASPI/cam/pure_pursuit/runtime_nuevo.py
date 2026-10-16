@@ -431,7 +431,7 @@ class PPRuntime:
         dm = getattr(self, "digital", None)
         return list(dm.line_world) if dm is not None and dm.line_world else None
 
-    def _route_step(self, armed: bool, frame=None):
+    def _route_step(self, armed: bool, frame=None, orange=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
         if not getattr(C, "ROUTE_FOLLOW", False):
             return None, "", None
@@ -442,6 +442,7 @@ class PPRuntime:
         self._rmode.frame = frame
         self._rmode.color_ranges = getattr(self.vision, "color_ranges", None)
         self._rmode.bev = self.bev
+        self._rmode.orange = orange
         return self._rmode.step(self.digital, self._prev_estado, getattr(self, "_prev_ack", None), armed)
 
     # ── Serial ────────────────────────────────────────────────────────────────
@@ -2109,7 +2110,7 @@ class PPRuntime:
         # Frame sin anotar (detect_on dibuja sobre una copia), solo si se usa la ROI
         _roi_frame = (frame if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
                       or getattr(C, "SEAT_ROI_LOG", False)) else None)
-        _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame)
+        _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame, line_info["Orange"])
         if _route_steer is not None:
             obs_norm = _route_steer
             state = "pp_follow"
