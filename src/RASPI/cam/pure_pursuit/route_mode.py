@@ -721,6 +721,7 @@ class RouteMode:
         mn = getattr(C, "ROUTE_PROFILE_MIN_PWM", None)
         floor = base if mn is None else min(int(mn), base)
         v_min = K * (floor - pwm0)
+        tight_on = False
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
         win = int(C.ROUTE_PROFILE_KAPPA_WIN)
@@ -758,6 +759,14 @@ class RouteMode:
                     near = float(near)
                     f = np.clip((dd - near) / max(sign_mm - near, 1.0), 0.0, 1.0)
                     v_sign = v_min + (v_base - v_min) * f
+                tight_mm = getattr(C, "ROUTE_PROFILE_SIGN_TIGHT_MM", None)
+                if tight_mm is not None and near is not None:
+                    # Paso muy justo (centro de ruta a centro de señal < NEAR): baja de MIN_PWM hasta TIGHT_PWM en TIGHT_MM.
+                    tight_mm = float(tight_mm)
+                    v_t = K * (float(getattr(C, "ROUTE_PROFILE_SIGN_TIGHT_PWM", 110)) - pwm0)
+                    g = np.clip((dd - tight_mm) / max(near - tight_mm, 1.0), 0.0, 1.0)
+                    v_sign = np.where(dd < near, v_t + (v_min - v_t) * g, v_sign)
+                    tight_on = True
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
         if getattr(C, "ROUTE_PROFILE_ISLAND_MM", None) is not None:
             # Cerca de las esquinas de la isla: misma rampa que las señales (v_min -> base).
@@ -781,6 +790,8 @@ class RouteMode:
             # Frenando hacia una muestra de adelante: se adelanta el retraso del motor.
             v_allow -= float(ff) * a_brk
             lo = min(floor, int(getattr(C, "ROUTE_PROFILE_BRAKE_FLOOR_PWM", 60)))
+        if tight_on:
+            lo = min(lo, int(getattr(C, "ROUTE_PROFILE_SIGN_TIGHT_PWM", 110)))
         pwm = v_allow / K + pwm0
         return int(round(min(max(pwm, lo), top)))
 

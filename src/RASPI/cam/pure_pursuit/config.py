@@ -1331,6 +1331,9 @@ ROUTE_PROFILE_MIN_PWM = None
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
 ROUTE_PROFILE_SIGN_NEAR_MM = None
+# Paso muy justo a una señal (ruta a centro < NEAR_MM): rampa de MIN_PWM a TIGHT_PWM en TIGHT_MM (centro a centro). None = apagado
+ROUTE_PROFILE_SIGN_TIGHT_MM = None
+ROUTE_PROFILE_SIGN_TIGHT_PWM = 110
 # Perfil: frenar también cerca de las 4 esquinas de la isla (±INNER_HALF_MM, ±INNER_HALF_MM).
 # None = apagado. Rampa de v_min (dist <= ISLAND_NEAR_MM) a la base (dist >= ISLAND_MM),
 # igual que con las señales. Distancia medida desde la muestra de la ruta a la esquina.
