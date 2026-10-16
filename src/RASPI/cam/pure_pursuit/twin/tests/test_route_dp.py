@@ -46,6 +46,8 @@ def _check_golden(native):
     g = np.load(GOLDEN)
     old = RR._NATIVE_DP
     RR._NATIVE_DP = native
+    RR._GEOM_CACHE.clear()          # que corra la geometría de verdad (numpy o C)
+    RR._STATIC_CACHE.clear()
     try:
         for i, case in enumerate(_cases()):
             r = _run(case)

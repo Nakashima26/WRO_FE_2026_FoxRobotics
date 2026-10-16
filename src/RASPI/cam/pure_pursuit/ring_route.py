@@ -164,9 +164,11 @@ def signs_from_field(field) -> dict:
     return {(s.section, s.seat): s.color for s in field.signs}
 
 
-def _rect_dist_pose(px, py, x, y, hd_rad):
-    """Distancia de puntos (m,) a huellas (…,) del carro; broadcast: x,y,hd (...), puntos (m)."""
-    fx, fy = np.sin(hd_rad), np.cos(hd_rad)
+def _rect_dist_pose(px, py, x, y, hd_rad, fx=None, fy=None):
+    """Distancia de puntos (m,) a huellas (…,) del carro; broadcast: x,y,hd (...), puntos (m).
+    fx, fy: sin y cos de hd_rad ya calculados (opcional)."""
+    if fx is None:
+        fx, fy = np.sin(hd_rad), np.cos(hd_rad)
     dx = px - x[..., None]
     dy = py - y[..., None]
     lon = dx * fx[..., None] + dy * fy[..., None]
@@ -178,8 +180,9 @@ def _rect_dist_pose(px, py, x, y, hd_rad):
     return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0)
 
 
-def _corners_pose(x, y, hd_rad):
-    fx, fy = np.sin(hd_rad), np.cos(hd_rad)
+def _corners_pose(x, y, hd_rad, fx=None, fy=None):
+    if fx is None:
+        fx, fy = np.sin(hd_rad), np.cos(hd_rad)
     rx, ry = fy, -fx
     out = []
     for lon, lat in ((-_REAR_MM, -_HALF_W), (-_REAR_MM, _HALF_W), (_FRONT_MM, _HALF_W), (_FRONT_MM, -_HALF_W)):
@@ -210,9 +213,11 @@ def _station_poses(P):
     return xx, yy, hd
 
 
-def _static_clearance(x, y, hd_rad, obst_pts):
+def _static_clearance(x, y, hd_rad, obst_pts, fx=None, fy=None):
     """Holgura mínima de la huella en las poses dadas (arrays de igual forma)."""
-    cs = _corners_pose(x, y, hd_rad)
+    if fx is None:
+        fx, fy = np.sin(hd_rad), np.cos(hd_rad)
+    cs = _corners_pose(x, y, hd_rad, fx, fy)
     wall = OUTER_HALF_MM - np.max([np.maximum(np.abs(cx), np.abs(cy)) for cx, cy in cs], axis=0)
     isl = np.full(x.shape, np.inf)
     for cx, cy in cs:
@@ -222,10 +227,10 @@ def _static_clearance(x, y, hd_rad, obst_pts):
         d = np.where(inside, -1.0, np.hypot(ox, oy))
         isl = np.minimum(isl, d)
     icorner = np.array([[INNER_HALF_MM * sx, INNER_HALF_MM * sy] for sx in (-1, 1) for sy in (-1, 1)])
-    isl = np.minimum(isl, _rect_dist_pose(icorner[:, 0], icorner[:, 1], x, y, hd_rad).min(-1))
+    isl = np.minimum(isl, _rect_dist_pose(icorner[:, 0], icorner[:, 1], x, y, hd_rad, fx, fy).min(-1))
     clear = np.minimum(wall, isl)
     if obst_pts is not None and len(obst_pts):
-        clear = np.minimum(clear, _rect_dist_pose(obst_pts[:, 0], obst_pts[:, 1], x, y, hd_rad).min(-1))
+        clear = np.minimum(clear, _rect_dist_pose(obst_pts[:, 0], obst_pts[:, 1], x, y, hd_rad, fx, fy).min(-1))
     return clear
 
 
@@ -234,6 +239,18 @@ def _dp_geometry(P, prm, side_ok):
     MASK = κ fuera de rango o lado no permitido (n,m,m,m). No ve obstáculos."""
     n, m = P.shape[0], P.shape[1]
     kmax = 1.0 / prm.r_min_mm
+    kg = _geom_kernel() if _NATIVE_DP else None
+    if kg is not None:
+        # Mismo cálculo en C (fox_route_geom): mismo orden de operaciones, bit a bit.
+        Pc = np.ascontiguousarray(P, dtype=np.float64)
+        sok = np.ascontiguousarray(side_ok).view(np.uint8)
+        G = np.empty((n, m, m, m))
+        DS = np.empty((n, m, m))
+        MASK = np.empty((n, m, m, m), dtype=np.uint8)
+        kg(n, m, Pc.ctypes.data, sok.ctypes.data, int(prm.time_cost), prm.w_len, prm.w_kappa,
+           prm.a_lat_mm_s2, prm.v_min_mm_s, prm.v_max_mm_s, kmax,
+           G.ctypes.data, DS.ctypes.data, MASK.ctypes.data)
+        return G, DS, MASK.view(bool)
     G = np.empty((n, m, m, m))
     DS = np.empty((n, m, m))
     MASK = np.empty((n, m, m, m), dtype=bool)
@@ -263,14 +280,31 @@ def _dp_geometry(P, prm, side_ok):
     return G, DS, MASK
 
 
-def _dp_kernel():
-    """fox_route_dp de la biblioteca nativa, o None si no está disponible."""
+_KERNELS: dict = {}                # (nombre, FOX_NATIVE) -> función nativa o None
+
+
+def _native_fn(name, argtypes):
+    """Kernel nativo por nombre, cacheado por FOX_NATIVE (la carga cuesta ~4 ms por llamada)."""
     try:
-        from .native import get_kernel
-        i32, vp = ctypes.c_int32, ctypes.c_void_p
-        return get_kernel("fox_route_dp", [i32, i32, i32] + [vp] * 10, None)
+        from .native import enabled, get_kernel
+        key = (name, enabled())
+        if key not in _KERNELS:
+            _KERNELS[key] = get_kernel(name, argtypes, None)
+        return _KERNELS[key]
     except Exception:
         return None
+
+
+def _dp_kernel():
+    """fox_route_dp de la biblioteca nativa, o None si no está disponible."""
+    i32, vp = ctypes.c_int32, ctypes.c_void_p
+    return _native_fn("fox_route_dp", [i32, i32, i32] + [vp] * 10)
+
+
+def _geom_kernel():
+    """fox_route_geom de la biblioteca nativa, o None si no está disponible."""
+    i32, vp, f64 = ctypes.c_int32, ctypes.c_void_p, ctypes.c_double
+    return _native_fn("fox_route_geom", [i32, i32, vp, vp, i32] + [f64] * 6 + [vp] * 3)
 
 
 def plan(direction: str, seats: dict, parking: str | None = None,
@@ -346,6 +380,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     # en las estaciones cercanas, como círculo de la diagonal de la señal
     # (conservador: hasta 10 mm de más contra una cara).
     xx, yy, hd = _station_poses(P)
+    shd, chd = np.sin(hd), np.cos(hd)
     ckey = (direction, start_section or "N", parking, park_w, n, prm.d_min, prm.d_max, prm.d_step)
     clear = _STATIC_CACHE.get(ckey)
     if clear is None:
@@ -363,7 +398,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
             near = None
             if bar is not None:
                 near = bar[np.hypot(bar[:, 0] - O[k, 0], bar[:, 1] - O[k, 1]) < 1300.0]
-            clear[k] = _static_clearance(xx[k], yy[k], hd[k], near)
+            clear[k] = _static_clearance(xx[k], yy[k], hd[k], near, shd[k], chd[k])
         _STATIC_CACHE[ckey] = clear
     clear = clear.copy()
     centers = [(px, py) for px, py, _c in pillars] + extra_centers
@@ -375,7 +410,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
         if len(ks) == 0:
             continue
-        dsg = _rect_dist_pose(np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks])[..., 0] - r_sign
+        dsg = _rect_dist_pose(np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks], shd[ks], chd[ks])[..., 0] - r_sign
         clear[ks] = np.minimum(clear[ks], dsg)
     bad = clear < prm.hard_clear_mm
     bonus = np.zeros((n, m, m))
@@ -399,11 +434,12 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 # detección medida ~98 %): la ruta pasa mirándolo y se resuelve.
                 kv = np.flatnonzero(np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1500.0)
                 cam = float(getattr(C, "CAMERA_FWD_MM", 140.0))
-                cx = xx[kv] + cam * np.sin(hd[kv])
-                cy = yy[kv] + cam * np.cos(hd[kv])
+                s, c = shd[kv], chd[kv]
+                cx = xx[kv] + cam * s
+                cy = yy[kv] + cam * c
                 dxs, dys = ux - cx, uy - cy
-                fwd = dxs * np.sin(hd[kv]) + dys * np.cos(hd[kv])
-                latv = dxs * np.cos(hd[kv]) - dys * np.sin(hd[kv])
+                fwd = dxs * s + dys * c
+                latv = dxs * c - dys * s
                 dist = np.hypot(fwd, latv)
                 vis = (fwd > 0) & (dist >= prm.view_min_mm) & (dist <= prm.view_max_mm) & (
                     np.abs(latv) <= fwd * math.tan(math.radians(prm.view_half_deg)))
