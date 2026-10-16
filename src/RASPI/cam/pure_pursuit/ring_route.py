@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -199,6 +200,9 @@ def _square_pts(cx, cy, half, n=5):
 
 _STATIC_CACHE: dict = {}
 _GEOM_CACHE: dict = {}
+_RANGE_CACHE: dict = {}            # gkey -> (ALO, AHI) para fox_route_dp_sparse
+_SIGN_CACHE: dict = {}             # (ckey, cx, cy) -> (ks, dsg) de la señal
+_VIS_CACHE: dict = {}              # (ckey, ux, uy, ...) -> (kv, vis) de la cámara
 _NATIVE_DP = True                  # False: bucle de la DP en numpy (sin fox_route_dp)
 
 
@@ -299,6 +303,12 @@ def _dp_kernel():
     """fox_route_dp de la biblioteca nativa, o None si no está disponible."""
     i32, vp = ctypes.c_int32, ctypes.c_void_p
     return _native_fn("fox_route_dp", [i32, i32, i32] + [vp] * 10)
+
+
+def _dp_sparse_kernel():
+    """fox_route_dp_sparse de la biblioteca nativa, o None si no está disponible."""
+    i32, vp = ctypes.c_int32, ctypes.c_void_p
+    return _native_fn("fox_route_dp_sparse", [i32, i32, i32] + [vp] * 12)
 
 
 def _geom_kernel():
@@ -407,10 +417,16 @@ def plan(direction: str, seats: dict, parking: str | None = None,
             centers.append(section_to_world(sname, *SEATS[seat]))
     r_sign = SIGN_MM / 2.0 * math.sqrt(2.0)
     for cx, cy in centers:
-        ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
+        sk = (ckey, float(cx), float(cy))
+        if sk not in _SIGN_CACHE:
+            ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
+            dsg = None
+            if len(ks) > 0:
+                dsg = _rect_dist_pose(np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks], shd[ks], chd[ks])[..., 0] - r_sign
+            _SIGN_CACHE[sk] = (ks, dsg)
+        ks, dsg = _SIGN_CACHE[sk]
         if len(ks) == 0:
             continue
-        dsg = _rect_dist_pose(np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks], shd[ks], chd[ks])[..., 0] - r_sign
         clear[ks] = np.minimum(clear[ks], dsg)
     bad = clear < prm.hard_clear_mm
     bonus = np.zeros((n, m, m))
@@ -432,17 +448,21 @@ def plan(direction: str, seats: dict, parking: str | None = None,
             if prm.w_visible > 0.0:
                 # Premio por estación desde la que la cámara lo vería (zona de
                 # detección medida ~98 %): la ruta pasa mirándolo y se resuelve.
-                kv = np.flatnonzero(np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1500.0)
                 cam = float(getattr(C, "CAMERA_FWD_MM", 140.0))
-                s, c = shd[kv], chd[kv]
-                cx = xx[kv] + cam * s
-                cy = yy[kv] + cam * c
-                dxs, dys = ux - cx, uy - cy
-                fwd = dxs * s + dys * c
-                latv = dxs * c - dys * s
-                dist = np.hypot(fwd, latv)
-                vis = (fwd > 0) & (dist >= prm.view_min_mm) & (dist <= prm.view_max_mm) & (
-                    np.abs(latv) <= fwd * math.tan(math.radians(prm.view_half_deg)))
+                vk = (ckey, float(ux), float(uy), cam, prm.view_min_mm, prm.view_max_mm, prm.view_half_deg)
+                if vk not in _VIS_CACHE:
+                    kv = np.flatnonzero(np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1500.0)
+                    s, c = shd[kv], chd[kv]
+                    cx = xx[kv] + cam * s
+                    cy = yy[kv] + cam * c
+                    dxs, dys = ux - cx, uy - cy
+                    fwd = dxs * s + dys * c
+                    latv = dxs * c - dys * s
+                    dist = np.hypot(fwd, latv)
+                    vis = (fwd > 0) & (dist >= prm.view_min_mm) & (dist <= prm.view_max_mm) & (
+                        np.abs(latv) <= fwd * math.tan(math.radians(prm.view_half_deg)))
+                    _VIS_CACHE[vk] = (kv, vis)
+                kv, vis = _VIS_CACHE[vk]
                 bonus[kv] -= prm.w_visible * vis
     allowed_d = np.ones((n, m), dtype=bool)
     for st, mask in side_rules:
@@ -502,9 +522,24 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         alu = np.ascontiguousarray(allowed_d).view(np.uint8)
         Vc = np.ascontiguousarray(Vc, dtype=np.float64)
         Vtmp = np.empty((m, m))
-        kern(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
-             penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
-             Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data)
+        sparse = _dp_sparse_kernel() if os.environ.get("FOX_DP_SPARSE", "1") != "0" else None
+        if sparse is not None:
+            # Solo recorre a permitidos por (k,b,c): mismo resultado que el bucle denso.
+            if gkey not in _RANGE_CACHE:
+                ok = ~MASK                                   # (n, a, b, c)
+                anyv = ok.any(axis=1)
+                alo = np.where(anyv, ok.argmax(axis=1), m).astype(np.int16)
+                ahi = np.where(anyv, m - 1 - ok[:, ::-1].argmax(axis=1), -1).astype(np.int16)
+                _RANGE_CACHE[gkey] = (np.ascontiguousarray(alo), np.ascontiguousarray(ahi))
+            alo, ahi = _RANGE_CACHE[gkey]
+            sparse(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
+                   penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
+                   alo.ctypes.data, ahi.ctypes.data,
+                   Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data)
+        else:
+            kern(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
+                 penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
+                 Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data)
     else:
         for t in range(1, N - 1):
             k1, k2 = t % n, (t + 1) % n
@@ -570,18 +605,18 @@ def _resample(xy: np.ndarray, step: float, direction: str) -> Route:
     la DP (h ≈ 75 mm, R ≥ 170: < 6 mm), así que no se come la holgura.
     """
     pts = xy
-    n = len(pts)
-    sub = []
-    for i in range(n):
-        p0, p1, p2, p3 = pts[i - 1], pts[i], pts[(i + 1) % n], pts[(i + 2) % n]
-        for t in np.linspace(0.0, 1.0, 16, endpoint=False):
-            t2, t3 = t * t, t * t * t
-            b0 = (1 - t) ** 3 / 6.0
-            b1 = (3 * t3 - 6 * t2 + 4) / 6.0
-            b2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6.0
-            b3 = t3 / 6.0
-            sub.append(b0 * p0 + b1 * p1 + b2 * p2 + b3 * p3)
-    sub = np.array(sub)
+    B = [[], [], [], []]
+    for t in np.linspace(0.0, 1.0, 16, endpoint=False):
+        t2, t3 = t * t, t * t * t
+        B[0].append((1 - t) ** 3 / 6.0)
+        B[1].append((3 * t3 - 6 * t2 + 4) / 6.0)
+        B[2].append((-3 * t3 + 3 * t2 + 3 * t + 1) / 6.0)
+        B[3].append(t3 / 6.0)
+    B0, B1, B2, B3 = (np.array(b)[None, :, None] for b in B)
+    # p0 = pts[i-1], p2 = pts[i+1], p3 = pts[i+2] (cíclico), como el bucle por i
+    P0, P1 = np.roll(pts, 1, axis=0), pts
+    P2, P3 = np.roll(pts, -1, axis=0), np.roll(pts, -2, axis=0)
+    sub = (B0 * P0[:, None, :] + B1 * P1[:, None, :] + B2 * P2[:, None, :] + B3 * P3[:, None, :]).reshape(-1, 2)
     seg = np.hypot(*np.diff(np.vstack([sub, sub[:1]]), axis=0).T)
     s_cum = np.concatenate([[0.0], np.cumsum(seg)])
     length = float(s_cum[-1])

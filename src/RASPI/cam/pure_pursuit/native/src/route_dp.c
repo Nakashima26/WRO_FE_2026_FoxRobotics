@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdint.h>
 #include <math.h>
 #ifdef _OPENMP
@@ -44,6 +45,84 @@ FOX_API void fox_route_dp(int32_t n, int32_t m, int32_t N,
                     if (a == 0 || tot < best) {   /* primer mínimo, como np.argmin */
                         best = tot;
                         arg = a;
+                    }
+                }
+                bk[bc] = (int16_t)arg;
+                Vtmp[bc] = best < INF ? best : INF;
+            }
+        }
+        for (int64_t i = 0; i < mm; i++) Vc[i] = Vtmp[i];
+    }
+}
+
+/* Igual que fox_route_dp, pero solo recorre a en [ALO,AHI] (MASK ya prohíbe lo
+ * demás). Fuera de rango tot = Vc+INF >= INF; si el rango no da costo < INF se
+ * repite el bucle completo. Bit a bit igual mientras Vc >= 0 (s >= 0). */
+FOX_API void fox_route_dp_sparse(int32_t n, int32_t m, int32_t N,
+    const double *G, const double *DS, const uint8_t *MASK,
+    const double *pen, const double *bonus, const uint8_t *bad, const uint8_t *allowed,
+    const int16_t *ALO, const int16_t *AHI,
+    double *Vc, double *Vtmp, int16_t *back)
+{
+    const double INF = 1e18;
+    const int64_t mm = (int64_t)m * m;
+    const int64_t m3 = mm * m;
+    assert(m <= 256);
+    for (int32_t t = 1; t <= N - 2; t++) {
+        int32_t k1 = t % n, k2 = (t + 1) % n;
+        const double *Gk = G + k1 * m3;
+        const uint8_t *Mk = MASK + k1 * m3;
+        const double *DSk = DS + k1 * mm;
+        const double *penk = pen + k2 * mm;
+        const double *bonk = bonus + k2 * mm;
+        const uint8_t *badk = bad + k2 * mm;
+        const uint8_t *alk = allowed + k2 * m;
+        const int16_t *alok = ALO + k1 * mm;
+        const int16_t *ahik = AHI + k1 * mm;
+        int16_t *bk = back + (t + 1) * mm;
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int32_t b = 0; b < m; b++) {
+            /* si todo a está prohibido, tot = Vc+INF: primer mínimo (como np.argmin) */
+            int32_t ia = 0;
+            double ibv = Vc[b] + INF;
+            for (int32_t a = 1; a < m; a++) {
+                double tot = Vc[a * m + b] + INF;
+                if (tot < ibv) { ibv = tot; ia = a; }
+            }
+            for (int32_t c = 0; c < m; c++) {
+                int64_t bc = (int64_t)b * m + c;
+                int blocked = badk[bc] || !alk[c];
+                int32_t lo = alok[bc], hi = ahik[bc];
+                if (blocked || lo > hi) {
+                    bk[bc] = (int16_t)ia;
+                    Vtmp[bc] = ibv < INF ? ibv : INF;
+                    continue;
+                }
+                double ds = DSk[bc], pc = penk[bc], bo = bonk[bc];
+                double best = 0.0;
+                int32_t arg = lo;
+                for (int32_t a = lo; a <= hi; a++) {
+                    int64_t idx = (int64_t)a * mm + bc;
+                    double s = Mk[idx] ? INF : ds * (Gk[idx] + pc) + bo;
+                    double tot = Vc[a * m + b] + s;
+                    if (a == lo || tot < best) {
+                        best = tot;
+                        arg = a;
+                    }
+                }
+                if (!(best < INF)) {   /* sin costo válido en el rango: bucle completo */
+                    best = 0.0;
+                    arg = 0;
+                    for (int32_t a = 0; a < m; a++) {
+                        int64_t idx = (int64_t)a * mm + bc;
+                        double s = Mk[idx] ? INF : ds * (Gk[idx] + pc) + bo;
+                        double tot = Vc[a * m + b] + s;
+                        if (a == 0 || tot < best) {
+                            best = tot;
+                            arg = a;
+                        }
                     }
                 }
                 bk[bc] = (int16_t)arg;

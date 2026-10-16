@@ -48,6 +48,9 @@ def _check_golden(native):
     RR._NATIVE_DP = native
     RR._GEOM_CACHE.clear()          # que corra la geometría de verdad (numpy o C)
     RR._STATIC_CACHE.clear()
+    RR._RANGE_CACHE.clear()
+    RR._SIGN_CACHE.clear()
+    RR._VIS_CACHE.clear()
     try:
         for i, case in enumerate(_cases()):
             r = _run(case)
@@ -65,6 +68,44 @@ def test_native_matches_golden():
     if RR._dp_kernel() is None:
         pytest.skip("fox_route_dp no disponible (biblioteca nativa)")
     _check_golden(native=True)
+
+
+def _same_route(a, b, tag):
+    assert np.array_equal(a.d_stations, b.d_stations), f"{tag}: d_stations"
+    assert np.array_equal(a.x, b.x) and np.array_equal(a.y, b.y), f"{tag}: x/y"
+    assert a.report.keys() == b.report.keys(), f"{tag}: report keys"
+    for k in a.report:
+        if k == "solve_ms":          # tiempo de pared, no resultado
+            continue
+        assert np.array_equal(np.asarray(a.report[k]), np.asarray(b.report[k])), f"{tag}: report[{k}]"
+
+
+def test_sparse_matches_dense(monkeypatch):
+    if RR._dp_sparse_kernel() is None:
+        pytest.skip("fox_route_dp_sparse no disponible (biblioteca nativa)")
+    seats2 = {("N", "T2"): "Red", ("E", "T3"): "Green", ("S", "X1"): "Red"}
+    seatsB = {("N", "T1"): "Green", ("W", "T4"): "Red"}
+    unknown2 = [k for k in _SEATS_ALL if k not in seats2][:14]
+    p_t, p_f = _params(True), _params(False)
+    # lock y anchor salen de rutas densas (FOX_DP_SPARSE=0)
+    monkeypatch.setenv("FOX_DP_SPARSE", "0")
+    base = RR.plan("CW", seats2, "W", prm=p_t, unknown=unknown2)
+    baseB = RR.plan("CCW", seatsB, "E", prm=p_t)
+    lock = {k: float(base.d_stations[k]) for k in range(7)}
+    anchor = (float(baseB.x[0]), float(baseB.y[0]), float(baseB.heading_deg[0]))
+    cases = [
+        dict(direction="CW", seats={}, parking="W", prm=p_t, unknown=_SEATS_ALL),
+        dict(direction="CW", seats=seats2, parking="W", prm=p_t, unknown=unknown2),
+        dict(direction="CCW", seats=seatsB, parking="E", prm=p_t, unknown=[]),
+        dict(direction="CW", seats=seats2, parking="W", prm=p_f, unknown=unknown2),
+        dict(direction="CW", seats=seats2, parking="W", prm=p_t, unknown=unknown2, lock=lock),
+        dict(direction="CCW", seats=seatsB, parking="E", prm=p_t, unknown=[], anchor=anchor),
+    ]
+    for i, kw in enumerate(cases):
+        monkeypatch.setenv("FOX_DP_SPARSE", "0")
+        dense = RR.plan(**kw)
+        monkeypatch.setenv("FOX_DP_SPARSE", "1")
+        _same_route(dense, RR.plan(**kw), f"caso {i}")
 
 
 if __name__ == "__main__":
