@@ -689,7 +689,8 @@ class Sim:
                     if armed and est == "T" and stopped_since and sim_t - stopped_since >= _STOPPED_HOLD_S:
                         stop_reason = "terminado"
                         break
-                    if armed and tc is not None and tc >= tpr and stopped_since and sim_t - stopped_since >= _STOPPED_HOLD_S:
+                    # Estacionando (est=E) el carro se detiene en los settles: no es el final; el final llega con TERMINADO.
+                    if armed and tc is not None and tc >= tpr and est != "E" and stopped_since and sim_t - stopped_since >= _STOPPED_HOLD_S:
                         stop_reason = "race_finished"
                         break
 

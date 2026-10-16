@@ -206,6 +206,15 @@ int   turnHint     = 0;       // turn {-1, 0, +1}
 bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+// ACK de un V2 que ya quedó viejo (hay otra línea de la Pi esperando): 0 = se
+// manda siempre (como antes); 1 = se salta solo en ESTACIONANDO/ESTACIONANDO_PUNTA
+// (el ACK largo del parking satura el UART y el loop se iba a >1 s); 2 = siempre.
+// La Pi usa el último ACK, así que saltar los viejos no le quita información.
+const int ACK_SALTA_VIEJOS = 0;
+// Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
+// Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (como antes).
+const int ACK_E_MIN_MS = 0;
+unsigned long ackEUltimoMs = 0;
 
 // ── Modo RUTA: la Pi sube la vuelta como puntos en mm del tapete y el ESP la
 // sigue con pure pursuit sobre su propia odometría (encoder + IMU), a la
@@ -1420,6 +1429,12 @@ PARK_AJ long         PARK_UTURN_ARRANQUE_MM      = 300;
 // cuanto se detecta). El disparo por frontal muy cerca (PARK_UTURN_DF_FORZAR_CM)
 // ignora la espera. Se barre con prepark.py --par PARK_UTURN_ESPERA_MM=...
 PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
+// Modo RUTA: la U de 180 se dispara por la pose del tapete (rtx/rty de la Pi), no
+// por el detector de esquina (en la ruta el carro no va recto y los ToF ven señales:
+// disparaba a mitad de la recta). >0 = mm a lo largo de la sección de salida desde
+// su centro, en el sentido de la marcha (la isla termina en 500). 0 = como antes.
+// > 0 también habilita estacionar en modo ruta (la U ignora prio=1 de la ruta). Apagado por defecto: el modo ruta es solo 3 vueltas.
+PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 0;
 long                 parkUturnDisparoOdom        = -1;   // odómetro al armar la espera
 // T15b2 (t15b2_esquina13, "patrón 2", seeds 7/19 CCW): tras la U (fase 25)
 // el carro puede quedar a ext 9-11 cm y la fase 0 (resetParkScan) separa con
@@ -2441,12 +2456,15 @@ void iniciarEstacionamiento(bool retorno) {
 // se puede compartir contadorEsquina con detectarEsquina() porque esta
 // función corre antes, en el mismo frame, en la rama "ronda cerrada" de más
 // abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
+float alongSalidaMm();
 void vigilarUturn(long distL, long distR, long distF) {
   if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO) return;
   // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
   // para esta U (que es la de la esquina 13, la siguiente).
   long recorrido = odomMm - parkUturnOdom0;
-  bool ocupado = piPriority || (piMemoryFrames > 0);
+  // Modo RUTA: la Pi manda prio=1 todo el tiempo (sigue la ruta), no es una esquiva. El modo ruta es solo 3 vueltas
+  // sin estacionar; estacionar en ruta es función nueva y va detrás de PARK_UTURN_RUTA_ALONG_MM > 0 (apagado = como antes).
+  bool ocupado = !(piRuta && PARK_UTURN_RUTA_ALONG_MM > 0) && (piPriority || (piMemoryFrames > 0));
   if (ocupado) {
     if (estado == CRUCERO) estado = SIGUIENDO;
     // No dejes historia de "esquina" armándose a medias mientras se esquiva
@@ -2459,6 +2477,17 @@ void vigilarUturn(long distL, long distR, long distF) {
   // leer "abierto" un instante por la geometría de esa esquina misma, antes
   // de asentarse en la recta — no lo confundas con la esquina 13.
   if (recorrido <= PARK_UTURN_ARRANQUE_MM) return;
+  if (piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0) {
+    bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
+    float along = alongSalidaMm();
+    if (!fondoR && along < (float)PARK_UTURN_RUTA_ALONG_MM) return;
+    parkUturnDisparoOdom = -1;
+    parkUturnPendiente = false;
+    Serial.print("PARK U por pose: along="); Serial.print(along, 0);
+    Serial.print(" ang="); Serial.println(anguloGyro, 1);
+    iniciarEstacionamiento(true);
+    return;
+  }
   bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
   bool apertura    = paredFrente && ((distL > umbralPared) || (distR > umbralPared));
   contadorEsquina13 = apertura ? min(contadorEsquina13 + 1, (int)esquinaDebounce)
@@ -2793,6 +2822,15 @@ int seccionTapete(float x, float y) {
   return fabsf(x) >= fabsf(y) ? (x > 0 ? 1 : 3) : (y > 0 ? 0 : 2);
 }
 
+// Modo RUTA: mm a lo largo de la sección de salida (rutaSecSalida) desde su centro,
+// en el sentido de la marcha. CCW (direccionIzquierda): S va a +x, E a +y, N a -x, W a -y.
+float alongSalidaMm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float a = (rutaSecSalida == 2) ? x : (rutaSecSalida == 1) ? y : (rutaSecSalida == 0) ? -x : -y;
+  return direccionIzquierda ? a : -a;
+}
+
 // Servo para un ángulo de rueda de la ruta (+ = derecha), sin wallPanic.
 int rutaServo(float ruedaDeg) {
   float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
@@ -2953,6 +2991,15 @@ void parsePiMessage(String line) {
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
+    if (Serial2.available() > 0
+        && (ACK_SALTA_VIEJOS == 2
+            || (ACK_SALTA_VIEJOS == 1 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)))) {
+      return;   // ver ACK_SALTA_VIEJOS
+    }
+    if (ACK_E_MIN_MS > 0 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)) {
+      if (millis() - ackEUltimoMs < (unsigned long)ACK_E_MIN_MS) return;   // ver ACK_E_MIN_MS
+      ackEUltimoMs = millis();
+    }
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
     Serial2.print("ACK:V2,ang=");
@@ -5176,6 +5223,9 @@ void loop() {
         Serial.print(" base="); Serial.print(parkBase, 1);
         Serial.print(" caida="); Serial.print(parkCaidaCnt);
         Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+        Serial.print(" rel="); Serial.print(parkAngRel, 1);
+        Serial.print(" bN="); Serial.print(parkBaseN);
+        Serial.print(" tEn="); Serial.print(tEn);
         break;
       }
 
