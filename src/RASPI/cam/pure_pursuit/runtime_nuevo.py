@@ -2511,7 +2511,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--record-fps",       type=float, default=5.0)
     p.add_argument("--cam-frame-every",  type=int,   default=2,
                    help="Cada cuántos frames procesados se actualiza la captura para vista remota (VNC)")
-    p.add_argument("--start-delay",      type=float, default=1.0,
+    p.add_argument("--start-delay",      type=float, default=0.5,
                    help="Segundos de espera entre el botón y el arranque (quitar la mano). 0 = sin espera")
     return p.parse_args()
 
@@ -2566,10 +2566,10 @@ def main():
         if _ss["btn_t"] is None:
             if _gpio.input(17) == _gpio.HIGH:
                 _ss["btn_t"] = time.time()
-                d = max(0.0, float(getattr(args, "start_delay", 1.0)))
+                d = max(0.0, float(getattr(args, "start_delay", 0.5)))
                 print(f"[GPIO] Botón detectado. GO en {d:.1f}s (quita la mano)...", flush=True)
             return False
-        d = max(0.0, float(getattr(args, "start_delay", 1.0)))
+        d = max(0.0, float(getattr(args, "start_delay", 0.5)))
         return (time.time() - _ss["btn_t"]) >= d
 
     def led_on():
