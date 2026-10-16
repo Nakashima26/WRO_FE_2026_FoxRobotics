@@ -201,8 +201,8 @@ def _square_pts(cx, cy, half, n=5):
 _STATIC_CACHE: dict = {}
 _GEOM_CACHE: dict = {}
 _RANGE_CACHE: dict = {}            # gkey -> (ALO, AHI) para fox_route_dp_sparse
-_SIGN_CACHE: dict = {}             # (ckey, cx, cy) -> (ks, dsg) de la señal
-_VIS_CACHE: dict = {}              # (ckey, ux, uy, ...) -> (kv, vis) de la cámara
+_SIGN_CACHE: dict = {}             # (gridkey, cx, cy) -> (ks, dsg) de la señal
+_VIS_CACHE: dict = {}              # (gridkey, ux, uy, ...) -> (kv, vis) de la cámara
 _NATIVE_DP = True                  # False: bucle de la DP en numpy (sin fox_route_dp)
 
 
@@ -391,10 +391,20 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     # (conservador: hasta 10 mm de más contra una cara).
     xx, yy, hd = _station_poses(P)
     shd, chd = np.sin(hd), np.cos(hd)
-    ckey = (direction, start_section or "N", parking, park_w, n, prm.d_min, prm.d_max, prm.d_step)
+    # La malla (O, P) solo depende de sentido, recta de salida y rango de d: paredes,
+    # isla, señales y vista se cachean por malla; las maderas del cajón aparte, porque
+    # park_w cambia al fijar el arranque (antes eso recalculaba todo: ~45 ms).
+    gridkey = (direction, start_section or "N", n, prm.d_min, prm.d_max, prm.d_step)
+    ckey = gridkey + (parking, park_w)
     clear = _STATIC_CACHE.get(ckey)
     if clear is None:
-        bar = None
+        base = _STATIC_CACHE.get(gridkey)
+        if base is None:
+            base = np.empty((n, m, m))
+            for k in range(n):
+                base[k] = _static_clearance(xx[k], yy[k], hd[k], None, shd[k], chd[k])
+            _STATIC_CACHE[gridkey] = base
+        clear = base.copy()
         if parking is not None:
             bpts = []
             for box in _barrier_corners(parking, *(() if park_w is None else (park_w,))):
@@ -403,12 +413,10 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 bpts += [(a, b) for a in np.linspace(min(xs), max(xs), 3)
                          for b in np.linspace(min(ys), max(ys), 9)]
             bar = np.array(bpts)
-        clear = np.empty((n, m, m))
-        for k in range(n):
-            near = None
-            if bar is not None:
+            for k in range(n):
                 near = bar[np.hypot(bar[:, 0] - O[k, 0], bar[:, 1] - O[k, 1]) < 1300.0]
-            clear[k] = _static_clearance(xx[k], yy[k], hd[k], near, shd[k], chd[k])
+                if len(near):
+                    clear[k] = np.minimum(clear[k], _rect_dist_pose(near[:, 0], near[:, 1], xx[k], yy[k], hd[k], shd[k], chd[k]).min(-1))
         _STATIC_CACHE[ckey] = clear
     clear = clear.copy()
     centers = [(px, py) for px, py, _c in pillars] + extra_centers
@@ -417,7 +425,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
             centers.append(section_to_world(sname, *SEATS[seat]))
     r_sign = SIGN_MM / 2.0 * math.sqrt(2.0)
     for cx, cy in centers:
-        sk = (ckey, float(cx), float(cy))
+        sk = (gridkey, float(cx), float(cy))
         if sk not in _SIGN_CACHE:
             ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
             dsg = None
@@ -449,7 +457,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 # Premio por estación desde la que la cámara lo vería (zona de
                 # detección medida ~98 %): la ruta pasa mirándolo y se resuelve.
                 cam = float(getattr(C, "CAMERA_FWD_MM", 140.0))
-                vk = (ckey, float(ux), float(uy), cam, prm.view_min_mm, prm.view_max_mm, prm.view_half_deg)
+                vk = (gridkey, float(ux), float(uy), cam, prm.view_min_mm, prm.view_max_mm, prm.view_half_deg)
                 if vk not in _VIS_CACHE:
                     kv = np.flatnonzero(np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1500.0)
                     s, c = shd[kv], chd[kv]
