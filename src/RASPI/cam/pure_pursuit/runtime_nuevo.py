@@ -1471,8 +1471,9 @@ class PPRuntime:
         # rangos HSV (conos, BEV/naranja/piso, rosa). Con la luz del
         # cuarto de pruebas las ganancias son ~1 y no cambia nada.
         frame = self.color_corr.process(frame)
-        frame = cv2.flip(frame, 1)
-        processed_frame, positions = self.vision.process_frame(frame)
+        # detect_on dibuja recuadros en su frame: va sobre copia para no tocar el
+        # buffer del grabber ni el frame sin dibujar que usa la ROI de asiento.
+        processed_frame, positions = self.vision.detect_on(frame.copy())
         t_vis = time.perf_counter()
         self._timing_ms["vis"] = (t_vis - now) * 1000.0
 
@@ -2105,8 +2106,8 @@ class PPRuntime:
         # Con el mapa de señales completo, el steer sale de un pure pursuit
         # sobre la ruta con la pose por odometría (encoder + IMU del ESP),
         # no de la imagen. prio=1: el ESP aplica el steer tal cual.
-        # Mismo espejo que Vision.process_frame, sin sus anotaciones (solo si se usa la ROI)
-        _roi_frame = (cv2.flip(frame, 1) if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
+        # Frame sin anotar (detect_on dibuja sobre una copia), solo si se usa la ROI
+        _roi_frame = (frame if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
                       or getattr(C, "SEAT_ROI_LOG", False)) else None)
         _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame)
         if _route_steer is not None:

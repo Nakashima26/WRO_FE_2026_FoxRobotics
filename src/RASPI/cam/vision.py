@@ -30,11 +30,16 @@ def open_camera(cam_index=0):
         # 21). format=BGRx: en la Pi 5 libcamerasrc sin formato explícito falla con
         # "not-negotiated"; BGRx sale directo del ISP (NV12 cae al CPU y baja fps).
         fps = int(os.environ.get("FOX_CAM_FPS", "40"))
+        # Escalar antes de convertir: el BGRx de 2 MP baja a 640x480 y recién ahí pasa a BGR (FOX_CAM_PIPE=old: orden viejo).
+        conv = ("! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
+                if os.environ.get("FOX_CAM_PIPE") == "old" else
+                "! videoscale n-threads=2 ! video/x-raw, width=640, height=480 "
+                "! videoconvert n-threads=2 ! video/x-raw, format=BGR ")
         pipeline = (
             f"libcamerasrc awb-enable=false colour-gains={gains} "
             "! queue max-size-buffers=1 leaky=downstream "
             f"! video/x-raw, width=1640, height=1232, framerate={fps}/1, format=BGRx "
-            "! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
+            f"{conv}"
             "! appsink drop=true max-buffers=1 sync=false"
         )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
@@ -162,50 +167,29 @@ class Vision:
             if aspect > MAX_ASPECT and solidity < 0.55:
                 continue
 
-            # Rechazo de la pared magenta del estacionamiento por B/R (ver
-            # RED_BR_MAX). Se mide solo sobre los px del contorno, no del bbox.
-            if color_name == "Red" and bgr is not None:
-                cnt_mask = np.zeros(mask.shape, np.uint8)
-                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
+            # Máscara del contorno SOLO dentro de su recuadro (mismos px y mismo
+            # orden row-major que el frame completo -> medianas idénticas).
+            if (color_name == "Red" and bgr is not None) or (color_name == "Green" and hsv is not None):
+                cnt_mask = np.zeros((h, w), np.uint8)
+                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1, offset=(-x, -y))
                 sel = cnt_mask > 0
-                b_px = bgr[..., 0][sel].astype(np.float32)
-                r_px = bgr[..., 2][sel].astype(np.float32)
-                if float(np.median(b_px / np.maximum(r_px, 1.0))) > self.RED_BR_MAX:
-                    continue
-                sel_m = sel & (mask > 0)
-                g_px = bgr[..., 1][sel_m].astype(np.float32)
-                r_m = np.maximum(bgr[..., 2][sel_m].astype(np.float32), 1.0)
-                if g_px.size and float(np.median(g_px / r_m)) > self.RED_GR_MAX:
-                    continue   # cinta naranja (ver RED_GR_MAX)
-
-            if color_name == "Green" and hsv is not None:
-                cnt_mask = np.zeros(mask.shape, np.uint8)
-                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
-                sel = (cnt_mask > 0) & (mask > 0)
-                if sel.any() and float(np.median(hsv[..., 1][sel])) < self.GREEN_S_MIN_MED:
-                    continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
+                sel_m = sel & (mask[y:y + h, x:x + w] > 0)
 
             # Rechazo de la pared magenta del estacionamiento por B/R (ver
             # RED_BR_MAX). Se mide solo sobre los px del contorno, no del bbox.
             if color_name == "Red" and bgr is not None:
-                cnt_mask = np.zeros(mask.shape, np.uint8)
-                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
-                sel = cnt_mask > 0
-                b_px = bgr[..., 0][sel].astype(np.float32)
-                r_px = bgr[..., 2][sel].astype(np.float32)
+                bgr_r = bgr[y:y + h, x:x + w]
+                b_px = bgr_r[..., 0][sel].astype(np.float32)
+                r_px = bgr_r[..., 2][sel].astype(np.float32)
                 if float(np.median(b_px / np.maximum(r_px, 1.0))) > self.RED_BR_MAX:
                     continue
-                sel_m = sel & (mask > 0)
-                g_px = bgr[..., 1][sel_m].astype(np.float32)
-                r_m = np.maximum(bgr[..., 2][sel_m].astype(np.float32), 1.0)
+                g_px = bgr_r[..., 1][sel_m].astype(np.float32)
+                r_m = np.maximum(bgr_r[..., 2][sel_m].astype(np.float32), 1.0)
                 if g_px.size and float(np.median(g_px / r_m)) > self.RED_GR_MAX:
                     continue   # cinta naranja (ver RED_GR_MAX)
 
             if color_name == "Green" and hsv is not None:
-                cnt_mask = np.zeros(mask.shape, np.uint8)
-                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
-                sel = (cnt_mask > 0) & (mask > 0)
-                if sel.any() and float(np.median(hsv[..., 1][sel])) < self.GREEN_S_MIN_MED:
+                if sel_m.any() and float(np.median(hsv[y:y + h, x:x + w, 1][sel_m])) < self.GREEN_S_MIN_MED:
                     continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
 
             objects.append((x, y, w, h))
