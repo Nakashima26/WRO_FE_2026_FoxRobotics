@@ -622,10 +622,17 @@ class RouteMode:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
                     self.follower.i, self.rv, len(unknown))
-        line = self.upload.pop(0) if (self.upload and getattr(C, "ROUTE_ON_ESP", False)) else None
-        if line is not None and line.startswith("RTE"):
+        lines = []
+        if self.upload and getattr(C, "ROUTE_ON_ESP", False):
+            # shortcut: >1 línea por frame pide subir el baud (a 115200 solo cabe una junto al V2).
+            for _ in range(max(1, int(getattr(C, "ROUTE_UPLOAD_LINES", 1)))):
+                if not self.upload:
+                    break
+                lines.append(self.upload.pop(0))
+        if any(l.startswith("RTE") for l in lines):
             self.esp_shift = self.upload_shift
             self.esp_route = self.route
+        line = "\n".join(lines) if lines else None
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
