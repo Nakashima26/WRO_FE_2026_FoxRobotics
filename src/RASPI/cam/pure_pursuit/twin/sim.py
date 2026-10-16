@@ -19,7 +19,7 @@ from pure_pursuit.runtime_nuevo import PPConfig, PPRuntime
 from pure_pursuit.twin.camera import CameraModel
 from pure_pursuit.twin.firmware.fw import FirmwareSIL, FirmwareSetupError
 from pure_pursuit.twin.metrics import compute_metrics, _parse_ack_field, _parse_est
-from pure_pursuit.twin.params import TwinParams, max_wheel_deg, wheel_deg_from_servo
+from pure_pursuit.twin.params import TwinParams, max_wheel_deg, physical_motor, wheel_deg_from_servo
 from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
 from pure_pursuit.twin.vehicle import Vehicle
@@ -352,6 +352,14 @@ class Sim:
         tau_scale = float(os.environ.get("TWIN_TAU_SCALE", 1.0))
         if tau_scale != 1.0:
             self.params.motor.tau_drive_s *= tau_scale
+        # Motor de hoja de datos (estudio): TWIN_MOTOR=fisico reemplaza k/pwm0/tau y pone tope de aceleración.
+        self.motor_fisico: dict[str, float] | None = None
+        if os.environ.get("TWIN_MOTOR") == "fisico":
+            env_kw = {"mass_kg": "TWIN_MASS_KG", "gear": "TWIN_GEAR", "mu": "TWIN_MU", "v_batt": "TWIN_VBATT"}
+            kw = {k: float(os.environ[e]) for k, e in env_kw.items() if e in os.environ}
+            self.motor_fisico = physical_motor(**kw)
+            for key, val in self.motor_fisico.items():
+                setattr(self.params.motor, key, val)
         self.max_time_s = max_time_s
         if pi_period_s is None:
             pi_period_s = cfg.get("pi_period_s", self.params.timing.pi_proc_s)
@@ -416,7 +424,10 @@ class Sim:
             f"bev_err={bev_err:.2f}px "
             f"lente={'equidistante' if cam.params.equidistant else 'pinhole'} "
             f"bev={C.BEV_W}x{C.BEV_H} robot_y={C.ROBOT_BEV_Y} "
-            f"vel x{self.speed_scale:.2f}",
+            f"vel x{self.speed_scale:.2f}"
+            + (f" motor fisico k={self.motor_fisico['k_mm_s_per_pwm']:.2f}"
+               f" pwm0={self.motor_fisico['pwm0']:.0f}"
+               f" tau={self.motor_fisico['tau_drive_s']:.3f}" if self.motor_fisico else ""),
             flush=True,
         )
 

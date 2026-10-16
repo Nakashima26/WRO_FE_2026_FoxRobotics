@@ -111,7 +111,15 @@ class Vehicle:
             v_target = v_ss if direction > 0 else -v_ss
 
         tau = mot.tau_coast_s if direction == 0 else mot.tau_drive_s
-        vel = self.v + (v_target - self.v) * (dt / tau)
+        dv = (v_target - self.v) * (dt / tau)
+        amax = mot.a_max_mm_s2
+        if direction != 0 and amax:
+            lim = amax * dt
+            if dv > lim:
+                dv = lim
+            elif dv < -lim:
+                dv = -lim
+        vel = self.v + dv
         self.v = vel
 
         wh = _radians(wheel)

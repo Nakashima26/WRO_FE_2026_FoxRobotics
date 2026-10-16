@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -77,6 +78,8 @@ class MotorParams:
     # atrás en casi todas las esquinas; con 0.12 el baseline completa vueltas.
     tau_coast_s: float = 0.12
     scrub_coeff: float = 0.35
+    # Tope de aceleración por agarre; None = sin tope.
+    a_max_mm_s2: float | None = None
 
     def __post_init__(self) -> None:
         _prov(
@@ -88,6 +91,22 @@ class MotorParams:
         _prov("motor.tau_coast_s", "supuesto",
               "coast TB6612 A1=A2=0; medir cuánto rueda tras cortar a PWM 100")
         _prov("motor.scrub_coeff", "supuesto", "pérdida por scrub al volante")
+        _prov("motor.a_max_mm_s2", "supuesto", "mu*fracción en eje trasero*g")
+
+
+def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
+                   eff=0.9, wheel_d_mm=43.0, j_rotor=2.5e-9) -> dict:
+    """Motor desde la hoja de datos: N20 50:1 (460 rpm, 0.14 N·m bloqueo, 0.1/1.6 A a 12 V)
+    + etapa LEGO `gear`. DC lineal: dv/dt = (v0*d - v)/tau, tau = m_ef*v0/F_bloqueo."""
+    r = wheel_d_mm / 2000.0
+    v0 = 460.0 * v_batt / 12.0 / gear / 60.0 * math.pi * wheel_d_mm   # mm/s sin carga
+    f_s = 0.14 * v_batt / 12.0 * gear * eff / r                         # N en la rueda
+    f_int = 0.1 / 1.6                                                   # fricción interna (corriente sin carga)
+    f_roll = 0.015 * mass_kg * 9.81 / f_s
+    m_ef = mass_kg + j_rotor * (50.0 * gear) ** 2 / r ** 2
+    k = v0 / (255.0 * (1.0 - f_int))
+    return dict(k_mm_s_per_pwm=k, k_rev_mm_s_per_pwm=k, pwm0=255.0 * (f_int + f_roll),
+                tau_drive_s=m_ef * v0 / 1000.0 / f_s, a_max_mm_s2=mu * rear_frac * 9810.0)
 
 
 @dataclass
