@@ -884,6 +884,8 @@ DIGITAL_MAP_SEED_CONFIRMED = False
 # Twin: al llegar a este tc, sembrar confirmed desde el Field, congelar votos
 # y (si ROUTE_PLANNER) forzar replan. 0 = off. Típico 4 = tras 1ª vuelta.
 DIGITAL_MAP_FREEZE_AT_TC = 0
+# Desde este conteo de giros las señales confirmadas no cambian de asiento; None = como antes.
+DIGITAL_MAP_FREEZE_TC = None
 # Recta del cajón = marco del mapa (convención, no dato del campo: el tapete es
 # simétrico a 90°). El carro real no tiene de dónde leerla y no la necesita.
 DIGITAL_MAP_PARKING = "W"

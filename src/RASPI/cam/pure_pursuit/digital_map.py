@@ -386,6 +386,10 @@ class DigitalMap:
         right = dx * cs - dy * sn
         return along, right
 
+    def _frozen(self) -> bool:
+        ft = getattr(C, "DIGITAL_MAP_FREEZE_TC", None)
+        return ft is not None and self._tc >= int(ft)
+
     def _vote(self, feet: list[tuple[float, float, str]]) -> None:
         # Twin con mapa ya conocido: no dejar que la visión mueva asientos
         # (replan thrashing + ruta distinta a la del Field).
@@ -481,6 +485,8 @@ class DigitalMap:
     def _keep_closer_row(self, sec: str, sid: str, color: str) -> None:
         """T1 y T3 son la misma altura, solo cambia la fila. Se queda la más cercana."""
         col = _COL[sid]
+        if self._frozen() and any((sec, o) in self.confirmed for o, c in _COL.items() if c == col and o != sid):
+            return
         mine = self._best.get((sec, sid), 9999.0)
         for other, ocol in _COL.items():
             if other == sid or ocol != col:
@@ -533,6 +539,8 @@ class DigitalMap:
 
     def _move_seat(self, old: tuple[str, str], new: tuple[str, str], color: str) -> None:
         if old == new or new in self.confirmed:
+            return
+        if self._frozen() and old in self.confirmed:
             return
         for store in (self._votes, self._best):
             if old in store and new not in store:
