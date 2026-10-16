@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ast
 import math
+import os
 import multiprocessing as mp
 import time
 from queue import Empty
@@ -145,6 +146,7 @@ def _view_window(frame_q, key_q) -> None:
     cam = None
     dig = None
     cv2.namedWindow("Fox", cv2.WINDOW_NORMAL)
+    parent = os.getppid()
     stop = False
     while not stop:
         # Sin mensaje nuevo no se repinta: antes se pintaba (~20 ms) cada
@@ -186,6 +188,11 @@ def _view_window(frame_q, key_q) -> None:
         name = _key_name(k)
         if name:
             key_q.put(name)
+        # Botón de cerrar de la ventana = esc; sin proceso padre (Ctrl+C, crash) la ventana no queda huérfana.
+        closed = field is not None and cv2.getWindowProperty("Fox", cv2.WND_PROP_VISIBLE) < 1
+        if closed or os.getppid() != parent:
+            key_q.put("q")
+            break
     cv2.destroyAllWindows()
 
 
