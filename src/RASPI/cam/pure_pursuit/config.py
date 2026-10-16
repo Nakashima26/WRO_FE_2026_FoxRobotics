@@ -1348,6 +1348,11 @@ ROUTE_PROFILE_A_LAT_TIGHT_MM_S2 = 1500.0
 ROUTE_CTE_URGENT_MM = None
 ROUTE_CTE_URGENT_PWM = 120
 ROUTE_CTE_HORIZON_MM = 600.0
+# Subida de ruta: con ROUTE_UPLOAD_SLOW se frena mientras la ruta nueva sube al ESP (el ESP
+# sigue la anterior). Con DIFF_MM se frena solo si la ruta nueva se aparta más de DIFF_MM de la
+# que tiene el ESP en los próximos HORIZON_MM delante del carro. None: siempre (como antes).
+ROUTE_UPLOAD_DIFF_MM = None
+ROUTE_UPLOAD_HORIZON_MM = 700.0
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm

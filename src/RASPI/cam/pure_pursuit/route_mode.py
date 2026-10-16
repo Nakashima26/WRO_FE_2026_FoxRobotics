@@ -85,6 +85,7 @@ class RouteMode:
         self.loc = None
         self.key = None
         self.upload: list[str] = []
+        self.esp_route = None        # última ruta completa en el ESP (tras su RTE)
         self.empty: set = set()
         self.view_count: dict = {}
         self.rv = None
@@ -569,7 +570,7 @@ class RouteMode:
             # si cambió desde la pose (otro carril cerca del carro).
             # ROUTE_UPLOAD_SLOW=False: el ESP sigue la ruta anterior completa
             # (doble buffer, swap en RTE), así que solo se frena en el ALTO.
-            if self.hold or bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)):
+            if self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky()):
                 cap = 0 if self.hold else _pwm("ROUTE_UPLOAD_PWM")
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
@@ -583,8 +584,26 @@ class RouteMode:
         line = self.upload.pop(0) if (self.upload and getattr(C, "ROUTE_ON_ESP", False)) else None
         if line is not None and line.startswith("RTE"):
             self.esp_shift = self.upload_shift
+            self.esp_route = self.route
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
+
+    def _upload_risky(self) -> bool:
+        """Mientras sube la ruta: ¿la nueva se aparta de la del ESP en el tramo de adelante?
+
+        Sin ROUTE_UPLOAD_DIFF_MM, sin ruta previa en el ESP o en otro marco (arranque
+        ciego), siempre True (frenar, como antes).
+        """
+        tol = getattr(C, "ROUTE_UPLOAD_DIFF_MM", None)
+        old = self.esp_route
+        if tol is None or old is None or self.esp_shift != self.upload_shift:
+            return True
+        r = self.follower.route
+        n = len(r.x)
+        m = int(float(getattr(C, "ROUTE_UPLOAD_HORIZON_MM", 700.0)) / (r.length_mm / n)) + 1
+        j = (max(self.follower.i, 0) + np.arange(m)) % n
+        d = np.hypot(r.x[j, None] - old.x[None, :], r.y[j, None] - old.y[None, :]).min(axis=1)
+        return bool(d.max() > float(tol))
 
     def _cte_urgent(self, conf, empty) -> bool:
         """El carro, corrido |cte| de la ruta, va hacia la isla, una señal o la pared.
