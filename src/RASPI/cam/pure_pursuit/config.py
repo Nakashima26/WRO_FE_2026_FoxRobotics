@@ -1362,6 +1362,9 @@ ROUTE_TIME_COST = False
 # Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
 # El twin lo deja en False para que cada corrida sea reproducible.
 ROUTE_PLAN_ASYNC = False
+# Twin: retraso (s) entre que se pide un plan y que se adopta, como la DP en la Pi 5 (~1 s).
+# Se cuenta en frames de la Pi (PI_FPS). None: al instante (como antes). Solo sin ROUTE_PLAN_ASYNC.
+ROUTE_PLAN_DELAY_S = None
 # Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
 ROUTE_LOCK_STATIONS = 7
 # Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.

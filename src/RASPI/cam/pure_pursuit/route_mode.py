@@ -99,6 +99,8 @@ class RouteMode:
         self._job_conf = {}
         self._job_unknown = []
         self._job_shift = 0.0
+        self._delay_left = None      # frames que faltan para adoptar el plan retrasado (ROUTE_PLAN_DELAY_S)
+        self._delay_plan = None
         # Arranque ciego
         self.blind = bool(getattr(C, "ROUTE_START_BLIND", False))
         self.fix = None              # StartFix mientras no se sabe el avance
@@ -531,10 +533,26 @@ class RouteMode:
                     self._job_hold = hold
                     self._job = threading.Thread(target=self._run_plan, args=args, daemon=True)
                     self._job.start()
+            elif getattr(C, "ROUTE_PLAN_DELAY_S", None) is not None and self.route is not None:
+                # Twin: el plan sale ya, pero se adopta tras el retraso de la Pi (ruta anterior mientras).
+                if self._delay_left is None:
+                    self._job_key = key
+                    self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_route_params(), unknown=args[3],
+                                                anchor=args[4], lock=args[5], park_w=args[6], extra=args[7]),
+                                        key, dict(plan_seats), list(plan_unknown), self.shift, hold)
+                    self._delay_left = int(round(float(C.ROUTE_PLAN_DELAY_S) * float(getattr(C, "PI_FPS", 40.0))))
             else:
                 self._adopt(RR.plan(args[0], args[1], args[2], prm=_route_params(), unknown=args[3],
                                     anchor=args[4], lock=args[5], park_w=args[6], extra=args[7]),
                             key, plan_seats, plan_unknown, empty, dm, self.shift, hold)
+        if self._delay_left is not None:
+            self._delay_left -= 1
+            if self._delay_left <= 0:
+                route, k, seats, unk, sh, hd_ = self._delay_plan
+                self._adopt(route, k, seats, unk, empty, dm, sh, hd_)
+                self._delay_left = None
+                self._delay_plan = None
+                self._job_key = None
         if self._job is not None and not self._job.is_alive():
             if self._job_out is not None:
                 self._adopt(self._job_out, self._job_key, dict(self._job_conf), self._job_unknown, empty, dm,
