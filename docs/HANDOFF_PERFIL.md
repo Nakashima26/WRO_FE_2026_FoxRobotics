@@ -12,7 +12,7 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "o1" = y2 + `"ROUTE_LAP1_OPEN": true`)
+## Mejor configuración (base actual, bench "l1" = o1 + `"ROUTE_FIX_LINE": true`)
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -23,13 +23,14 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
         "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0,
         "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.25,
         "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_STOP_MM": 0.0,
-        "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true}}
+        "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true,
+        "ROUTE_FIX_LINE": true}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0 --pi ROUTE_UPLOAD_DIFF_MM=60 --pi ROUTE_LAP1_OPEN=True --pi ROUTE_FIX_LINE=True
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -48,6 +49,7 @@ Todos apagados por defecto salvo el del ESP32.
 | `8ded2c4` | `ROUTE_PROFILE_TIGHT_KAPPA`: aceleración lateral menor en curvas muy cerradas (radio menor que el lookahead de 200 mm). | Probado (h1/h2): no arregla la semilla 3. No se usa |
 | `92fd3c4` | `ROUTE_CTE_URGENT_MM`: **freno por urgencia al salirse.** Si el carro está fuera de la ruta, se corre la ruta de adelante (600 mm) el mismo desvío. Solo si así quedaría a menos de 120 mm de la isla, una señal o la pared, frena a `ROUTE_CTE_URGENT_PWM`. Si se sale poquito pero tiene espacio, no frena. | Usado en la base (120 mm, PWM 120) |
 | `3456498` | `ROUTE_UPLOAD_DIFF_MM`: mientras sube la ruta nueva al ESP, frenar solo si se aparta de la que tiene el ESP en los próximos 700 mm. | Usado en la base (60 mm) |
+| `e4490bd` | **`ROUTE_FIX_LINE`: arranque forzado con la línea naranja.** Si el sonar no converge antes de acabar la recta, el δ del cajón sale de la mediana de la línea naranja de la esquina: el punto de la recta del BEV en la columna central se lleva al mundo con la pose supuesta y se corta con la cinta. Offline (42 semillas): peor error forzado 106 → 58 mm. | Usado en la base. Banco l1 vs o1: fallas 12 → 6, mismo tiempo, sin semillas nuevas |
 
 ## Cómo se decide (banco estándar)
 
@@ -112,7 +114,7 @@ la anterior y las referencias (combo1).
 
 1. **Latencia del plan (medido sobre o1):** con `ROUTE_PLAN_DELAY_S` 0.3 las fallas suben de 12 a 61, y con 0.6 a 123 de 210. En el twin el plan es instantáneo (~60 ms en Mac). Hay que medir cuánto tarda la DP en la Pi 5 (C + OpenMP) antes de creerle al twin. Con 0.15 s: 24 fallas (+0.53 s); 0.1 s: 15 (+0.23 s); 0.05 s: 18 (+0.07 s), ruido de ±3. **Plan 4x más rápido (0241ad2):** kernel DP disperso + caché por asiento + B-spline vectorizada: tibio 55 → 14 ms en Mac, misma ruta bit a bit (mismo_trace IGUAL). Pi 5 estimado ~30-40 ms, sin medir. `ROUTE_PENDING_PWM` (b1579e3, apagado) con 0.3 s de retraso: 120 → 34 fallas (+1.57 s), 155 → 61 (no sirve). Con el plan rápido no hace falta. Medir en la Pi: líneas `[ROUTE] plan#… XXms` del log.
 - **Rampa de vuelta 1 (`ROUTE_UNSEEN_RAMP_MM`, 763a72b, apagada):** frena en rampa hacia el asiento sin ver en vez del escalón a 155 dentro de 1300 mm. Sobre o1: 900 → −0.40 s, 13 fallas (solo 4/3); 800 → −0.58 s, 16 fallas (solo 8/4); 700 → −0.78 s, 15 fallas (solo 5/2). Ninguna pasa la regla; las fallas no son monótonas con la distancia (ruido de ±3). Gana tiempo real en la vuelta 1 pero suma 1-4 choques sueltos.
-2. **Odometría / arranque ciego (medido en o1, 42 semillas):** con el retraso de ~150 ms descontado, el EKF queda en ~15 mm laterales p95 cuando el cajón se fija bien. El 25 % de los arranques se fija FORZADO (no converge antes de acabar la recta); siempre pasa cuando el cajón está a <200 mm del supuesto. Si el error del cajón es >50 mm, falla el 31 % de las corridas (5/16); si es ≤50 mm, falla el 3.6 % (7/194). Rutas abiertas: fijar el avance también con la línea naranja/azul de la esquina (la cámara ya la ve; route_mode no la usa), o frenar antes del límite de la recta si no ha convergido. El ruido de sonar del twin (3 mm) es optimista.
+2. **Odometría / arranque ciego (medido en o1, 42 semillas):** con el retraso de ~150 ms descontado, el EKF queda en ~15 mm laterales p95 cuando el cajón se fija bien. El 25 % de los arranques se fija FORZADO (no converge antes de acabar la recta); siempre pasa cuando el cajón está a <200 mm del supuesto. Si el error del cajón es >50 mm, falla el 31 % de las corridas (5/16); si es ≤50 mm, falla el 3.6 % (7/194). Hecho: la línea naranja fija el caso forzado (`ROUTE_FIX_LINE`, fallas 12 → 6). Ojo: cuando el sonar sí converge, la línea es peor (mediana 21 mm contra 10), por eso solo se usa en el forzado. En el carro real hay que comprobar que el tracker naranja ve la cinta en la recta del cajón. Queda abierto: frenar antes del límite de la recta si no ha convergido. El ruido de sonar del twin (3 mm) es optimista.
 3. El arranque y la primera sección (~10 s a PWM 95-110).
 4. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
 5. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
