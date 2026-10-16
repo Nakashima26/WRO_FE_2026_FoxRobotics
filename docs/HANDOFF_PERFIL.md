@@ -10,9 +10,9 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 ## Resultado en una línea
 
-De ~65 s (v3b) a ~56.5 s de mediana en el twin. Las fallas bajan de 17 a 16 (de 210 corridas).
+De ~65 s (v3b) a ~56 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
-## Mejor configuración (base actual, bench "u2")
+## Mejor configuración (base actual, bench "x1")
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
 
@@ -22,13 +22,13 @@ Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
         "ROUTE_CTE_PWM": 205, "ROUTE_PROFILE_SIGN_MM": 220.0,
         "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0,
         "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.25,
-        "ROUTE_CTE_URGENT_MM": 120.0}}
+        "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_STOP_MM": 0.0}}
 ```
 
 Para verla en el visor (desde este worktree, no desde otra rama):
 
 ```bash
-cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120
+cd src/RASPI/cam && PYTHONUTF8=1 TWIN_NOISE_SEED=1 /Users/jesse/Documents/GitHub/FoxRobotics/.venv/bin/python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --speed 1 --pi ROUTE_PROFILE_BASE_PWM=205 --pi ROUTE_TIME_COST=True --pi ROUTE_LAP1_PWM=155 --pi ROUTE_UNSEEN_PWM=155 --pi ROUTE_PROFILE_MIN_PWM=155 --pi ROUTE_CTE_PWM=205 --pi ROUTE_PROFILE_SIGN_MM=220 --pi ROUTE_PROFILE_SIGN_NEAR_MM=150 --pi ROUTE_FIX_STEP_MM=8 --pi ROUTE_PROFILE_A_LAT_MM_S2=2000 --pi ROUTE_PROFILE_BRAKE_FF_S=0.25 --pi ROUTE_CTE_URGENT_MM=120 --pi ROUTE_STOP_MM=0
 ```
 
 (Ajustar la ruta del venv en otra compu.)
@@ -88,6 +88,9 @@ la anterior y las referencias (combo1).
 | Sobre u2: vuelta 1 a 170 (v3) | −0.30 s (−0.24 en vuelta 1), 13 fallas | No llega a 0.5 s; la vuelta 1 no la frena el tope |
 | Sobre u2: ver asientos desde 900 mm, vacío en 10 frames (w1) | −0.1 s, 23 fallas | No |
 | **Dónde está el tiempo (u2)** | Vuelta 1: 21.9 s a 315 mm/s, 1.7 s detenido, 19.6 s a PWM ≤ 160. Vueltas 2-3: 11.3 s a 655 mm/s. Arranque + primera sección a PWM 95-110 (~10 s) | La vuelta 1 tiene ~10 s de margen |
+| **Sobre u2: sin parar a confirmar asientos, `ROUTE_STOP_MM` 0 (x1)** | −0.50 s (−0.56 en vuelta 1), 14 fallas vs 16, solo-x1 7 vs solo-u2 9. Con la urgencia ya no choca como antes | **Sí, base nueva** |
+| Sobre u2: sin frenar al subir la ruta, `ROUTE_UPLOAD_SLOW` false (x2) | −1.15 s, pero 26 fallas, 13 solo-x2 | No. Mientras sube la ruta, el ESP sigue la vieja y choca |
+| Sobre u2: x1 + x2 (x3) | −1.81 s, 26 fallas, semilla 14 nueva | No |
 
 ## Cuánto queda (estimación)
 
@@ -98,6 +101,7 @@ la anterior y las referencias (combo1).
 
 ## Siguientes pasos
 
-1. Con la urgencia puesta, volver a probar A_LAT 2500 o BASE_PWM más alto (antes los frenaba la semilla 3).
-2. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
-3. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
+1. **La subida de ruta vale ~1.1 s** (x2) pero hoy es necesaria. Frenar solo cuando la ruta nueva cambia cerca del carro, o subir la ruta más rápido, en vez de frenar en cada subida.
+2. El arranque y la primera sección (~10 s a PWM 95-110).
+3. Vuelta 1 (~22.4 s): el mayor hueco que queda. Las fallas que siguen (semillas 16, 32, 21) son toques de señal en la vuelta 1.
+4. **En el carro:** cargar el firmware con `f5b1ef9`, medir velocidad vs PWM y frenado (`twin/tools/calib/HOJA_MEDICION.md`), y calibrar el twin.
