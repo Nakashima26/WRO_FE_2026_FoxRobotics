@@ -594,7 +594,8 @@ class RouteMode:
             self.rv = self._speed(speed_unknown, (x - ds * ax, y - ds * ay, hd)) if lap1 else None
         else:
             # Sin el avance: lento, la esquina todavía no se sabe dónde está.
-            self.rv = slow
+            blind = getattr(C, "ROUTE_BLIND_PWM", None)
+            self.rv = slow if blind is None else int(blind)
         if abs(self.follower.cte) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
             cte_cap = _pwm("ROUTE_CTE_PWM")
