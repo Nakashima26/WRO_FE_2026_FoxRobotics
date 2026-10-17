@@ -88,8 +88,30 @@ Tiempo de tc12 al fin: ~15.5-16 s.
   `rutaSecSalida`, odometría). Es un cambio grande en `sim.py`/`pi_link`. No lo hice:
   la carrera completa tarda ~25 s de reloj por semilla, unos 10 min por banco de 42
   con 6 procesos.
-- **Pendiente**: un preset `ruta_prepark` que arranque en la recta 12 con la Pi ya
-  localizada, validado contra carreras completas en unas semillas.
+- **Hecho (rama `claude/park-u-preset`)**: arranque sembrado en modo ruta. Cualquier carrera
+  completa en modo ruta con `log_dir` graba `ruta_seed.json` al salir del giro 12, con el carro
+  ya recto (|rumbo − carril| ≤ 8°). Guarda la pose verdadera en el instante de la odometría del
+  ACK, px/py/yaw/ang/od del ESP, el od de tc=12, la pose del localizador y el shift/park_w del
+  arranque ciego. Con `FOX_RUTA_SEED=<dir con s<seed>/>` (por ejemplo `runs/full/n1`), `Sim`
+  arranca ahí:
+  - ESP: `silRutaSeed` en el 1er loop, antes del 1er ACK (tc=12, U pendiente, odometría).
+  - Pi: `_seed_pi` (mapa con las señales del campo, pose y yaw_fix, RouteMode con el avance
+    resuelto). La ruta se sube de nuevo al ESP (~0.7 s).
+
+  Uso: `FOX_RUTA_SEED=runs/full/n1 runs/pkw.sh seed/n1 1 "$EX" <seed>`, con el mismo preset y
+  el mismo `FOX_PARK_POS`.
+
+  **Validación** (ruta_perfil + PARALELO, ALONG 600, ALEJAR 60, físico, ruido 1; semillas 1-3,
+  5-7, 17 y 18): 8/8 iguales. Siete dan OK; s18 choca en ambos casos con la señal Red E/T4, 1.6
+  contra 1.7 s después de la U. Tiempo de la U al TERMINADO: 11.4 contra 11.4 s (s1).
+
+  **Velocidad**: 7 semillas con 6 procesos tardan 48 s en carrera completa y 9.8 s sembradas
+  (**~5×**). Una semilla sola: 26.7 → 7.8 s.
+
+  **Límite**: el arranque viene de una carrera completa de la base. Sirve mientras el cambio no
+  toque las vueltas 1-3. Si las toca, hay que volver a grabar las semillas con carreras completas.
+  El carro arranca detenido (en la carrera llega a ~370 mm/s), así que la U sale ~1 s más tarde
+  en reloj simulado.
 
 ## Pedido: ¿planear el paralelo con la pose del modo ruta?
 

@@ -200,3 +200,27 @@ def test_encoder_odom_sub_mm_ticks_accumulate():
     expect = enc[0] / counts_per_mm
     assert abs(od - expect) <= 2.0
     assert abs(px - expect) <= 2.0
+
+
+def test_ruta_seed_odom_and_tc():
+    """silRutaSeed (sim.py ruta_seed): el 1er ACK ya trae la odometría y tc=12 sembrados."""
+    fw = FirmwareSIL()
+    for k, v in {"rp_on": 1, "rp_x": -464, "rp_y": -244, "rp_yaw": -1067.0, "rp_ang": 12.8,
+                 "rp_od": 22339, "rp_od12": 22319, "rp_izq": 0}.items():
+        fw.set_param(k, float(v))
+    fw.set_callbacks(
+        advance=lambda _us: None,
+        sonar=lambda sid: SONAR_50CM_US if sid in (0, 1) else 0,
+        gyro=lambda: 0.0,
+    )
+    fw.push_serial2("READY")
+    fw.setup()
+    fw.push_serial2(V2_PP)
+    for _ in range(5):
+        fw.loop()
+    ack = _latest_ack(fw)
+    fw.close()
+    assert ack is not None
+    assert re.search(r",tc=(\d+),tpr=\1,", ack), ack   # tc = TURNS_PER_RACE
+    assert ",px=-464," in ack and ",py=-244," in ack and ",od=22339," in ack
+    assert ",yaw=-1067.0" in ack

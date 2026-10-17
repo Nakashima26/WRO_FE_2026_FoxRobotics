@@ -2303,6 +2303,34 @@ void silPreParkSeed() {
   Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
   Serial.print(" ang="); Serial.println(anguloGyro, 1);
 }
+
+// Harness del twin (sim.py ruta_seed, solo SIL): arranca en modo RUTA en la recta
+// del cajón tras el giro 12, con el estado que grabó una carrera completa
+// (odometría del marco del cajón, tc=12 y la U pendiente).
+void silRutaSeed() {
+  if (sil_param("rp_on", 0.0) < 0.5) return;
+  anguloTotal    = (float)sil_param("rp_yaw", 0.0);
+  anguloGyro     = (float)sil_param("rp_ang", 0.0);
+  odomYawPrevDeg = anguloTotal;
+  poseXf = (float)sil_param("rp_x", 0.0);
+  poseYf = (float)sil_param("rp_y", 0.0);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+  odomMmF = (float)sil_param("rp_od", 0.0);
+  odomMm  = (long)lroundf(odomMmF);
+  direccionIzquierda = sil_param("rp_izq", 0.0) > 0.5;
+  primerGiro     = true;
+  turnsCompleted = TURNS_PER_RACE;
+  lastTurnTime   = millis();
+  if (PARK_MODO != PARK_NINGUNO && PARK_MEDIA_VUELTA) {
+    parkUturnPendiente = true;
+    parkUturnOdom0     = (long)sil_param("rp_od12", (double)odomMm);
+    contadorEsquina13  = 0;
+  }
+  Serial.print("SIL ruta_seed: pose=("); Serial.print(poseXf, 0); Serial.print(",");
+  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
+  Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.print(" od="); Serial.println(odomMm);
+}
 #endif
 
 // ── Entrada a ESTACIONANDO ───────────────────────────────────────────────────
@@ -3595,6 +3623,9 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+#if defined(FOX_SIL)
+  { static bool sembrado = false; if (!sembrado) { sembrado = true; silRutaSeed(); } }   // antes del 1er ACK
+#endif
   logEsteLoop = (LOG_MIN_MS == 0 || (estado != ESTACIONANDO && estado != ESTACIONANDO_PUNTA)
                  || millis() - logUltimoMs >= (unsigned long)LOG_MIN_MS);
   if (logEsteLoop) logUltimoMs = millis();
