@@ -49,6 +49,6 @@
  "ROUTE_UNSEEN_WALL_PWM": 210,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "ft60_parkk4.json",
+ "_fuente": "b125_parkk4.json",
  "_preset": "ruta_perfil"
 }
