@@ -1428,6 +1428,7 @@ PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 0;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
+PARK_AJ long         PARK_PEGADO_CICLA          = 0;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
 // PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
 PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 160;
 PARK_AJ long         PARK_UTURN_PWM             = 160;
@@ -2309,7 +2310,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE);
+  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM);
 #undef SIL_AJ
@@ -5976,7 +5977,7 @@ void loop() {
           // terminar aquí, hasta PARK_CICLOS_MAX veces (ver constante).
           // ATRAS PEGADO también cicla: la fase 9 va hacia ENFRENTE, que es
           // justo alejarse de lo que tiene atrás (igual que en las fases 3/14/4/8).
-          if (!alineado && !pegado && parkCiclos < PARK_CICLOS_MAX) {
+          if (!alineado && (!pegado || PARK_PEGADO_CICLA) && parkCiclos < PARK_CICLOS_MAX) {
             parkCiclos++;
             motorCoast(); escribirServo(centroServo);
             Serial.print("PARK ciclo "); Serial.print(parkCiclos);

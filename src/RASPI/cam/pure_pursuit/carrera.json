@@ -17,6 +17,7 @@
  "OBS_INFLATE_R": 56,
  "PI_FPS": 40.0,
  "RACING_LINE": "",
+ "ROUTE_BLIND_PWM": 100.0,
  "ROUTE_CTE_PWM": 250,
  "ROUTE_CTE_URGENT_MM": 120.0,
  "ROUTE_CTE_URGENT_PWM": 110,
@@ -49,6 +50,6 @@
  "ROUTE_UNSEEN_WALL_PWM": 210,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "b125_parkk4.json",
+ "_fuente": "bl100c.json",
  "_preset": "ruta_perfil"
 }
