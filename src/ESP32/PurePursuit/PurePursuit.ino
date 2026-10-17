@@ -212,9 +212,13 @@ bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
 // La Pi usa el último ACK, así que saltar los viejos no le quita información.
 const int ACK_SALTA_VIEJOS = 0;
 // Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
-// Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (como antes).
-const int ACK_E_MIN_MS = 0;
+// Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (antes). 2026-10-16: 100 (prepark motor físico 0/100 -> 100/100 junto con LOG_MIN_MS y PARK_ANG_IN_DEG 70 / PARK_POSTE2_MM 60; ver docs/HANDOFF_PARKING.md).
+const int ACK_E_MIN_MS = 100;
 unsigned long ackEUltimoMs = 0;
+// Log periódico (~170 B por loop = ~15 ms a 115200) frena el loop al estacionar; mínimo de ms entre logs SOLO en ESTACIONANDO/ESTACIONANDO_PUNTA. 0 = cada loop (antes).
+const int LOG_MIN_MS = 100;
+unsigned long logUltimoMs = 0;
+bool logEsteLoop = true;
 
 // ── Modo RUTA: la Pi sube la vuelta como puntos en mm del tapete y el ESP la
 // sigue con pure pursuit sobre su propia odometría (encoder + IMU), a la
@@ -882,7 +886,7 @@ const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
-PARK_AJ int           PARK_ANG_IN_DEG          = 63;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66
+PARK_AJ int           PARK_ANG_IN_DEG          = 70;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66; 2026-10-16: 63 -> 70 con motor físico (docs/HANDOFF_PARKING.md)
 PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
 // La inercia de la reversa a tope vale ~9°, no 3. Con 3 la maniobra entregaba
@@ -1055,7 +1059,7 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 // mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
 // arriba quedan para el carro sin encoder y como timeouts de seguridad.
 const bool          PARK_POR_ENCODER          = true;
-PARK_AJ float         PARK_POSTE2_MM            = 40.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más)
+PARK_AJ float         PARK_POSTE2_MM            = 60.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
 PARK_AJ float         PARK_RECTO_MAX_MM         = 100.0f; // tope de la fase 14; 2026-10-04: 110 -> 100
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
@@ -3558,6 +3562,9 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+  logEsteLoop = (LOG_MIN_MS == 0 || (estado != ESTACIONANDO && estado != ESTACIONANDO_PUNTA)
+                 || millis() - logUltimoMs >= (unsigned long)LOG_MIN_MS);
+  if (logEsteLoop) logUltimoMs = millis();
 #if FOX_BNO && !defined(FOX_SIL)
   leerBNO();
 #else
@@ -5218,14 +5225,13 @@ void loop() {
           setMotor(PARK_PUNTA_PWM);
         }
 
-        Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
-        Serial.print(" ext="); Serial.print(extRaw);
-        Serial.print(" base="); Serial.print(parkBase, 1);
-        Serial.print(" caida="); Serial.print(parkCaidaCnt);
-        Serial.print(" arm="); Serial.print(armada ? 1 : 0);
-        Serial.print(" rel="); Serial.print(parkAngRel, 1);
-        Serial.print(" bN="); Serial.print(parkBaseN);
-        Serial.print(" tEn="); Serial.print(tEn);
+        if (logEsteLoop) {
+          Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" base="); Serial.print(parkBase, 1);
+          Serial.print(" caida="); Serial.print(parkCaidaCnt);
+          Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+        }
         break;
       }
 
@@ -6209,28 +6215,30 @@ void loop() {
   actualizarOdometria();
 
   // ── Log periódico ─────────────────────────────────────────────────────────
-  Serial.print(" | Estado:");
-  if      (estado == GIRANDO)      Serial.print("GIRANDO");
-  else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
-  else if (estado == CRUCERO)      Serial.print("CRUCERO");
-  else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
-  else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
-  else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
-  else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
-  else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
-  else if (estado == INICIO)       Serial.print("INICIO");
-  else                              Serial.print("SIGUIENDO");
-  Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
-  Serial.print(" | L:");        Serial.print(distL);
-  Serial.print(" | R:");        Serial.print(distR);
-  Serial.print(" | F:"); Serial.print(distF);
-  Serial.print(" | Ang:");      Serial.print(anguloGyro);
-  Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
-  Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
-  Serial.print(" | turn:");     Serial.print(turnHint);
-  Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
-  Serial.print(" | mem:");      Serial.print(piMemoryFrames);
-  Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
-  Serial.print(" | giros:");    Serial.print(turnsCompleted);
-  Serial.print("/");            Serial.println(TURNS_PER_RACE);
+  if (logEsteLoop) {
+    Serial.print(" | Estado:");
+    if      (estado == GIRANDO)      Serial.print("GIRANDO");
+    else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
+    else if (estado == CRUCERO)      Serial.print("CRUCERO");
+    else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
+    else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
+    else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
+    else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
+    else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
+    else if (estado == INICIO)       Serial.print("INICIO");
+    else                              Serial.print("SIGUIENDO");
+    Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
+    Serial.print(" | L:");        Serial.print(distL);
+    Serial.print(" | R:");        Serial.print(distR);
+    Serial.print(" | F:"); Serial.print(distF);
+    Serial.print(" | Ang:");      Serial.print(anguloGyro);
+    Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
+    Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
+    Serial.print(" | turn:");     Serial.print(turnHint);
+    Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
+    Serial.print(" | mem:");      Serial.print(piMemoryFrames);
+    Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
+    Serial.print(" | giros:");    Serial.print(turnsCompleted);
+    Serial.print("/");            Serial.println(TURNS_PER_RACE);
+  }
 }
