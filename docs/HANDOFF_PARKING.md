@@ -142,6 +142,31 @@ antes del park). De la U al fin: 14.05 → 11.00 s; carrera 78.0 → 75.0 s.
 −43° (sale de la curva de la señal) y la U choca con Red E/T4. Ni ENDEREZA 0/2 ni ALONG 450
 lo arreglan.
 
+## Baud 921600 con el park (rama `claude/park-baud-921600`, merge de fox/perfil-isla sobre park-u-preset)
+
+921600 en el twin: `TWIN_FW_PARAMS="serial2_us_per_char=10.85,serial_us_per_char=10.85"
+TWIN_PI_UART_US_PER_BYTE=10.85`. En el carro: `PI_BAUD`/`USB_BAUD` del .ino y `BAUDRATE` de config.py.
+
+Carreras completas (42 semillas, ruido 1, ruta_perfil + PARALELO/ALONG600/ALEJAR60, físico, park random):
+
+| config | OK | de la U al fin | carrera (media OK) | fallos |
+|---|---|---|---|---|
+| (a) 115200, ACK_E_MIN_MS/LOG_MIN_MS 100 | 40/42 | 11.00 s | 74.97 s | s18 (U → Red E/T4), s32 (señal W/T2 a 8 s) |
+| (b) 921600, flags 100 | 40/42 | 10.61 s | 73.28 s | s18 (igual), s31 (señal W/T2 a 8 s) |
+| (c) 921600, flags 0 | 40/42 | 10.67 s | 73.34 s | iguales a (b) |
+
+prepark.py (100 escenarios, hw_nuevo, físico):
+
+| | flags 100 | flags 0 |
+|---|---|---|
+| 115200 | 97/100 | **0/100** (el escaneo nunca arma) |
+| 921600 | 100/100 | 100/100 |
+
+**A 921600, `ACK_E_MIN_MS` y `LOG_MIN_MS` ya no hacen falta**: (b) y (c) dan lo mismo (0.06 s de
+diferencia, ruido). A 115200 siguen siendo imprescindibles (0/100 sin ellos). Se dejan en 100: no
+cuestan nada a 921600 y protegen si el carro queda a 115200. Los fallos s31/s32 cambian con el baud,
+pero son choques con señales a los 8 s (primera vuelta), no del park.
+
 ## Pedido: ¿planear el paralelo con la pose del modo ruta?
 
 **Es viable, pero no con la pose del tapete sola.** El cajón deja ~70 mm de holgura lateral (200 − 130)
