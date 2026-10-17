@@ -1457,6 +1457,7 @@ PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
 // su centro, en el sentido de la marcha (la isla termina en 500). 0 = como antes.
 // > 0 también habilita estacionar en modo ruta (la U ignora prio=1 de la ruta). Apagado por defecto: el modo ruta es solo 3 vueltas.
 PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 0;
+PARK_AJ long         PARK_UTURN_RUTA_PKA_MM      = 0;   // piso extra de la U en ruta: along >= pka + esto (madera del cajón más adelante, pka= de la Pi); 0 = apagado
 // Modo RUTA: además del along, la U espera a que el carro vaya casi recto al carril (|anguloGyro| <= esto); si dispara
 // girado (esquivando) el ToF no ve la pared y el radio sale mal. 0 = sin compuerta.
 PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeoró (U tarde o nunca: ruta 28 -> 20/41)
@@ -2305,7 +2306,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
   SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
-  SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX);
+  SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2538,7 +2539,9 @@ void vigilarUturn(long distL, long distR, long distF) {
   if (piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0) {
     bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
     float along = alongSalidaMm();
-    if (!fondoR && along < (float)PARK_UTURN_RUTA_ALONG_MM) return;
+    float umbralU = (float)PARK_UTURN_RUTA_ALONG_MM;
+    if (PARK_UTURN_RUTA_PKA_MM > 0 && !isnan(rutaPka)) umbralU = max(umbralU, rutaPka + (float)PARK_UTURN_RUTA_PKA_MM);   // la U no cae encima de la madera del cajón
+    if (!fondoR && along < umbralU) return;
     if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
     parkUturnDisparoOdom = -1;
     parkUturnPendiente = false;

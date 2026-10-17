@@ -174,3 +174,48 @@ por el plan local de dos arcos. No antes.
   (ANG 70-73; POSTE2 80 rompe).
 - Tiempo: con ALEJAR el estacionamiento tarda ~16 s desde tc12, contra ~14 s.
   Aún no se ajustó el tiempo.
+
+## Engranaje 1.25 + 564 g: park más rápido y s18 (2026-10-17)
+
+Banco: carrera completa, `TWIN_GEAR=1.25 TWIN_MASS_KG=0.564`, físico, UART 460800 (21.7 µs/B),
+42 semillas × ruidos 1-3, `ruta_perfil`. Scripts (gitignored) en `src/RASPI/cam/runs/`:
+`b.sh <tag> "1 2 3" <json> 16`, `mk.py` (json base + overrides), `jcan.py`, `fases.py`
+(tiempo por fase `pnf`).
+
+Base pgq2h + park escalado: 41/41/41 (s18), mediana 45.0-45.15 s, U→fin 9.80-9.97 s.
+Tiempo por fase (mediana): escaneo 0 = 2.97 s, U 24 = 1.82, reversa 3/8/7/14/... ≈ 4.5,
+settle 25 = 0.34, enderezar 27 = 0.50.
+
+**s18**: el carro sale del esquive de Red N/T1 por dentro (ext 93) y la U a along 600 cae
+encima de Red E/T4. Con ALONG 500 se arregla, pero s2 se rompe: la U termina sobre la primera
+madera del cajón (pka 446) antes de que el escaneo arme, y la ignora (“bajada IGNORADA”).
+Nuevo `PARK_UTURN_RUTA_PKA_MM` (0 = apagado): la U espera hasta `along ≥ pka + esto`.
+
+Screening en ruido 1 (cada uno solo, sobre la base):
+
+| Cambio | OK | U→fin |
+|---|---|---|
+| ALONG 500 + PKA 120 | **42** | 9.46 |
+| ALONG 450 + PKA 120 | 33 | – |
+| `MANIOBRA_FRENO_MS` 300 → 150 / 100 | 41 / 41 | 9.44 / 9.24 |
+| `PARK_UTURN_PWM`+`ALEJAR_PWM` 137 → 170 | 41 | 9.68 |
+| `PARK_PUNTA_PWM` (escaneo lento) 95 → 110 / 125 | 41 / 41 | 9.62 / 9.42 |
+| PWMs de la reversa ×1.15 | 38 | – |
+| `PARK_SCAN_RAPIDO_PWM` 210, `PARK_APPROACH_PWM` 100 | 41 | sin efecto (no se usan en este camino) |
+| Rechazados a 1.5, de nuevo a 1.25: POSTE2 80, RECTO_MAX 50, PARED_CM 20, ANG_MAX 15 | 0-27 | – |
+| ANG_IN 67 / 73, SCAN_RAPIDO_MM 250 | 41 | 9.85 / 10.02 / 9.74 |
+
+Combinación (ALONG 500 + PKA 120 + U/ALEJAR 170 + PUNTA 125 + FRENO 100): U→fin 7.85 s, pero
+s40/s26 caen igual que s2 (la U más rápida llega a la madera a ~480 ms del escaneo, y arma a 600).
+PKA 250/300 lo arregla pero s34 (pka 484) dispara tarde y choca con la isla. **`PARK_ARMADO_MS`
+600 → 400** (300 da lo mismo) → **42/42/42**, U→fin 7.82-7.91 s, carrera 42.5-42.8 s.
+
+**Export (pab25 + park nuevo)**: pab25 (pgq2h + A_BRAKE 2500, PWM0 18.7) con park escalado
+da 41/41/41, 44.5-44.6 s; con el park nuevo **42/42/42, mediana 42.30-42.32 s (−2.3 s), U→fin
+7.81-7.85 s**. `runs/pab25_parkk.json`: `PARK_UTURN_RUTA_ALONG_MM 500, PARK_UTURN_RUTA_PKA_MM 120,
+PARK_UTURN_PWM/ALEJAR_PWM 170, PARK_PUNTA_PWM 125, MANIOBRA_FRENO_MS 100, PARK_ARMADO_MS 400`
+(+ las PWMs escaladas de antes).
+
+Riesgos: `MANIOBRA_FRENO_MS` 100 es el coast antes de invertir el puente H; el twin modela el
+coast con `tau_coast` 0.12 s *supuesto*. En el carro, medir que a 100 ms el motor ya casi paró
+(si no, invierte con back-EMF). ARMADO 400 deja menos margen contra postes falsos tras la U.
