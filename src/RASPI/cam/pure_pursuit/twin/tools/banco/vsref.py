@@ -23,6 +23,9 @@ def one(path):
     except Exception:
         return dict(ok=False, why="noSTOP")
     bad = stop != "race_finished" or bool(m.get("collisions")) or bool(m.get("sign_contacts"))
+    # Choque ya con las 3 vueltas hechas (TERMINANDO del bench): en la carrera ahí sigue la U, no cuenta.
+    if stop == "collision" and len(m.get("lap_times_s") or []) >= 3:
+        bad = False
     if bad:
         c = m.get("collisions") or []
         why = c[0].get("cause", "?") if c and isinstance(c[0], dict) else stop
