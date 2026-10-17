@@ -219,3 +219,14 @@ PARK_UTURN_PWM/ALEJAR_PWM 170, PARK_PUNTA_PWM 125, MANIOBRA_FRENO_MS 100, PARK_A
 Riesgos: `MANIOBRA_FRENO_MS` 100 es el coast antes de invertir el puente H; el twin modela el
 coast con `tau_coast` 0.12 s *supuesto*. En el carro, medir que a 100 ms el motor ya casi paró
 (si no, invierte con back-EMF). ARMADO 400 deja menos margen contra postes falsos tras la U.
+
+### Segunda ronda (sobre pab25_parkk, 42/42/42, 42.3 s)
+
+Ruido 1, cada uno solo: `MANIOBRA_FRENO_MS` 50 −0.11 s; `PARK_PUNTA_PWM` 140 −0.22; U/ALEJAR 200 ≈ 0;
+`PARK_RETORNO_SETTLE_MAX_MS` 300 = 0; `MANIOBRA_SETTLE_RATE_DPS` 60 + `QUIETO_N` 2 −0.05;
+`PARK_UTURN_ALEJAR_CM` 50 −0.17; reversa +5 % (REV 79, PWM 87, CENTER_PAR 69, RETORNO_REV 83) −0.14. Todos 42/42.
+
+Combinados, ruidos 1-3: con PUNTA 140 + ALEJAR 50 → 42/42/42, 41.75 s; con **PUNTA 155 + ALEJAR 40 → 42/42/42,
+mediana 41.44-41.58 s (−0.85 s), U→fin 6.9-7.0 s (aceptado, `runs/pab25_parkk2.json`)**. ALEJAR 30 → 34-36/42
+(choques con el cajón: patrón A otra vez). PUNTA 185 da exactamente lo mismo que 155 (algo lo limita; no investigado).
+Riesgo extra: `MANIOBRA_FRENO_MS` 50 (coast antes de invertir) depende aún más del `tau_coast` supuesto.

@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + pab25_parkk.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + pab25_parkk2.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -431,7 +431,7 @@ const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el 
 const float CRUCERO_WALL_BLEND = 0.8f; // en CRUCERO: cuánto del wall PID se mezcla para CENTRAR
                                        // en el carril (0 = solo heading, 1 = wall PID completo).
                                        // Solo aplica mientras ambas paredes existen.
-const unsigned long MANIOBRA_FRENO_MS      = 100;   // coast (A1=A2=LOW) antes/después de invertir dirección
+const unsigned long MANIOBRA_FRENO_MS      = 50;   // coast (A1=A2=LOW) antes/después de invertir dirección
                                                     // — SIN esto el puente H se fríe por "plugging" (invertir
                                                     // con el motor girando). Reventó un TB6612 así (2026-09-01).
 const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa de a poco. Corto a
@@ -554,8 +554,8 @@ const int CRUCERO_YIELD_ANG_DEG = 30;  // |anguloGyro| máx. para esa salida (an
 // se hace coast + servo centro y se espera a que |ΔanguloGyro/Δt| baje del
 // umbral por N samples (o venza el timeout).
 const unsigned long MANIOBRA_SETTLE_SAMPLE_MS  = 40;    // cada cuánto se mide la velocidad angular
-const float         MANIOBRA_SETTLE_RATE_DPS   = 30.0f; // deg/s por debajo de esto = "ya no rota"
-const int           MANIOBRA_SETTLE_QUIETO_N   = 3;     // samples lentos SEGUIDOS para cerrar (~120 ms)
+const float         MANIOBRA_SETTLE_RATE_DPS   = 60; // deg/s por debajo de esto = "ya no rota"
+const int           MANIOBRA_SETTLE_QUIETO_N   = 2;     // samples lentos SEGUIDOS para cerrar (~120 ms)
 const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igual aunque no se aquiete
 
 // Fase 4 (retroceso-post): la reversa a ciegas (servo centrado) giraba el carro
@@ -902,7 +902,7 @@ PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la m
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
 PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
-const int           PARK_REV_PWM             = 75;    // PWM de marcha atrás — suave para control preciso
+const int           PARK_REV_PWM             = 79;    // PWM de marcha atrás — suave para control preciso
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
@@ -914,7 +914,7 @@ const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
 const float         PARK_KD_RATE              = 0.30f;
 const int           PARK_SERVO_MAX            = 35;
-const int           PARK_PWM                  = 83;
+const int           PARK_PWM                  = 87;
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
@@ -1203,7 +1203,7 @@ PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (p
 // PARK_FWD_MS sigue acotando por si la pared nunca aparece.
 // PARA REVERTIR: PARK_CENTER_DEB = 1.
 const int           PARK_CENTER_DEB           = 3;
-const int           PARK_CENTER_PWM_PAR       = 66;
+const int           PARK_CENTER_PWM_PAR       = 69;
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
 // El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
@@ -1422,7 +1422,7 @@ const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el a
 PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 // Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
 // a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
-PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 60;
+PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 40;
 PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
@@ -1496,7 +1496,7 @@ const unsigned long PARK_RETORNO_REV_CCW_MS    = 1200;   // regreso con pared a 
 // de enfrente ignorando el primer poste. Se iguala al valor de CCW, que ya está
 // probado. Si en pista resulta que el CW necesita otro tiempo, se separa aquí.
 const unsigned long PARK_RETORNO_REV_CW_MS     = 1200;   // regreso con pared a la DER (carrera CW)
-const int           PARK_RETORNO_REV_PWM       = 79;
+const int           PARK_RETORNO_REV_PWM       = 83;
 // ── La reversa del regreso también sigue la PARED, no solo el gyro ──────────
 // Ver el bloque de la fase 22. false = comportamiento anterior (solo rumbo a 0).
 // 2026-09-16 APAGADO tras la run 1031. El signo era correcto (el carro sí pasó de
@@ -1519,7 +1519,7 @@ const unsigned long PARK_RETORNO_REV_RECTO_MS  = 350;
 // revés), cambia esto a +1 y queda arreglado — no toques nada más.
 const int           PARK_RETORNO_REV_SIGNO     = -1;
 // Wall follower
-const int           PARK_PUNTA_PWM             = 125;     // PWM de la recta final
+const int           PARK_PUNTA_PWM             = 155;     // PWM de la recta final
 const float         PARK_PUNTA_PARED_CM        = 31.0f;  // distancia a mantener de la pared exterior (lectura del sonar)
                                                          // 2026-09-15: 30 -> 35 (orillas949 se enchuecaba hacia la pared) -> 33
                                                          // (orillas950 con 35 se saltó el 1er poste: eco débil más lejos)
