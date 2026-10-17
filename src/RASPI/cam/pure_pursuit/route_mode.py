@@ -104,6 +104,7 @@ class RouteMode:
         self._job_shift = 0.0
         self._delay_left = None      # frames que faltan para adoptar el plan retrasado (ROUTE_PLAN_DELAY_S)
         self.pi_steer = False        # ps=1: el ESP gira con el obs de la Pi (ruta nueva) mientras sube
+        self.pi_wheel = 0.0          # pw=: rueda (deg, + = derecha) de la Pi con la ruta nueva, para ps=1
         self._delay_plan = None
         # Arranque ciego
         self.blind = bool(getattr(C, "ROUTE_START_BLIND", False))
@@ -587,6 +588,7 @@ class RouteMode:
         ax, ay = self.axis
         ds = self.shift - self.route_shift
         wheel = self.follower.steer(x - ds * ax, y - ds * ay, hd)
+        self.pi_wheel = wheel
         servo = wheel * float(C.SERVO_FULL_LOCK_CMD_DEG) / float(C.MAX_WHEEL_STEER_DEG)
         obs = max(-1.0, min(1.0, servo / C.PP_STEER_GAIN))
         slow = int(getattr(C, "ROUTE_SLOW_PWM", 100))
@@ -1087,7 +1089,7 @@ class RouteMode:
         ty -= ds * self.axis[1]
         s = f",rt=1,rtx={tx:.1f},rty={ty:.1f},rth={th:.3f}"
         if self.pi_steer:
-            s += ",ps=1"
+            s += f",ps=1,pw={self.pi_wheel:.2f}"
         if self.rv is not None:
             s += f",rv={int(self.rv)}"
         return s

@@ -227,6 +227,7 @@ float rutaPaso    = 20.0f;   // mm entre puntos
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
 bool  piSteerPi   = false;   // ps=1: mientras sube la ruta, girar con obs de la Pi (ruta nueva) en vez de la ruta vieja
+float piWheelDeg  = 0.0f;    // pw=: rueda de la Pi con la ruta nueva (+ = derecha), la usa ps=1
 bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
@@ -2944,6 +2945,7 @@ void parsePiMessage(String line) {
     // Modo RUTA: rt=1 y la transformación odometría -> tapete.
     piRuta         = campoPi(line, ",rt=", v) && v.toInt() != 0;
     piSteerPi      = campoPi(line, ",ps=", v) && v.toInt() != 0;
+    if (campoPi(line, ",pw=", v)) piWheelDeg = v.toFloat();
     rutaVel        = campoPi(line, ",rv=", v) ? (int)v.toInt() : -1;
     if (campoPi(line, ",rtx=", v)) {
       rutaTx = v.toFloat();
@@ -3324,7 +3326,19 @@ void controlPID(long distL, long distR) {
   } else if (piPurePursuit) {
     // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
     float ruedaDeg;
-    if (!piSteerPi && rutaSteer(ruedaDeg)) {
+    if (piSteerPi && piRuta) {
+      // ps=1 (ruta nueva subiendo): rueda que calculó la Pi con la ruta nueva, mismo mapeo que la ruta.
+      int servoAngle = constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      escribirServo(servoAngle);
+      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
+        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+      } else {
+        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      }
+      Serial.print(" | Mode:RUTA-PI"); Serial.print(" | Servo:"); Serial.print(servoAngle);
+      return;
+    }
+    if (rutaSteer(ruedaDeg)) {
       int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
       // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
@@ -3360,8 +3374,7 @@ void controlPID(long distL, long distR) {
     int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
     servoAngle = constrain(servoAngle + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
     escribirServo(servoAngle);
-    // ps=1 (ruta subiendo): el tope rv de la Pi (perfil, CTE) sigue mandando.
-    setMotor(piSteerPi && rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+    setMotor(velocidadMotor);
 
     // ── Debug UART ────────────────────────────────────────────────────────────
     Serial.print(" | Mode:PP");
