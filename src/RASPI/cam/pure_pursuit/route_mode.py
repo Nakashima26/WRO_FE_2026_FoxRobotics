@@ -51,6 +51,7 @@ def _route_params():
     pwm0 = float(getattr(C, "ROUTE_PROFILE_PWM0", 25.0))
     return RR.RouteParams(
         w_kappa=float(getattr(C, "ROUTE_W_KAPPA", 3.0e4)),
+        d_step=float(getattr(C, "ROUTE_D_STEP", 20.0)),
         hard_clear_mm=float(getattr(C, "ROUTE_HARD_CLEAR_MM", 55.0)),
         soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
         w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),
@@ -111,6 +112,8 @@ class RouteMode:
         self._job_unknown = []
         self._job_shift = 0.0
         self._delay_left = None      # frames que faltan para adoptar el plan retrasado (ROUTE_PLAN_DELAY_S)
+        self.pi_steer = False        # ps=1: el ESP gira con el obs de la Pi (ruta nueva) mientras sube
+        self.pi_wheel = 0.0          # pw=: rueda (deg, + = derecha) de la Pi con la ruta nueva, para ps=1
         self._delay_plan = None
         # Arranque ciego
         self.blind = bool(getattr(C, "ROUTE_START_BLIND", False))
@@ -594,6 +597,7 @@ class RouteMode:
         ax, ay = self.axis
         ds = self.shift - self.route_shift
         wheel = self.follower.steer(x - ds * ax, y - ds * ay, hd)
+        self.pi_wheel = wheel
         servo = wheel * float(C.SERVO_FULL_LOCK_CMD_DEG) / float(C.MAX_WHEEL_STEER_DEG)
         obs = max(-1.0, min(1.0, servo / C.PP_STEER_GAIN))
         slow = int(getattr(C, "ROUTE_SLOW_PWM", 100))
@@ -611,12 +615,15 @@ class RouteMode:
             if getattr(C, "ROUTE_CTE_URGENT_MM", None) is not None and self._cte_urgent(conf, empty):
                 cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
+        self.pi_steer = (bool(self.upload) and not self.hold
+                         and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and self._upload_risky())
         if self.upload:
             # Mientras la ruta nueva no llega completa al ESP, lento; detenido
             # si cambió desde la pose (otro carril cerca del carro).
             # ROUTE_UPLOAD_SLOW=False: el ESP sigue la ruta anterior completa
             # (doble buffer, swap en RTE), así que solo se frena en el ALTO.
-            if self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky()):
+            # pi_steer: el ESP gira con la Pi, sin tope de subida (pi_steer nunca va con hold: el ALTO sigue).
+            if not self.pi_steer and (self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky())):
                 cap = 0 if self.hold else _pwm("ROUTE_UPLOAD_PWM")
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
@@ -1094,6 +1101,8 @@ class RouteMode:
         s = f",rt=1,rtx={tx:.1f},rty={ty:.1f},rth={th:.3f}"
         if self.fixed and getattr(self, "pka", None) is not None:
             s += f",pka={self.pka:.0f}"
+        if self.pi_steer:
+            s += f",ps=1,pw={self.pi_wheel:.2f}"
         if self.rv is not None:
             s += f",rv={int(self.rv)}"
         return s

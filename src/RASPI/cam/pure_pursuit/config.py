@@ -1260,6 +1260,7 @@ ROUTE_FOLLOW = False
 ROUTE_LOOKAHEAD_MM = 200.0
 # Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
 ROUTE_W_KAPPA = 3.0e4
+ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10: diagonales más rectas, ~5x más lento)
 # Frames que se adelanta la pose de odometría (llega atrasada por el UART).
 # 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
 ROUTE_PREDICT_FRAMES = 0.0
@@ -1395,6 +1396,9 @@ ROUTE_LOCK_STATIONS = 7
 # Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.
 # False: no se baja (el ESP sigue la anterior hasta el RTE); el ALTO (cap 0) se queda.
 ROUTE_UPLOAD_SLOW = True
+# Mientras sube una ruta que cambia (ver ROUTE_UPLOAD_DIFF_MM), el ESP gira con el obs de la Pi
+# (ruta nueva) en vez de su ruta vieja (ps=1 en el V2) y no se aplica ROUTE_UPLOAD_PWM. False: sin cambio.
+ROUTE_UPLOAD_PI_STEER = False
 # Error lateral (mm, odometría) arriba del cual se baja a ROUTE_SLOW_PWM.
 ROUTE_CTE_SLOW_MM = 40.0
 # Frames máximos detenido esperando ver un asiento (luego sigue lento).
@@ -1494,7 +1498,7 @@ CORR_LIMIT_PX    = 160.0
 # ─── Cámara / captura ─────────────────────────────────────────────────────────
 CAM_INDEX      = 1
 SERIAL_PORT    = "/dev/ttyS0"
-BAUDRATE       = 115200
+BAUDRATE       = 115200  # = PI_BAUD del ESP; 921600 rinde ~1.8 s/ronda en el twin
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
 

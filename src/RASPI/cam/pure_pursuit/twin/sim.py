@@ -392,6 +392,10 @@ class Sim:
             self.fw_params.update({"rp_on": 1.0, "rp_x": e["px"], "rp_y": e["py"], "rp_yaw": e["yaw"],
                                    "rp_ang": e["ang"], "rp_od": e["od"], "rp_od12": ruta_seed["od12"],
                                    "rp_izq": 1.0 if ruta_seed["direction"] == "CCW" else 0.0})
+        # TWIN_FW_PARAMS="serial2_us_per_char=10.85,serial_us_per_char=10.85" (p. ej. otro baud)
+        for kv in filter(None, os.environ.get("TWIN_FW_PARAMS", "").split(",")):
+            k, v = kv.split("=")
+            self.fw_params[k.strip()] = float(v)
         cfg = resolve_preset(
             preset,
             fw_source=fw_source,

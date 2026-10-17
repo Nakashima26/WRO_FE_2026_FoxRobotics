@@ -239,6 +239,8 @@ int   rutaRecib   = 0;       // puntos recibidos de la carga en curso
 float rutaPaso    = 20.0f;   // mm entre puntos
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
+bool  piSteerPi   = false;   // ps=1: mientras sube la ruta, girar con obs de la Pi (ruta nueva) en vez de la ruta vieja
+float piWheelDeg  = 0.0f;    // pw=: rueda de la Pi con la ruta nueva (+ = derecha), la usa ps=1
 bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
@@ -3058,6 +3060,8 @@ void parsePiMessage(String line) {
     piEsquina      = campoPi(line, ",es=", v)    && v.toInt() != 0;
     // Modo RUTA: rt=1 y la transformación odometría -> tapete.
     piRuta         = campoPi(line, ",rt=", v) && v.toInt() != 0;
+    piSteerPi      = campoPi(line, ",ps=", v) && v.toInt() != 0;
+    if (campoPi(line, ",pw=", v)) piWheelDeg = v.toFloat();
     rutaVel        = campoPi(line, ",rv=", v) ? (int)v.toInt() : -1;
     if (campoPi(line, ",rtx=", v)) {
       rutaTx = v.toFloat();
@@ -3448,6 +3452,18 @@ void controlPID(long distL, long distR) {
   } else if (piPurePursuit) {
     // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
     float ruedaDeg;
+    if (piSteerPi && piRuta) {
+      // ps=1 (ruta nueva subiendo): rueda que calculó la Pi con la ruta nueva, mismo mapeo que la ruta.
+      int servoAngle = constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      escribirServo(servoAngle);
+      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
+        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+      } else {
+        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      }
+      Serial.print(" | Mode:RUTA-PI"); Serial.print(" | Servo:"); Serial.print(servoAngle);
+      return;
+    }
     if (rutaSteer(ruedaDeg)) {
       int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
@@ -3550,9 +3566,18 @@ void terminando(long distL, long distR) {
 // Setup
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Twin (pb92): a 921600 el loop sube de ~18 a ~64 Hz y la ronda baja ~1.8 s.
+// PI_BAUD debe coincidir con BAUDRATE en config.py de la Pi.
+#ifndef PI_BAUD
+#define PI_BAUD 115200
+#endif
+#ifndef USB_BAUD
+#define USB_BAUD 115200
+#endif
+
 void setup() {
-  Serial.begin(115200);
-  Serial2.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+  Serial.begin(USB_BAUD);
+  Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
 
   Wire.begin();
 #if FOX_BNO && !defined(FOX_SIL)
