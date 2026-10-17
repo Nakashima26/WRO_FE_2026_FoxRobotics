@@ -226,6 +226,7 @@ int   rutaRecib   = 0;       // puntos recibidos de la carga en curso
 float rutaPaso    = 20.0f;   // mm entre puntos
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
+bool  piSteerPi   = false;   // ps=1: mientras sube la ruta, girar con obs de la Pi (ruta nueva) en vez de la ruta vieja
 bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
@@ -2942,6 +2943,7 @@ void parsePiMessage(String line) {
     piEsquina      = campoPi(line, ",es=", v)    && v.toInt() != 0;
     // Modo RUTA: rt=1 y la transformación odometría -> tapete.
     piRuta         = campoPi(line, ",rt=", v) && v.toInt() != 0;
+    piSteerPi      = campoPi(line, ",ps=", v) && v.toInt() != 0;
     rutaVel        = campoPi(line, ",rv=", v) ? (int)v.toInt() : -1;
     if (campoPi(line, ",rtx=", v)) {
       rutaTx = v.toFloat();
@@ -3322,7 +3324,7 @@ void controlPID(long distL, long distR) {
   } else if (piPurePursuit) {
     // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
     float ruedaDeg;
-    if (rutaSteer(ruedaDeg)) {
+    if (!piSteerPi && rutaSteer(ruedaDeg)) {
       int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
       // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
@@ -3358,7 +3360,8 @@ void controlPID(long distL, long distR) {
     int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
     servoAngle = constrain(servoAngle + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
     escribirServo(servoAngle);
-    setMotor(velocidadMotor);
+    // ps=1 (ruta subiendo): el tope rv de la Pi (perfil, CTE) sigue mandando.
+    setMotor(piSteerPi && rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
 
     // ── Debug UART ────────────────────────────────────────────────────────────
     Serial.print(" | Mode:PP");

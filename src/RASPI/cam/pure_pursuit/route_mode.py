@@ -103,6 +103,7 @@ class RouteMode:
         self._job_unknown = []
         self._job_shift = 0.0
         self._delay_left = None      # frames que faltan para adoptar el plan retrasado (ROUTE_PLAN_DELAY_S)
+        self.pi_steer = False        # ps=1: el ESP gira con el obs de la Pi (ruta nueva) mientras sube
         self._delay_plan = None
         # Arranque ciego
         self.blind = bool(getattr(C, "ROUTE_START_BLIND", False))
@@ -603,12 +604,15 @@ class RouteMode:
             if getattr(C, "ROUTE_CTE_URGENT_MM", None) is not None and self._cte_urgent(conf, empty):
                 cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
+        self.pi_steer = (bool(self.upload) and not self.hold
+                         and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and self._upload_risky())
         if self.upload:
             # Mientras la ruta nueva no llega completa al ESP, lento; detenido
             # si cambió desde la pose (otro carril cerca del carro).
             # ROUTE_UPLOAD_SLOW=False: el ESP sigue la ruta anterior completa
             # (doble buffer, swap en RTE), así que solo se frena en el ALTO.
-            if self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky()):
+            # pi_steer: el ESP gira con la Pi, sin tope de subida (pi_steer nunca va con hold: el ALTO sigue).
+            if not self.pi_steer and (self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky())):
                 cap = 0 if self.hold else _pwm("ROUTE_UPLOAD_PWM")
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
@@ -1082,6 +1086,8 @@ class RouteMode:
         tx -= ds * self.axis[0]
         ty -= ds * self.axis[1]
         s = f",rt=1,rtx={tx:.1f},rty={ty:.1f},rth={th:.3f}"
+        if self.pi_steer:
+            s += ",ps=1"
         if self.rv is not None:
             s += f",rv={int(self.rv)}"
         return s

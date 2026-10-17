@@ -1396,6 +1396,9 @@ ROUTE_LOCK_STATIONS = 7
 # Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.
 # False: no se baja (el ESP sigue la anterior hasta el RTE); el ALTO (cap 0) se queda.
 ROUTE_UPLOAD_SLOW = True
+# Mientras sube una ruta que cambia (ver ROUTE_UPLOAD_DIFF_MM), el ESP gira con el obs de la Pi
+# (ruta nueva) en vez de su ruta vieja (ps=1 en el V2) y no se aplica ROUTE_UPLOAD_PWM. False: sin cambio.
+ROUTE_UPLOAD_PI_STEER = False
 # Error lateral (mm, odometría) arriba del cual se baja a ROUTE_SLOW_PWM.
 ROUTE_CTE_SLOW_MM = 40.0
 # Frames máximos detenido esperando ver un asiento (luego sigue lento).
