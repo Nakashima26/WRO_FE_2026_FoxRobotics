@@ -1412,6 +1412,11 @@ const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el a
 // sube de ~52/107 a ~149/190 mm CW/CCW y la U termina a ~180 mm de la pared exterior). Con ext <= 35 cm
 // al arrancar la U el radio ya es el mínimo y este valor no actúa. Del lado exterior no hay latas.
 PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+// Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
+// a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
+PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 0;
+PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
+PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
@@ -1439,6 +1444,9 @@ PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
 // su centro, en el sentido de la marcha (la isla termina en 500). 0 = como antes.
 // > 0 también habilita estacionar en modo ruta (la U ignora prio=1 de la ruta). Apagado por defecto: el modo ruta es solo 3 vueltas.
 PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 0;
+// Modo RUTA: además del along, la U espera a que el carro vaya casi recto al carril (|anguloGyro| <= esto); si dispara
+// girado (esquivando) el ToF no ve la pared y el radio sale mal. 0 = sin compuerta.
+PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeoró (U tarde o nunca: ruta 28 -> 20/41)
 long                 parkUturnDisparoOdom        = -1;   // odómetro al armar la espera
 // T15b2 (t15b2_esquina13, "patrón 2", seeds 7/19 CCW): tras la U (fase 25)
 // el carro puede quedar a ext 9-11 cm y la fase 0 (resetParkScan) separa con
@@ -2281,6 +2289,8 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
+  SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
+  SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2355,7 +2365,7 @@ void iniciarEstacionandoParaleloUturn() {
   parkParedEsIzquierda = paredCajonEsIzq(true);
   parkRumboGiro0   = anguloGyro;
   parkServoU       = 0;
-  parkFase         = 24;
+  parkFase         = (PARK_UTURN_ALEJAR_CM > 0) ? 26 : 24;
   parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorAdelante();
   escribirServo(centroServo);
@@ -2461,6 +2471,7 @@ void iniciarEstacionamiento(bool retorno) {
 // función corre antes, en el mismo frame, en la rama "ronda cerrada" de más
 // abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
 float alongSalidaMm();
+float rutaErrCarrilDeg(); float rutaExtTapeteCm();
 void vigilarUturn(long distL, long distR, long distF) {
   if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO) return;
   // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
@@ -2485,11 +2496,14 @@ void vigilarUturn(long distL, long distR, long distF) {
     bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
     float along = alongSalidaMm();
     if (!fondoR && along < (float)PARK_UTURN_RUTA_ALONG_MM) return;
+    if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
     parkUturnDisparoOdom = -1;
     parkUturnPendiente = false;
     Serial.print("PARK U por pose: along="); Serial.print(along, 0);
     Serial.print(" ang="); Serial.println(anguloGyro, 1);
     iniciarEstacionamiento(true);
+    parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();   // la U y el alejarse miden contra el carril, no contra el rumbo girado de la ruta
+    Serial.print("PARK U carril ref="); Serial.println(parkRumboGiro0, 1);
     return;
   }
   bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
@@ -2833,6 +2847,25 @@ float alongSalidaMm() {
   rutaPoseTapete(x, y);
   float a = (rutaSecSalida == 2) ? x : (rutaSecSalida == 1) ? y : (rutaSecSalida == 0) ? -x : -y;
   return direccionIzquierda ? a : -a;
+}
+
+// Modo RUTA: error de rumbo contra el carril de la sección de salida, en convención de anguloGyro (+ = izquierda).
+// Rumbo del carril en unidades de anguloGyro = anguloGyro - rutaErrCarrilDeg().
+float rutaErrCarrilDeg() {
+  float carril = (rutaSecSalida == 2) ? 90.0f : (rutaSecSalida == 1) ? 0.0f : (rutaSecSalida == 0) ? 270.0f : 180.0f;
+  if (!direccionIzquierda) carril += 180.0f;
+  float e = carril - (rutaTh - anguloTotal);
+  while (e > 180.0f) e -= 360.0f;
+  while (e < -180.0f) e += 360.0f;
+  return e;
+}
+
+// Modo RUTA: cm del costado del carro a la pared exterior de la sección de salida (pose del tapete; 6.5 cm = medio ancho).
+float rutaExtTapeteCm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float perp = (rutaSecSalida == 2) ? -y : (rutaSecSalida == 1) ? x : (rutaSecSalida == 0) ? y : -x;
+  return (1500.0f - perp) / 10.0f - 6.5f;
 }
 
 // Servo para un ángulo de rueda de la ruta (+ = derecha), sin wallPanic.
@@ -4786,6 +4819,42 @@ void loop() {
       int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
       if (piPark >= 1) parkRosaVisto = true;
+
+      // ── Fase 26: ALEJARSE antes de la U (PARK_UTURN_ALEJAR_CM) — rumbo
+      // abierto lejos de la pared del lado del giro hasta tener espacio ───────
+      if (parkFase == 26) {
+        bool  uturnIzqP   = !parkParedEsIzquierda;
+        float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+        long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
+        float dif     = fabs(anguloGyro - parkRumboGiro0);
+        float lateral = (piRuta && rutaTfOk && rutaSecSalida >= 0) ? rutaExtTapeteCm()
+                      : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
+        bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
+        bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
+        if (lejos || tope) {
+          parkFase = 27; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 27: ENDEREZA antes de la U (ext="); Serial.print(extAhoraP);
+          Serial.print(" lat="); Serial.print(lateral, 1);
+          Serial.println(tope ? " TOPE)" : ")");
+          break;
+        }
+        motorAdelante();
+        servoRumboPark(parkRumboGiro0 - haciaAhoraP * (float)PARK_UTURN_ALEJAR_ANG);
+        setMotor(PARK_RETORNO_PWM_MIN);
+        break;
+      }
+
+      // ── Fase 27: ENDEREZA al rumbo del carril y arranca la U (fase 24) ────
+      if (parkFase == 27) {
+        motorAdelante();
+        servoRumboPark(parkRumboGiro0);
+        setMotor(PARK_RETORNO_PWM_MIN);
+        if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
+          parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
+        }
+        break;
+      }
 
       // ── Fase 24: U DE 180° (PARK_PARALELO_USA_UTURN) — mismo arco que
       // ESTACIONANDO_PUNTA fase 20, pegado a la pared EXTERIOR actual (la
