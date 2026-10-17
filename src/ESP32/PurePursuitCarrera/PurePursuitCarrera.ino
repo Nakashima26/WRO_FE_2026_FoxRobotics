@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + pgv3_parkesc.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + pgq2h_parkesc.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800

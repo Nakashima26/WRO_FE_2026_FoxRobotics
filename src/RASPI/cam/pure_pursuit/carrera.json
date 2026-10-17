@@ -23,11 +23,11 @@
  "ROUTE_FIX_LINE": true,
  "ROUTE_FIX_STEP_MM": 8.0,
  "ROUTE_FOLLOW": true,
- "ROUTE_HARD_CLEAR_MM": 65.0,
+ "ROUTE_HARD_CLEAR_MM": 70.0,
  "ROUTE_LAP1_OPEN": true,
  "ROUTE_LAP1_PWM": 255,
  "ROUTE_PROFILE": true,
- "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0,
+ "ROUTE_PROFILE_A_LAT_MM_S2": 2400.0,
  "ROUTE_PROFILE_BASE_PWM": 250,
  "ROUTE_PROFILE_BRAKE_FF_S": 0.1,
  "ROUTE_PROFILE_BRAKE_FLOOR_PWM": 53,
@@ -45,6 +45,6 @@
  "ROUTE_UNSEEN_RAMP_MM": 850.0,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "pgv3_parkesc.json",
+ "_fuente": "pgq2h_parkesc.json",
  "_preset": "ruta_perfil"
 }
