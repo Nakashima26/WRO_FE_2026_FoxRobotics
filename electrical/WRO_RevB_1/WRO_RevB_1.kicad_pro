@@ -78,7 +78,11 @@
       ],
       "drc_exclusions": [
         [
-          "unconnected_items|170580000|109160000|F.Cu|4|77e398d0-e3a6-4f92-b859-d6386e9ae5ca|d252b5b9-be3f-40f7-8385-207cdcea92c6",
+          "unconnected_items|117640000|114620000|F.Cu|4|89fc3c87-5018-423e-ab40-030e65728e05|2cf9b03f-676d-40cb-9b20-f9935eb69b42",
+          ""
+        ],
+        [
+          "unconnected_items|170580000|109160000|F.Cu|4|77e398d0-e3a6-4f92-b859-d6386e9ae5ca|412bb627-9dbb-4f2c-b709-189fda10ddda",
           "will connect with other pcb"
         ]
       ],
@@ -584,7 +588,7 @@
       "netlist": "",
       "plot": "",
       "specctra_dsn": "",
-      "step": "WRO_RevB_1.step",
+      "step": "",
       "vrml": ""
     },
     "page_layout_descr_file": ""
