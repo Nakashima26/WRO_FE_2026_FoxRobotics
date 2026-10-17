@@ -243,3 +243,14 @@ Riesgo extra: `MANIOBRA_FRENO_MS` 50 (coast antes de invertir) depende aún más
   (aceptado, `runs/pab25_parkk3.json`)**. +15 % ya daba 4 choques en la primera ronda.
 - **Con pvi154 (VEL_INICIAL 154):** sobre park3 → 42/41/42 (s41 n2, pegado de lado 10 mm): la reversa +10 % queda
   al límite y se descarta. Sobre park2 → **42/42/42, mediana 41.06-41.33 s, U→fin 6.9 s (export, `runs/pvi154_parkk2.json`)**.
+
+### Cuarta ronda (sobre pu19r4_parkk2, 42/42/42, 40.77-40.93 s, U→fin 7.0 s)
+
+- Nuevo `PARK_UTURN_SIN_SETTLE` (0 = como antes): al cerrar la U pasa directo al escaneo, sin coast ni settle
+  (fase 25). **1 → 42/42/42, 40.71-40.87 s (−0.06 s), U→fin 6.84-6.93 s (aceptado, `runs/pu19r4_parkk4.json`)**.
+  Con ARMADO 300 da lo mismo.
+- `PARK_UTURN_ENDEREZA` 0 o 2: 40/42 (2 choques). Rechazado.
+- `PARK_UTURN_EXT_OBJ_CM` (U más corta): 32 → −0.11 s en ruido 1; 36 → 42/41/42 (s26 n2, 7 mm fuera); 40 → 26/42;
+  44 → 14/42. Es un precipicio: queda en 28.
+- Lo que queda por fase (mediana): escaneo ~1.6 s, U ~1.5 s, reversa (fases 3/8/14/13/11) ~2.8 s, enderezar 0.4 s.
+  Lo que acelera la reversa o el escaneo más allá de lo actual (reversa +10 %, MOTOR_MAX > 155) ya está al límite.

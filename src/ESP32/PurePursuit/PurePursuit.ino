@@ -1423,6 +1423,7 @@ PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
+PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 0;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 // PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
 PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 160;
 PARK_AJ long         PARK_UTURN_PWM             = 160;
@@ -2304,7 +2305,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM);
+  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM);
 #undef SIL_AJ
@@ -4964,6 +4965,15 @@ void loop() {
         bool  listo  = girado >= (float)PARK_UTURN_DEG;
         bool  tout   = t >= PARK_RETORNO_TIMEOUT_MS;
         if (listo || tout) {
+          if (PARK_UTURN_SIN_SETTLE) {
+            // sin coast: el carro ya va en el sentido del escaneo
+            escribirServo(centroServo);
+            anguloGyro -= haciaAhoraP * 180.0f;
+            Serial.print("PARK: U sin settle girado="); Serial.print(girado, 1);
+            Serial.print(" ang="); Serial.println(anguloGyro, 1);
+            resetParkScan();
+            break;
+          }
           motorCoast();
           escribirServo(centroServo);
           parkFase         = 25;
