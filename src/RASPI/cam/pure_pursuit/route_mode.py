@@ -1039,6 +1039,7 @@ class RouteMode:
         cx, cy = x + fx * cam, y + fy * cam
         best = None          # el más cercano
         best_vis = None      # el más cercano que la cámara está viendo ahora
+        wall = None          # el más cercano de la fila exterior que la ruta pasa por el lado de la pared
         for sec, seat in unknown:
             sx, sy = section_to_world(sec, *SEATS[seat])
             cand = []
@@ -1046,6 +1047,12 @@ class RouteMode:
             hit = np.flatnonzero(d < 260.0)
             if len(hit):
                 cand.append(hit[0] * step)
+                # Ruta por fuera de un asiento exterior sin ver (semilla 34: el plan
+                # llega tarde, ya no cabe por dentro; si sale verde no hay espacio para cruzar).
+                j = hit[np.argmin(d[hit])]
+                ring = max(abs(sx), abs(sy))
+                if ring > 1000.0 and max(abs(px[j]), abs(py[j])) > ring:
+                    wall = hit[0] * step if wall is None else min(wall, hit[0] * step)
             fwd = (sx - cx) * fx + (sy - cy) * fy
             if fwd > -100.0:
                 cand.append(math.hypot(sx - cx, sy - cy))
@@ -1055,11 +1062,18 @@ class RouteMode:
             best = s if best is None else min(best, s)
             if (sec, seat) in self.visible:
                 best_vis = s if best_vis is None else min(best_vis, s)
+        wall_pwm = getattr(C, "ROUTE_UNSEEN_WALL_PWM", None)
+
+        def wcap(v):
+            if wall_pwm is None or wall is None or wall > float(getattr(C, "ROUTE_SLOWDOWN_MM", 1300.0)):
+                return v
+            return int(wall_pwm) if v is None else min(v, int(wall_pwm))
+
         cap = int(getattr(C, "ROUTE_LAP1_PWM", 120))
         # Nada sin ver cerca adelante: lo ya visto no frena (manda el perfil).
         open_cap = None if getattr(C, "ROUTE_LAP1_OPEN", False) else cap
         if best is None:
-            return open_cap
+            return wcap(open_cap)
         stop = float(getattr(C, "ROUTE_STOP_MM", 750.0))
         slow_mm = float(getattr(C, "ROUTE_SLOWDOWN_MM", 1300.0))
         # Detenerse solo sirve si la cámara lo está viendo (en ~0.4 s queda
@@ -1070,13 +1084,13 @@ class RouteMode:
             self.stopped += 1
             if self.stopped <= int(getattr(C, "ROUTE_STOP_MAX_FRAMES", 80)):
                 return 0
-            return min(cap, _pwm("ROUTE_UNSEEN_PWM"))
+            return wcap(min(cap, _pwm("ROUTE_UNSEEN_PWM")))
         self.stopped = 0
         if best <= slow_mm:
             unseen = min(cap, _pwm("ROUTE_UNSEEN_PWM"))
             ramp = getattr(C, "ROUTE_UNSEEN_RAMP_MM", None)
             if ramp is None or best <= float(ramp):
-                return unseen
+                return wcap(unseen)
             # v tal que, con latencia y frenando a A_BRAKE, llega a v_unseen a `ramp` mm del asiento.
             K = float(C.ROUTE_PROFILE_K_MM_S_PER_PWM)
             pwm0 = float(C.ROUTE_PROFILE_PWM0)
@@ -1085,8 +1099,8 @@ class RouteMode:
             vu = K * (unseen - pwm0)
             v = -a * lat + math.sqrt((a * lat) ** 2 + vu * vu + 2.0 * a * (best - float(ramp)))
             top = cap if open_cap is not None else int(C.ROUTE_PROFILE_MAX_PWM)
-            return int(round(min(max(v / K + pwm0, unseen), top)))
-        return open_cap
+            return wcap(int(round(min(max(v / K + pwm0, unseen), top))))
+        return wcap(open_cap)
 
     def _suffix(self) -> str:
         tf = self.loc.transform() if self.loc is not None else None
