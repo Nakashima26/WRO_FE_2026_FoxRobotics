@@ -78,20 +78,12 @@
       ],
       "drc_exclusions": [
         [
-          "starved_thermal|139072304|109812304|e3935017-6425-4d7d-94a4-be8742db4a5b|91e6af69-1486-46b8-ad8a-f98110a65274|B.Cu",
-          "this component does not consume much current, doesnt need 2 reliefs"
-        ],
-        [
-          "starved_thermal|141780000|99214476|e3935017-6425-4d7d-94a4-be8742db4a5b|78e67d66-9d0a-4b07-86cb-1d3d0b80db46|B.Cu",
-          "this component does not consume much current, doesnt need 2 reliefs"
-        ],
-        [
-          "starved_thermal|154000000|98140000|e3935017-6425-4d7d-94a4-be8742db4a5b|0160b254-bf37-4796-9ad4-daa4063995c8|B.Cu",
-          "this component does not consume much current, doesnt need 2 reliefs"
-        ],
-        [
-          "unconnected_items|199985317|126887000|F.Cu|4|e3935017-6425-4d7d-94a4-be8742db4a5b|e3935017-6425-4d7d-94a4-be8742db4a5b",
+          "starved_thermal|144910000|94640000|e3935017-6425-4d7d-94a4-be8742db4a5b|78e67d66-9d0a-4b07-86cb-1d3d0b80db46|B.Cu",
           ""
+        ],
+        [
+          "unconnected_items|180608355|109217590|F.Cu|4|e3935017-6425-4d7d-94a4-be8742db4a5b|7f38645c-7df2-44e9-addc-42a6a6c7adcd",
+          "gnd is common with module"
         ]
       ],
       "meta": {
@@ -549,7 +541,7 @@
         "schematic_color": "rgba(0, 0, 0, 0.000)",
         "track_width": 2.0,
         "tuning_profile": "",
-        "via_diameter": 2.0
+        "via_diameter": 2.3
       },
       {
         "name": "5V",
@@ -565,9 +557,8 @@
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 0,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 2.0,
-        "tuning_profile": "",
-        "via_diameter": 2.0
+        "track_width": 2.5,
+        "tuning_profile": ""
       }
     ],
     "meta": {
