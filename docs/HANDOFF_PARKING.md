@@ -241,3 +241,5 @@ Riesgo extra: `MANIOBRA_FRENO_MS` 50 (coast antes de invertir) depende aún más
   la madera llega antes de armar). Rechazado.
 - **Reversa +10 % (REV 83, PWM 91, CENTER_PAR 72, RETORNO_REV 87) → 42/42/42, 41.32-41.47 s, U→fin 6.8-6.9 s
   (aceptado, `runs/pab25_parkk3.json`)**. +15 % ya daba 4 choques en la primera ronda.
+- **Con pvi154 (VEL_INICIAL 154):** sobre park3 → 42/41/42 (s41 n2, pegado de lado 10 mm): la reversa +10 % queda
+  al límite y se descarta. Sobre park2 → **42/42/42, mediana 41.06-41.33 s, U→fin 6.9 s (export, `runs/pvi154_parkk2.json`)**.
