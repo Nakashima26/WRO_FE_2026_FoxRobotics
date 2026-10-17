@@ -12,6 +12,20 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
 
+## Mejor versión por engranaje (se actualiza con cada cambio aceptado)
+
+Twin, 460800, motor físico, preset `ruta_perfil`. Cada cambio se prueba en las dos relaciones; `vel2pwm.py` (scratchpad) pasa de mm/s a PWM con K/PWM0 de cada una.
+
+**1.5:1 (pf1, la del export ce3a6c4):** vueltas ≈ −2.3 s vs pl2, 0 fallas.
+```json
+{"pi": {"ROUTE_PROFILE_BASE_PWM": 227, "ROUTE_TIME_COST": true, "ROUTE_LAP1_PWM": 238, "ROUTE_UNSEEN_PWM": 238, "ROUTE_PROFILE_MIN_PWM": 169, "ROUTE_CTE_PWM": 227, "ROUTE_PROFILE_SIGN_MM": 220.0, "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.1, "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_STOP_MM": 0.0, "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true, "ROUTE_FIX_LINE": true, "ROUTE_UNSEEN_RAMP_MM": 850.0, "DIGITAL_MAP_ORANGE_BEHIND_MM": 1500.0, "ROUTE_UPLOAD_STEP_MM": 80.0, "ROUTE_PROFILE_K_MM_S_PER_PWM": 3.033, "ROUTE_PROFILE_PWM0": 18.8, "ROUTE_SLOW_PWM": 105, "ROUTE_PROFILE_SIGN_TIGHT_PWM": 117, "ROUTE_CTE_URGENT_PWM": 128, "ROUTE_PROFILE_BRAKE_FLOOR_PWM": 59, "ROUTE_PROFILE_LATENCY_S": 0.12}, "fw": {"INICIO_PWM": "128", "VEL_INICIAL": "169"}}
+```
+
+**1.25:1 (pgv3, `TWIN_GEAR=1.25`; la que se monta ahora):** vueltas ≈ −5.0 s vs pl2, 0 fallas. Falta validar la carrera completa con park a 1.25.
+```json
+{"pi": {"ROUTE_PROFILE_BASE_PWM": 250, "ROUTE_TIME_COST": true, "ROUTE_LAP1_PWM": 255, "ROUTE_UNSEEN_PWM": 255, "ROUTE_PROFILE_MIN_PWM": 145, "ROUTE_CTE_PWM": 250, "ROUTE_PROFILE_SIGN_MM": 220.0, "ROUTE_PROFILE_SIGN_NEAR_MM": 150.0, "ROUTE_FIX_STEP_MM": 8.0, "ROUTE_PROFILE_BRAKE_FF_S": 0.1, "ROUTE_CTE_URGENT_MM": 120.0, "ROUTE_PROFILE_A_LAT_MM_S2": 2000.0, "ROUTE_STOP_MM": 0.0, "ROUTE_UPLOAD_DIFF_MM": 60.0, "ROUTE_LAP1_OPEN": true, "ROUTE_FIX_LINE": true, "ROUTE_UNSEEN_RAMP_MM": 850.0, "DIGITAL_MAP_ORANGE_BEHIND_MM": 1500.0, "ROUTE_UPLOAD_STEP_MM": 80.0, "ROUTE_PROFILE_K_MM_S_PER_PWM": 3.639, "ROUTE_PROFILE_PWM0": 19.4, "ROUTE_SLOW_PWM": 91, "ROUTE_PROFILE_SIGN_TIGHT_PWM": 101, "ROUTE_CTE_URGENT_PWM": 110, "ROUTE_PROFILE_BRAKE_FLOOR_PWM": 53, "ROUTE_PROFILE_LATENCY_S": 0.12, "ROUTE_HARD_CLEAR_MM": 65.0}, "fw": {"INICIO_PWM": "110", "VEL_INICIAL": "145"}}
+```
+
 ## Mejor configuración (base actual, bench "st80" = lu185 + `ROUTE_UPLOAD_STEP_MM` 80)
 
 Preset `ruta_perfil`, JSON de la Pi (los defaults del código NO la activan):
