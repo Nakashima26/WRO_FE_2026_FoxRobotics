@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
 from pure_pursuit.twin.firmware.fw import FirmwareSIL
 
-_UART_US_PER_BYTE = 86.8
+_UART_US_PER_BYTE = float(os.environ.get("TWIN_PI_UART_US_PER_BYTE", "86.8"))  # 115200 baud
 
 
 class SimSerialLink:

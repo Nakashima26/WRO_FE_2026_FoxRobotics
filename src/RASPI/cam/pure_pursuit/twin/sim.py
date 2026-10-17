@@ -312,6 +312,10 @@ class Sim:
         # parámetros SIL de arranque (sil_set_param) para el firmware.
         self.field_override = field
         self.fw_params = dict(fw_params or {})
+        # TWIN_FW_PARAMS="serial2_us_per_char=10.85,serial_us_per_char=10.85" (p. ej. otro baud)
+        for kv in filter(None, os.environ.get("TWIN_FW_PARAMS", "").split(",")):
+            k, v = kv.split("=")
+            self.fw_params[k.strip()] = float(v)
         cfg = resolve_preset(
             preset,
             fw_source=fw_source,
