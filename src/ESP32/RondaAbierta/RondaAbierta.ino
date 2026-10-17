@@ -65,8 +65,8 @@ const int VEL_GIRO_FINAL    = 190;   // GIRANDO, resto
 // mucho WALL_MAX_DESVIO_DEG; el gyro PID es el único que mueve el servo.
 // (Sumar las dos salidas dejaba que la pared le ganara al rumbo: con la pared
 // interior lejos, el carro giraba en espiral hasta chocar.)
-float KpWall = 0;                    // grados de rumbo por cm de error
-float KdWall = 0;                    // grados de rumbo por (cm/s)
+float KpWall = 0.3;                    // grados de rumbo por cm de error
+float KdWall = 0.2;                    // grados de rumbo por (cm/s)
 const float WALL_HOLD_CM        = 28.0;  // distancia a la pared INTERIOR tras el giro 1
 const float WALL_MAX_DESVIO_DEG = 15.0;  // lo más que la pared corre el rumbo
 const long  WALL_CONFIABLE_CM   = 55;    // pared interior más lejos que esto = no seguirla, solo rumbo

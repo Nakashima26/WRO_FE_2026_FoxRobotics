@@ -90,7 +90,7 @@ const int RVC_RX = 25;
 
 // ---------------- Encoder (PCNT) ----------------
 const float DIAMETRO_MM  = 42.7f;
-const float CUENTAS_POR_VUELTA = 3.0f * 4 * 50.0f * 2;   // 12 CPR x4 x caja 50:1 x engranes 2:1 = 1200
+const float CUENTAS_POR_VUELTA = 3.0f * 4 * 50.0f * 1.5;   // 12 CPR x4 x caja 50:1 x engranes 2:1 = 1200
 const float MM_POR_CUENTA = PI * DIAMETRO_MM / CUENTAS_POR_VUELTA;
 const int   SIGNO_ENC = -1;          // adelante cuenta negativo (igual en ISR y PCNT)
 
