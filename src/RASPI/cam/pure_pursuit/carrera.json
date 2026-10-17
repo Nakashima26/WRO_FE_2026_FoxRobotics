@@ -42,10 +42,10 @@
  "ROUTE_SLOW_PWM": 91,
  "ROUTE_STOP_MM": 0.0,
  "ROUTE_TIME_COST": true,
- "ROUTE_UNSEEN_PWM": 255,
- "ROUTE_UNSEEN_RAMP_MM": 850.0,
+ "ROUTE_UNSEEN_PWM": 190,
+ "ROUTE_UNSEEN_RAMP_MM": 400.0,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "pvi154_parkk2.json",
+ "_fuente": "pu19r4_parkk2.json",
  "_preset": "ruta_perfil"
 }

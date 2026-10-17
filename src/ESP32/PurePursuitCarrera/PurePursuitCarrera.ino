@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + pvi154_parkk2.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + pu19r4_parkk2.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -1689,7 +1689,7 @@ int contadorPanicL = 0, contadorPanicR = 0;
 // Antes del PRIMER giro el carro va lento: la aproximación va más tranquila
 // (menos yaw del PID de centrado), el lateral lee limpio y detectarEsquina
 // confirma a tiempo. Después del giro 1 -> velocidad normal.
-const int VEL_INICIAL = 154;
+const int VEL_INICIAL = 158;
 
 // ── Carrera ───────────────────────────────────────────────────────────────────
 int  turnsCompleted      = 0;
