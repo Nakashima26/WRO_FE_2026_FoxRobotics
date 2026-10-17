@@ -211,3 +211,5 @@ la anterior y las referencias (combo1).
 13. **(antes) pvi154 + park rápido 2:** 42/42/42, mediana 41.06-41.33 s, U→fin 6.9 s. Con park 3 (reversa +10 %) s41 n2 sale 10 mm: descartado. Export: `pvi154_parkk2.json`, `--pi-baud 460800`.
 14. **(antes) pu19r4 + park rápido 2:** pvi154 + VEL_INICIAL 158 + UNSEEN_PWM 190 + UNSEEN_RAMP 400 con el park 2 → **42/42/42**, mediana 40.77-40.93 s (pvi154: 41.06-41.33), U→fin 7.0 s. psg210 y pu19r6 dieron 42/42/41 (s27 n3 en las vueltas). Export: `pu19r4_parkk2.json`, `--pi-baud 460800`.
 15. **Export actual = pu19r4 + park 4 (park 2 + `PARK_UTURN_SIN_SETTLE` 1):** 42/42/42, mediana 40.71-40.87 s, U→fin 6.9 s. Export: `pu19r4_parkk4.json`, `--pi-baud 460800`.
+
+- **bl100c (export):** ROUTE_BLIND_PWM 100 + fw PARK_PEGADO_CICLA=1 (en fase 13, "pegado de lado" sin alinear cicla a fase 9; arregla s26 n2 que salía 10 mm fuera con 10.5°). Carrera 42/42/42, T_med 40.24/40.40/40.42 (b125: 40.82/40.63/40.82). CICLA sola sobre b125: 42/42/42 sin cambio de tiempo.
