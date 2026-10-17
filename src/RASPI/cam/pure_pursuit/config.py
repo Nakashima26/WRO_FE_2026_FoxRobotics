@@ -1498,7 +1498,7 @@ CORR_LIMIT_PX    = 160.0
 # ─── Cámara / captura ─────────────────────────────────────────────────────────
 CAM_INDEX      = 1
 SERIAL_PORT    = "/dev/ttyS0"
-BAUDRATE       = 115200
+BAUDRATE       = 115200  # = PI_BAUD del ESP; 921600 rinde ~1.8 s/ronda en el twin
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
 

@@ -3440,9 +3440,18 @@ void terminando(long distL, long distR) {
 // Setup
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Twin (pb92): a 921600 el loop sube de ~18 a ~64 Hz y la ronda baja ~1.8 s.
+// PI_BAUD debe coincidir con BAUDRATE en config.py de la Pi.
+#ifndef PI_BAUD
+#define PI_BAUD 115200
+#endif
+#ifndef USB_BAUD
+#define USB_BAUD 115200
+#endif
+
 void setup() {
-  Serial.begin(115200);
-  Serial2.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+  Serial.begin(USB_BAUD);
+  Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
 
   Wire.begin();
 #if FOX_BNO && !defined(FOX_SIL)
