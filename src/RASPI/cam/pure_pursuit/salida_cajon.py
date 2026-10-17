@@ -37,6 +37,9 @@ SALIDA_LAT_MIN_MM = 300.0
 SALIDA_LAT_MAX_MM = 700.0
 SALIDA_BIN_MM = 200.0        # agrupa los pies por asiento a lo largo de la recta
 SALIDA_VOTES = 3             # pies del mismo color en el mismo asiento para decidir
+# Ventana más larga solo para la velocidad de la salida (isen=1 -> INICIO_PWM_SENAL):
+# una señal a ~850 mm (T2 en CCW con el cajón lejos) se pasa justo al terminar la S.
+SALIDA_SENAL_ALONG_MAX_MM = 1300.0
 
 
 def _num(ack: str, key: str) -> float | None:
@@ -55,6 +58,8 @@ class SalidaCajon:
         self.side = 0                     # 0 sin dato | 1 afuera | 2 adentro
         self._votes: dict[tuple[int, int], dict[str, int]] = {}
         self.decided: tuple[float, float, str] | None = None
+        self.near = False                 # señal cerca de la salida (isen=)
+        self._near_votes = 0
 
     def update(self, ack: str | None, feet) -> int:
         if self.side or not ack or ",est=I" not in ack:
@@ -78,6 +83,10 @@ class SalidaCajon:
                 lat += _FOOT_TO_CENTER_MM * lat / ray
             x = px + fwd * cs + lat * sn                      # marco de arranque
             y = py + fwd * sn - lat * cs
+            if (SALIDA_ALONG_MIN_MM <= x <= SALIDA_SENAL_ALONG_MAX_MM
+                    and SALIDA_LAT_MIN_MM <= abs(y) <= SALIDA_LAT_MAX_MM):
+                self._near_votes += 1
+                self.near = self.near or self._near_votes >= SALIDA_VOTES
             if not (SALIDA_ALONG_MIN_MM <= x <= SALIDA_ALONG_MAX_MM
                     and SALIDA_LAT_MIN_MM <= abs(y) <= SALIDA_LAT_MAX_MM):
                 continue

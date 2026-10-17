@@ -1,6 +1,6 @@
 """Compara variantes contra una referencia corrida por corrida.
 
-Uso: python vsref.py REF_DIR VAR_DIR [VAR_DIR...]   (dirs con cand_n1..5)
+Uso: python vsref.py REF_DIR VAR_DIR [VAR_DIR...]   (dirs con cand_n1..5; NZ_MAX=10 para ruidos 1-10)
 Tiempo de vuelta 1 geométrico: primer movimiento -> primer cruce del ángulo de salida.
 """
 import collections
@@ -47,7 +47,7 @@ def one(path):
 
 
 def load(d):
-    return {(n, s): one(os.path.join(d, f"cand_n{n}", f"s{s}")) for n in range(1, 6) for s in SEEDS}
+    return {(n, s): one(os.path.join(d, f"cand_n{n}", f"s{s}")) for n in range(1, int(os.environ.get("NZ_MAX", 5)) + 1) for s in SEEDS}
 
 
 def main():

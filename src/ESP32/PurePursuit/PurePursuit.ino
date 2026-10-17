@@ -780,6 +780,7 @@ const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_G
 // toda la pista (se latchea como hace GIRANDO en la 1ª esquina).
 // TODOS estos números son de ARRANQUE — hay que tunearlos en el tapete.
 const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra
+const int  INICIO_PWM_SENAL            = 0;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
@@ -835,6 +836,9 @@ bool inicioGirarDer = false;   // lado de salida del cajón (servo full hacia ah
 unsigned long inicioRevMs = 0; // inicio de la reversa (fase 5): base del presupuesto INICIO_REV_MS
 float inicioAngPico = 0.0f;    // máx |anguloGyro| alcanzado en las fases 1-3 (ref. de la contravuelta)
 int   piSalida      = 0;       // isal= de la Pi: 0 sin dato | 1 afuera | 2 adentro (sticky, ver arriba)
+bool  piSenalSalida = false;   // isen= de la Pi: señal a <~1.3 m adelante del cajón (sticky)
+// Salida rápida solo sin señal cerca de la salida; con señal, el PWM de siempre.
+int inicioPwm() { return (piSenalSalida && INICIO_PWM_SENAL > 0) ? INICIO_PWM_SENAL : INICIO_PWM; }
 bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
 float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
@@ -3055,6 +3059,8 @@ void parsePiMessage(String line) {
     if (campoPi(line, "inicio=", v) && v.toInt() != 0) piInicioEstacionamiento = true;
     // isal — lado de paso de la 1ª señal adelante del cajón (solo durante INICIO)
     if (campoPi(line, ",isal=", v) && v.toInt() != 0) piSalida = v.toInt();
+    // isen — hay señal a <~1.3 m adelante de la salida: INICIO a INICIO_PWM_SENAL (sticky)
+    if (campoPi(line, ",isen=", v) && v.toInt() != 0) piSenalSalida = true;
 
     // park — etapa del cajón vista por la Pi en la recta final
     if (campoPi(line, "park=", v)) piPark = v.toInt();
@@ -3908,7 +3914,7 @@ void loop() {
       }
 
       if (inicioFase == 1) {
-        int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM);
+        int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         setMotor(vel);
@@ -3931,7 +3937,7 @@ void loop() {
       if (inicioFase == 2) {
         motorAdelante();
         escribirServo(centroServo);
-        setMotor(INICIO_PWM);
+        setMotor(inicioPwm());
         bool fin;
         if (INICIO_REVERSA) {
           fin = (millis() - inicioFaseMs >= INICIO_MID_MS);
@@ -3962,7 +3968,7 @@ void loop() {
       if (inicioFase == 3) {
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);   // full al lado CONTRARIO
-        setMotor(INICIO_PWM);
+        setMotor(inicioPwm());
         // Corrige solo INICIO_CONTRA_CORRIGE_DEG desde el pico (o llega al piso de
         // margen si el pico fue chico); el residuo lo cierra la reversa (fase 5).
         // Sin reversa la contravuelta cierra sola hasta ~0 (INICIO_CONTRA_FIN_DEG).
@@ -4070,7 +4076,7 @@ void loop() {
 
       // ── Fase 6: SETTLE — espera a que deje de rotar y cierra ───────────────
       if (inicioFase == 6) {
-        if (INICIO_SETTLE_MOTOR) { motorAdelante(); setMotor(INICIO_PWM); } else motorCoast();  // motorCoast deja A1/A2 en LOW
+        if (INICIO_SETTLE_MOTOR) { motorAdelante(); setMotor(inicioPwm()); } else motorCoast();  // motorCoast deja A1/A2 en LOW
         escribirServo(centroServo);
         unsigned long nowMs = millis();
         if (nowMs - inicioSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
