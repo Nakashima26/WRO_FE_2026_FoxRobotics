@@ -20,8 +20,10 @@ from pure_pursuit.twin.firmware.build import load_ino_text, _apply_overrides
 # Solo existen en el twin (compensación de la cámara simulada); el carro real no las usa.
 TWIN_ONLY = {"PARK_PINK_RATIO_MIN"}
 
-# Los presets de ruta dejan PARK_NINGUNO solo para el twin; la carrera tiene que estacionar.
-FW_TWIN_ONLY = {"PARK_MODO"}
+# La carrera completa estaciona: U + paralelo en modo ruta (docs/HANDOFF_PARKING.md). Pisan el
+# PARK_NINGUNO de los presets de ruta; el bench JSON puede cambiarlos.
+FW_PARK_CARRERA = {"PARK_MODO": "PARK_PARALELO", "PARK_UTURN_RUTA_ALONG_MM": "600",
+                   "PARK_UTURN_ALEJAR_CM": "60"}
 
 _SRC = Path(__file__).resolve().parents[5]          # .../src
 _PI_DIR = Path(__file__).resolve().parents[2]       # .../pure_pursuit
@@ -51,7 +53,7 @@ def main() -> None:
     pi_path.write_text(json.dumps(pi, indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
     # ESP: sketch con los overrides de fw y los defines (#ifndef en el .ino dejan que ganen).
-    fw = {k: v for k, v in cfg["fw_overrides"].items() if k not in FW_TWIN_ONLY}
+    fw = {**cfg["fw_overrides"], **FW_PARK_CARRERA, **(bench.get("fw") or {})}
     defines = dict(cfg.get("fw_defines", {}))
     if args.pi_baud is not None:
         defines["PI_BAUD"] = str(args.pi_baud)

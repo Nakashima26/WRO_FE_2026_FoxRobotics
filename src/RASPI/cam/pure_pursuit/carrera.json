@@ -44,6 +44,6 @@
  "ROUTE_UNSEEN_RAMP_MM": 850.0,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "pf1.json",
+ "_fuente": "pf1_park.json",
  "_preset": "ruta_perfil"
 }
