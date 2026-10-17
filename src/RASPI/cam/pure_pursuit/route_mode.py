@@ -80,6 +80,15 @@ def _pwm(name):
 _COL = {"T4": 0, "T2": 0, "X2": 1, "X1": 1, "T3": 2, "T1": 2}    # columna (w 1000/1500/2000)
 
 
+def _stall_far_along(parking: str, direction: str, park_w: float) -> float:
+    """Along (eje del carril en el sentido de carrera, 0 = centro de la recta; alongSalidaMm del ESP)
+    de la madera del cajón que queda más adelante: la primera que encuentra el escaneo al regresar."""
+    from .wro_field import _barrier_corners, _heading
+    h = math.radians(_heading(parking, direction))
+    fx, fy = math.sin(h), math.cos(h)
+    return max(px * fx + py * fy for b in _barrier_corners(parking, park_w) for px, py in b)
+
+
 class RouteMode:
     def __init__(self) -> None:
         self.route = None
@@ -633,6 +642,8 @@ class RouteMode:
             self.esp_shift = self.upload_shift
             self.esp_route = self.route
         line = "\n".join(lines) if lines else None
+        if self.fixed and self.park_w is not None:
+            self.pka = _stall_far_along(dm.parking, dm.direction, self.park_w)
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
@@ -1081,6 +1092,8 @@ class RouteMode:
         tx -= ds * self.axis[0]
         ty -= ds * self.axis[1]
         s = f",rt=1,rtx={tx:.1f},rty={ty:.1f},rth={th:.3f}"
+        if self.fixed and getattr(self, "pka", None) is not None:
+            s += f",pka={self.pka:.0f}"
         if self.rv is not None:
             s += f",rv={int(self.rv)}"
         return s

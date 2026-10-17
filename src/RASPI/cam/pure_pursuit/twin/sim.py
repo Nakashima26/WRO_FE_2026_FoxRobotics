@@ -329,6 +329,12 @@ def _record_seed(rec, runtime, field, veh, tc, est, log_dir, seed, t, link, hist
     # al salir del giro: 9° y 60 mm): la verdad se toma de ese instante.
     t_odo = (t_done - len(ack) * 86.8) / 1e6
     tx, ty, th = _pose_at(history, t_odo)
+    # Solo con el carro ya estable: si aún gira o el Localizer no convergió, el arranque sembrado
+    # sale con 50-80 mm / 10° de error y choca donde la carrera completa no (s9, s21, s35, s38).
+    lx, ly, lh = rm.loc.pose()
+    if (abs((veh.heading_deg - th + 180.0) % 360.0 - 180.0) > 2.0 or math.hypot(lx - tx, ly - ty) > 50.0
+            or abs((lh - th + 180.0) % 360.0 - 180.0) > 5.0):
+        return
     px, py, yaw = rm.loc.odom
     rec.update(done=True)
     data = {"seed": seed, "t": round(t, 3), "od12": rec["od12"],

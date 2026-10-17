@@ -113,6 +113,35 @@ Tiempo de tc12 al fin: ~15.5-16 s.
   El carro arranca detenido (en la carrera llega a ~370 mm/s), así que la U sale ~1 s más tarde
   en reloj simulado.
 
+  **Grabación más estricta**: además de |rumbo − carril| ≤ 8°, la semilla solo se graba con el
+  rumbo estable (≤ 2° entre la odometría del ACK y el frame) y el localizador a ≤ 50 mm / 5° de
+  la verdad. Sin eso, 4 de 41 semillas (s9, s21, s35, s38) arrancaban 60-80 mm / 10° corridas y
+  chocaban donde la carrera completa no. Con el filtro quedan 28 de 42 semillas (s18 no entra).
+
+## Park más rápido (rama `claude/park-u-preset`)
+
+Constantes nuevas `PARK_AJ` (0 = como antes):
+- `PARK_UTURN_ALEJAR_PWM` = 160 (fases 26/27; antes PARK_RETORNO_PWM_MIN 80).
+- `PARK_UTURN_PWM` = 160 (tope de la rampa de la U, fase 24).
+- `PARK_SCAN_RAPIDO_PWM` = 200 y `PARK_SCAN_RAPIDO_MM` = 400: escaneo del paralelo (fase 0,
+  sub 0) rápido mientras `alongSalidaMm() > pka + 400`. `pka` = along de la madera del cajón más
+  adelante en la carrera, que la Pi manda en el sufijo de ruta (`_stall_far_along`). En
+  ESTACIONANDO el ESP usa la última transformación y el último pka.
+- `PARK_UTURN_ENDEREZA` (1 = siempre fase 27, 0 = nunca, 2 = solo si ya avanzó ≥ 30 mm): no
+  arregla s18 y quedó en 1.
+
+Banco sembrado (28 semillas, físico, ruido 1), de la U al TERMINADO: base 13.25 s → 10.53 s,
+28/28 OK. Por encima de 160 la U y el alejar no ganan nada (200/240 dan lo mismo). Con
+`PARK_SCAN_RAPIDO_MM` 250, s7 pasa los postes a 410 mm/s sin verlos y sale del tapete: 400 es el
+margen. `PARK_UTURN_RUTA_ALONG_MM` 450 agrega 2 choques (s2, s27) con señales de la recta.
+
+**Carreras completas (42 semillas)**: 40/42, los mismos 2 fallos que la base (s18 en la U y s32
+antes del park). De la U al fin: 14.05 → 11.00 s; carrera 78.0 → 75.0 s.
+
+**s18** (CW, cajón N, Red N/T1 por dentro): la U se dispara en along 616 con el carro todavía a
+−43° (sale de la curva de la señal) y la U choca con Red E/T4. Ni ENDEREZA 0/2 ni ALONG 450
+lo arreglan.
+
 ## Pedido: ¿planear el paralelo con la pose del modo ruta?
 
 **Es viable, pero no con la pose del tapete sola.** El cajón deja ~70 mm de holgura lateral (200 − 130)
