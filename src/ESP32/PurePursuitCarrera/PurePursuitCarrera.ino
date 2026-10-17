@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + pab25_parkk2.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + pab25_parkk3.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -902,7 +902,7 @@ PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la m
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
 PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
-const int           PARK_REV_PWM             = 79;    // PWM de marcha atrás — suave para control preciso
+const int           PARK_REV_PWM             = 83;    // PWM de marcha atrás — suave para control preciso
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
@@ -914,7 +914,7 @@ const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
 const float         PARK_KD_RATE              = 0.30f;
 const int           PARK_SERVO_MAX            = 35;
-const int           PARK_PWM                  = 87;
+const int           PARK_PWM                  = 91;
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
@@ -1203,7 +1203,7 @@ PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (p
 // PARK_FWD_MS sigue acotando por si la pared nunca aparece.
 // PARA REVERTIR: PARK_CENTER_DEB = 1.
 const int           PARK_CENTER_DEB           = 3;
-const int           PARK_CENTER_PWM_PAR       = 69;
+const int           PARK_CENTER_PWM_PAR       = 72;
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
 // El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
@@ -1496,7 +1496,7 @@ const unsigned long PARK_RETORNO_REV_CCW_MS    = 1200;   // regreso con pared a 
 // de enfrente ignorando el primer poste. Se iguala al valor de CCW, que ya está
 // probado. Si en pista resulta que el CW necesita otro tiempo, se separa aquí.
 const unsigned long PARK_RETORNO_REV_CW_MS     = 1200;   // regreso con pared a la DER (carrera CW)
-const int           PARK_RETORNO_REV_PWM       = 83;
+const int           PARK_RETORNO_REV_PWM       = 87;
 // ── La reversa del regreso también sigue la PARED, no solo el gyro ──────────
 // Ver el bloque de la fase 22. false = comportamiento anterior (solo rumbo a 0).
 // 2026-09-16 APAGADO tras la run 1031. El signo era correcto (el carro sí pasó de

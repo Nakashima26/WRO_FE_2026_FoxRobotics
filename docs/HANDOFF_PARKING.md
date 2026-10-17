@@ -230,3 +230,14 @@ Combinados, ruidos 1-3: con PUNTA 140 + ALEJAR 50 → 42/42/42, 41.75 s; con **P
 mediana 41.44-41.58 s (−0.85 s), U→fin 6.9-7.0 s (aceptado, `runs/pab25_parkk2.json`)**. ALEJAR 30 → 34-36/42
 (choques con el cajón: patrón A otra vez). PUNTA 185 da exactamente lo mismo que 155 (algo lo limita; no investigado).
 Riesgo extra: `MANIOBRA_FRENO_MS` 50 (coast antes de invertir) depende aún más del `tau_coast` supuesto.
+
+### Tercera ronda (sobre pab25_parkk2, 41.44 s)
+
+- `MOTOR_MAX` del preset `ruta_perfil` = 155: `setMotor` topa ahí todo el park (las vueltas usan
+  `setMotorTope(…, 255)`). Por eso U/ALEJAR 170-200, PUNTA > 155 y SCAN_RAPIDO 170 no hacían nada.
+- `MOTOR_MAX` 200 (U/ALEJAR 170 reales): 41/42/42 (s9 pegado de lado), −0.25 s → rechazado. Con 165: 41/42/42 (s24).
+- `MOTOR_MAX` 200 + PUNTA 185: 34-35/42 (llega pasado al cajón). + U 200 + SCAN 220: 31-37/42.
+- Escaneo rápido hasta la primera madera (SCAN_RAPIDO 200, MM 0 o 50): 39-40/42 (s2/s26/s40, pka grande:
+  la madera llega antes de armar). Rechazado.
+- **Reversa +10 % (REV 83, PWM 91, CENTER_PAR 72, RETORNO_REV 87) → 42/42/42, 41.32-41.47 s, U→fin 6.8-6.9 s
+  (aceptado, `runs/pab25_parkk3.json`)**. +15 % ya daba 4 choques en la primera ronda.

@@ -46,6 +46,6 @@
  "ROUTE_UNSEEN_RAMP_MM": 850.0,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "pab25_parkk2.json",
+ "_fuente": "pab25_parkk3.json",
  "_preset": "ruta_perfil"
 }
