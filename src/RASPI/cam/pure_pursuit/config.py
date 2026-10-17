@@ -1284,6 +1284,9 @@ ROUTE_SLOWDOWN_MM = 1300.0
 ROUTE_SLOW_PWM = 100
 ROUTE_BLIND_PWM = None   # tope antes de fijar el avance del cajón (arranque ciego); None = ROUTE_SLOW_PWM
 ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
+# Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
+# (dentro de ROUTE_SLOWDOWN_MM). None = apagado.
+ROUTE_UNSEEN_WALL_PWM = None
 ROUTE_CTE_PWM = None     # tope lejos de la ruta (None = ROUTE_SLOW_PWM)
 ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_PWM)
 # Tope de PWM en la vuelta 1 mientras quede algún asiento sin resolver.
