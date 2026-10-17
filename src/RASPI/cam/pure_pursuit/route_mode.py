@@ -51,6 +51,7 @@ def _route_params():
     pwm0 = float(getattr(C, "ROUTE_PROFILE_PWM0", 25.0))
     return RR.RouteParams(
         w_kappa=float(getattr(C, "ROUTE_W_KAPPA", 3.0e4)),
+        d_step=float(getattr(C, "ROUTE_D_STEP", 20.0)),
         hard_clear_mm=float(getattr(C, "ROUTE_HARD_CLEAR_MM", 55.0)),
         soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
         w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),

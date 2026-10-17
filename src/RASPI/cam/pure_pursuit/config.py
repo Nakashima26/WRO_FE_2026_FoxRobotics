@@ -1260,6 +1260,7 @@ ROUTE_FOLLOW = False
 ROUTE_LOOKAHEAD_MM = 200.0
 # Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
 ROUTE_W_KAPPA = 3.0e4
+ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10: diagonales más rectas, ~5x más lento)
 # Frames que se adelanta la pose de odometría (llega atrasada por el UART).
 # 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
 ROUTE_PREDICT_FRAMES = 0.0
