@@ -547,6 +547,7 @@ class Sim:
         stopped_since: float | None = None
         progress_anchor_t = 0.0
         progress_anchor_xy = (veh.x, veh.y)
+        progress_anchor_hd = veh.heading_deg
         terminado_seen = False
 
         def _t_s() -> float:
@@ -704,11 +705,13 @@ class Sim:
                     if sim_t - progress_anchor_t >= _STUCK_WINDOW_S and armed:
                         dx = veh.x - progress_anchor_xy[0]
                         dy = veh.y - progress_anchor_xy[1]
-                        if math.hypot(dx, dy) < _STUCK_PROGRESS_MM:
+                        # una vuelta de ~8 s vuelve al mismo punto: exigir que no haya girado
+                        if math.hypot(dx, dy) < _STUCK_PROGRESS_MM and abs(veh.heading_deg - progress_anchor_hd) < 90.0:
                             stop_reason = "stuck"
                             break
                         progress_anchor_t = sim_t
                         progress_anchor_xy = (veh.x, veh.y)
+                        progress_anchor_hd = veh.heading_deg
 
                     dbg_chunk = fw.pop_debug()
                     if dbg_chunk:
@@ -820,6 +823,7 @@ class Sim:
                                 armed_t = t_end
                                 progress_anchor_t = t_end
                                 progress_anchor_xy = (veh.x, veh.y)
+                                progress_anchor_hd = veh.heading_deg
                         elif frame_callback:
                             view = SimFrameView(
                                 t=t_end,
