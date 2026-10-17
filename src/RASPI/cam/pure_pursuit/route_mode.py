@@ -482,6 +482,11 @@ class RouteMode:
             self.fix.update(ack, pose)
             if getattr(C, "ROUTE_FIX_LINE", None): self._line_vote(dm, pose)
             delta = self.fix.converged()
+            tol = getattr(C, "ROUTE_FIX_LINE_TOL_MM", None)
+            if (delta is not None and tol is not None and getattr(C, "ROUTE_FIX_LINE", None)
+                    and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
+                    and abs(float(delta) - float(np.median(self._line_d))) > float(tol)):
+                delta = None   # la masa converge a un pico que la línea contradice: seguir leyendo
             forced = False
             if delta is None and self._past_straight(dm, pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
