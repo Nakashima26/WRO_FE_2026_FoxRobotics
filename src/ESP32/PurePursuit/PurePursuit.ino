@@ -206,6 +206,19 @@ int   turnHint     = 0;       // turn {-1, 0, +1}
 bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+// ACK de un V2 que ya quedó viejo (hay otra línea de la Pi esperando): 0 = se
+// manda siempre (como antes); 1 = se salta solo en ESTACIONANDO/ESTACIONANDO_PUNTA
+// (el ACK largo del parking satura el UART y el loop se iba a >1 s); 2 = siempre.
+// La Pi usa el último ACK, así que saltar los viejos no le quita información.
+const int ACK_SALTA_VIEJOS = 0;
+// Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
+// Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (antes). 2026-10-16: 100 (prepark motor físico 0/100 -> 100/100 junto con LOG_MIN_MS y PARK_ANG_IN_DEG 70 / PARK_POSTE2_MM 60; ver docs/HANDOFF_PARKING.md).
+const int ACK_E_MIN_MS = 100;
+unsigned long ackEUltimoMs = 0;
+// Log periódico (~170 B por loop = ~15 ms a 115200) frena el loop al estacionar; mínimo de ms entre logs SOLO en ESTACIONANDO/ESTACIONANDO_PUNTA. 0 = cada loop (antes).
+const int LOG_MIN_MS = 100;
+unsigned long logUltimoMs = 0;
+bool logEsteLoop = true;
 
 // ── Modo RUTA: la Pi sube la vuelta como puntos en mm del tapete y el ESP la
 // sigue con pure pursuit sobre su propia odometría (encoder + IMU), a la
@@ -231,6 +244,7 @@ float piWheelDeg  = 0.0f;    // pw=: rueda de la Pi con la ruta nueva (+ = derec
 bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
+float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
 // Grados de servo por grado de rueda: 71° de servo = 44.54° de rueda (v2).
@@ -875,7 +889,7 @@ const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
-PARK_AJ int           PARK_ANG_IN_DEG          = 63;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66
+PARK_AJ int           PARK_ANG_IN_DEG          = 70;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66; 2026-10-16: 63 -> 70 con motor físico (docs/HANDOFF_PARKING.md)
 PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
 // La inercia de la reversa a tope vale ~9°, no 3. Con 3 la maniobra entregaba
@@ -1048,7 +1062,7 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 // mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
 // arriba quedan para el carro sin encoder y como timeouts de seguridad.
 const bool          PARK_POR_ENCODER          = true;
-PARK_AJ float         PARK_POSTE2_MM            = 40.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más)
+PARK_AJ float         PARK_POSTE2_MM            = 60.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
 PARK_AJ float         PARK_RECTO_MAX_MM         = 100.0f; // tope de la fase 14; 2026-10-04: 110 -> 100
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
@@ -1401,6 +1415,21 @@ const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el a
 // sube de ~52/107 a ~149/190 mm CW/CCW y la U termina a ~180 mm de la pared exterior). Con ext <= 35 cm
 // al arrancar la U el radio ya es el mínimo y este valor no actúa. Del lado exterior no hay latas.
 PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+// Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
+// a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
+PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 0;
+PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
+PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
+// Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
+// estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
+PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
+// PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
+PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 160;
+PARK_AJ long         PARK_UTURN_PWM             = 160;
+// Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
+// madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
+PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 200;
+PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 400;
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
@@ -1422,6 +1451,15 @@ PARK_AJ long         PARK_UTURN_ARRANQUE_MM      = 300;
 // cuanto se detecta). El disparo por frontal muy cerca (PARK_UTURN_DF_FORZAR_CM)
 // ignora la espera. Se barre con prepark.py --par PARK_UTURN_ESPERA_MM=...
 PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
+// Modo RUTA: la U de 180 se dispara por la pose del tapete (rtx/rty de la Pi), no
+// por el detector de esquina (en la ruta el carro no va recto y los ToF ven señales:
+// disparaba a mitad de la recta). >0 = mm a lo largo de la sección de salida desde
+// su centro, en el sentido de la marcha (la isla termina en 500). 0 = como antes.
+// > 0 también habilita estacionar en modo ruta (la U ignora prio=1 de la ruta). Apagado por defecto: el modo ruta es solo 3 vueltas.
+PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 0;
+// Modo RUTA: además del along, la U espera a que el carro vaya casi recto al carril (|anguloGyro| <= esto); si dispara
+// girado (esquivando) el ToF no ve la pared y el radio sale mal. 0 = sin compuerta.
+PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeoró (U tarde o nunca: ruta 28 -> 20/41)
 long                 parkUturnDisparoOdom        = -1;   // odómetro al armar la espera
 // T15b2 (t15b2_esquina13, "patrón 2", seeds 7/19 CCW): tras la U (fase 25)
 // el carro puede quedar a ext 9-11 cm y la fase 0 (resetParkScan) separa con
@@ -2264,6 +2302,10 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
+  SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
+  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM);
+  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
+  SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
   anguloGyro     = (float)sil_param("pp_ang", 0.0);
@@ -2275,6 +2317,34 @@ void silPreParkSeed() {
   Serial.print("SIL pre_park: pose=("); Serial.print(poseXf, 0); Serial.print(",");
   Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
   Serial.print(" ang="); Serial.println(anguloGyro, 1);
+}
+
+// Harness del twin (sim.py ruta_seed, solo SIL): arranca en modo RUTA en la recta
+// del cajón tras el giro 12, con el estado que grabó una carrera completa
+// (odometría del marco del cajón, tc=12 y la U pendiente).
+void silRutaSeed() {
+  if (sil_param("rp_on", 0.0) < 0.5) return;
+  anguloTotal    = (float)sil_param("rp_yaw", 0.0);
+  anguloGyro     = (float)sil_param("rp_ang", 0.0);
+  odomYawPrevDeg = anguloTotal;
+  poseXf = (float)sil_param("rp_x", 0.0);
+  poseYf = (float)sil_param("rp_y", 0.0);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+  odomMmF = (float)sil_param("rp_od", 0.0);
+  odomMm  = (long)lroundf(odomMmF);
+  direccionIzquierda = sil_param("rp_izq", 0.0) > 0.5;
+  primerGiro     = true;
+  turnsCompleted = TURNS_PER_RACE;
+  lastTurnTime   = millis();
+  if (PARK_MODO != PARK_NINGUNO && PARK_MEDIA_VUELTA) {
+    parkUturnPendiente = true;
+    parkUturnOdom0     = (long)sil_param("rp_od12", (double)odomMm);
+    contadorEsquina13  = 0;
+  }
+  Serial.print("SIL ruta_seed: pose=("); Serial.print(poseXf, 0); Serial.print(",");
+  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
+  Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.print(" od="); Serial.println(odomMm);
 }
 #endif
 
@@ -2338,7 +2408,7 @@ void iniciarEstacionandoParaleloUturn() {
   parkParedEsIzquierda = paredCajonEsIzq(true);
   parkRumboGiro0   = anguloGyro;
   parkServoU       = 0;
-  parkFase         = 24;
+  parkFase         = (PARK_UTURN_ALEJAR_CM > 0) ? 26 : 24;
   parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorAdelante();
   escribirServo(centroServo);
@@ -2443,12 +2513,16 @@ void iniciarEstacionamiento(bool retorno) {
 // se puede compartir contadorEsquina con detectarEsquina() porque esta
 // función corre antes, en el mismo frame, en la rama "ronda cerrada" de más
 // abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
+float alongSalidaMm();
+float rutaErrCarrilDeg(); float rutaExtTapeteCm();
 void vigilarUturn(long distL, long distR, long distF) {
   if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO) return;
   // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
   // para esta U (que es la de la esquina 13, la siguiente).
   long recorrido = odomMm - parkUturnOdom0;
-  bool ocupado = piPriority || (piMemoryFrames > 0);
+  // Modo RUTA: la Pi manda prio=1 todo el tiempo (sigue la ruta), no es una esquiva. El modo ruta es solo 3 vueltas
+  // sin estacionar; estacionar en ruta es función nueva y va detrás de PARK_UTURN_RUTA_ALONG_MM > 0 (apagado = como antes).
+  bool ocupado = !(piRuta && PARK_UTURN_RUTA_ALONG_MM > 0) && (piPriority || (piMemoryFrames > 0));
   if (ocupado) {
     if (estado == CRUCERO) estado = SIGUIENDO;
     // No dejes historia de "esquina" armándose a medias mientras se esquiva
@@ -2461,6 +2535,20 @@ void vigilarUturn(long distL, long distR, long distF) {
   // leer "abierto" un instante por la geometría de esa esquina misma, antes
   // de asentarse en la recta — no lo confundas con la esquina 13.
   if (recorrido <= PARK_UTURN_ARRANQUE_MM) return;
+  if (piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0) {
+    bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
+    float along = alongSalidaMm();
+    if (!fondoR && along < (float)PARK_UTURN_RUTA_ALONG_MM) return;
+    if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
+    parkUturnDisparoOdom = -1;
+    parkUturnPendiente = false;
+    Serial.print("PARK U por pose: along="); Serial.print(along, 0);
+    Serial.print(" ang="); Serial.println(anguloGyro, 1);
+    iniciarEstacionamiento(true);
+    parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();   // la U y el alejarse miden contra el carril, no contra el rumbo girado de la ruta
+    Serial.print("PARK U carril ref="); Serial.println(parkRumboGiro0, 1);
+    return;
+  }
   bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
   bool apertura    = paredFrente && ((distL > umbralPared) || (distR > umbralPared));
   contadorEsquina13 = apertura ? min(contadorEsquina13 + 1, (int)esquinaDebounce)
@@ -2795,6 +2883,34 @@ int seccionTapete(float x, float y) {
   return fabsf(x) >= fabsf(y) ? (x > 0 ? 1 : 3) : (y > 0 ? 0 : 2);
 }
 
+// Modo RUTA: mm a lo largo de la sección de salida (rutaSecSalida) desde su centro,
+// en el sentido de la marcha. CCW (direccionIzquierda): S va a +x, E a +y, N a -x, W a -y.
+float alongSalidaMm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float a = (rutaSecSalida == 2) ? x : (rutaSecSalida == 1) ? y : (rutaSecSalida == 0) ? -x : -y;
+  return direccionIzquierda ? a : -a;
+}
+
+// Modo RUTA: error de rumbo contra el carril de la sección de salida, en convención de anguloGyro (+ = izquierda).
+// Rumbo del carril en unidades de anguloGyro = anguloGyro - rutaErrCarrilDeg().
+float rutaErrCarrilDeg() {
+  float carril = (rutaSecSalida == 2) ? 90.0f : (rutaSecSalida == 1) ? 0.0f : (rutaSecSalida == 0) ? 270.0f : 180.0f;
+  if (!direccionIzquierda) carril += 180.0f;
+  float e = carril - (rutaTh - anguloTotal);
+  while (e > 180.0f) e -= 360.0f;
+  while (e < -180.0f) e += 360.0f;
+  return e;
+}
+
+// Modo RUTA: cm del costado del carro a la pared exterior de la sección de salida (pose del tapete; 6.5 cm = medio ancho).
+float rutaExtTapeteCm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float perp = (rutaSecSalida == 2) ? -y : (rutaSecSalida == 1) ? x : (rutaSecSalida == 0) ? y : -x;
+  return (1500.0f - perp) / 10.0f - 6.5f;
+}
+
 // Servo para un ángulo de rueda de la ruta (+ = derecha), sin wallPanic.
 int rutaServo(float ruedaDeg) {
   float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
@@ -2954,9 +3070,19 @@ void parsePiMessage(String line) {
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
+    if (campoPi(line, ",pka=", v)) rutaPka = v.toFloat();
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
+    if (Serial2.available() > 0
+        && (ACK_SALTA_VIEJOS == 2
+            || (ACK_SALTA_VIEJOS == 1 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)))) {
+      return;   // ver ACK_SALTA_VIEJOS
+    }
+    if (ACK_E_MIN_MS > 0 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)) {
+      if (millis() - ackEUltimoMs < (unsigned long)ACK_E_MIN_MS) return;   // ver ACK_E_MIN_MS
+      ackEUltimoMs = millis();
+    }
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
     Serial2.print("ACK:V2,ang=");
@@ -3536,6 +3662,12 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+#if defined(FOX_SIL)
+  { static bool sembrado = false; if (!sembrado) { sembrado = true; silRutaSeed(); } }   // antes del 1er ACK
+#endif
+  logEsteLoop = (LOG_MIN_MS == 0 || (estado != ESTACIONANDO && estado != ESTACIONANDO_PUNTA)
+                 || millis() - logUltimoMs >= (unsigned long)LOG_MIN_MS);
+  if (logEsteLoop) logUltimoMs = millis();
 #if FOX_BNO && !defined(FOX_SIL)
   leerBNO();
 #else
@@ -4758,12 +4890,56 @@ void loop() {
       parkExtRaw = extRaw;
       if (piPark >= 1) parkRosaVisto = true;
 
+      // ── Fase 26: ALEJARSE antes de la U (PARK_UTURN_ALEJAR_CM) — rumbo
+      // abierto lejos de la pared del lado del giro hasta tener espacio ───────
+      if (parkFase == 26) {
+        bool  uturnIzqP   = !parkParedEsIzquierda;
+        float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+        long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
+        float dif     = fabs(anguloGyro - parkRumboGiro0);
+        float lateral = (piRuta && rutaTfOk && rutaSecSalida >= 0) ? rutaExtTapeteCm()
+                      : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
+        bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
+        bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
+        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0
+                                || (PARK_UTURN_ENDEREZA == 2 && parkRecorridoMm() < 30.0f))) {
+          parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 24: U sin enderezar (lat="); Serial.print(lateral, 1);
+          Serial.print(" ang="); Serial.print(anguloGyro - parkRumboGiro0, 1); Serial.println(")");
+          break;
+        }
+        if (lejos || tope) {
+          parkFase = 27; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 27: ENDEREZA antes de la U (ext="); Serial.print(extAhoraP);
+          Serial.print(" lat="); Serial.print(lateral, 1);
+          Serial.println(tope ? " TOPE)" : ")");
+          break;
+        }
+        motorAdelante();
+        servoRumboPark(parkRumboGiro0 - haciaAhoraP * (float)PARK_UTURN_ALEJAR_ANG);
+        setMotor(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN);
+        break;
+      }
+
+      // ── Fase 27: ENDEREZA al rumbo del carril y arranca la U (fase 24) ────
+      if (parkFase == 27) {
+        motorAdelante();
+        servoRumboPark(parkRumboGiro0);
+        setMotor(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN);
+        if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
+          parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
+        }
+        break;
+      }
+
       // ── Fase 24: U DE 180° (PARK_PARALELO_USA_UTURN) — mismo arco que
       // ESTACIONANDO_PUNTA fase 20, pegado a la pared EXTERIOR actual (la
       // opuesta a parkParedEsIzquierda, que es la del regreso) ───────────────
       if (parkFase == 24) {
         unsigned long t = millis() - parkFaseMs;
-        int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
+        int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN,
+                           PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM);
         bool  uturnIzqP   = !parkParedEsIzquierda;
         float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
         long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
@@ -5193,14 +5369,19 @@ void loop() {
                             + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
           motorAdelante();
           servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
-          setMotor(PARK_PUNTA_PWM);
+          // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
+          bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0
+                        && !isnan(rutaPka) && alongSalidaMm() > rutaPka + (float)PARK_SCAN_RAPIDO_MM;
+          setMotor(rapido ? (int)PARK_SCAN_RAPIDO_PWM : PARK_PUNTA_PWM);
         }
 
-        Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
-        Serial.print(" ext="); Serial.print(extRaw);
-        Serial.print(" base="); Serial.print(parkBase, 1);
-        Serial.print(" caida="); Serial.print(parkCaidaCnt);
-        Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+        if (logEsteLoop) {
+          Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" base="); Serial.print(parkBase, 1);
+          Serial.print(" caida="); Serial.print(parkCaidaCnt);
+          Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+        }
         break;
       }
 
@@ -6184,28 +6365,30 @@ void loop() {
   actualizarOdometria();
 
   // ── Log periódico ─────────────────────────────────────────────────────────
-  Serial.print(" | Estado:");
-  if      (estado == GIRANDO)      Serial.print("GIRANDO");
-  else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
-  else if (estado == CRUCERO)      Serial.print("CRUCERO");
-  else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
-  else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
-  else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
-  else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
-  else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
-  else if (estado == INICIO)       Serial.print("INICIO");
-  else                              Serial.print("SIGUIENDO");
-  Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
-  Serial.print(" | L:");        Serial.print(distL);
-  Serial.print(" | R:");        Serial.print(distR);
-  Serial.print(" | F:"); Serial.print(distF);
-  Serial.print(" | Ang:");      Serial.print(anguloGyro);
-  Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
-  Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
-  Serial.print(" | turn:");     Serial.print(turnHint);
-  Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
-  Serial.print(" | mem:");      Serial.print(piMemoryFrames);
-  Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
-  Serial.print(" | giros:");    Serial.print(turnsCompleted);
-  Serial.print("/");            Serial.println(TURNS_PER_RACE);
+  if (logEsteLoop) {
+    Serial.print(" | Estado:");
+    if      (estado == GIRANDO)      Serial.print("GIRANDO");
+    else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
+    else if (estado == CRUCERO)      Serial.print("CRUCERO");
+    else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
+    else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
+    else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
+    else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
+    else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
+    else if (estado == INICIO)       Serial.print("INICIO");
+    else                              Serial.print("SIGUIENDO");
+    Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
+    Serial.print(" | L:");        Serial.print(distL);
+    Serial.print(" | R:");        Serial.print(distR);
+    Serial.print(" | F:"); Serial.print(distF);
+    Serial.print(" | Ang:");      Serial.print(anguloGyro);
+    Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
+    Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
+    Serial.print(" | turn:");     Serial.print(turnHint);
+    Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
+    Serial.print(" | mem:");      Serial.print(piMemoryFrames);
+    Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
+    Serial.print(" | giros:");    Serial.print(turnsCompleted);
+    Serial.print("/");            Serial.println(TURNS_PER_RACE);
+  }
 }

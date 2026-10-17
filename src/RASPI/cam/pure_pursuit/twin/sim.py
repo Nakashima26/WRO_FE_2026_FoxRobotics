@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 import os
 import time
@@ -277,6 +278,74 @@ def _pose_at(history: "deque[tuple[float, float, float, float]]", t: float) -> t
     return history[-1][1], history[-1][2], history[-1][3]
 
 
+def _seed_pi(runtime, field, rs) -> None:
+    """Pi a mitad de carrera (ruta_seed): mapa con las señales del campo y la pose del
+    localizador grabada; RouteMode con el avance del cajón ya resuelto. El 1er ACK
+    (odometría sembrada en el ESP) no mueve la pose: _odom_last ya es esa odometría."""
+    from pure_pursuit.route_mode import RouteMode
+    from pure_pursuit.wro_field import _heading, w_axis
+    dm, e = runtime.digital, rs["esp"]
+    x, y, hd = rs["loc"]
+    for s in field.signs:
+        dm.confirmed[(s.section, s.seat)] = s.color
+    dm.park_w = rs["park_w"]
+    dm._deferred = None
+    dm._odom0 = dm._odom_last = (float(e["px"]), float(e["py"]))
+    dm._dr_xy, dm._pose_fix, dm.pose_xy = (x, y), (0.0, 0.0), (x, y)
+    dm._yaw_fix = ((hd + e["yaw"] - _heading(dm.parking, dm.direction) + 180.0) % 360.0) - 180.0
+    dm.heading = dm._view_heading = hd
+    rm = RouteMode()
+    rm.fixed, rm.fix, rm.park_w = True, None, rs["park_w"]
+    rm.shift = rm.route_shift = rm.esp_shift = rm.upload_shift = rs["shift"]
+    rm.axis = w_axis(dm.parking)
+    runtime._rmode = rm
+
+
+def _record_seed(rec, runtime, field, veh, tc, est, log_dir, seed, t, link, history) -> None:
+    """Graba ruta_seed.json (una vez) al salir del giro 12 con el carro ya recto: lo que
+    _seed_pi y silRutaSeed necesitan para arrancar ahí (preset + FOX_RUTA_SEED)."""
+    from pure_pursuit.wro_field import _heading
+    if rec.get("done") or tc is None or tc < 12:
+        return
+    ack = getattr(runtime, "_prev_ack", None) or ""
+    if "od12" not in rec:
+        od = _parse_ack_field(ack, "od")
+        if od is not None:
+            rec["od12"] = float(od)
+        return
+    rm = getattr(runtime, "_rmode", None)
+    if est not in ("S", "C") or rm is None or rm.loc is None or rm.loc.odom is None or not rm.fixed:
+        return
+    lane = _heading(field.parking_section, field.direction)
+    if abs((veh.heading_deg - lane + 180.0) % 360.0 - 180.0) > 8.0:
+        return
+    vals = {k: _parse_ack_field(ack, k) for k in ("px", "py", "yaw", "ang", "od")}
+    if any(v is None for v in vals.values()):
+        return
+    t_done = link.ack_times.get(ack)
+    if t_done is None:
+        return
+    # La odometría del ACK es de cuando el ESP lo empezó a mandar (~150 ms antes de este frame
+    # al salir del giro: 9° y 60 mm): la verdad se toma de ese instante.
+    t_odo = (t_done - len(ack) * 86.8) / 1e6
+    tx, ty, th = _pose_at(history, t_odo)
+    # Solo con el carro ya estable: si aún gira o el Localizer no convergió, el arranque sembrado
+    # sale con 50-80 mm / 10° de error y choca donde la carrera completa no (s9, s21, s35, s38).
+    lx, ly, lh = rm.loc.pose()
+    if (abs((veh.heading_deg - th + 180.0) % 360.0 - 180.0) > 2.0 or math.hypot(lx - tx, ly - ty) > 50.0
+            or abs((lh - th + 180.0) % 360.0 - 180.0) > 5.0):
+        return
+    px, py, yaw = rm.loc.odom
+    rec.update(done=True)
+    data = {"seed": seed, "t": round(t, 3), "od12": rec["od12"],
+            "direction": field.direction, "parking": field.parking_section,
+            "true": [tx, ty, th % 360.0], "t_odo": round(t_odo, 3), "v_mm_s": veh.v,
+            "esp": {"px": px, "py": py, "yaw": yaw, "ang": float(vals["ang"]), "od": float(vals["od"])},
+            "loc": list(rm.loc.pose()), "shift": rm.shift, "park_w": rm.park_w}
+    (Path(log_dir) / "ruta_seed.json").write_text(json.dumps(data), encoding="utf-8")
+    print(f"[twin] ruta_seed grabado tc={tc} t={t:.2f}", flush=True)
+
+
 class Sim:
     def __init__(
         self,
@@ -301,6 +370,7 @@ class Sim:
         ignore_collisions: tuple[str, ...] = (),
         inject_map_truth: Any = None,
         park_pos: Any = None,
+        ruta_seed: dict[str, Any] | None = None,
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
@@ -316,6 +386,16 @@ class Sim:
         for kv in filter(None, os.environ.get("TWIN_FW_PARAMS", "").split(",")):
             k, v = kv.split("=")
             self.fw_params[k.strip()] = float(v)
+        # Arranque a mitad de carrera en modo ruta (ruta_seed.json que graba una carrera
+        # completa al salir del giro 12): argumento > env FOX_RUTA_SEED=<dir con s<seed>/>.
+        if ruta_seed is None and os.environ.get("FOX_RUTA_SEED"):
+            ruta_seed = json.loads((Path(os.environ["FOX_RUTA_SEED"]) / f"s{seed}" / "ruta_seed.json").read_text())
+        self.ruta_seed = ruta_seed
+        if ruta_seed:
+            e = ruta_seed["esp"]
+            self.fw_params.update({"rp_on": 1.0, "rp_x": e["px"], "rp_y": e["py"], "rp_yaw": e["yaw"],
+                                   "rp_ang": e["ang"], "rp_od": e["od"], "rp_od12": ruta_seed["od12"],
+                                   "rp_izq": 1.0 if ruta_seed["direction"] == "CCW" else 0.0})
         cfg = resolve_preset(
             preset,
             fw_source=fw_source,
@@ -388,6 +468,9 @@ class Sim:
         _ns = os.environ.get("TWIN_NOISE_SEED")
         rng = np.random.default_rng(self.seed if _ns is None else [self.seed, int(_ns)])
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
+        if self.ruta_seed:
+            field.start_x, field.start_y, field.start_heading = self.ruta_seed["true"]
+        seed_rec = {} if self.log_dir and not self.ruta_seed and getattr(C, "ROUTE_FOLLOW", False) else None
         for key in self.inject_map_truth:
             k, attr = _MAP_TRUTH_KEYS[key]
             if k not in saved_cfg and hasattr(C, k):
@@ -693,7 +776,8 @@ class Sim:
                     if armed and est == "T" and stopped_since and sim_t - stopped_since >= _STOPPED_HOLD_S:
                         stop_reason = "terminado"
                         break
-                    if armed and tc is not None and tc >= tpr and stopped_since and sim_t - stopped_since >= _STOPPED_HOLD_S:
+                    # Estacionando (est=E) el carro se detiene en los settles: no es el final; el final llega con TERMINADO.
+                    if armed and tc is not None and tc >= tpr and est != "E" and stopped_since and sim_t - stopped_since >= _STOPPED_HOLD_S:
                         stop_reason = "race_finished"
                         break
 
@@ -730,6 +814,8 @@ class Sim:
                                 if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
                                     for s in field.signs:
                                         runtime.digital.confirmed[(s.section, s.seat)] = s.color
+                                if self.ruta_seed:
+                                    _seed_pi(runtime, field, self.ruta_seed)
                                 armed = True
                                 armed_t = t_end
                                 progress_anchor_t = t_end
@@ -748,6 +834,8 @@ class Sim:
                                 stop_reason = "user_stop"
                                 break
 
+                        if seed_rec is not None and armed:
+                            _record_seed(seed_rec, runtime, field, veh, tc, est, self.log_dir, self.seed, t_end, link, history)
                         _log_trace(
                             {
                                 "pi_frame": True,

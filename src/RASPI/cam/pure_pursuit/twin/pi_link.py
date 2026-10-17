@@ -17,6 +17,7 @@ class SimSerialLink:
         self._pi_now_us: int = 0
         self._pending: list[tuple[int, str]] = []
         self._last_ack: str = ""
+        self.ack_times: dict[str, int] = {}   # ACK -> µs de fin de transmisión (últimos pocos; ruta_seed)
 
     def set_now_us(self, t_us: int) -> None:
         self._pi_now_us = int(t_us)
@@ -43,4 +44,7 @@ class SimSerialLink:
         t_done, line = max(ready, key=lambda p: p[0])
         self._pending = [p for p in self._pending if p[0] != t_done]
         self._last_ack = line
+        self.ack_times[line] = t_done
+        if len(self.ack_times) > 16:
+            del self.ack_times[next(iter(self.ack_times))]
         return line
