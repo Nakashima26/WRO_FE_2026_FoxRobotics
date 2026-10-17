@@ -20,6 +20,7 @@ Para correrlo:
 import argparse
 import copy
 import functools
+import json
 import math
 import os
 import sys
@@ -2513,6 +2514,8 @@ def parse_args() -> argparse.Namespace:
                    help="Cada cuántos frames procesados se actualiza la captura para vista remota (VNC)")
     p.add_argument("--start-delay",      type=float, default=0.5,
                    help="Segundos de espera entre el botón y el arranque (quitar la mano). 0 = sin espera")
+    p.add_argument("--sin-carrera",      action="store_true",
+                   help="no cargar carrera.json")
     return p.parse_args()
 
 
@@ -2595,6 +2598,19 @@ def main():
             print("[GPIO] LED apagado: cámara sin imagen.", flush=True)
 
     args = parse_args()
+
+    # carrera.json (exportar_carrera.py): config de la carrera sobre C.*. Los defaults de
+    # parse_args ya se evaluaron con config.py, así que solo BAUDRATE se re-aplica aquí;
+    # cam-index/serial-port/process-every siguen con el default de config.py.
+    carrera = Path(__file__).with_name("carrera.json")
+    if carrera.is_file() and not args.sin_carrera:
+        data = json.loads(carrera.read_text(encoding="utf-8"))
+        for k, v in data.items():
+            if not k.startswith("_"):
+                setattr(C, k, v)
+        if "BAUDRATE" in data and not any(a.startswith("--baudrate") for a in sys.argv):
+            args.baudrate = data["BAUDRATE"]
+        print(f"[carrera] {sum(not k.startswith('_') for k in data)} valores de carrera.json", flush=True)
 
     threaded = True
     if args.no_threaded_capture:
