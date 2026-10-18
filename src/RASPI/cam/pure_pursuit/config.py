@@ -1361,6 +1361,10 @@ ROUTE_FIX_LINE = None
 ROUTE_FIX_LINE_MIN = 3
 # Fijado por masa (no forzado) solo si cuadra con la mediana de la línea naranja (si hay ≥ ROUTE_FIX_LINE_MIN lecturas): |δ − mediana| ≤ esto; None = sin chequeo
 ROUTE_FIX_LINE_TOL_MM = None
+# Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
+ROUTE_FIX_LINE_LAG_FRAMES = 5
+# Localizer: una lectura de distancia que salta más que esto respecto a la anterior del mismo sensor se ignora (eco de transición señal->pared, semilla 32); None = apagado.
+LOC_SENSOR_JUMP_MM = 100.0
 # Perfil: aceleración lateral menor en curvas muy cerradas (|κ| > TIGHT_KAPPA, 1/mm).
 # Con radio < lookahead (200 mm) el pure pursuit corta hacia adentro (esquinas de la
 # isla, semilla 3). None = apagado (todas las curvas con A_LAT_MM_S2).

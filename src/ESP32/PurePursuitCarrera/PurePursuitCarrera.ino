@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + u25s25.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + lj108.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800

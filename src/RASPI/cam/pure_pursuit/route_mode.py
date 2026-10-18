@@ -844,6 +844,9 @@ class RouteMode:
         fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
         if not 100.0 <= fwd <= 600.0:
             return
+        k = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
+        if len(self._pre_poses) > k:
+            pose = self._pre_poses[-1 - k]   # pose del momento de la imagen (latencia cámara->ACK)
         h = math.radians(pose[2])
         p = np.array([pose[0] + fwd * math.sin(h), pose[1] + fwd * math.cos(h)])
         a = np.array(self.axis)

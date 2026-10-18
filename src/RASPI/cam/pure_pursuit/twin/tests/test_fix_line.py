@@ -15,6 +15,7 @@ def _rm(orange):
     rm = RouteMode.__new__(RouteMode)
     rm.orange = orange
     rm._line_d = []
+    rm._pre_poses = []
     rm.axis = W.w_axis("N")
     return rm
 

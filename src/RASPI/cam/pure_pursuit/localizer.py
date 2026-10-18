@@ -109,6 +109,7 @@ class Localizer:
         self.last = {}
         self.n_used = 0
         self.n_rej = 0
+        self._prev_z = {}
 
     def set_map(self, seats: dict, unknown, parking: str | None, park_w: float | None = None) -> None:
         """Señales conocidas + asientos sin resolver (tapan el rayo igual)."""
@@ -215,6 +216,11 @@ class Localizer:
             if raw is None or raw <= 0:
                 continue
             z = raw * scale
+            prev = self._prev_z.get(key)
+            self._prev_z[key] = z
+            jump = getattr(C, "LOC_SENSOR_JUMP_MM", None)
+            if jump is not None and prev is not None and abs(z - prev) > float(jump):
+                continue   # primera lectura tras un salto: puede ser eco de transición
             if kind == "us" and (z < 30.0 or z > 1500.0):
                 continue
             if kind == "tof" and (z < 20.0 or z > 240.0):
