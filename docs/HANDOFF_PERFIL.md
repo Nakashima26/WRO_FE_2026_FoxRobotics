@@ -220,3 +220,5 @@ la anterior y las referencias (combo1).
 15. **Export actual = pu19r4 + park 4 (park 2 + `PARK_UTURN_SIN_SETTLE` 1):** 42/42/42, mediana 40.71-40.87 s, U→fin 6.9 s. Export: `pu19r4_parkk4.json`, `--pi-baud 460800`.
 
 - **bl100c (export):** ROUTE_BLIND_PWM 100 + fw PARK_PEGADO_CICLA=1 (en fase 13, "pegado de lado" sin alinear cicla a fase 9; arregla s26 n2 que salía 10 mm fuera con 10.5°). Carrera 42/42/42, T_med 40.24/40.40/40.42 (b125: 40.82/40.63/40.82). CICLA sola sobre b125: 42/42/42 sin cambio de tiempo.
+
+- **m210a4 (export):** pi ROUTE_PROFILE_MIN_PWM 210 + fw PARK_ATRAS_FINAL_CM 2.5→4 (s2 n2 terminaba "ya alineado" con la esquina trasera 5 mm pasada de la madera de atrás y 9 cm libres adelante; tolerancia 3-4° empeora). Carrera 42/42/42, T_med 40.00/39.98/40.17 (mn190: 39.99/40.21/40.27). ATRAS 4 sola sobre mn190: 42/42/42, +0.0/+0.12/+0.14 s.

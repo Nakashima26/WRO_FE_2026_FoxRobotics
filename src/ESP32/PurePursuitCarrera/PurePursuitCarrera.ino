@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + mn190.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + m210a4.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -1096,7 +1096,7 @@ PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta l
 // planeada con el mapa (runs/geo2.py) corta la contravuelta con ToF atrás ~6 cm
 // y endereza en la fase 13 hasta ~2.5 cm. Con un solo umbral la fase 13 se
 // cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
-PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
+PARK_AJ float         PARK_ATRAS_FINAL_CM       = 4.0;
 
 // T15b2 (t15b2_esquina13, "patrón 3"): fase 8 (FULL INTERNO) corta por
 // PARK_ATRAS_MIN_CM con el carro todavía girando fuerte (medido: ~80 deg/s,
