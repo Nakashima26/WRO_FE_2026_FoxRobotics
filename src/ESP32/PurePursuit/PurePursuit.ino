@@ -1429,6 +1429,8 @@ PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 0;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 PARK_AJ long         PARK_PEGADO_CICLA          = 0;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
+PARK_AJ long         PARK_UTURN_TOPE            = 0;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
+PARK_AJ long         PARK_SCAN_TOPE             = 0;   // tope PWM propio del escaneo rápido; 0 = MOTOR_MAX
 // PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
 PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 160;
 PARK_AJ long         PARK_UTURN_PWM             = 160;
@@ -2310,7 +2312,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA);
+  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM);
 #undef SIL_AJ
@@ -4928,7 +4930,7 @@ void loop() {
         }
         motorAdelante();
         servoRumboPark(parkRumboGiro0 - haciaAhoraP * (float)PARK_UTURN_ALEJAR_ANG);
-        setMotor(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN);
+        setMotorTope(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
         break;
       }
 
@@ -4936,7 +4938,7 @@ void loop() {
       if (parkFase == 27) {
         motorAdelante();
         servoRumboPark(parkRumboGiro0);
-        setMotor(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN);
+        setMotorTope(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
         if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
@@ -4967,7 +4969,7 @@ void loop() {
         }
         escribirServo(parkServoU);
         motorAdelante();
-        setMotor(vel);
+        setMotorTope(vel, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
         float girado = (anguloGyro - parkRumboGiro0) * haciaAhoraP;
         bool  listo  = girado >= (float)PARK_UTURN_DEG;
         bool  tout   = t >= PARK_RETORNO_TIMEOUT_MS;
@@ -5392,7 +5394,7 @@ void loop() {
           // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
           bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0
                         && !isnan(rutaPka) && alongSalidaMm() > rutaPka + (float)PARK_SCAN_RAPIDO_MM;
-          setMotor(rapido ? (int)PARK_SCAN_RAPIDO_PWM : PARK_PUNTA_PWM);
+          setMotorTope(rapido ? (int)PARK_SCAN_RAPIDO_PWM : PARK_PUNTA_PWM, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
 
         if (logEsteLoop) {

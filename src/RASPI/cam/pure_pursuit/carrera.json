@@ -50,6 +50,6 @@
  "ROUTE_UNSEEN_WALL_PWM": 210,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "tp255.json",
+ "_fuente": "u25s25.json",
  "_preset": "ruta_perfil"
 }

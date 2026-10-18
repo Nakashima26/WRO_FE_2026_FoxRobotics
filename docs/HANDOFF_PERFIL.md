@@ -224,3 +224,5 @@ la anterior y las referencias (combo1).
 - **bl100c (export):** ROUTE_BLIND_PWM 100 + fw PARK_PEGADO_CICLA=1 (en fase 13, "pegado de lado" sin alinear cicla a fase 9; arregla s26 n2 que salía 10 mm fuera con 10.5°). Carrera 42/42/42, T_med 40.24/40.40/40.42 (b125: 40.82/40.63/40.82). CICLA sola sobre b125: 42/42/42 sin cambio de tiempo.
 
 - **m210a4 (export):** pi ROUTE_PROFILE_MIN_PWM 210 + fw PARK_ATRAS_FINAL_CM 2.5→4 (s2 n2 terminaba "ya alineado" con la esquina trasera 5 mm pasada de la madera de atrás y 9 cm libres adelante; tolerancia 3-4° empeora). Carrera 42/42/42, T_med 40.00/39.98/40.17 (mn190: 39.99/40.21/40.27). ATRAS 4 sola sobre mn190: 42/42/42, +0.0/+0.12/+0.14 s.
+
+- **u25s25 (export):** fw flags nuevos PARK_UTURN_TOPE / PARK_SCAN_TOPE (tope PWM propio para alejar+U y escaneo rápido; antes todo el park topaba en MOTOR_MAX 155). Export: TOPE 255, UTURN_PWM/ALEJAR_PWM 255, SCAN_RAPIDO_PWM 255. Carrera 42/42/42, T_med 38.89/39.01/39.10 (tp255: 39.89/39.91/40.00), U→fin 5.99/6.13/6.02 (antes ~6.95). Escalones n1: U200 −0.37, scan230 −0.27, U200+s230 −0.69, U230+s230 −0.84. Riesgo: el carro real a 255 en la U/escaneo derrapa más que el twin.
