@@ -119,32 +119,32 @@ Copia la salida (o la carpeta) para Claude.
 
 ### Preparación (una vez)
 
-CalibFox se maneja por el **mismo UART que usa la Pi en carrera** (Serial2, RX=17
-TX=16, 115200). No hace falta cable USB al carro durante las corridas: el
-script corre en la Pi y tú (o Claude) entras por ssh.
+Dos formas; las dos usan el mismo script. Ya viene con los valores del carro v2
+(BNO085 sin MPU6050, encoder B en GPIO 36, servo centro 75), así que compila
+tal cual desde el Arduino IDE o con arduino-cli.
 
-1. Carga `src/ESP32/CalibFox/CalibFox.ino` en el ESP32 con el USB (no es el
-   firmware de carrera). El carro v2 trae BNO085 y no MPU6050, así que compila
-   con `-DCALIB_MPU=0`; si no tienes la librería VL53L1X, agrega `-DCALIB_TOF=0`.
-   ```bash
-   arduino-cli compile --fqbn esp32:esp32:esp32 --build-property "build.extra_flags=-DCALIB_MPU=0" src/ESP32/CalibFox
-   arduino-cli upload  --fqbn esp32:esp32:esp32 -p <PUERTO> src/ESP32/CalibFox
-   ```
-   Desconecta el USB después de cargar. (Con `-DCALIB_UART=0` vuelve a hablar
-   por USB, para manejarlo desde la laptop con cable.)
-2. En la Pi, para el programa de carrera si está corriendo (ocupa el puerto) y,
-   desde `src/RASPI/cam`:
-   ```bash
-   export PYTHONUTF8=1 PYTHONPATH=.
-   CAP="python -m pure_pursuit.twin.tools.calib.calib_capture --port /dev/ttyS0 --out runs/calib/$(date +%Y%m%d) --maxpwm 255 --vbat <VOLTAJE>"
-   ```
-   `/dev/ttyS0` es el `SERIAL_PORT` de `config.py`. Prueba en seco sin carro:
-   `--port mock`.
-3. **Seguridad:** cualquier tecla en la terminal **aborta** la corrida, y cada
-   corrida tiene un tope de 20 s. Ten espacio libre al frente.
+**A. Pi apagada, laptop con cable USB al ESP32 (por defecto).** Como las
+pruebas de la rama `parking`. El cable tiene que dejar que el carro recorra
+~2 m, así que alguien camina con la laptop.
 
-Todos los pasos de abajo escriben en la **misma carpeta**
-`runs/calib/<fecha>` (en la Pi).
+```bash
+arduino-cli upload --fqbn esp32:esp32:esp32 -p <PUERTO> src/ESP32/CalibFox   # después de compile
+cd src/RASPI/cam && export PYTHONUTF8=1 PYTHONPATH=.
+CAP="python -m pure_pursuit.twin.tools.calib.calib_capture --port <PUERTO> --out runs/calib/$(date +%Y%m%d) --maxpwm 255 --vbat <VOLTAJE>"
+```
+`<PUERTO>` en Mac es `/dev/cu.usbserial-0001` o `/dev/cu.SLAB_USBtoUART`
+(`ls /dev/cu.*`). Si no aparece: cierra apps que agarran USB (Spotify lo hace),
+desconecta y reconecta; si sigue sin aparecer, instala el driver CP210x de
+Silicon Labs.
+
+**B. Sin cable al carro: por el UART de la Pi.** Compila con
+`-DCALIB_UART=1`, para el programa de carrera en la Pi y corre el mismo `CAP`
+en la Pi con `--port /dev/ttyS0` (el `SERIAL_PORT` de `config.py`).
+
+En las dos: prueba en seco con `--port mock`. **Seguridad:** cualquier tecla
+aborta la corrida, y cada corrida tiene un tope de 20 s.
+
+Todos los pasos de abajo escriben en la **misma carpeta** `runs/calib/<fecha>`.
 
 ### Paso 4. Encoder: cuentas por mm (SIEMPRE PRIMERO)
 
@@ -201,11 +201,12 @@ freno 120 ____ ____ ____ | freno 230 ____ ____ ____
 
 ### Paso 7. Servo: centro y curvatura
 
-1. **Centro:** con `${=CAP} raw "SERVO 90"` el carro debe avanzar recto 2 m. Si
-   se va de lado, prueba 88, 89, 91... hasta que vaya recto y anota ese valor.
+1. **Centro:** con `${=CAP} raw "SERVO 75"` (el centro de ServoCentro) el carro
+   debe avanzar recto 2 m. Si se va de lado, prueba 73, 74, 76... hasta que vaya
+   recto y anota ese valor.
 2. **Curvas:**
    ```bash
-   ${=CAP} steer --reps 2 --servos 19,40,60,70,80,100,110,120,140,161
+   ${=CAP} steer --reps 2 --servos 5,20,40,55,65,85,95,110,130,150
    ```
    Con el plumón en el **centro del eje trasero**, el carro hace círculos con
    cada ángulo de servo. Mide el **diámetro** de cada círculo de lado a lado,
@@ -218,7 +219,7 @@ lado gira mucho menos que el otro, anótalo: el gemelo lo modela por separado.
 ### Paso 8. Pérdida de velocidad al girar (scrub)
 
 ```bash
-${=CAP} lock --pwm 160 --servos 90,50,30 --reps 3
+${=CAP} lock --pwm 160 --servos 75,40,15 --reps 3
 ```
 
 Deja **~60 cm** de radio libre: el carro va a dar vueltas en círculo.

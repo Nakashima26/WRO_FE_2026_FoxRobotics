@@ -44,7 +44,7 @@ def build(out_dir: Path, extra_flags: list[str] | None = None) -> Path:
                                                    [*srcs, *(HERE / "mock").glob("*.h")]):
         return exe
     cmd = [*_cxx(), "-std=c++17", "-O1", "-Wall", "-Wextra", "-Wno-nullability-completeness",
-           "-I", str(HERE / "mock"), *(extra_flags or []),
+           "-I", str(HERE / "mock"), "-DCALIB_MPU=1", "-DCALIB_TOF=1", *(extra_flags or []),   # el mock trae stubs de los dos
            "-x", "c++", str(ino), "-x", "c++", str(HERE / "mock" / "mock_main.cpp"), "-o", str(exe)]
     r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if r.returncode != 0:

@@ -126,6 +126,7 @@ class Session:
                  note: str = "", ask: Callable[[str], str] = input, say: Callable[[str], None] = print):
         self.link, self.out, self.ask, self.say = link, outdir, ask, say
         self.settle_s = 0.6      # pausa entre corridas (los tests la ponen en 0)
+        self.center = 75         # servo recto del v2 (ServoCentro); --center lo cambia
         self.out.mkdir(parents=True, exist_ok=True)
         self.meta_path = self.out / "session.json"
         self.meta = {"created": dt.datetime.now().isoformat(timespec="seconds"),
@@ -198,7 +199,7 @@ class Session:
                 self.pause("Pon el carro con espacio para circular", prompt)
                 rep = self.link.command(cmd, ms / 1000 + 8)
                 out.append(self.save(f"lock_p{pwm:03d}_s{s:03d}_r{r:02d}", rep, cmd))
-        self.link.command("SERVO 90", 3)
+        self.link.command(f"SERVO {self.center}", 3)
         return out
 
     # (b) encoder --------------------------------------------------------------
@@ -249,7 +250,7 @@ class Session:
                     if val:
                         w.writerow([s, float(val), r, ""])
                         f.flush()
-        self.link.command("SERVO 90", 3)
+        self.link.command(f"SERVO {self.center}", 3)
         return p
 
     # (d) loop ---------------------------------------------------------------------
@@ -286,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--vbat", type=float, default=None, help="tension de la bateria al empezar (V); queda en session.json")
     ap.add_argument("--note", default="")
     ap.add_argument("--no-prompt", action="store_true")
+    ap.add_argument("--center", type=int, default=75, help="servo recto (paso 7); def. 75 del v2")
     ap.add_argument("--maxpwm", type=int, default=None, help="tope MAXPWM del firmware (def. 200; la carrera a gear 1.25 llega a 255)")
     sub = ap.add_subparsers(dest="what", required=True)
 
@@ -309,14 +311,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--brake", action="store_true")
     s = sub.add_parser("lock", help="velocidad con volante fijo (scrub)")
     s.add_argument("--pwm", type=int, default=100)
-    s.add_argument("--servos", default="90,50,30")
+    s.add_argument("--servos", default="75,40,15")
     s.add_argument("--reps", type=int, default=3)
     s.add_argument("--ms", type=int, default=2500)
     s = sub.add_parser("enc", help="cuentas/mm empujando a mano")
     s.add_argument("--dist", type=float, default=1000.0)
     s.add_argument("--reps", type=int, default=5)
     s = sub.add_parser("steer", help="radio de giro a varios comandos de servo")
-    s.add_argument("--servos", default="60,70,80,100,110,120,130,150")
+    s.add_argument("--servos", default="5,20,40,55,65,85,95,110,130,150")
     s.add_argument("--reps", type=int, default=2)
     s.add_argument("--pwm", type=int, default=70)
     s.add_argument("--ms", type=int, default=4000)
@@ -338,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.maxpwm is not None:
         link.command(f"MAXPWM {a.maxpwm}", 3)
     sess = Session(link, out, a.vbat, a.note)
+    sess.center = a.center
     prompt = not a.no_prompt
     try:
         if a.what == "ramp":

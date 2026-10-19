@@ -251,7 +251,7 @@ def test_calibfox_commands_and_csv(mock_exe, tmp_path):
     assert np.all(np.diff(run.counts) >= 0)                              # adelante = cuentas +
     assert s.link.command("PWM 999 100").status == "ERR"
     assert s.link.command("PWM 100 99999").status == "ERR"
-    assert s.link.command("SERVO 5").status == "ERR"
+    assert s.link.command("SERVO 1").status == "ERR"   # tope mecánico v2: 2..154
     assert s.link.command("SERVO 120").ok
     assert s.link.command("FOO").status == "ERR"
     # reversa: cuentas decrecen y el firmware esperó el freno (no se invierte con el motor girando)

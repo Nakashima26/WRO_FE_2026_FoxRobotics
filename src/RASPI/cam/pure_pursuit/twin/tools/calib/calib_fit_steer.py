@@ -1,7 +1,7 @@
 """Mapeo servo -> rueda equivalente (bicicleta) y ppServoGain recomendado.
 
 Desde src/RASPI/cam (PYTHONUTF8=1 PYTHONPATH=.):
-  python -m pure_pursuit.twin.tools.calib.calib_fit_steer steer.csv [--center 90]
+  python -m pure_pursuit.twin.tools.calib.calib_fit_steer steer.csv [--center 75]
          [--wheelbase 113] [--kingpin 60] [--out-dir DIR] [--apply] [--root RAIZ]
 
 CSV de entrada (cabecera obligatoria; una fila por medicion; cualquiera de estas
@@ -75,7 +75,7 @@ def load_rows(path: Path) -> list[dict]:
         return [dict(r) for r in csv.DictReader(f)]
 
 
-def fit_steer(rows: list[dict], center: float = 90.0, L: float = 113.0, T: float = 60.0) -> dict:
+def fit_steer(rows: list[dict], center: float = 75.0, L: float = 113.0, T: float = 60.0) -> dict:
     """Devuelve ganancias por lado, linealidad, tope y ppServoGain recomendado."""
     by_servo: dict[float, list[float]] = {}
     srcs = set()
@@ -180,7 +180,7 @@ def build_patches(res: dict, root: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("csv", type=Path)
-    ap.add_argument("--center", type=float, default=90.0)
+    ap.add_argument("--center", type=float, default=75.0)
     ap.add_argument("--wheelbase", type=float, default=113.0)
     ap.add_argument("--kingpin", type=float, default=60.0)
     ap.add_argument("--out-dir", type=Path, default=None)

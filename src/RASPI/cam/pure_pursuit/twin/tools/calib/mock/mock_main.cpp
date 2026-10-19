@@ -46,7 +46,7 @@ static void emit_count(int step) {          // step = +1 / -1
   g_phase = ((g_phase + step) % 4 + 4) % 4;
   int ab = GRAY[g_phase];
   g_pin[34] = (ab >> 1) & 1;
-  g_pin[39] = ab & 1;
+  g_pin[36] = ab & 1;
   if (g_isr) g_isr();
 }
 

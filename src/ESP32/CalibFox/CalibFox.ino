@@ -2,7 +2,7 @@
  * CalibFox.ino — Banco de calibracion del Fox (WRO Future Engineers 2026, v2)
  *
  * Sketch INDEPENDIENTE de PurePursuit.ino: no necesita la Pi, ni READY, ni V2.
- * Se controla por texto en el UART de la Pi (Serial2 RX=17 TX=16, 115200; -DCALIB_UART=0 = USB) y emite CSV. Lo maneja
+ * Se controla por texto en el USB (115200; -DCALIB_UART=1 = UART de la Pi, Serial2 RX=17 TX=16) y emite CSV. Lo maneja
  * src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_capture.py (o cualquier
  * terminal serie).
  *
@@ -11,7 +11,7 @@
  *                     adelante = A1 HIGH / A2 LOW ; reversa = A1 LOW / A2 HIGH
  *                     coast = A1 LOW / A2 LOW ; freno = pines de direccion + PWM 0
  *   Servo SG90      : SERVO_PIN=13 (LEDC 50 Hz, 16 bits, 500..2500 us <-> 0..180 deg)
- *   Encoder cuadratura: ENC_A=34, ENC_B=39 (solo-entrada, SIN pull-up interno:
+ *   Encoder cuadratura: ENC_A=34, ENC_B=36 (solo-entrada, SIN pull-up interno:
  *                     el modulo del encoder debe traer pull-ups)
  *   HC-SR04 izq/der/frontal: TRIG/ECHO = 27/32, 26/35, 14/33
  *   MPU-6050        : I2C por defecto (SDA=21, SCL=22), libreria MPU6050_tockn
@@ -84,9 +84,9 @@
 
 struct Profile;   // el IDE pone los prototipos arriba: pwmAt(const Profile&) necesita el nombre antes
 
-// Control por el UART de la Pi (Serial2, sin cable USB al carro); -DCALIB_UART=0 vuelve al USB.
+// Por defecto USB (Pi apagada, laptop con cable). -DCALIB_UART=1: por el UART de la Pi (Serial2), sin cable al carro.
 #ifndef CALIB_UART
-#define CALIB_UART 1
+#define CALIB_UART 0
 #endif
 #if CALIB_UART && defined(ARDUINO_ARCH_ESP32)
 #define IO Serial2
@@ -95,7 +95,7 @@ struct Profile;   // el IDE pone los prototipos arriba: pwmAt(const Profile&) ne
 #endif
 
 #ifndef CALIB_MPU
-#define CALIB_MPU 1
+#define CALIB_MPU 0
 #endif
 
 #if CALIB_MPU
@@ -106,7 +106,7 @@ static bool mpuReady = false;
 #endif
 
 #ifndef CALIB_TOF
-#define CALIB_TOF 1          // comando TOF (VL53L1X de Pololu); -DCALIB_TOF=0 si no esta la libreria
+#define CALIB_TOF 0          // comando TOF (VL53L1X de Pololu); -DCALIB_TOF=1 con la libreria instalada
 #endif
 #if CALIB_TOF
 #include <Wire.h>
@@ -130,7 +130,7 @@ static VL53L1X tofDev;
 #define A2          19
 #define SERVO_PIN   13
 #define ENC_PIN_A   34
-#define ENC_PIN_B   39
+#define ENC_PIN_B   36   // morado, como EncoderTest de la rama parking (pull-up 4.7k externa)
 
 // ── PWM (identico a PurePursuit.ino l.95-98) ──────────────────────────────────
 static const int freqServo = 50;
@@ -141,15 +141,15 @@ static const int resMotor  = 8;
 // ── Parametros de la herramienta ──────────────────────────────────────────────
 static const unsigned long FRENO_MS      = 300;     // = MANIOBRA_FRENO_MS del .ino
 static const unsigned long RUN_HARD_MAX_MS = 20000;
-static const int   SERVO_MIN_SAFE = 15;
-static const int   SERVO_MAX_SAFE = 165;
+static const int   SERVO_MIN_SAFE = 2;     // topes mecánicos del v2 (RectaBnoTest: 2..154)
+static const int   SERVO_MAX_SAFE = 154;
 static const unsigned long PING_TIMEOUT_US = 7000;   // = pulseIn del .ino l.2579
 static const int   LT_MAX = 1000;                    // muestras max de LOOPTIME
 
 static float         cpmm        = 20.73f;           // ENC_CUENTAS_POR_MM del .ino l.434
 static unsigned long periodMs    = 10;
 static int           maxPwm      = 200;
-static int           servoDeg    = 90;
+static int           servoDeg    = 75;   // centro medido con ServoCentro (rama parking)
 static bool          servoActive = false;
 static int           motorDir    = 0;                // +1 adelante, -1 reversa, 0 coast
 static unsigned long lastCoastMs = 0;
@@ -505,7 +505,7 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
 // ── Comandos ──────────────────────────────────────────────────────────────────
 static void printInfo() {
   IO.println("# CalibFox v1");
-  IO.println("# pines: PWMA=23 A1=18 A2=19 SERVO=13 ENC_A=34 ENC_B=39 "
+  IO.println("# pines: PWMA=23 A1=18 A2=19 SERVO=13 ENC_A=34 ENC_B=36 "
                  "TRIG/ECHO L=27/32 R=26/35 F=14/33");
   IO.print("# cpmm="); IO.print(cpmm, 3);
   IO.print(" period_ms="); IO.print(periodMs);
@@ -571,7 +571,7 @@ static void handleLine(char *line) {
   }
   if (!strcmp(cmd, "SERVO")) {
     long v; if (!getInt(ctx, v)) { IO.println("ERR SERVO deg"); return; }
-    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { IO.println("ERR SERVO fuera de 15..165"); return; }
+    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { IO.println("ERR SERVO fuera de 2..154"); return; }
     servoWrite((int)v); IO.println("OK SERVO"); return;
   }
   if (!strcmp(cmd, "SERVOOFF")) { ledcWrite(SERVO_PIN, 0); servoActive = false; IO.println("OK SERVOOFF"); return; }
@@ -616,7 +616,7 @@ static void handleLine(char *line) {
     if (!getInt(ctx, v) || !getInt(ctx, ms)) { IO.println("ERR PWM v ms [servo]"); return; }
     if (v < -255 || v > 255) { IO.println("ERR PWM -255..255"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 15..165"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 2..154"); return; }
       servoWrite((int)sv);
       delay(400);   // que el servo llegue antes de arrancar
     }
@@ -638,7 +638,7 @@ static void handleLine(char *line) {
     unsigned long total = (unsigned long)(nSteps * hold);
     if (total > RUN_HARD_MAX_MS) { IO.println("ERR RAMP > 20 s: menos escalones o hold menor"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 15..165"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 2..154"); return; }
       servoWrite((int)sv); delay(400);
     }
     Profile p = {PM_STAIRS, (int)a, (int)b, (int)st, (unsigned long)hold, total, total, false};
