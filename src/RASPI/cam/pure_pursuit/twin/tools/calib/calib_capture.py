@@ -100,8 +100,13 @@ def open_port(name: str, mock_dir: Path | None = None):
         import serial  # type: ignore
     except ImportError as e:
         raise SystemExit("falta pyserial: pip install pyserial") from e
-    p = serial.Serial(name, 115200, timeout=0.5)
-    time.sleep(2.0)
+    p = serial.Serial()
+    p.port, p.baudrate, p.timeout = name, 115200, 0.5
+    p.dtr = p.rts = False      # abiertas en True dejan al ESP32 en reset (solo llegan ceros)
+    p.open()
+    if not name.startswith("/dev/cu.CalibFox"):   # USB: pulso de reset para ver el arranque
+        p.rts = True; time.sleep(0.15); p.rts = False
+    time.sleep(2.5)
     p.reset_input_buffer()
     return p
 

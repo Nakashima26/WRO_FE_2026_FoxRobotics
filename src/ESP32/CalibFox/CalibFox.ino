@@ -708,7 +708,7 @@ void setup() {
 #endif
   pwmWrite(0);
   motorCoast();
-  servoWrite(90);
+  servoWrite(servoDeg);   // centro del v2 (75)
 
   pinMode(ENC_PIN_A, INPUT);
   pinMode(ENC_PIN_B, INPUT);
