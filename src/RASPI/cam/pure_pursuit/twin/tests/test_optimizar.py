@@ -56,6 +56,13 @@ def test_parse_out_sin_stop_o_con_pocas_vueltas_falla(tmp_path):
     assert opt.ok_t(opt.parse_out(tmp_path / "no_existe.out")) == (False, None)
 
 
+def test_roce_de_pared_exterior_es_falla():
+    rec = {"lap_times_s": [13.9, 9.1, 9.0],
+           "ignored_contacts": {"pared exterior": {"t": 5.0, "cause": "pared exterior", "max_mm": 3.0}}}
+    assert opt.ok_t(rec) == (False, None)
+    assert opt.ok_t({"lap_times_s": [13.9, 9.1, 9.0], "ignored_contacts": {}}) == (True, pytest.approx(32.0))
+
+
 def test_encode_decode_round_trip():
     x = np.array([0.25, 0.5, 0.5, 0.5, 0.5, 0.5, 0.0, 1.0])
     pi = opt.decode(x)

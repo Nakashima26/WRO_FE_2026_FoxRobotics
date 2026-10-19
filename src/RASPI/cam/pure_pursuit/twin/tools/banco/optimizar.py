@@ -77,7 +77,8 @@ def parse_out(path):
 def ok_t(rec):
     """(ok, suma de vueltas 1-3); ok requiere al menos 3 vueltas."""
     laps = (rec or {}).get("lap_times_s") or []
-    if len(laps) < 3:
+    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca
+    if len(laps) < 3 or (rec or {}).get("ignored_contacts"):
         return (False, None)
     return (True, float(sum(laps[:3])))
 
