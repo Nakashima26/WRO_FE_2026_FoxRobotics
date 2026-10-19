@@ -35,28 +35,22 @@ Con `SERVO 75` el carro se fue a la derecha. Con 77 fue recto (~0.74 m). Usa
 `--center 77`. Ojo: RondaAbierta, VueltaCalibracion y casi todo `parking`
 siguen con 75.
 
-## Paso 5 — solo el bloque 1, y con un problema: **la reversa no mueve el carro**
+## Paso 5 — solo el bloque 1 hacia adelante; la reversa no se hizo
 
 `ramp --reps 3` (PWM 20→130, paso 10, 800 ms), servo 77, `--maxpwm 255`.
-Se guardaron `ramp_fwd_r01..r03` y `ramp_rev_r01..r02` (la rev 3 se cortó porque
-se apagó el carro).
 
-- **En todas las `ramp_rev` el encoder marca 0 cuentas y v = 0 todo el tramo,
-  aunque el PWM negativo sí se aplicó.** El carro no regresaba: cada repetición
-  arrancó donde acabó la anterior, y en la `fwd_r03` ya iba topado (v = 0 a
-  PWM 80). En CalibFox, reversa = `A1 LOW, A2 HIGH`. Revisar con MotorTest si el
-  puente H mueve el motor hacia atrás (cable o pin de A2 = GPIO 19, o el
-  cambio A1/A2 que salió en el "día uno" de Carrera.ino). Hasta arreglarlo,
-  las pruebas que regresan solas (ramp, step) solo sirven hacia adelante, y
-  hay que regresar el carro a mano.
-- `ramp_fwd_r01` y `r02` se ven sanas (v con cpmm 5.6, multiplicar por
-  5.60/5.45 = 1.028): PWM 50 ≈ 44 mm/s, 80 ≈ 160 mm/s, 110 ≈ 260 mm/s.
-  `fwd_r03` no sirve (topado).
+- Solo cuentan **`ramp_fwd_r01` y `ramp_fwd_r02`** (v con cpmm 5.6; multiplicar
+  por 5.60/5.45 = 1.028): PWM 50 ≈ 44 mm/s, 80 ≈ 160 mm/s, 110 ≈ 260 mm/s.
+- **La parte en reversa no se corrió**: el carro no hizo esas corridas. Los
+  archivos `ramp_rev_r01/r02` tienen el PWM negativo del comando pero el encoder
+  en 0 todo el tramo: **no usarlos**. Sin el regreso, cada ida arrancó donde
+  acabó la anterior y `ramp_fwd_r03` ya iba sin espacio (v = 0 a PWM 80):
+  **tampoco usarla**. Repetir el paso 5 completo antes de ajustar el motor.
 
 ## Pendiente
 
 Paso 5 (rampa 150→255, deadband, step), 6, 7b (radios), 8, 9 y 10, y la
-Parte A (cámara). Antes de seguir: arreglar la reversa y cargar 5.45
+Parte A (cámara). Antes de seguir: cargar 5.45
 (`CPMM 5.45`) o cambiar el valor por defecto en CalibFox.
 
 Dato aparte, de VueltaCalibracion (rama `parking`, radio = arco del encoder /
@@ -65,4 +59,3 @@ escala vieja de 6.71/mm → **≈ 225–260 mm** real; al 80% del tope, con 5.60
 izquierda 214–224 y derecha 187–201 → **≈ 220–230 / 192–207 mm** real. La guía
 espera 110–130 mm en los topes; no cuadra y vale la pena medirlo con el paso 7b.
 
-Confirmado por Erick en la pista: en las rampas el carro **no corrió en reversa**.
