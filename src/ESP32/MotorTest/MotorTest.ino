@@ -38,7 +38,7 @@ const int ENC_B = 36;
 
 const float DIAMETRO_MM  = 42.7f;
 const float PULSOS_MOTOR = 3.0f;        // 12 CPR = 3 pulsos por canal
-const float RELACION     = 50.0f * 2;   // caja 50:1 x engranes 15T/30T (18T/27T -> 50.0f * 1.5)
+const float RELACION     = 50.092f * 1.25;   // caja 50:1 x engranes 15T/30T (18T/27T -> 50.0f * 1.5)
 const float CUENTAS_POR_VUELTA = PULSOS_MOTOR * 4 * RELACION;   // 1200 por vuelta de llanta
 int SIGNO = -1;                         // con azul->34 y morado->36, adelante cuenta negativo
 

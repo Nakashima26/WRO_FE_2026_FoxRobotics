@@ -1,7 +1,8 @@
 /*
  * RondaAbierta — la ronda abierta de PurePursuit.ino (rondaObstaculos = false)
  * en el carro nuevo, sin Raspberry ni botón:
- *   - Al prender espera ARRANQUE_MS (5 s) y arranca solo.
+ *   - Al prender espera ARRANQUE_MS (5 s) y arranca solo; con
+ *     ARRANQUE_POR_COMANDO (pruebas) espera una 'g' por BT/USB. 'x' lo para.
  *   - Paredes con 3 VL53L1X (frontal, izq, der) en lugar de los HC-SR04.
  *   - Rumbo con el BNO085 (UART-RVC) en lugar del MPU-6050.
  * La lógica es la misma de PurePursuit.ino:
@@ -20,7 +21,7 @@
  *   TERMINANDO: tras el giro 12, TERMINANDO_MS más de recta y frena.
  * Los sensores se procesan a ritmo fijo (CONTROL_MS ~ un dato nuevo de ToF),
  * así los debounces cuentan lecturas, como con los ultrasónicos.
- * Librería: "VL53L1X" de Pololu. Monitor a 115200 (opcional).
+ * Librería: "VL53L1X" de Pololu. Monitor a 115200 o por Bluetooth (BT_NOMBRE), opcional.
  *
  * PINES:
  *   Driver TB6612: PWMA=23, AIN1=18, AIN2=19
@@ -38,10 +39,28 @@
 
 #include <Wire.h>
 #include <VL53L1X.h>
+#include "BluetoothSerial.h"
+
+// ── Log por USB y Bluetooth ───────────────────────────────────────────────────
+// Todo lo que se imprime sale por los dos. Desde el celular: "Serial Bluetooth
+// Terminal", emparejar con BT_NOMBRE. Sin nadie conectado, el BT no escribe nada.
+const char* BT_NOMBRE = "RondaAbierta";
+BluetoothSerial SerialBT;
+
+class LogDual : public Print {
+public:
+  size_t write(uint8_t c) override { Serial.write(c); SerialBT.write(c); return 1; }
+  size_t write(const uint8_t* buf, size_t n) override { Serial.write(buf, n); SerialBT.write(buf, n); return n; }
+};
+LogDual Log;
 
 // ── Carrera ───────────────────────────────────────────────────────────────────
 const int           TURNS_PER_RACE = 12;      // 12 = 3 vueltas
-const unsigned long ARRANQUE_MS    = 5000;    // espera tras prender antes de arrancar
+// Pruebas: true = no arranca hasta recibir 'g' por BT o USB (así da tiempo de
+// conectar el log). COMPETENCIA: false = arranca solo ARRANQUE_MS tras prender.
+// 'x' por BT/USB frena y termina en los dos modos.
+const bool          ARRANQUE_POR_COMANDO = true;
+const unsigned long ARRANQUE_MS    = 5000;    // espera tras prender antes de arrancar (si no es por comando)
 const unsigned long TERMINANDO_MS  = 1000;    // recta tras el último giro hasta frenar
 
 // ── Servo ─────────────────────────────────────────────────────────────────────
@@ -56,9 +75,9 @@ const int MOTOR_MAX         = 255;   // rectas
 const int VEL_INICIAL       = 180;   // antes del giro 1 (y todo el giro 1)
 const int VEL_APROX_CERRADA = 120;   // pared de enfrente < FRONT_SLOWDOWN_CM
 const int VEL_APROX2        = 90;    // giro 1: pared de enfrente < FRONT_SLOWDOWN2_CM
-const int VEL_GIRO_INICIO   = 180;   // GIRANDO, |ángulo| < 45
-const int VEL_GIRO_MEDIO    = 170;   // GIRANDO, |ángulo| < 70
-const int VEL_GIRO_FINAL    = 190;   // GIRANDO, resto
+const int VEL_GIRO_INICIO   = 210;   // GIRANDO, |ángulo| < 45
+const int VEL_GIRO_MEDIO    = 200;   // GIRANDO, |ángulo| < 70
+const int VEL_GIRO_FINAL    = 220;   // GIRANDO, resto
 
 // ── PID paredes ───────────────────────────────────────────────────────────────
 // En CASCADA: la pared no mueve el servo directo, corre el rumbo objetivo como
@@ -66,15 +85,26 @@ const int VEL_GIRO_FINAL    = 190;   // GIRANDO, resto
 // (Sumar las dos salidas dejaba que la pared le ganara al rumbo: con la pared
 // interior lejos, el carro giraba en espiral hasta chocar.)
 float KpWall = 0.3;                    // grados de rumbo por cm de error
-float KdWall = 0.2;                    // grados de rumbo por (cm/s)
+float KdWall = 0;                      // grados de rumbo por (cm/s); 0 hasta que la P sola funcione
 const float WALL_HOLD_CM        = 28.0;  // distancia a la pared INTERIOR tras el giro 1
 const float WALL_MAX_DESVIO_DEG = 15.0;  // lo más que la pared corre el rumbo
-const long  WALL_CONFIABLE_CM   = 55;    // pared interior más lejos que esto = no seguirla, solo rumbo
-const long  WALL_HISTERESIS_CM  = 10;    // entra a seguirla bajo 45 cm, la suelta arriba de 65 cm
+// Con 55/10 entraba bajo 45 cm: yendo a ~50 cm de la interior se quedaba en
+// "lejos" toda la recta y nada lo jalaba. Ahora entra bajo 60 y suelta arriba de 80.
+const long  WALL_CONFIABLE_CM   = 70;    // pared interior más lejos que esto = no seguirla, solo rumbo
+const long  WALL_HISTERESIS_CM  = 10;    // entra a seguirla bajo 60 cm, la suelta arriba de 80 cm
 // El desvío de la pared cambia como mucho a este ritmo: al entrar/salir del modo
 // "hold" (la pared aparece o desaparece) ya no da un brinco de golpe al rumbo
 // objetivo, que el gyro PID convertía en un volantazo.
 const float DESVIO_RAPIDEZ_DEG_S = 20.0;
+// Trim de rumbo aprendido (la "I" del PID de pared). El rumbo objetivo es
+// n x 90° desde el arranque: si el carro salió 2-3° chueco (o el BNO derivó),
+// todas las rectas quedan un poco en diagonal y con solo la P el carro se
+// queda a ~10 cm del objetivo (run 2026-10-19: 38 cm en vez de 28, con el
+// desvío fijo en ~-3°). El trim acumula ese error y corrige el rumbo de TODAS
+// las rectas: no se borra en los giros, porque el chueco es el mismo siempre.
+float KiWall = 0.08;                     // grados de trim por (cm x s) de error
+const float TRIM_MAX_DEG      = 8.0;     // lo más que el trim corre el rumbo
+const float TRIM_ERROR_MAX_CM = 25.0;    // solo aprende con el carro ya cerca del objetivo
 
 // ── PID rumbo ─────────────────────────────────────────────────────────────────
 float KpGyro = 1.0;
@@ -90,6 +120,12 @@ const int esquinaDebounce     = 2;    // lecturas
 const int FRONT_ESQUINA_MAX   = 100;  // la esquina solo cuenta con pared de enfrente < esto
                                       // (era el tope del HC-SR04; el ToF ve más lejos,
                                       // así que se puede subir si entra tarde en esquinas anchas)
+// Desde 2026-10-19 los FRONT_* son cm REALES (frontal calibrado, ver CORR_FRONTAL_MM).
+// Antes el frontal leía ~20 cm de más: con los mismos números el carro ahora gira
+// y frena ~20 cm antes. Al abrirse la interior la pared de enfrente está a ~80-110
+// cm reales: antes había que esperar a que la lectura (inflada) bajara de 100 y el
+// giro salía 200-300 ms tarde (run 133246). Si ahora roza la esquina interior al
+// girar, baja FRONT_ESQUINA_MAX a ~90.
 const int FRONT_SLOWDOWN_CM   = 90;
 const int FRONT_SLOWDOWN2_CM  = 60;   // solo giro 1
 const int FRONT_FORCE_GIRO_CM = 40;   // solo giro 1: forzar el giro hacia el lado más abierto
@@ -152,6 +188,10 @@ struct Tof {
   bool        ok;
   long        cm;        // última lectura (SIN_PARED_CM si inválida)
   unsigned long msValida;  // millis() de la última lectura válida
+  long        crudo;     // lo que dio el sensor en la última lectura, sin filtrar (para el log)
+  uint8_t     st;        // range_status de esa lectura
+  long        candidato; // acercamiento brusco esperando confirmación (-1 = ninguno)
+  uint8_t     stCandidato;
 };
 Tof tofs[] = {
   {"FREN", 0,  0x30},
@@ -177,7 +217,11 @@ unsigned long bnoUltimoMs = 0;
 // PIDs
 float errorWall = 0, prevErrorWall = 0;
 bool  wallPrevValido = false;   // hay un errorWall anterior para la derivada
+// Resumen por recta: cuántas lecturas en cada modo y cuántas sin dato interior.
+int   resTicks = 0, resHold = 0, resEsq = 0, resIntSinDato = 0;
+float resSumaInt = 0, resSumaHold = 0;
 float desvio = 0;               // °, lo que la pared corre el rumbo objetivo (+ = izquierda)
+float trimRumbo = 0;            // °, trim aprendido (+ = izquierda); se suma en todas las rectas
 float errorGyro = 0, integralGyro = 0;
 unsigned long lastPIDTime = 0;
 // Tasa de giro (°/s, + = izquierda), del BNO a ~100 Hz. La D del gyro PID usa
@@ -280,6 +324,7 @@ bool arrancarTof(Tof& t) {
   t.s.startContinuous(TOF_PERIODO_MS);
   t.cm = SIN_PARED_CM;
   t.msValida = 0;
+  t.candidato = -1;
   return true;
 }
 
@@ -289,12 +334,47 @@ bool arrancarTof(Tof& t) {
 // pared REAL (negra, a 30-80 cm) también sale casi siempre con wrap fail en
 // TofTest4, pon ACEPTAR_WRAP = true (pero entonces la esquina abierta puede
 // verse como pared a ~56 cm).
-const bool ACEPTAR_WRAP = false;
+// 2026-10-19 (log por BT): SÍ pasa. Parado, el izquierdo daba 47-52 cm con wrap
+// fail todo el tiempo y L+R ~ 100-108 cm = el ancho del pasillo; el derecho veía
+// la interior a 20-60 cm casi siempre con wrap fail. Sin pared, los laterales
+// salen con signal fail a 120-280 cm, no con wrap. Por eso la interior "no se
+// veía" (wall PID apagado) y el giro 1 eligió el lado equivocado.
+const bool ACEPTAR_WRAP = true;
 // SignalFail = regresó poca luz. Con ROI 8, una pared negra REAL a ~75 cm sale
 // con signal fail pero con la distancia correcta, y sin pared sale ~160-190 cm.
-// Se acepta solo hasta SIGNAL_FAIL_MAX_CM: más cerca es pared, más lejos es
-// "sin pared". Queda debajo de umbralPared para no inventar paredes en la esquina.
-const long SIGNAL_FAIL_MAX_CM = 90;
+// Antes se aceptaba solo hasta 90 cm y lo demás se volvía 200; ahora se usa la
+// distancia que da (arriba de umbralPared cuenta igual como "sin pared" y el log
+// y el filtro ven el número real). Si regresan los giros a destiempo, bájalo a 90.
+const long SIGNAL_FAIL_MAX_CM = SIN_PARED_CM;
+// Acercamiento brusco: si una lectura sale más de SALTO_MAX_CM más cerca que la
+// anterior (el carro no avanza tanto en 50 ms), no se acepta hasta que la
+// siguiente lectura quede a SALTO_CONFIRMA_CM de ella. Un fantasma suelto (p. ej.
+// el frontal brincando de 200 a ~66 a media recta) se descarta y se imprime.
+const long SALTO_MAX_CM      = 40;
+// Con 20 se descartaban lecturas buenas del frontal (a ~1 m su ruido es de
+// ±10-15 cm parado y más andando) y la esquina se retrasaba.
+const long SALTO_CONFIRMA_CM = 35;
+
+// ── Calibración de los ToF ────────────────────────────────────────────────────
+// Cuánto lee DE MÁS cada sensor según el status (mm); a cada lectura se le
+// resta, así las distancias (y los umbrales FRONT_*, WALL_HOLD_CM...) son
+// centímetros reales. El "crudo" del log queda sin corregir.
+// Frontal, prueba estática 2026-10-19 contra pared negra:
+//   300 mm -> 332 (st 7) | 600 -> 787, 1000 -> 1217, 1500 -> 1690 (st 2)
+// Laterales: en las vueltas de VueltaCalibracion los st 7 salieron ~+35-40 mm,
+// pero con las posiciones de los sensores estimadas: faltan su prueba estática
+// (VueltaCalibracion en espera, pared de lado a 30 y 60 cm) para llenarlos.
+// En otra sede: repetir la prueba y cambiar solo estos números.
+//                              st0  st2  st7
+const int CORR_FRONTAL_MM[3] = { 30, 200,  30 };
+const int CORR_LATERAL_MM[3] = {  0,   0,   0 };
+
+int correccionMm(bool frontal, uint8_t st) {
+  const int* c = frontal ? CORR_FRONTAL_MM : CORR_LATERAL_MM;
+  if (st == VL53L1X::SignalFail)     return c[1];
+  if (st == VL53L1X::WrapTargetFail) return c[2];
+  return c[0];
+}
 
 bool estadoUsable(uint8_t st, long cm) {
   if (st == VL53L1X::WrapTargetFail) return ACEPTAR_WRAP;
@@ -311,9 +391,30 @@ void leerTofs() {
     Tof& t = tofs[i];
     if (!t.ok || !t.s.dataReady()) continue;
     t.s.read(false);
-    long cm = t.s.ranging_data.range_mm / 10;
-    bool valida = estadoUsable(t.s.ranging_data.range_status, cm)
-                  && cm > 0 && cm <= SIN_PARED_CM;
+    long mm = t.s.ranging_data.range_mm;
+    uint8_t st = t.s.ranging_data.range_status;
+    t.crudo = mm / 10;
+    t.st    = st;
+    // El status se juzga con lo crudo; la distancia que se usa es la corregida.
+    bool valida = estadoUsable(st, mm / 10) && mm > 0;
+    long cm = max(1L, (mm - correccionMm(&t == &tofF, st)) / 10);
+    if (valida) cm = min(cm, SIN_PARED_CM);
+
+    // Acercamiento brusco: esperar a que la siguiente lectura lo confirme.
+    if (t.candidato >= 0) {
+      bool confirma = valida && labs(cm - t.candidato) <= SALTO_CONFIRMA_CM;
+      if (!confirma)
+        Log.printf("!! %s fantasma %ld cm (st=%d) descartado: tenía %ld, luego %ld (st=%d)\n",
+                   t.nombre, t.candidato, t.stCandidato, t.cm, cm, st);
+      t.candidato = -1;
+      if (confirma) { t.cm = cm; t.msValida = millis(); continue; }
+    }
+    if (valida && t.cm - cm > SALTO_MAX_CM) {
+      t.candidato   = cm;
+      t.stCandidato = st;
+      continue;   // t.cm se queda como estaba
+    }
+
     if (valida) {
       t.cm = cm;
       t.msValida = millis();
@@ -330,7 +431,10 @@ float rumboRecta(int n) {
   return (direccionIzquierda ? 90.0f : -90.0f) * n;
 }
 
+// En un salto grande (aparece o desaparece la pared) no se promedia: mezclar
+// 200 ("sin pared") con una distancia real daba números inventados (174, 183...).
 float filtroEMA(float nueva, float anterior) {
+  if (fabs(nueva - anterior) > SALTO_MAX_CM) return nueva;
   return alpha * nueva + (1.0 - alpha) * anterior;
 }
 
@@ -347,17 +451,20 @@ bool detectarEsquina(long distL, long distR, long distF) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Pared -> desvío del rumbo objetivo. Se llama a ritmo de ToF (CONTROL_MS).
-void actualizarDesvio(long distL, long distR) {
+// Recibe las distancias filtradas en float: con long, 1 cm de escalón en 50 ms
+// eran 20 cm/s de derivada.
+void actualizarDesvio(float distL, float distR) {
   unsigned long now = millis();
   float dt = (now - lastPIDTime) / 1000.0;
   lastPIDTime = now;
-  if (dt < 0.01) dt = 0.01;
+  dt = constrain(dt, 0.01f, 0.1f);   // tras una pausa larga la rampa no se brinca
 
   // Antes del giro 1 no hay lado interior: solo rumbo.
-  // Lateral ya abierto (esquina por venir) o pared interior lejana (hueco, se
-  // acabó, o el ToF ve el piso): no se sigue la pared, se mantiene el rumbo.
-  bool esquinaInminente = (distL > umbralPared) || (distR > umbralPared);
-  long distInt = direccionIzquierda ? distL : distR;
+  // Solo cuenta el lado INTERIOR: si se abre (esquina por venir) o está lejos
+  // (hueco, se acabó, o el ToF no la ve) no se sigue la pared, se mantiene el
+  // rumbo. El exterior en 200 (lectura fallida) ya no apaga el seguimiento.
+  float distInt = direccionIzquierda ? distL : distR;
+  bool esquinaInminente = distInt > umbralPared;
   float desvioObj = 0;
 
   // Histéresis: con la pared interior justo en el límite, el modo brincaba entre
@@ -373,6 +480,7 @@ void actualizarDesvio(long distL, long distR) {
     modoServo = "rumbo";
   } else if (!enHold) {
     wallPrevValido = false;
+    desvioObj = trimRumbo;   // sin pared que seguir, el trim aprendido sigue valiendo
     modoServo = esquinaInminente ? "esq" : "lejos";
   } else {
     // errorWall > 0 = lejos de la pared interior -> acercarse (girar hacia ella).
@@ -382,9 +490,23 @@ void actualizarDesvio(long distL, long distR) {
     prevErrorWall  = errorWall;
     wallPrevValido = true;
     float lado = direccionIzquierda ? 1.0f : -1.0f;   // pared interior a la izquierda = girar a la izquierda
-    desvioObj = lado * (KpWall * errorWall + KdWall * deriv);
+    // Trim: solo aprende lejos de los giros (el carro todavía se está
+    // acomodando) y con el error ya chico (al acercarse desde lejos se inflaría).
+    if (millis() - lastTurnTime > cooldownGiro && fabsf(errorWall) < TRIM_ERROR_MAX_CM)
+      trimRumbo = constrain(trimRumbo + lado * KiWall * errorWall * dt, -TRIM_MAX_DEG, TRIM_MAX_DEG);
+    desvioObj = lado * (KpWall * errorWall + KdWall * deriv) + trimRumbo;
     desvioObj = constrain(desvioObj, -WALL_MAX_DESVIO_DEG, WALL_MAX_DESVIO_DEG);
     modoServo = "hold";
+    resSumaHold += distInt;
+  }
+
+  // Resumen por recta (se imprime al detectar la esquina).
+  if (primerGiro) {
+    resTicks++;
+    if (enHold)                 resHold++;
+    else if (esquinaInminente)  resEsq++;
+    if ((direccionIzquierda ? tofL : tofR).cm >= SIN_PARED_CM) resIntSinDato++;
+    resSumaInt += distInt;
   }
 
   // Rampa: el desvío se acerca a desvioObj a lo más DESVIO_RAPIDEZ_DEG_S.
@@ -417,6 +539,22 @@ void pidRumbo() {
   escribirServo(centroServo + (int)outputFinal);
 }
 
+// Una línea por recta: si "hold" sale bajo, el PID de pared casi no actuó.
+// "int sin dato" alto = el ToF interior no ve la pared.
+void imprimirResumenRecta() {
+  if (resTicks == 0) return;
+  // "int en hold" = distancia promedio a la interior mientras la seguía: debe
+  // acercarse a WALL_HOLD_CM. "trim" = el rumbo que lleva aprendido.
+  Log.printf("RECTA %d: hold %d%% esq %d%% lejos %d%% | int sin dato %d%% | int en hold %.0f cm (obj %.0f) | trim %+.1f\n",
+                turnsCompleted,
+                100 * resHold / resTicks, 100 * resEsq / resTicks,
+                100 * (resTicks - resHold - resEsq) / resTicks,
+                100 * resIntSinDato / resTicks,
+                resHold ? resSumaHold / resHold : 0.0f, WALL_HOLD_CM, trimRumbo);
+  resTicks = resHold = resEsq = resIntSinDato = 0;
+  resSumaInt = resSumaHold = 0;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Estados
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -424,14 +562,14 @@ void pidRumbo() {
 void arrancarCarrera() {
   anguloGyro     = 0;
   anguloObjetivo = 0;
-  wallPrevValido = false; desvio = 0;
+  wallPrevValido = false; desvio = 0; trimRumbo = 0;
   integralGyro = 0;
   timeStart    = millis();
   lastTurnTime = millis();
   lastPIDTime  = millis();
   digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
   estado = SIGUIENDO;
-  Serial.println("-> ARRANCA");
+  Log.println("-> ARRANCA");
 }
 
 void siguiendo(long distL, long distR, long distF) {
@@ -441,7 +579,7 @@ void siguiendo(long distL, long distR, long distF) {
   if (turnsCompleted == 0 && distF > 0 && distF < FRONT_SLOWDOWN2_CM)
     velocidadMotor = min(velocidadMotor, VEL_APROX2);
 
-  actualizarDesvio(distL, distR);
+  actualizarDesvio(distL_filtrada, distR_filtrada);
   setMotor(velocidadMotor);
 
   if (millis() - lastTurnTime <= cooldownGiro || millis() - timeStart <= GRACIA_ARRANQUE_MS) return;
@@ -452,13 +590,14 @@ void siguiendo(long distL, long distR, long distF) {
   bool giroForzado = (contadorForzado >= FORZADO_DEBOUNCE);
 
   if (giroNormal || giroForzado) {
+    imprimirResumenRecta();
     estado = GIRANDO;
     if (!primerGiro) {
       direccionIzquierda = (distL > distR);
       primerGiro         = true;
     }
-    if (giroForzado && !giroNormal) Serial.println("Giro 1 FORZADO (pared de enfrente)");
-    Serial.printf("Giro %d %s  (L:%ld R:%ld F:%ld)\n", turnsCompleted + 1,
+    if (giroForzado && !giroNormal) Log.println("Giro 1 FORZADO (pared de enfrente)");
+    Log.printf("Giro %d %s  (L:%ld R:%ld F:%ld)\n", turnsCompleted + 1,
                   direccionIzquierda ? "izquierda" : "derecha", distL, distR, distF);
   }
 }
@@ -497,11 +636,11 @@ void girando() {
     lastTurnTime   = millis();
     turnsCompleted++;
     anguloObjetivo = rumboRecta(turnsCompleted);
-    Serial.printf("Giro completado %d/%d\n", turnsCompleted, TURNS_PER_RACE);
+    Log.printf("Giro completado %d/%d\n", turnsCompleted, TURNS_PER_RACE);
     if (turnsCompleted >= TURNS_PER_RACE) {
       estado = TERMINANDO;
       terminandoEntryMs = millis();
-      Serial.printf("-> TERMINANDO (%lu ms)\n", TERMINANDO_MS);
+      Log.printf("-> TERMINANDO (%lu ms)\n", TERMINANDO_MS);
     } else {
       estado = SIGUIENDO;
     }
@@ -510,13 +649,14 @@ void girando() {
 
 void terminando(long distL, long distR) {
   velocidadMotor = MOTOR_MAX;
-  actualizarDesvio(distL, distR);
+  actualizarDesvio(distL_filtrada, distR_filtrada);
   setMotor(velocidadMotor);
   if (millis() - terminandoEntryMs >= TERMINANDO_MS) {
+    imprimirResumenRecta();
     frenar();
     escribirServo(centroServo);
     estado = TERMINADO;
-    Serial.printf("TERMINADO: %d giros en %.1f s\n", turnsCompleted, (millis() - timeStart) / 1000.0f);
+    Log.printf("TERMINADO: %d giros en %.1f s\n", turnsCompleted, (millis() - timeStart) / 1000.0f);
   }
 }
 
@@ -526,6 +666,7 @@ void terminando(long distL, long distR) {
 
 void setup() {
   Serial.begin(115200);
+  SerialBT.begin(BT_NOMBRE);
   delay(200);
 
   pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
@@ -550,7 +691,7 @@ void setup() {
   for (int i = 0; i < N_TOF; i++) {
     tofs[i].ok = arrancarTof(tofs[i]);
     todosOk &= tofs[i].ok;
-    Serial.printf("ToF %-4s 0x%02X : %s\n", tofs[i].nombre, tofs[i].dir, tofs[i].ok ? "OK" : "NO RESPONDE");
+    Log.printf("ToF %-4s 0x%02X : %s\n", tofs[i].nombre, tofs[i].dir, tofs[i].ok ? "OK" : "NO RESPONDE");
   }
 
   // BNO al final: arrancar los ToF tarda y el buffer se llenaría.
@@ -559,22 +700,39 @@ void setup() {
   uint32_t t0 = millis();
   while (bnoPaquetes < 20 && millis() - t0 < 3000) leerBno();
   bool bnoOk = bnoPaquetes >= 20;
-  Serial.println(bnoOk ? "BNO OK" : "BNO NO responde: revisa VIN, GND, PS0=3.3V, PS1=GND y SDA -> GPIO 25");
+  Log.println(bnoOk ? "BNO OK" : "BNO NO responde: revisa VIN, GND, PS0=3.3V, PS1=GND y SDA -> GPIO 25");
 
   // Sin los 3 ToF o sin BNO no se arranca: el carro se quedaría sin paredes o sin rumbo.
   if (!todosOk || !bnoOk) {
-    Serial.println("NO ARRANCA: falta un sensor");
-    while (true) delay(1000);
+    // Se repite para que se vea aunque el BT se conecte después.
+    while (true) { Log.println("NO ARRANCA: falta un sensor"); delay(1000); }
   }
 
-  Serial.printf("Arranca en %lu s...\n", ARRANQUE_MS / 1000);
+  if (ARRANQUE_POR_COMANDO) Log.println("Listo: manda 'g' (BT o USB) para arrancar, 'x' para parar");
+  else                      Log.printf("Arranca en %lu s...\n", ARRANQUE_MS / 1000);
   timeStart = millis();
+}
+
+// 'g' arranca (desde ESPERANDO), 'x' frena y termina. Por BT o por USB.
+void leerComandos() {
+  while (Serial.available() || SerialBT.available()) {
+    char c = Serial.available() ? Serial.read() : SerialBT.read();
+    if (c == 'g' && estado == ESPERANDO) {
+      arrancarCarrera();
+    } else if (c == 'x' && estado != ESPERANDO && estado != TERMINADO) {
+      frenar();
+      escribirServo(centroServo);
+      estado = TERMINADO;
+      Log.printf("PARADO a mano ('x'): %d giros en %.1f s\n", turnsCompleted, (millis() - timeStart) / 1000.0f);
+    }
+  }
 }
 
 void loop() {
   leerBno();
   leerTofs();
   leerBno();   // otra vez: que el I2C de los ToF no deje acumular paquetes del BNO
+  leerComandos();
 
   if (estado == TERMINADO) return;
 
@@ -599,11 +757,11 @@ void loop() {
   long distR = (long)distR_filtrada;
   long distF = (long)distF_filtrada;
 
-  if (ahora - bnoUltimoMs > 200) Serial.println("!! BNO sin datos > 200 ms");
+  if (ahora - bnoUltimoMs > 200) Log.println("!! BNO sin datos > 200 ms");
 
   switch (estado) {
     case ESPERANDO:
-      if (ahora - timeStart >= ARRANQUE_MS) arrancarCarrera();
+      if (!ARRANQUE_POR_COMANDO && ahora - timeStart >= ARRANQUE_MS) arrancarCarrera();
       break;
     case SIGUIENDO:  siguiendo(distL, distR, distF); break;
     case TERMINANDO: terminando(distL, distR);        break;
@@ -614,8 +772,12 @@ void loop() {
     tLog = ahora;
     const char* nombre = estado == ESPERANDO ? "ESPERANDO" : estado == SIGUIENDO ? "SIGUIENDO"
                        : estado == GIRANDO ? "GIRANDO" : estado == TERMINANDO ? "TERMINANDO" : "TERMINADO";
-    Serial.printf("%-10s L:%3ld R:%3ld F:%3ld | ang:%7.1f obj:%7.1f des:%5.1f tasa:%6.1f | servo:%3d (%s) pwm:%3d | giros:%d/%d %s\n",
-                  nombre, distL, distR, distF, anguloGyro, anguloObjetivo, desvio, tasaGiro, servoActual, modoServo,
+    // crudo = lo que dio cada sensor en su última lectura y su status
+    // (0 válida, 2 poca luz, 4 fuera de rango, 7 wrap fail).
+    Log.printf("%-10s L:%3ld R:%3ld F:%3ld | crudo L:%3ld/%d R:%3ld/%d F:%3ld/%d | ang:%7.1f obj:%7.1f des:%5.1f tasa:%6.1f | servo:%3d (%s) pwm:%3d | giros:%d/%d %s\n",
+                  nombre, distL, distR, distF,
+                  tofL.crudo, tofL.st, tofR.crudo, tofR.st, tofF.crudo, tofF.st,
+                  anguloGyro, anguloObjetivo, desvio, tasaGiro, servoActual, modoServo,
                   velocidadMotor, turnsCompleted, TURNS_PER_RACE,
                   primerGiro ? (direccionIzquierda ? "IZQ" : "DER") : "");
   }
