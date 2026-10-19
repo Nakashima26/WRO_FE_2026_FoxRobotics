@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + ul2.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + pk46.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -431,7 +431,7 @@ const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el 
 const float CRUCERO_WALL_BLEND = 0.8f; // en CRUCERO: cuánto del wall PID se mezcla para CENTRAR
                                        // en el carril (0 = solo heading, 1 = wall PID completo).
                                        // Solo aplica mientras ambas paredes existen.
-const unsigned long MANIOBRA_FRENO_MS      = 50;   // coast (A1=A2=LOW) antes/después de invertir dirección
+const unsigned long MANIOBRA_FRENO_MS      = 47;   // coast (A1=A2=LOW) antes/después de invertir dirección
                                                     // — SIN esto el puente H se fríe por "plugging" (invertir
                                                     // con el motor girando). Reventó un TB6612 así (2026-09-01).
 const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa de a poco. Corto a
@@ -897,7 +897,7 @@ const bool          PARK_ESPERA_PI           = false;
 const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI=true: red de
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
-const int           PARK_APPROACH_PWM        = 87;   // PWM en recta de aproximación al cajón
+const int           PARK_APPROACH_PWM        = 80;   // PWM en recta de aproximación al cajón
 PARK_AJ int           PARK_ANG_IN_DEG          = 70;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66; 2026-10-16: 63 -> 70 con motor físico (docs/HANDOFF_PARKING.md)
 PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
@@ -906,7 +906,7 @@ PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la m
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
 PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
-const int           PARK_REV_PWM             = 79;    // PWM de marcha atrás — suave para control preciso
+const int           PARK_REV_PWM             = 92;    // PWM de marcha atrás — suave para control preciso
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
@@ -929,7 +929,7 @@ const int           PARK_CAIDA_N              = 2;
 const int           PARK_GAP_N                = 2;
 const int           PARK_REBASE_N             = 20;
 const int           PARK_PARED_MAX_CM         = 55;
-const unsigned long PARK_ARMADO_MS            = 400;
+const unsigned long PARK_ARMADO_MS            = 407;
 const float         PARK_ARMADO_ANG_DEG       = 15.0f;
 const bool          PARK_REQUIERE_PI          = false;
 const unsigned long PARK_TIMEOUT_MS           = 10000;
@@ -1096,7 +1096,7 @@ PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta l
 // planeada con el mapa (runs/geo2.py) corta la contravuelta con ToF atrás ~6 cm
 // y endereza en la fase 13 hasta ~2.5 cm. Con un solo umbral la fase 13 se
 // cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
-PARK_AJ float         PARK_ATRAS_FINAL_CM       = 4.0;
+PARK_AJ float         PARK_ATRAS_FINAL_CM       = 3.10;
 
 // T15b2 (t15b2_esquina13, "patrón 3"): fase 8 (FULL INTERNO) corta por
 // PARK_ATRAS_MIN_CM con el carro todavía girando fuerte (medido: ~80 deg/s,
@@ -1207,7 +1207,7 @@ PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (p
 // PARK_FWD_MS sigue acotando por si la pared nunca aparece.
 // PARA REVERTIR: PARK_CENTER_DEB = 1.
 const int           PARK_CENTER_DEB           = 3;
-const int           PARK_CENTER_PWM_PAR       = 69;
+const int           PARK_CENTER_PWM_PAR       = 80;
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
 // El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
@@ -1409,7 +1409,7 @@ bool          cajonParedDetectada    = false;
 // PARK_PUNTA_AJUSTE_MS > 0; si cae sobre el poste lejano -> PARK_PUNTA_AJUSTE_MS < 0.
 // (El modo de estacionamiento y PARK_MEDIA_VUELTA se eligen arriba del todo.)
 // Media vuelta (fases 20-23, en ESTACIONANDO y en ESTACIONANDO_PUNTA)
-const int           PARK_RETORNO_PWM           = 83;
+const int           PARK_RETORNO_PWM           = 92;
 const int           PARK_RETORNO_PWM_MIN       = 70;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
 const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // solo el estacionamiento en paralelo
@@ -1442,7 +1442,7 @@ PARK_AJ long         PARK_UTURN_PWM             = 255;
 // Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
 // madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
 PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 255;
-PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 400;
+PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 370;
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
@@ -1504,7 +1504,7 @@ const unsigned long PARK_RETORNO_REV_CCW_MS    = 1200;   // regreso con pared a 
 // de enfrente ignorando el primer poste. Se iguala al valor de CCW, que ya está
 // probado. Si en pista resulta que el CW necesita otro tiempo, se separa aquí.
 const unsigned long PARK_RETORNO_REV_CW_MS     = 1200;   // regreso con pared a la DER (carrera CW)
-const int           PARK_RETORNO_REV_PWM       = 83;
+const int           PARK_RETORNO_REV_PWM       = 88;
 // ── La reversa del regreso también sigue la PARED, no solo el gyro ──────────
 // Ver el bloque de la fase 22. false = comportamiento anterior (solo rumbo a 0).
 // 2026-09-16 APAGADO tras la run 1031. El signo era correcto (el carro sí pasó de
