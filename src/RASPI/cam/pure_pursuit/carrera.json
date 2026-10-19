@@ -51,7 +51,8 @@
  "ROUTE_UNSEEN_RAMP_MM": 400.0,
  "ROUTE_UNSEEN_WALL_PWM": 210,
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
+ "ROUTE_UPLOAD_LINES": 2,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "es01.json",
+ "_fuente": "ul2.json",
  "_preset": "ruta_perfil"
 }
