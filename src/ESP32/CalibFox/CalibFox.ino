@@ -195,6 +195,39 @@ void IRAM_ATTR encIsr() {
   if (d) encCount += d;
 }
 
+// En el ESP32 el encoder va por PCNT (como VueltaCalibracion): con Bluetooth
+// prendido los GPIO 36/39 dan interrupciones falsas (errata) y la ISR perdía
+// casi todo (prueba 2026-10-19: -138 cuentas, 529 saltos). El mock usa la ISR.
+#if defined(ARDUINO_ARCH_ESP32) && !defined(CALIB_ISR_ENC)
+#include "driver/pulse_cnt.h"
+#define ENC_PCNT 1
+static pcnt_unit_handle_t pcnt = NULL;
+static const int ENC_SIGNO = -1;   // adelante cuenta negativo (VueltaCalibracion SIGNO_ENC)
+
+static bool pcntInit() {
+  pcnt_unit_config_t ucfg = {};
+  ucfg.low_limit = -30000; ucfg.high_limit = 30000;
+  ucfg.flags.accum_count = 1;
+  if (pcnt_new_unit(&ucfg, &pcnt) != ESP_OK) return false;
+  pcnt_glitch_filter_config_t fcfg = {}; fcfg.max_glitch_ns = 1000;
+  pcnt_unit_set_glitch_filter(pcnt, &fcfg);
+  pcnt_chan_config_t cA = {}; cA.edge_gpio_num = ENC_PIN_A; cA.level_gpio_num = ENC_PIN_B;
+  pcnt_chan_config_t cB = {}; cB.edge_gpio_num = ENC_PIN_B; cB.level_gpio_num = ENC_PIN_A;
+  pcnt_channel_handle_t chA, chB;
+  pcnt_new_channel(pcnt, &cA, &chA); pcnt_new_channel(pcnt, &cB, &chB);
+  pcnt_channel_set_edge_action(chA, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE);
+  pcnt_channel_set_level_action(chA, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_channel_set_edge_action(chB, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE);
+  pcnt_channel_set_level_action(chB, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_unit_add_watch_point(pcnt, ucfg.high_limit);
+  pcnt_unit_add_watch_point(pcnt, ucfg.low_limit);
+  pcnt_unit_enable(pcnt); pcnt_unit_clear_count(pcnt); pcnt_unit_start(pcnt);
+  return true;
+}
+static int32_t readEnc() { int v = 0; pcnt_unit_get_count(pcnt, &v); return ENC_SIGNO * v; }
+static uint32_t readEncErr() { return 0; }   // PCNT no ve saltos; el filtro de glitches los quita
+static void zeroEnc() { pcnt_unit_clear_count(pcnt); }
+#else
 static int32_t readEnc() {
   portENTER_CRITICAL(&encMux);
   int32_t c = encCount;
@@ -215,6 +248,7 @@ static void zeroEnc() {
   encErr   = 0;
   portEXIT_CRITICAL(&encMux);
 }
+#endif
 
 // ── Actuadores ────────────────────────────────────────────────────────────────
 static void pwmWrite(int duty) { ledcWrite(PWMA, duty); }
@@ -712,9 +746,13 @@ void setup() {
 
   pinMode(ENC_PIN_A, INPUT);
   pinMode(ENC_PIN_B, INPUT);
+#ifdef ENC_PCNT
+  if (!pcntInit()) IO.println("# ERROR: no arranco el PCNT del encoder");
+#else
   encPrevAB = ((digitalRead(ENC_PIN_A) ? 1 : 0) << 1) | (digitalRead(ENC_PIN_B) ? 1 : 0);
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), encIsr, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_B), encIsr, CHANGE);
+#endif
 
   delay(300);
   printInfo();
