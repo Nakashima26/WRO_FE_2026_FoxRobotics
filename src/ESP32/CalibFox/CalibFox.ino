@@ -2,7 +2,7 @@
  * CalibFox.ino — Banco de calibracion del Fox (WRO Future Engineers 2026, v2)
  *
  * Sketch INDEPENDIENTE de PurePursuit.ino: no necesita la Pi, ni READY, ni V2.
- * Se controla por texto en el USB (Serial, 115200) y emite CSV. Lo maneja
+ * Se controla por texto en el UART de la Pi (Serial2 RX=17 TX=16, 115200; -DCALIB_UART=0 = USB) y emite CSV. Lo maneja
  * src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_capture.py (o cualquier
  * terminal serie).
  *
@@ -81,6 +81,18 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+
+struct Profile;   // el IDE pone los prototipos arriba: pwmAt(const Profile&) necesita el nombre antes
+
+// Control por el UART de la Pi (Serial2, sin cable USB al carro); -DCALIB_UART=0 vuelve al USB.
+#ifndef CALIB_UART
+#define CALIB_UART 1
+#endif
+#if CALIB_UART && defined(ARDUINO_ARCH_ESP32)
+#define IO Serial2
+#else
+#define IO Serial
+#endif
 
 #ifndef CALIB_MPU
 #define CALIB_MPU 1
@@ -258,8 +270,8 @@ static int clampPwm(int v) {
 }
 
 static bool serialAbort() {
-  if (Serial.available() > 0) {
-    while (Serial.available() > 0) Serial.read();
+  if (IO.available() > 0) {
+    while (IO.available() > 0) IO.read();
     return true;
   }
   return false;
@@ -274,8 +286,8 @@ static int runProfile(const Profile &p) {
   waitBeforeStart(dir0);
 
   zeroEnc();
-  Serial.println("# BEGIN");
-  Serial.println("t_ms,pwm,enc_counts,v_mm_s,servo_deg,enc_err");
+  IO.println("# BEGIN");
+  IO.println("t_ms,pwm,enc_counts,v_mm_s,servo_deg,enc_err");
 
   const unsigned long periodUs = periodMs * 1000UL;
   unsigned long t0 = micros();
@@ -324,19 +336,19 @@ static int runProfile(const Profile &p) {
       snprintf(buf, sizeof(buf), "%lu.%03lu,%d,%ld,%.1f,%d,%lu",
                (unsigned long)(tUs / 1000UL), (unsigned long)(tUs % 1000UL),
                appliedPwm, (long)cnt, (double)v, servoDeg, (unsigned long)readEncErr());
-      Serial.println(buf);
+      IO.println(buf);
     }
   }
   motorCoast();
   lastRunDir = curDir != 0 ? curDir : lastRunDir;
-  Serial.println(aborted ? "# ABORT" : "# END");
+  IO.println(aborted ? "# ABORT" : "# END");
   return aborted ? 1 : 0;
 }
 
 static void finishRun(int code, const char *name) {
-  if (code == 0)      { Serial.print("OK ");  Serial.println(name); }
-  else if (code == 1) { Serial.print("ERR "); Serial.print(name); Serial.println(" abortado"); }
-  else                { Serial.print("ERR "); Serial.print(name); Serial.println(" duracion fuera de 1..20000 ms"); }
+  if (code == 0)      { IO.print("OK ");  IO.println(name); }
+  else if (code == 1) { IO.print("ERR "); IO.print(name); IO.println(" abortado"); }
+  else                { IO.print("ERR "); IO.print(name); IO.println(" duracion fuera de 1..20000 ms"); }
 }
 
 // ── LOOPTIME ──────────────────────────────────────────────────────────────────
@@ -389,8 +401,8 @@ static void doLoopTime(int n) {
     ltBuf[4][i] = t4 - t0;
     if (serialAbort()) { n = i; break; }
   }
-  Serial.println("# LOOPTIME: secuencia de sensado de PurePursuit.loop() (sin ToF ni Serial2 ni logica)");
-  Serial.println("stage,n,min_us,mean_us,p99_us,max_us,timeouts");
+  IO.println("# LOOPTIME: secuencia de sensado de PurePursuit.loop() (sin ToF ni Serial2 ni logica)");
+  IO.println("stage,n,min_us,mean_us,p99_us,max_us,timeouts");
   for (int s = 0; s < 5; s++) {
     if (n <= 0) break;
     uint64_t sum = 0;
@@ -405,11 +417,11 @@ static void doLoopTime(int n) {
     snprintf(buf, sizeof(buf), "%s,%d,%lu,%lu,%lu,%lu,%d", ltName[s], n,
              (unsigned long)mn, (unsigned long)(sum / n), (unsigned long)ltBuf[s][ip],
              (unsigned long)mx, to);
-    Serial.println(buf);
+    IO.println(buf);
   }
   // Jitter del propio loop() vacio de este sketch (referencia del costo de micros()).
   uint32_t a = micros(), b = micros();
-  Serial.print("# micros() delta tipico (us): "); Serial.println((unsigned long)(b - a));
+  IO.print("# micros() delta tipico (us): "); IO.println((unsigned long)(b - a));
 }
 
 // ── TOF: tasa real, range_status y alcance valido de un VL53L1X ───────────────
@@ -427,13 +439,13 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
     case 'R': idx = 1; xs = TOF_XSHUT_R; break;
     case 'B': idx = 2; xs = TOF_XSHUT_B; break;
     case 'F': idx = 3; xs = TOF_XSHUT_F; break;
-    default: Serial.println("ERR TOF sensor L|R|B|F"); return;
+    default: IO.println("ERR TOF sensor L|R|B|F"); return;
   }
   bool shortMode = !strcmp(mode, "SHORT");
-  if (!shortMode && strcmp(mode, "LONG")) { Serial.println("ERR TOF modo SHORT|LONG"); return; }
+  if (!shortMode && strcmp(mode, "LONG")) { IO.println("ERR TOF modo SHORT|LONG"); return; }
   bool defBudget = !strcmp(budget, "DEF");
   long bud = defBudget ? 50 : atol(budget);
-  if (!defBudget && (bud < 15 || bud > 500)) { Serial.println("ERR TOF presupuesto 15..500 ms o DEF"); return; }
+  if (!defBudget && (bud < 15 || bud > 500)) { IO.println("ERR TOF presupuesto 15..500 ms o DEF"); return; }
   if (periodMs <= 0) periodMs = bud;
 
   Wire.begin();
@@ -443,15 +455,15 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
   digitalWrite(xs, HIGH);                    // solo este sensor despierto: direccion por defecto
   delay(10);
   tofDev.setTimeout(500);
-  if (!tofDev.init()) { Serial.println("ERR TOF init fallo (cableado/XSHUT/direccion)"); return; }
+  if (!tofDev.init()) { IO.println("ERR TOF init fallo (cableado/XSHUT/direccion)"); return; }
   tofDev.setDistanceMode(shortMode ? VL53L1X::Short : VL53L1X::Long);
   if (!defBudget && !tofDev.setMeasurementTimingBudget((uint32_t)bud * 1000UL)) {
-    Serial.println("# aviso: presupuesto rechazado por la libreria");
+    IO.println("# aviso: presupuesto rechazado por la libreria");
   }
   tofDev.startContinuous((uint32_t)periodMs);
 
-  Serial.println("# BEGIN");
-  Serial.println("i,t_ms,mm,status,dt_ms,sig_mcps");
+  IO.println("# BEGIN");
+  IO.println("i,t_ms,mm,status,dt_ms,sig_mcps");
   unsigned long t0 = millis(), tLast = t0;
   int n = 0, valid = 0;
   int hist[16] = {0};
@@ -465,7 +477,7 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
       char buf[80];
       snprintf(buf, sizeof(buf), "%d,%lu,%u,%u,%lu,%.2f", n, now - t0, (unsigned)mm, (unsigned)st,
                now - tLast, (double)tofDev.rangingData.peak_signal_count_rate_MCPS);
-      Serial.println(buf);
+      IO.println(buf);
       tLast = now;
       n++;
       if (st == 0) valid++;
@@ -475,32 +487,32 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
   tofDev.stopContinuous();
   digitalWrite(xs, LOW);
   float secs = (millis() - t0) / 1000.0f;
-  Serial.print("# TOFSUM sensor="); Serial.print(sensor);
-  Serial.print(" idx="); Serial.print(idx);
-  Serial.print(" mode="); Serial.print(mode);
-  Serial.print(" budget_ms="); if (defBudget) Serial.print("DEF"); else Serial.print((long)bud);
-  Serial.print(" period_ms="); Serial.print(periodMs);
-  Serial.print(" n="); Serial.print(n);
-  Serial.print(" rate_hz="); Serial.print(secs > 0 ? n / secs : 0.0f, 2);
-  Serial.print(" valid="); Serial.print(valid);
-  Serial.print(" status_hist=");
-  for (int s = 0; s < 16; s++) if (hist[s]) { Serial.print(s); Serial.print(':'); Serial.print(hist[s]); Serial.print(' '); }
-  Serial.println();
-  Serial.println(aborted ? "# ABORT" : "# END");
+  IO.print("# TOFSUM sensor="); IO.print(sensor);
+  IO.print(" idx="); IO.print(idx);
+  IO.print(" mode="); IO.print(mode);
+  IO.print(" budget_ms="); if (defBudget) IO.print("DEF"); else IO.print((long)bud);
+  IO.print(" period_ms="); IO.print(periodMs);
+  IO.print(" n="); IO.print(n);
+  IO.print(" rate_hz="); IO.print(secs > 0 ? n / secs : 0.0f, 2);
+  IO.print(" valid="); IO.print(valid);
+  IO.print(" status_hist=");
+  for (int s = 0; s < 16; s++) if (hist[s]) { IO.print(s); IO.print(':'); IO.print(hist[s]); IO.print(' '); }
+  IO.println();
+  IO.println(aborted ? "# ABORT" : "# END");
 }
 #endif
 
 // ── Comandos ──────────────────────────────────────────────────────────────────
 static void printInfo() {
-  Serial.println("# CalibFox v1");
-  Serial.println("# pines: PWMA=23 A1=18 A2=19 SERVO=13 ENC_A=34 ENC_B=39 "
+  IO.println("# CalibFox v1");
+  IO.println("# pines: PWMA=23 A1=18 A2=19 SERVO=13 ENC_A=34 ENC_B=39 "
                  "TRIG/ECHO L=27/32 R=26/35 F=14/33");
-  Serial.print("# cpmm="); Serial.print(cpmm, 3);
-  Serial.print(" period_ms="); Serial.print(periodMs);
-  Serial.print(" maxpwm="); Serial.print(maxPwm);
-  Serial.print(" servo="); Serial.print(servoDeg);
-  Serial.print(" enc="); Serial.print((long)readEnc());
-  Serial.print(" enc_err="); Serial.println((unsigned long)readEncErr());
+  IO.print("# cpmm="); IO.print(cpmm, 3);
+  IO.print(" period_ms="); IO.print(periodMs);
+  IO.print(" maxpwm="); IO.print(maxPwm);
+  IO.print(" servo="); IO.print(servoDeg);
+  IO.print(" enc="); IO.print((long)readEnc());
+  IO.print(" enc_err="); IO.println((unsigned long)readEncErr());
 }
 
 static char *nextTok(char *&ctx) { return strtok_r(nullptr, " \t,", &ctx); }
@@ -519,55 +531,55 @@ static void handleLine(char *line) {
   if (!cmd) return;
   for (char *c = cmd; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
 
-  if (!strcmp(cmd, "PING")) { Serial.println("OK CalibFox v1"); return; }
+  if (!strcmp(cmd, "PING")) { IO.println("OK CalibFox v1"); return; }
   if (!strcmp(cmd, "HELP") || !strcmp(cmd, "?")) {
-    Serial.println("# PWM v ms [servo] | RAMP de a paso hold_ms [servo] | COAST v run_ms log_ms [brake]");
-    Serial.println("# ENCZERO | ENC | ENCLOG ms | CPMM x | SERVO deg | SERVOOFF | PERIOD ms | MAXPWM v");
-    Serial.println("# I2CHZ hz | LOOPTIME [n] | TOF s modo budget dur [per] | STOP | INFO | PING");
-    Serial.println("OK HELP");
+    IO.println("# PWM v ms [servo] | RAMP de a paso hold_ms [servo] | COAST v run_ms log_ms [brake]");
+    IO.println("# ENCZERO | ENC | ENCLOG ms | CPMM x | SERVO deg | SERVOOFF | PERIOD ms | MAXPWM v");
+    IO.println("# I2CHZ hz | LOOPTIME [n] | TOF s modo budget dur [per] | STOP | INFO | PING");
+    IO.println("OK HELP");
     return;
   }
-  if (!strcmp(cmd, "INFO")) { printInfo(); Serial.println("OK INFO"); return; }
-  if (!strcmp(cmd, "STOP")) { motorCoast(); Serial.println("OK STOP"); return; }
+  if (!strcmp(cmd, "INFO")) { printInfo(); IO.println("OK INFO"); return; }
+  if (!strcmp(cmd, "STOP")) { motorCoast(); IO.println("OK STOP"); return; }
 
-  if (!strcmp(cmd, "ENCZERO")) { zeroEnc(); Serial.println("OK ENCZERO"); return; }
+  if (!strcmp(cmd, "ENCZERO")) { zeroEnc(); IO.println("OK ENCZERO"); return; }
   if (!strcmp(cmd, "ENC")) {
-    Serial.print("OK ENC counts="); Serial.print((long)readEnc());
-    Serial.print(" err="); Serial.println((unsigned long)readEncErr());
+    IO.print("OK ENC counts="); IO.print((long)readEnc());
+    IO.print(" err="); IO.println((unsigned long)readEncErr());
     return;
   }
   if (!strcmp(cmd, "CPMM")) {
     char *t = nextTok(ctx);
     float v = t ? (float)atof(t) : 0.0f;
-    if (v < 1.0f || v > 200.0f) { Serial.println("ERR CPMM 1..200"); return; }
-    cpmm = v; Serial.println("OK CPMM"); return;
+    if (v < 1.0f || v > 200.0f) { IO.println("ERR CPMM 1..200"); return; }
+    cpmm = v; IO.println("OK CPMM"); return;
   }
   if (!strcmp(cmd, "PERIOD")) {
-    long v; if (!getInt(ctx, v) || v < 2 || v > 1000) { Serial.println("ERR PERIOD 2..1000"); return; }
-    periodMs = (unsigned long)v; Serial.println("OK PERIOD"); return;
+    long v; if (!getInt(ctx, v) || v < 2 || v > 1000) { IO.println("ERR PERIOD 2..1000"); return; }
+    periodMs = (unsigned long)v; IO.println("OK PERIOD"); return;
   }
   if (!strcmp(cmd, "MAXPWM")) {
-    long v; if (!getInt(ctx, v) || v < 1 || v > 255) { Serial.println("ERR MAXPWM 1..255"); return; }
-    maxPwm = (int)v; Serial.println("OK MAXPWM"); return;
+    long v; if (!getInt(ctx, v) || v < 1 || v > 255) { IO.println("ERR MAXPWM 1..255"); return; }
+    maxPwm = (int)v; IO.println("OK MAXPWM"); return;
   }
   if (!strcmp(cmd, "I2CHZ")) {
-    long v; if (!getInt(ctx, v) || v < 10000 || v > 1000000) { Serial.println("ERR I2CHZ 10000..1000000"); return; }
+    long v; if (!getInt(ctx, v) || v < 10000 || v > 1000000) { IO.println("ERR I2CHZ 10000..1000000"); return; }
 #if CALIB_MPU
     Wire.begin(); Wire.setClock((uint32_t)v);
 #endif
-    Serial.println("OK I2CHZ"); return;
+    IO.println("OK I2CHZ"); return;
   }
   if (!strcmp(cmd, "SERVO")) {
-    long v; if (!getInt(ctx, v)) { Serial.println("ERR SERVO deg"); return; }
-    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { Serial.println("ERR SERVO fuera de 15..165"); return; }
-    servoWrite((int)v); Serial.println("OK SERVO"); return;
+    long v; if (!getInt(ctx, v)) { IO.println("ERR SERVO deg"); return; }
+    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { IO.println("ERR SERVO fuera de 15..165"); return; }
+    servoWrite((int)v); IO.println("OK SERVO"); return;
   }
-  if (!strcmp(cmd, "SERVOOFF")) { ledcWrite(SERVO_PIN, 0); servoActive = false; Serial.println("OK SERVOOFF"); return; }
+  if (!strcmp(cmd, "SERVOOFF")) { ledcWrite(SERVO_PIN, 0); servoActive = false; IO.println("OK SERVOOFF"); return; }
 
   if (!strcmp(cmd, "LOOPTIME")) {
     long n = 300; getInt(ctx, n);
     doLoopTime((int)n);
-    Serial.println("OK LOOPTIME");
+    IO.println("OK LOOPTIME");
     return;
   }
 
@@ -576,7 +588,7 @@ static void handleLine(char *line) {
     char *sn = nextTok(ctx); char *md = nextTok(ctx); char *bd = nextTok(ctx);
     long dur = 0, per = 0;
     if (!sn || !md || !bd || !getInt(ctx, dur) || dur < 200 || dur > (long)RUN_HARD_MAX_MS) {
-      Serial.println("ERR TOF <L|R|B|F> <SHORT|LONG> <budget_ms|DEF> <dur_ms 200..20000> [period_ms]"); return;
+      IO.println("ERR TOF <L|R|B|F> <SHORT|LONG> <budget_ms|DEF> <dur_ms 200..20000> [period_ms]"); return;
     }
     getInt(ctx, per);
     for (char *c = sn; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
@@ -584,15 +596,15 @@ static void handleLine(char *line) {
     for (char *c = bd; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
     motorCoast();
     doTof(sn, md, bd, dur, per);
-    Serial.println("OK TOF");
+    IO.println("OK TOF");
 #else
-    Serial.println("ERR TOF no compilado (CALIB_TOF=0)");
+    IO.println("ERR TOF no compilado (CALIB_TOF=0)");
 #endif
     return;
   }
 
   if (!strcmp(cmd, "ENCLOG")) {
-    long ms; if (!getInt(ctx, ms) || ms < 100 || ms > (long)RUN_HARD_MAX_MS) { Serial.println("ERR ENCLOG 100..20000 ms"); return; }
+    long ms; if (!getInt(ctx, ms) || ms < 100 || ms > (long)RUN_HARD_MAX_MS) { IO.println("ERR ENCLOG 100..20000 ms"); return; }
     motorCoast();
     Profile p = {PM_CONST, 0, 0, 0, 0, 0, (unsigned long)ms, false};
     finishRun(runProfile(p), "ENCLOG");
@@ -601,10 +613,10 @@ static void handleLine(char *line) {
 
   if (!strcmp(cmd, "PWM")) {
     long v, ms, sv = -1;
-    if (!getInt(ctx, v) || !getInt(ctx, ms)) { Serial.println("ERR PWM v ms [servo]"); return; }
-    if (v < -255 || v > 255) { Serial.println("ERR PWM -255..255"); return; }
+    if (!getInt(ctx, v) || !getInt(ctx, ms)) { IO.println("ERR PWM v ms [servo]"); return; }
+    if (v < -255 || v > 255) { IO.println("ERR PWM -255..255"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { Serial.println("ERR servo 15..165"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 15..165"); return; }
       servoWrite((int)sv);
       delay(400);   // que el servo llegue antes de arrancar
     }
@@ -616,17 +628,17 @@ static void handleLine(char *line) {
   if (!strcmp(cmd, "RAMP")) {
     long a, b, st, hold, sv = -1;
     if (!getInt(ctx, a) || !getInt(ctx, b) || !getInt(ctx, st) || !getInt(ctx, hold)) {
-      Serial.println("ERR RAMP de a paso hold_ms [servo]"); return;
+      IO.println("ERR RAMP de a paso hold_ms [servo]"); return;
     }
-    if (st == 0 || hold < 20) { Serial.println("ERR RAMP paso!=0 y hold>=20"); return; }
+    if (st == 0 || hold < 20) { IO.println("ERR RAMP paso!=0 y hold>=20"); return; }
     if ((b - a) * st < 0) st = -st;                    // el paso apunta hacia b
-    if ((a < 0 && b > 0) || (a > 0 && b < 0)) { Serial.println("ERR RAMP no cruzar el cero (reversa aparte)"); return; }
-    if (a < -255 || a > 255 || b < -255 || b > 255) { Serial.println("ERR RAMP -255..255"); return; }
+    if ((a < 0 && b > 0) || (a > 0 && b < 0)) { IO.println("ERR RAMP no cruzar el cero (reversa aparte)"); return; }
+    if (a < -255 || a > 255 || b < -255 || b > 255) { IO.println("ERR RAMP -255..255"); return; }
     long nSteps = (labs(b - a) / labs(st)) + 1;
     unsigned long total = (unsigned long)(nSteps * hold);
-    if (total > RUN_HARD_MAX_MS) { Serial.println("ERR RAMP > 20 s: menos escalones o hold menor"); return; }
+    if (total > RUN_HARD_MAX_MS) { IO.println("ERR RAMP > 20 s: menos escalones o hold menor"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { Serial.println("ERR servo 15..165"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 15..165"); return; }
       servoWrite((int)sv); delay(400);
     }
     Profile p = {PM_STAIRS, (int)a, (int)b, (int)st, (unsigned long)hold, total, total, false};
@@ -637,9 +649,9 @@ static void handleLine(char *line) {
   if (!strcmp(cmd, "COAST")) {
     long v, runMs, logMs;
     if (!getInt(ctx, v) || !getInt(ctx, runMs) || !getInt(ctx, logMs)) {
-      Serial.println("ERR COAST v run_ms log_ms [brake]"); return;
+      IO.println("ERR COAST v run_ms log_ms [brake]"); return;
     }
-    if (v < -255 || v > 255 || runMs < 100 || logMs < 100) { Serial.println("ERR COAST args"); return; }
+    if (v < -255 || v > 255 || runMs < 100 || logMs < 100) { IO.println("ERR COAST args"); return; }
     char *t = nextTok(ctx);
     bool brake = false;
     if (t) { for (char *c = t; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32; brake = !strcmp(t, "BRAKE"); }
@@ -648,7 +660,7 @@ static void handleLine(char *line) {
     return;
   }
 
-  Serial.print("ERR comando desconocido: "); Serial.println(cmd);
+  IO.print("ERR comando desconocido: "); IO.println(cmd);
 }
 
 // ── setup / loop ──────────────────────────────────────────────────────────────
@@ -656,8 +668,12 @@ static char lineBuf[96];
 static size_t lineLen = 0;
 
 void setup() {
-  Serial.setTxBufferSize(4096);   // CSV a 10 ms sin bloquear el muestreo
-  Serial.begin(115200);
+  IO.setTxBufferSize(4096);   // CSV a 10 ms sin bloquear el muestreo
+#if CALIB_UART && defined(ARDUINO_ARCH_ESP32)
+  IO.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16: los mismos pines que usa la Pi en carrera
+#else
+  IO.begin(115200);
+#endif
 
   pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
   digitalWrite(A1, LOW); digitalWrite(A2, LOW);          // coast desde el arranque
@@ -681,12 +697,12 @@ void setup() {
 
   delay(300);
   printInfo();
-  Serial.println("OK READY");
+  IO.println("OK READY");
 }
 
 void loop() {
-  while (Serial.available() > 0) {
-    char c = (char)Serial.read();
+  while (IO.available() > 0) {
+    char c = (char)IO.read();
     if (c == '\r') continue;
     if (c == '\n') {
       lineBuf[lineLen] = '\0';
@@ -696,7 +712,7 @@ void loop() {
       lineBuf[lineLen++] = c;
     } else {
       lineLen = 0;                       // linea demasiado larga: descartar
-      Serial.println("ERR linea larga");
+      IO.println("ERR linea larga");
     }
   }
 }

@@ -119,25 +119,32 @@ Copia la salida (o la carpeta) para Claude.
 
 ### Preparación (una vez)
 
-1. Carga `src/ESP32/CalibFox/CalibFox.ino` en el ESP32 (no es el firmware de
-   carrera). El carro v2 trae BNO085 y no MPU6050, así que compila con
-   `-DCALIB_MPU=0`; si no tienes la librería VL53L1X, agrega `-DCALIB_TOF=0`.
+CalibFox se maneja por el **mismo UART que usa la Pi en carrera** (Serial2, RX=17
+TX=16, 115200). No hace falta cable USB al carro durante las corridas: el
+script corre en la Pi y tú (o Claude) entras por ssh.
+
+1. Carga `src/ESP32/CalibFox/CalibFox.ino` en el ESP32 con el USB (no es el
+   firmware de carrera). El carro v2 trae BNO085 y no MPU6050, así que compila
+   con `-DCALIB_MPU=0`; si no tienes la librería VL53L1X, agrega `-DCALIB_TOF=0`.
    ```bash
    arduino-cli compile --fqbn esp32:esp32:esp32 --build-property "build.extra_flags=-DCALIB_MPU=0" src/ESP32/CalibFox
    arduino-cli upload  --fqbn esp32:esp32:esp32 -p <PUERTO> src/ESP32/CalibFox
    ```
-2. En la laptop, desde `src/RASPI/cam`:
+   Desconecta el USB después de cargar. (Con `-DCALIB_UART=0` vuelve a hablar
+   por USB, para manejarlo desde la laptop con cable.)
+2. En la Pi, para el programa de carrera si está corriendo (ocupa el puerto) y,
+   desde `src/RASPI/cam`:
    ```bash
    export PYTHONUTF8=1 PYTHONPATH=.
-   CAP="python -m pure_pursuit.twin.tools.calib.calib_capture --port <PUERTO> --out runs/calib/$(date +%Y%m%d) --maxpwm 255 --vbat <VOLTAJE>"
+   CAP="python -m pure_pursuit.twin.tools.calib.calib_capture --port /dev/ttyS0 --out runs/calib/$(date +%Y%m%d) --maxpwm 255 --vbat <VOLTAJE>"
    ```
-   `<PUERTO>` en Mac es algo como `/dev/cu.usbserial-0001` (`ls /dev/cu.*`).
-   Prueba en seco sin carro: `--port mock`.
+   `/dev/ttyS0` es el `SERIAL_PORT` de `config.py`. Prueba en seco sin carro:
+   `--port mock`.
 3. **Seguridad:** cualquier tecla en la terminal **aborta** la corrida, y cada
    corrida tiene un tope de 20 s. Ten espacio libre al frente.
 
 Todos los pasos de abajo escriben en la **misma carpeta**
-`runs/calib/<fecha>`.
+`runs/calib/<fecha>` (en la Pi).
 
 ### Paso 4. Encoder: cuentas por mm (SIEMPRE PRIMERO)
 
