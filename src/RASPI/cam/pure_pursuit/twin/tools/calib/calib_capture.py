@@ -286,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--vbat", type=float, default=None, help="tension de la bateria al empezar (V); queda en session.json")
     ap.add_argument("--note", default="")
     ap.add_argument("--no-prompt", action="store_true")
+    ap.add_argument("--maxpwm", type=int, default=None, help="tope MAXPWM del firmware (def. 200; la carrera a gear 1.25 llega a 255)")
     sub = ap.add_subparsers(dest="what", required=True)
 
     s = sub.add_parser("ramp", help="v(PWM): escalera adelante y reversa")
@@ -334,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     port = open_port(a.port, out / "_mock")
     link = CalibLink(port)
     link.wait_ready()
+    if a.maxpwm is not None:
+        link.command(f"MAXPWM {a.maxpwm}", 3)
     sess = Session(link, out, a.vbat, a.note)
     prompt = not a.no_prompt
     try:

@@ -48,6 +48,8 @@ def ema_per_frame(a):
 
 # ─── Rutas ────────────────────────────────────────────────────────────────────
 CALIB_FILE = Path(__file__).parent / "bev_calib.npz"
+# Lente (calib_lente.py): K/dist/newK. vision.open_camera la aplica sola si existe.
+LENS_CALIB_FILE = Path(__file__).parent / "lens_calib.npz"
 
 # ─── BEV — imagen de salida ───────────────────────────────────────────────────
 BEV_W      = 400          # píxeles de ancho

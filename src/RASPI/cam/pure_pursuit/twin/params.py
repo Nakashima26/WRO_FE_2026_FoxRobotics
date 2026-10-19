@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Literal
+
+import numpy as np
 
 # Fuente única de dimensiones del carro: config.py (la Pi no puede importar twin/).
 from .. import config as C
@@ -238,6 +241,8 @@ class CameraParams:
     rotation_cam_to_robot: tuple | None = None
     k1: float = 0.0
     k2: float = 0.0
+    # 3x3 de la imagen YA enderezada (newK de lens_calib.npz). None = hfov.
+    K: tuple | None = None
     # Equidistante (r = f·θ) pone el horizonte en el borde y el verde pasa
     # el corte de 1000 px hasta ~80 cm. En la carrera mueve el pie de la
     # lata y el primer rojo del oeste se come a los 10 s. Apagado: el BEV
@@ -255,6 +260,11 @@ class CameraParams:
             "supuesto",
             "140 mm, en el morro, a la altura del sonar frontal",
         )
+        if self.K is None and os.environ.get("TWIN_LENS_CALIB"):
+            lens = np.load(os.environ["TWIN_LENS_CALIB"])
+            self.K = tuple(map(tuple, lens["newK"].tolist()))
+            self.width, self.height = (int(v) for v in lens["size"])
+            _prov("camera.K", "medido", "lens_calib.npz (tablero)")
 
 
 @dataclass

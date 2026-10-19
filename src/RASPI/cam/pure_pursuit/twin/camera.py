@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -105,17 +106,22 @@ class CameraModel:
 
     def _build_intrinsics(self) -> None:
         p = self.params
-        half = math.radians(p.hfov_deg) / 2.0
-        # Pinhole: el borde del ancho es tan(hfov/2). Equidistante: r = f·θ,
-        # el mismo borde es hfov/2 en radianes. A 120° y 45° de tilt el
-        # horizonte cae en la fila 0 y el piso ocupa las 480.
-        if p.equidistant:
-            self._fx = (p.width / 2.0) / half
+        if p.K is not None and not p.equidistant:
+            # Intrínsecos medidos (newK del tablero): fx, fy y centro propios.
+            self._fx, self._fy = float(p.K[0][0]), float(p.K[1][1])
+            self._cx, self._cy = float(p.K[0][2]), float(p.K[1][2])
         else:
-            self._fx = (p.width / 2.0) / math.tan(half)
-        self._fy = self._fx
-        self._cx = p.width / 2.0
-        self._cy = p.height / 2.0
+            half = math.radians(p.hfov_deg) / 2.0
+            # Pinhole: el borde del ancho es tan(hfov/2). Equidistante: r = f·θ,
+            # el mismo borde es hfov/2 en radianes. A 120° y 45° de tilt el
+            # horizonte cae en la fila 0 y el piso ocupa las 480.
+            if p.equidistant:
+                self._fx = (p.width / 2.0) / half
+            else:
+                self._fx = (p.width / 2.0) / math.tan(half)
+            self._fy = self._fx
+            self._cx = p.width / 2.0
+            self._cy = p.height / 2.0
         if p.rotation_cam_to_robot is not None:
             self._cam_to_robot = np.asarray(p.rotation_cam_to_robot, dtype=np.float64).reshape(3, 3)
         else:
@@ -473,6 +479,7 @@ class CameraModel:
         hfov_deg: float = 62.0,
         search_hfov: bool = False,
         calib_points_mm: np.ndarray | None = None,
+        lens_path: Path | str | None = None,
     ) -> tuple[CameraModel, dict[str, Any]]:
         """Cámara pinhole que explica la homografía real del .npz.
 
@@ -498,10 +505,15 @@ class CameraModel:
         obj_pts = np.column_stack([calib[:, 0], calib[:, 1], np.zeros(len(calib))])
         base = CameraParams()
         w, h = float(base.width), float(base.height)
+        lens_K = None
+        # Sin ruta, la misma lente que CameraParams toma de TWIN_LENS_CALIB (si no, PnP y K no cuadran).
+        lens_path = lens_path or os.environ.get("TWIN_LENS_CALIB") or None
+        if lens_path is not None:
+            lens = np.load(str(lens_path))
+            lens_K = lens["newK"].astype(np.float64)
+            w, h = (float(v) for v in lens["size"])
 
-        def solve(hfov: float):
-            fx = (w / 2.0) / math.tan(math.radians(hfov) / 2.0)
-            K = np.array([[fx, 0.0, w / 2.0], [0.0, fx, h / 2.0], [0.0, 0.0, 1.0]])
+        def solve(K):
             best = None
             n, rvecs, tvecs, _ = cv2.solvePnPGeneric(
                 obj_pts, img_pts, K, None, flags=cv2.SOLVEPNP_IPPE)
@@ -516,13 +528,22 @@ class CameraModel:
                     best = (err, R, center)
             return best
 
-        best_hfov = hfov_deg
-        best = solve(hfov_deg)
-        if search_hfov:
-            for hf in np.arange(40.0, 170.5, 1.0):
-                cand = solve(float(hf))
-                if cand is not None and (best is None or cand[0] < best[0]):
-                    best, best_hfov = cand, float(hf)
+        def k_hfov(hfov: float):
+            fx = (w / 2.0) / math.tan(math.radians(hfov) / 2.0)
+            return np.array([[fx, 0.0, w / 2.0], [0.0, fx, h / 2.0], [0.0, 0.0, 1.0]])
+
+        if lens_K is not None:
+            # Con lente medida el FOV ya viene de newK: no se busca.
+            best = solve(lens_K)
+            best_hfov = math.degrees(2.0 * math.atan(w / 2.0 / lens_K[0, 0]))
+        else:
+            best_hfov = hfov_deg
+            best = solve(k_hfov(hfov_deg))
+            if search_hfov:
+                for hf in np.arange(40.0, 170.5, 1.0):
+                    cand = solve(k_hfov(float(hf)))
+                    if cand is not None and (best is None or cand[0] < best[0]):
+                        best, best_hfov = cand, float(hf)
         if best is None:
             raise RuntimeError("PnP no encontró una cámara sobre el piso")
         err, R, center = best
@@ -543,6 +564,8 @@ class CameraModel:
             "image_points": img_pts.tolist(),
         }
         cam_params = CameraParams(
+            width=int(w),
+            height=int(h),
             hfov_deg=best_hfov,
             tilt_deg=report["tilt_deg"],
             height_mm=report["height_mm"],
@@ -550,6 +573,7 @@ class CameraModel:
             right_mm=report["right_from_rear_axle_mm"],
             rotation_cam_to_robot=tuple(map(tuple, cam_to_robot)),
             equidistant=False,
+            K=None if lens_K is None else tuple(map(tuple, lens_K.tolist())),
         )
         return cls(params=cam_params, vehicle=twin), report
 

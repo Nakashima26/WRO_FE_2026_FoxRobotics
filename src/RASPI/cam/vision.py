@@ -9,7 +9,42 @@ fox_cv_threads = int(os.environ.get("FOX_CV_THREADS", str(min(4, os.cpu_count() 
 cv2.setNumThreads(fox_cv_threads)
 
 
-def open_camera(cam_index=0):
+_LENS_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pure_pursuit", "lens_calib.npz")
+
+
+class _UndistortCap:
+    """Envuelve el VideoCapture y endereza cada frame con la calibración de lente."""
+
+    def __init__(self, cap, m1, m2):
+        self._cap, self._m1, self._m2 = cap, m1, m2
+
+    def read(self):
+        ok, frame = self._cap.read()
+        if ok and frame is not None:
+            frame = cv2.remap(frame, self._m1, self._m2, cv2.INTER_LINEAR)
+        return ok, frame
+
+    def __getattr__(self, name):
+        return getattr(self._cap, name)
+
+
+def _wrap_undistort(cap):
+    # FOX_LENS_CALIB: ruta del npz; "" o "0" = apagado. Sin archivo = frames crudos.
+    path = os.environ.get("FOX_LENS_CALIB", _LENS_DEFAULT)
+    if path in ("", "0") or not os.path.exists(path):
+        return cap
+    try:
+        d = np.load(path)
+        size = tuple(int(v) for v in d["size"])   # tamaño con que se calibró (640x480)
+        m1, m2 = cv2.initUndistortRectifyMap(d["K"], d["dist"], None, d["newK"], size, cv2.CV_16SC2)
+        print(f"[CAM] lente enderezado con {path} (sig {str(d['sig'])})", flush=True)
+        return _UndistortCap(cap, m1, m2)
+    except Exception as e:   # una calibración rota no debe tumbar la carrera
+        print(f"[CAM] AVISO: no se pudo cargar {path} ({e}); sin enderezar", flush=True)
+        return cap
+
+
+def open_camera(cam_index=0, undistort=True):
     if os.name == "nt":
         cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
         if not cap.isOpened():
@@ -46,7 +81,7 @@ def open_camera(cam_index=0):
         if not cap.isOpened() and os.environ.get("FOX_CAM_PIPE") != "old":
             # GStreamer viejo sin n-threads: reintenta con la cadena original
             os.environ["FOX_CAM_PIPE"] = "old"
-            return open_camera(cam_index)
+            return open_camera(cam_index, undistort)
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
 
@@ -60,6 +95,8 @@ def open_camera(cam_index=0):
     except Exception:
         pass
 
+    if undistort:
+        cap = _wrap_undistort(cap)
     return cap
 
 
