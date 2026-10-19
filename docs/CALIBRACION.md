@@ -123,19 +123,21 @@ Dos formas; las dos usan el mismo script. Ya viene con los valores del carro v2
 (BNO085 sin MPU6050, encoder B en GPIO 36, servo centro 75), así que compila
 tal cual desde el Arduino IDE o con arduino-cli.
 
-**A. Pi apagada, laptop con cable USB al ESP32 (por defecto).** Como las
-pruebas de la rama `parking`. El cable tiene que dejar que el carro recorra
-~2 m, así que alguien camina con la laptop.
+**A. Pi apagada, por Bluetooth (por defecto).** Igual que VueltaCalibracion
+de la rama `parking`: el ESP32 manda todo por USB **y** por Bluetooth
+(`CalibFox`), y acepta comandos por los dos. El cable USB solo hace falta para
+cargarlo.
 
-```bash
-arduino-cli upload --fqbn esp32:esp32:esp32 -p <PUERTO> src/ESP32/CalibFox   # después de compile
-cd src/RASPI/cam && export PYTHONUTF8=1 PYTHONPATH=.
-CAP="python -m pure_pursuit.twin.tools.calib.calib_capture --port <PUERTO> --out runs/calib/$(date +%Y%m%d) --maxpwm 255 --vbat <VOLTAJE>"
-```
-`<PUERTO>` en Mac es `/dev/cu.usbserial-0001` o `/dev/cu.SLAB_USBtoUART`
-(`ls /dev/cu.*`). Si no aparece: cierra apps que agarran USB (Spotify lo hace),
-desconecta y reconecta; si sigue sin aparecer, instala el driver CP210x de
-Silicon Labs.
+1. Carga CalibFox con el cable (`arduino-cli upload --fqbn esp32:esp32:esp32 -p <PUERTO> src/ESP32/CalibFox`
+   después de `compile`, o desde el Arduino IDE). Desconecta el cable.
+2. Empareja la computadora con `CalibFox` (Bluetooth del sistema). En Mac
+   aparece `/dev/cu.CalibFox`; en Windows un puerto COM.
+3. ```bash
+   cd src/RASPI/cam && export PYTHONUTF8=1 PYTHONPATH=.
+   CAP="python -m pure_pursuit.twin.tools.calib.calib_capture --port /dev/cu.CalibFox --out runs/calib/$(date +%Y%m%d) --maxpwm 255 --vbat <VOLTAJE>"
+   ```
+   Con cable también sirve: `--port /dev/cu.usbserial-0001` (si no aparece,
+   falta el driver CP210x de Silicon Labs).
 
 **B. Sin cable al carro: por el UART de la Pi.** Compila con
 `-DCALIB_UART=1`, para el programa de carrera en la Pi y corre el mismo `CAP`

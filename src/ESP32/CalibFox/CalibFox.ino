@@ -2,7 +2,7 @@
  * CalibFox.ino — Banco de calibracion del Fox (WRO Future Engineers 2026, v2)
  *
  * Sketch INDEPENDIENTE de PurePursuit.ino: no necesita la Pi, ni READY, ni V2.
- * Se controla por texto en el USB (115200; -DCALIB_UART=1 = UART de la Pi, Serial2 RX=17 TX=16) y emite CSV. Lo maneja
+ * Se controla por texto en el USB y por Bluetooth "CalibFox" (115200; -DCALIB_UART=1 = UART de la Pi) y emite CSV. Lo maneja
  * src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_capture.py (o cualquier
  * terminal serie).
  *
@@ -84,12 +84,33 @@
 
 struct Profile;   // el IDE pone los prototipos arriba: pwmAt(const Profile&) necesita el nombre antes
 
-// Por defecto USB (Pi apagada, laptop con cable). -DCALIB_UART=1: por el UART de la Pi (Serial2), sin cable al carro.
+// Por defecto USB + Bluetooth "CalibFox" (Pi apagada, como VueltaCalibracion de la rama parking).
+// -DCALIB_UART=1: por el UART de la Pi (Serial2). -DCALIB_BT=0: solo USB.
 #ifndef CALIB_UART
 #define CALIB_UART 0
 #endif
+#ifndef CALIB_BT
+#define CALIB_BT 1
+#endif
 #if CALIB_UART && defined(ARDUINO_ARCH_ESP32)
 #define IO Serial2
+#elif CALIB_BT && defined(ARDUINO_ARCH_ESP32)
+#include "BluetoothSerial.h"
+BluetoothSerial SerialBT;
+// Todo sale por USB y Bluetooth; los comandos entran por cualquiera de los dos.
+class DualIO : public Stream {
+ public:
+  void setTxBufferSize(size_t n) { Serial.setTxBufferSize(n); }
+  void begin(unsigned long b) { Serial.begin(b); SerialBT.begin("CalibFox"); }
+  int available() override { return Serial.available() + SerialBT.available(); }
+  int read() override { return Serial.available() ? Serial.read() : SerialBT.read(); }
+  int peek() override { return Serial.available() ? Serial.peek() : SerialBT.peek(); }
+  void flush() override { Serial.flush(); }
+  size_t write(uint8_t c) override { Serial.write(c); SerialBT.write(c); return 1; }
+  size_t write(const uint8_t *b, size_t n) override { Serial.write(b, n); SerialBT.write(b, n); return n; }
+};
+DualIO IOdual;
+#define IO IOdual
 #else
 #define IO Serial
 #endif
@@ -146,7 +167,7 @@ static const int   SERVO_MAX_SAFE = 154;
 static const unsigned long PING_TIMEOUT_US = 7000;   // = pulseIn del .ino l.2579
 static const int   LT_MAX = 1000;                    // muestras max de LOOPTIME
 
-static float         cpmm        = 20.73f;           // ENC_CUENTAS_POR_MM del .ino l.434
+static float         cpmm        = 5.60f;            // 12 CPR x 4 x 50.092 x 1.25 / (pi x 42.7 mm), VueltaCalibracion; el paso 4 lo mide
 static unsigned long periodMs    = 10;
 static int           maxPwm      = 200;
 static int           servoDeg    = 75;   // centro medido con ServoCentro (rama parking)
