@@ -1,0 +1,151 @@
+{
+  "created": "2026-10-21T12:30:21",
+  "vbat_V": 12.5,
+  "note": "",
+  "files": [
+    {
+      "file": "step_p090_r01.csv",
+      "cmd": "PWM 90 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p090_r01.csv",
+      "cmd": "PWM -90 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p090_r02.csv",
+      "cmd": "PWM 90 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p090_r02.csv",
+      "cmd": "PWM -90 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p090_r03.csv",
+      "cmd": "PWM 90 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p090_r03.csv",
+      "cmd": "PWM -90 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p160_r01.csv",
+      "cmd": "PWM 160 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p160_r01.csv",
+      "cmd": "PWM -160 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p160_r02.csv",
+      "cmd": "PWM 160 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p160_r02.csv",
+      "cmd": "PWM -160 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p160_r03.csv",
+      "cmd": "PWM 160 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p160_r03.csv",
+      "cmd": "PWM -160 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p230_r01.csv",
+      "cmd": "PWM 230 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p230_r01.csv",
+      "cmd": "PWM -230 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p230_r02.csv",
+      "cmd": "PWM 230 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p230_r02.csv",
+      "cmd": "PWM -230 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "step_p230_r03.csv",
+      "cmd": "PWM 230 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "stepn_p230_r03.csv",
+      "cmd": "PWM -230 2500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

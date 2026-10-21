@@ -1,0 +1,55 @@
+{
+  "created": "2026-10-21T13:02:20",
+  "vbat_V": 12.4,
+  "note": "",
+  "files": [
+    {
+      "file": "lock_p160_s040_r01.csv",
+      "cmd": "PWM 160 2500 40",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p160_s040_r02.csv",
+      "cmd": "PWM 160 2500 40",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p160_s040_r03.csv",
+      "cmd": "PWM 160 2500 40",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p160_s015_r01.csv",
+      "cmd": "PWM 160 2500 15",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p160_s015_r02.csv",
+      "cmd": "PWM 160 2500 15",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p160_s015_r03.csv",
+      "cmd": "PWM 160 2500 15",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

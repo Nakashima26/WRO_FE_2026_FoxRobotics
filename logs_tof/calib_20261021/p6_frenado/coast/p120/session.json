@@ -1,0 +1,15 @@
+{
+  "created": "2026-10-21T12:46:25",
+  "vbat_V": 12.5,
+  "note": "COAST 120 1500 2000; regreso por encoder",
+  "files": [
+    {
+      "file": "coast_p120_r03.csv",
+      "cmd": "COAST 120 1500 2000",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}
