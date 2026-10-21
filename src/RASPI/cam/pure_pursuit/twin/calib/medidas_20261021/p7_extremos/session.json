@@ -1,0 +1,71 @@
+{
+  "created": "2026-10-21T13:08:57",
+  "vbat_V": 12.4,
+  "note": "",
+  "files": [
+    {
+      "file": "lock_p090_s002_r01.csv",
+      "cmd": "PWM 90 4000 2",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s008_r01.csv",
+      "cmd": "PWM 90 4000 8",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s012_r01.csv",
+      "cmd": "PWM 90 4000 12",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s016_r01.csv",
+      "cmd": "PWM 90 4000 16",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s140_r01.csv",
+      "cmd": "PWM 90 4000 140",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s144_r01.csv",
+      "cmd": "PWM 90 4000 144",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s150_r01.csv",
+      "cmd": "PWM 90 4000 150",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s154_r01.csv",
+      "cmd": "PWM 90 4000 154",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}
