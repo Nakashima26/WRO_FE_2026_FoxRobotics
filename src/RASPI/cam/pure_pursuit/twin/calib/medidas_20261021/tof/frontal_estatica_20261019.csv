@@ -1,0 +1,5 @@
+sensor,dist_mm,cfg,med_mm,min_mm,max_mm,st_dominante,senal_mcps,nota
+F,300,L 8 50,332,317,346,7,2.77,mediana de ~10 resumenes de 1 s; pared negra de la pista
+F,600,L 8 50,787,716,884,2,1.10,
+F,1000,L 8 50,1217,1131,1371,2,0.75,
+F,1500,L 8 50,1690,1534,1923,2,0.50,
