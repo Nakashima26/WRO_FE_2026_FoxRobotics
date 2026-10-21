@@ -57,7 +57,9 @@
  *   STOP                         coast inmediato (tambien aborta una corrida: cualquier
  *                                byte recibido durante una corrida la aborta).
  *
- * CSV: t_ms,pwm,enc_counts,v_mm_s,servo_deg,enc_err
+ * CSV: t_ms,pwm,enc_counts,v_mm_s,servo_deg,enc_err,yaw_deg
+ *   yaw_deg = giro desde el inicio de la corrida (BNO085, + = izquierda; 0 sin BNO).
+ *   YAW -> "OK YAW deg=<acumulado> paquetes=<n>" (revisar que el BNO responde).
  *   t_ms       ms desde el inicio de la corrida (3 decimales, de micros())
  *   pwm        PWM firmado realmente aplicado (con el recorte a MAXPWM)
  *   enc_counts cuentas x4 con signo desde el inicio de la corrida (adelante = +)
@@ -318,6 +320,58 @@ static int pwmAt(const Profile &p, unsigned long t) {
   return 0;
 }
 
+// ── BNO085 (UART-RVC, SDA del BNO -> GPIO 25) ─────────────────────────────────
+// Para medir el radio de giro sin rayar el piso: radio = avance del encoder /
+// ángulo girado (rad). yaw_deg (última columna del CSV) = cuánto giró el carro
+// desde el inicio de la corrida, + = a la IZQUIERDA. El yaw del BNO crece a la
+// derecha (RondaAbierta, BNO_SIGNO = -1): aquí se le cambia el signo.
+// Paquetes de 19 bytes a ~100 Hz, se acumulan sin el salto de ±180.
+#if defined(ARDUINO_ARCH_ESP32) && !defined(CALIB_NO_BNO)
+#define CALIB_BNO 1
+static const int BNO_RX = 25;
+static uint8_t bnoBuf[19];
+static int bnoN = 0;
+static float bnoYawPrev = 0;
+static bool bnoTiene = false;
+static float yawDeg = 0;
+static uint32_t bnoPaquetes = 0;
+
+static float normaliza180(float a) {
+  while (a >  180) a -= 360;
+  while (a < -180) a += 360;
+  return a;
+}
+
+static void bnoInit() {
+  Serial1.setRxBufferSize(1024);
+  Serial1.begin(115200, SERIAL_8N1, BNO_RX, -1);
+}
+
+static void bnoLeer() {
+  while (Serial1.available()) {
+    uint8_t b = Serial1.read();
+    if (bnoN == 0 && b != 0xAA) continue;
+    if (bnoN == 1 && b != 0xAA) { bnoN = 0; continue; }
+    bnoBuf[bnoN++] = b;
+    if (bnoN < 19) continue;
+    bnoN = 0;
+    uint8_t suma = 0;
+    for (int i = 2; i < 18; i++) suma += bnoBuf[i];
+    if (suma != bnoBuf[18]) continue;
+    float yaw = (int16_t)(bnoBuf[3] | (bnoBuf[4] << 8)) * 0.01f;
+    if (bnoTiene) yawDeg -= normaliza180(yaw - bnoYawPrev);
+    bnoYawPrev = yaw;
+    bnoTiene = true;
+    bnoPaquetes++;
+  }
+}
+#else
+static float yawDeg = 0;            // mock / sin BNO: la columna sale en 0
+static uint32_t bnoPaquetes = 0;
+static void bnoInit() {}
+static void bnoLeer() {}
+#endif
+
 static int clampPwm(int v) {
   if (v >  maxPwm) return  maxPwm;
   if (v < -maxPwm) return -maxPwm;
@@ -341,8 +395,10 @@ static int runProfile(const Profile &p) {
   waitBeforeStart(dir0);
 
   zeroEnc();
+  bnoLeer();
+  const float yaw0 = yawDeg;
   IO.println("# BEGIN");
-  IO.println("t_ms,pwm,enc_counts,v_mm_s,servo_deg,enc_err");
+  IO.println("t_ms,pwm,enc_counts,v_mm_s,servo_deg,enc_err,yaw_deg");
 
   const unsigned long periodUs = periodMs * 1000UL;
   unsigned long t0 = micros();
@@ -387,10 +443,12 @@ static int runProfile(const Profile &p) {
       float v = (dtS > 0.0f) ? ((cnt - prevCnt) / cpmm) / dtS : 0.0f;
       prevCnt = cnt;
       prevT = now;
-      char buf[96];
-      snprintf(buf, sizeof(buf), "%lu.%03lu,%d,%ld,%.1f,%d,%lu",
+      bnoLeer();
+      char buf[112];
+      snprintf(buf, sizeof(buf), "%lu.%03lu,%d,%ld,%.1f,%d,%lu,%.2f",
                (unsigned long)(tUs / 1000UL), (unsigned long)(tUs % 1000UL),
-               appliedPwm, (long)cnt, (double)v, servoDeg, (unsigned long)readEncErr());
+               appliedPwm, (long)cnt, (double)v, servoDeg, (unsigned long)readEncErr(),
+               (double)(yawDeg - yaw0));
       IO.println(buf);
     }
   }
@@ -567,7 +625,9 @@ static void printInfo() {
   IO.print(" maxpwm="); IO.print(maxPwm);
   IO.print(" servo="); IO.print(servoDeg);
   IO.print(" enc="); IO.print((long)readEnc());
-  IO.print(" enc_err="); IO.println((unsigned long)readEncErr());
+  IO.print(" enc_err="); IO.print((unsigned long)readEncErr());
+  IO.print(" bno_paquetes="); IO.print((unsigned long)bnoPaquetes);
+  IO.print(" yaw="); IO.println(yawDeg, 2);
 }
 
 static char *nextTok(char *&ctx) { return strtok_r(nullptr, " \t,", &ctx); }
@@ -597,6 +657,12 @@ static void handleLine(char *line) {
   if (!strcmp(cmd, "INFO")) { printInfo(); IO.println("OK INFO"); return; }
   if (!strcmp(cmd, "STOP")) { motorCoast(); IO.println("OK STOP"); return; }
 
+  if (!strcmp(cmd, "YAW")) {
+    bnoLeer();
+    IO.print("OK YAW deg="); IO.print(yawDeg, 2);
+    IO.print(" paquetes="); IO.println((unsigned long)bnoPaquetes);
+    return;
+  }
   if (!strcmp(cmd, "ENCZERO")) { zeroEnc(); IO.println("OK ENCZERO"); return; }
   if (!strcmp(cmd, "ENC")) {
     IO.print("OK ENC counts="); IO.print((long)readEnc());
@@ -754,12 +820,15 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENC_PIN_B), encIsr, CHANGE);
 #endif
 
+  bnoInit();
   delay(300);
+  bnoLeer();
   printInfo();
   IO.println("OK READY");
 }
 
 void loop() {
+  bnoLeer();   // que el buffer del BNO no se llene entre comandos
   while (IO.available() > 0) {
     char c = (char)IO.read();
     if (c == '\r') continue;

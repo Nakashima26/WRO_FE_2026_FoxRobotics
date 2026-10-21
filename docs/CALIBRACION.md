@@ -215,6 +215,18 @@ freno 120 ____ ____ ____ | freno 230 ____ ____ ____
    divídelo entre 2 y escribe ese **radio en mm** cuando lo pida (queda en
    `steer.csv`).
 
+**Más rápido, sin rayar el piso (`--auto`):** CalibFox lee el BNO085 y manda
+`yaw_deg` en cada fila; el radio sale de **avance del encoder / ángulo girado**
+(el encoder va antes del diferencial: mide el promedio de las dos ruedas
+traseras = el centro del eje). Solo deja libre ~1.5 × 1.5 m:
+```bash
+${=CAP} --center 77 --no-prompt steer --auto --cpmm 5.45 --reps 2 --ms 6000 --servos 5,20,40,55,65
+${=CAP} --center 77 --no-prompt steer --auto --cpmm 5.45 --reps 2 --ms 6000 --servos 90,100,115,130,150
+```
+Revisa con `raw YAW` que `paquetes` suba (BNO conectado). Si avisa "giro corto",
+sube `--ms`. Para confiar, compara **uno** (p. ej. a tope) con cinta: dos
+pedacitos de cinta donde pasa el eje trasero en lados opuestos del círculo.
+
 **Qué esperar:** el radio mínimo, en los topes, ronda los **110–130 mm**. Si un
 lado gira mucho menos que el otro, anótalo: el gemelo lo modela por separado.
 

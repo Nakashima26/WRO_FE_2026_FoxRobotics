@@ -13,6 +13,7 @@ import argparse
 import csv
 import datetime as dt
 import json
+import math
 import sys
 import time
 from dataclasses import dataclass, field
@@ -123,6 +124,36 @@ def cmd_pwm(v: int, ms: int, servo: int | None = None) -> str:
 
 def ramp_duration_ms(a: int, b: int, step: int, hold_ms: int) -> int:
     return (abs(b - a) // abs(step) + 1) * hold_ms
+
+
+STEER_SKIP_S = 1.0      # se ignora el primer segundo: el carro todavia esta acelerando
+STEER_MIN_GIRO_DEG = 20.0
+
+
+def radius_from_rows(rows: list[str], cpmm: float) -> tuple[float, float, float, str] | None:
+    """Radio del centro del eje trasero con encoder + BNO, de las filas CSV de CalibFox.
+
+    Solo el tramo con motor y despues de STEER_SKIP_S. El encoder (antes del
+    diferencial) mide el promedio de las dos ruedas traseras = avance del centro
+    del eje. Devuelve (radio_mm, avance_mm, giro_deg, nota) o None sin yaw_deg."""
+    if not rows or "yaw_deg" not in rows[0]:
+        return None
+    pts = []
+    for ln in rows[1:]:
+        c = ln.split(",")
+        if len(c) < 7:
+            continue
+        t, pwm, cnt, yaw = float(c[0]) / 1000.0, float(c[1]), float(c[2]), float(c[6])
+        if pwm != 0 and t >= STEER_SKIP_S:
+            pts.append((cnt, yaw))
+    if len(pts) < 3:
+        return None
+    arco = (pts[-1][0] - pts[0][0]) / cpmm
+    giro = pts[-1][1] - pts[0][1]
+    if abs(giro) < 1e-3:
+        return float("inf"), arco, giro, "  (no giro)"
+    nota = f"  (giro corto < {STEER_MIN_GIRO_DEG:.0f} grados: poco preciso, alarga --ms)"         if abs(giro) < STEER_MIN_GIRO_DEG else ""
+    return abs(arco) / abs(math.radians(giro)), arco, giro, nota
 
 
 # ── Sesion ────────────────────────────────────────────────────────────────────
@@ -237,8 +268,13 @@ class Session:
         return int(kv["counts"]), int(kv["err"])
 
     # (c)(e) direccion ------------------------------------------------------------
-    def steer(self, servos: list[int], reps: int, pwm: int, ms: int) -> Path:
-        """Circula a servo fijo y pide el radio medido; escribe steer.csv para calib_fit_steer."""
+    def steer(self, servos: list[int], reps: int, pwm: int, ms: int,
+              auto_cpmm: float | None = None, prompt: bool = True) -> Path:
+        """Circula a servo fijo y escribe steer.csv para calib_fit_steer.
+
+        Sin auto_cpmm pide el radio medido con cinta. Con auto_cpmm lo calcula
+        con el encoder y el BNO (columna yaw_deg de CalibFox): radio = avance /
+        angulo girado, en el tramo ya estable. No hay que rayar el piso."""
         p = self.out / "steer.csv"
         new = not p.exists()
         with p.open("a", newline="", encoding="utf-8") as f:
@@ -247,10 +283,26 @@ class Session:
                 w.writerow(["servo_deg", "radius_mm", "rep", "note"])
             for s in servos:
                 for r in range(1, reps + 1):
-                    self.ask(f"[steer servo={s} rep {r}/{reps}] Pon el carro libre; marca el centro del eje trasero. ENTER ... ")
+                    if auto_cpmm is None or prompt:
+                        self.ask(f"[steer servo={s} rep {r}/{reps}] Pon el carro libre"
+                                 + ("" if auto_cpmm else "; marca el centro del eje trasero") + ". ENTER ... ")
                     cmd = cmd_pwm(pwm, ms, s)
+                    self.say(f"[steer {cmd} rep {r}/{reps}]")
                     rep = self.link.command(cmd, ms / 1000 + 8)
                     self.save(f"lock_p{pwm:03d}_s{s:03d}_r{r:02d}", rep, cmd)
+                    if auto_cpmm is not None:
+                        res = radius_from_rows(rep.rows, auto_cpmm)
+                        if res is None:
+                            self.say("  sin datos de yaw (¿CalibFox sin BNO?): no se calculo el radio")
+                            continue
+                        radio, arco, giro, nota = res
+                        if math.isinf(radio):
+                            self.say(f"  no giro (avance {arco:.0f} mm): no se guarda radio")
+                            continue
+                        self.say(f"  radio {radio:.0f} mm  (avance {arco:.0f} mm, giro {giro:+.1f} grados){nota}")
+                        w.writerow([s, round(radio, 1), r, f"auto enc+BNO: avance {arco:.0f} mm, giro {giro:+.1f} grados{nota}"])
+                        f.flush()
+                        continue
                     val = self.ask("  Radio del centro del eje trasero en mm (ENTER = saltar): ").strip()
                     if val:
                         w.writerow([s, float(val), r, ""])
@@ -327,6 +379,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--reps", type=int, default=2)
     s.add_argument("--pwm", type=int, default=70)
     s.add_argument("--ms", type=int, default=4000)
+    s.add_argument("--auto", action="store_true",
+                   help="radio con encoder + BNO (CalibFox con yaw_deg), sin medir con cinta")
+    s.add_argument("--cpmm", type=float, default=5.45,
+                   help="cuentas/mm del encoder para --auto (paso 4; 2026-10-19: 5.45)")
     s = sub.add_parser("looptime", help="duracion de la secuencia de sensado del loop()")
     s.add_argument("--n", type=int, default=500)
     s = sub.add_parser("tof", help="tasa/status/alcance del VL53L1X")
@@ -361,7 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         elif a.what == "enc":
             sess.enc(a.dist, a.reps)
         elif a.what == "steer":
-            sess.steer(_ints(a.servos), a.reps, a.pwm, a.ms)
+            sess.steer(_ints(a.servos), a.reps, a.pwm, a.ms,
+                       auto_cpmm=a.cpmm if a.auto else None, prompt=prompt)
         elif a.what == "looptime":
             sess.looptime(a.n)
         elif a.what == "tof":
