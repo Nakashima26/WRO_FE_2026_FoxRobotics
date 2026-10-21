@@ -74,11 +74,11 @@ const int PWM_ARRANQUE = 90;
 const unsigned long RAMPA_MS = 500;
 
 // ── Control (convenciones de RondaAbierta: servo = centro + X, X > 0 = izquierda)
-int       centroServo    = 75;
+int       centroServo    = 77;    // medido 2026-10-21 (juego de ±2 alrededor)
 const int SERVO_MIN      = 0;
-const int SERVO_MAX      = 156;
+const int SERVO_MAX      = 150;   // en 154 la dirección se traba (calib 2026-10-21)
 const int SERVO_TOPE_DER = 0;
-const int SERVO_TOPE_IZQ = 156;
+const int SERVO_TOPE_IZQ = 150;   // el giro izquierdo más cerrado (radio 154 mm); 156 trababa la dirección
 float KpRumbo = 1.0f;                  // grados de servo por grado de error (el de RondaAbierta)
 const int PWM_REF_PID = 255;
 // Control lateral con la posición estimada: corre el rumbo objetivo
@@ -115,7 +115,9 @@ const float DIAMETRO_MM        = 42.7f;
 // como MotorTest. (Con el 1.5 de RectanguloTest = 900, la vuelta del 2026-10-19
 // salió ~20% más chica de lo que de verdad recorrió.)
 const float CUENTAS_POR_VUELTA = 3.0f * 4 * 50.092f * 1.25f;
-const float MM_POR_CUENTA      = PI * DIAMETRO_MM / CUENTAS_POR_VUELTA;
+// Medido 2026-10-19 con el carro avanzando solo (4031 cuentas en 740 mm):
+// 5.45 cuentas/mm, no los 5.60 de la fórmula (la llanta rueda como Ø 43.9 mm).
+const float MM_POR_CUENTA      = 1.0f / 5.45f;
 const int   SIGNO_ENC          = -1;   // adelante cuenta negativo
 
 const int BNO_SIGNO = -1;   // yaw del BNO crece a la derecha; th crece a la izquierda
