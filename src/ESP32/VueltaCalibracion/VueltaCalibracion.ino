@@ -318,6 +318,41 @@ void leerTofs() {
 // (medida desde la CARA del sensor), cada segundo sale por sensor la mediana,
 // mín-máx, cuántas lecturas de cada status y la señal promedio.
 //   # ToF F: med  612 mm (598-631) n=20 st0:0 st2:20 st7:0 otro:0 señal 0.85
+// Calibración estática: cambia modo/ROI/presupuesto de los 3 ToF sin recargar
+// el sketch (scripts/tof_estatica.py prueba varias configuraciones por distancia).
+void configurarTofs(char modo, int roi, int budgetMs) {
+  VL53L1X::DistanceMode m = modo == 'S' ? VL53L1X::Short : modo == 'M' ? VL53L1X::Medium : VL53L1X::Long;
+  roi = constrain(roi, 4, 16);
+  budgetMs = constrain(budgetMs, modo == 'S' ? 20 : 33, 1000);
+  for (int i = 0; i < N_TOF; i++) {
+    Tof& t = tofs[i];
+    if (!t.ok) continue;
+    t.s.stopContinuous();
+    delay(5);
+    t.s.setDistanceMode(m);
+    t.s.setROISize(roi, roi);
+    t.s.setMeasurementTimingBudget((uint32_t)budgetMs * 1000);
+    t.s.startContinuous(budgetMs);
+    t.nBuf = 0;
+    t.sumaSig = 0;
+  }
+  Log.printf("# cfg modo=%c roi=%d budget=%d OK\n", modo, roi, budgetMs);
+}
+
+void comandoLinea(char* s) {
+  while (*s == ' ') s++;
+  if (s[0] == 'c') {
+    char modo = 'L'; int roi = TOF_ROI, budget = TOF_BUDGET_US / 1000;
+    if (sscanf(s + 1, " %c %d %d", &modo, &roi, &budget) >= 1) {
+      if (modo >= 'a') modo -= 32;
+      configurarTofs(modo, roi, budget);
+    }
+  } else if (s[0] == 'r') {
+    for (int i = 0; i < N_TOF; i++) { tofs[i].nBuf = 0; tofs[i].sumaSig = 0; }
+    Log.println("# resumen reiniciado");
+  }
+}
+
 void imprimirResumenTof() {
   for (int i = 0; i < N_TOF; i++) {
     Tof& t = tofs[i];
@@ -521,13 +556,24 @@ void loop() {
   leerTofs();
   leerBno();
 
+  // Comandos: 'g' y 'x' sueltos (sin Enter), o líneas terminadas en Enter:
+  //   c <S|M|L> <roi> <budget_ms>   reconfigura los 3 ToF (solo en espera)
+  //   r                             reinicia el resumen de "# ToF" (datos frescos)
+  static char lin[32];
+  static int nLin = 0;
   while (Serial.available() || SerialBT.available()) {
     char c = Serial.available() ? Serial.read() : SerialBT.read();
-    if (c == 'g' && (fase == ESPERA || fase == FIN)) {
+    if (nLin == 0 && c == 'g' && (fase == ESPERA || fase == FIN)) {
       if (fase == FIN) { fase = ESPERA; }
       arrancar();
-    } else if (c == 'x' && (fase == RECTA || fase == GIRO)) {
+    } else if (nLin == 0 && c == 'x' && (fase == RECTA || fase == GIRO)) {
       terminar("parado a mano");
+    } else if (c == '\n' || c == '\r') {
+      lin[nLin] = '\0';
+      if (nLin > 0 && fase == ESPERA) comandoLinea(lin);
+      nLin = 0;
+    } else if (nLin < (int)sizeof(lin) - 1 && c != 'g' && c != 'x') {
+      lin[nLin++] = c;
     }
   }
 
