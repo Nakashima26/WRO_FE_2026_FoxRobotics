@@ -32,7 +32,7 @@ ENV = {
 }
 # (clave en cfg["pi"], minimo, maximo, entero)
 PARAMS = [
-    ("ROUTE_PROFILE_A_LAT_MM_S2", 2000, 3400, False),
+    ("ROUTE_PROFILE_A_LAT_MM_S2", 2000, 2900, False),   # agarre medido 2400 izq / 2750 der (2026-10-21)
     ("ROUTE_PROFILE_A_BRAKE_MM_S2", 2000, 3500, False),
     ("ROUTE_PROFILE_BRAKE_FF_S", 0.0, 0.15, False),
     ("ROUTE_PROFILE_LATENCY_S", 0.06, 0.20, False),
