@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + pk46.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -71,10 +71,10 @@ MPU6050 mpu(Wire);
 #endif
 
 #if FOX_ENCODER && !defined(FOX_SIL)
-// Encoder de cuadratura del N20 (hardware nuevo). 34/39 son solo-entrada y SIN
+// Encoder de cuadratura del N20 (hardware nuevo). 34/36 son solo-entrada y SIN
 // pull-up interno: el encoder debe traer pull-ups (o ponerlos en la PCB).
 #define ENC_PIN_A   34
-#define ENC_PIN_B   39
+#define ENC_PIN_B   36   // morado (CalibFox / EncoderTest de parking)
 #endif
 
 #if FOX_TOF && !defined(FOX_SIL)
@@ -198,12 +198,18 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
-int centroServo    = 90;
-const int SERVO_MIN_DEG = 19;   // 90 - 71: tope derecho (cremallera v2, README 2.4)
-const int SERVO_MAX_DEG = 161;  // 90 + 71: tope izquierdo
-// Dirección v2 (README §2.4): 44.54° de rueda equivalente (modelo bicicleta) a ±71° de
-// servo = 0.627°/tick, o sea 43.91° a 70 ticks (la fórmula de las U usa `delta / 43.91 * 70`).
-// Debe coincidir con config.MAX_WHEEL_STEER_DEG * 70 / SERVO_FULL_LOCK_CMD_DEG.
+int centroServo    = 78;   // mitad de 1..156 (el 77 de p7_centro estaba mal medido; 2026-10-22)
+const int SERVO_MIN_DEG = 1;    // tope derecho medido 2026-10-22
+const int SERVO_MAX_DEG = 156;  // tope izquierdo medido 2026-10-22 (antes se trababa en 154)
+// Dirección medida 2026-10-22 en el tapete (twin/calib/medidas_20261022): grados de rueda
+// equivalente (bicicleta, atan(113/R)) por tick de servo desde el centro, uno por lado.
+// Der lineal hasta el tope (servo 1 -> R 123 mm); izq lineal hasta 144 y de 148 a 156 se
+// queda en R ~134 (la llanta de afuera ya no acompaña).
+const float RUEDA_POR_TICK_DER = 0.552f;
+const float RUEDA_POR_TICK_IZQ = 0.588f;
+// Tope simétrico por si acaso (usuario 2026-10-22): R 134 mm a los dos lados = atan(113/134).
+// Debe coincidir con config.MAX_WHEEL_STEER_DEG y KAPPA_MAX de route_planner.py.
+const float RUEDA_TOPE_DEG     = 40.1f;
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -252,8 +258,6 @@ int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odomet
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
-// Grados de servo por grado de rueda: 71° de servo = 44.54° de rueda (v2).
-const float RUTA_SERVO_POR_RUEDA = 71.0f / 44.54f;
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
 const int RUTA_PWM_MAX = 255;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
@@ -374,7 +378,7 @@ void IRAM_ATTR encIsr() {
   uint8_t ab = (a << 1) | b;
   int8_t d = encTrans[(encPrevAB << 2) | ab];
   encPrevAB = ab;
-  if (d) encCount += d;
+  if (d) encCount -= d;   // azul->34, morado->36: la tabla cuenta adelante negativo (EncoderTest/VueltaCalibracion SIGNO -1)
 }
 #endif
 #endif
@@ -518,7 +522,7 @@ const float GIRO_PI_CUENTA_DEG   = 70.0f;
 const float ODOM_PWM_K           = 3.5f;
 const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
-const float ENC_CUENTAS_POR_MM   = 20.73f;   // 7*4*50*2/(PI*43), recalibrar en pista
+const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -821,6 +825,15 @@ const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear 
 // (salida_cajon.py): 2 = ADENTRO (cruzar al carril interior: rojo en CW / verde en
 // CCW) -> la S se abre a ~90° (una "caja") hasta pasar la fila interior.
 const bool INICIO_REVERSA              = false; // true = fases 4-8 de antes (reversa colchón)
+// Servo a tope ANTES de mover el carro: con la llanta interior a ~53° (R ~140 mm) el arco
+// necesita ~95 mm libres delante de la nariz; arrancar mientras el servo viaja (~73° a
+// ~600°/s) se come ese margen y la esquina delantera toca la madera de enfrente.
+const unsigned long INICIO_SERVO_ESPERA_MS = 150;
+// Aun así, con R ~140 mm la esquina delantera exterior toca la madera de enfrente a ~36° de
+// giro (por ~6 mm). A los INICIO_3P_ANG_DEG da una reversa corta con el servo al otro tope
+// (la nariz sigue entrando y la cola ya se alejó de la madera de atrás) y vuelve al arco.
+const float INICIO_3P_ANG_DEG          = 0.0f;   // 0 = sin corrección; con 53° reales sale directo (2026-10-22)
+const float INICIO_3P_REV_MM           = 15.0f;
 const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
 const float INICIO_LAT_AFUERA_MM       = 200.0f; // desplazamiento lateral final, salida normal (centro a ~33 cm de la pared)
 const float INICIO_LAT_ADENTRO_MM      = 620.0f; // ídem con isal=2 (centro a ~75 cm: más allá de la fila interior a 60 cm)
@@ -845,6 +858,7 @@ bool  piSenalSalida = false;   // isen= de la Pi: señal a <~1.3 m adelante del 
 // Salida rápida solo sin señal cerca de la salida; con señal, el PWM de siempre.
 int inicioPwm() { return (piSenalSalida && INICIO_PWM_SENAL > 0) ? INICIO_PWM_SENAL : INICIO_PWM; }
 bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
+bool  inicio3pHecho = false;   // la reversa de corrección (fase 11) solo una vez
 float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
 float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample de la fase 6
@@ -1434,11 +1448,11 @@ PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 1;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 PARK_AJ long         PARK_PEGADO_CICLA          = 1;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
-PARK_AJ long         PARK_UTURN_TOPE            = 255;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
+PARK_AJ long         PARK_UTURN_TOPE            = 200;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
 PARK_AJ long         PARK_SCAN_TOPE             = 255;   // tope PWM propio del escaneo rápido; 0 = MOTOR_MAX
 // PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
 PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 255;
-PARK_AJ long         PARK_UTURN_PWM             = 255;
+PARK_AJ long         PARK_UTURN_PWM             = 200;
 // Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
 // madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
 PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 255;
@@ -1955,7 +1969,7 @@ void actualizarOdometria() {
   cnt = encCount;
   portEXIT_CRITICAL(&encMux);
 #endif
-  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/20.73 = 0.0482 mm/cuenta.
+  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/5.45 = 0.183 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
   encCountPrev = cnt;
 #else
@@ -2927,11 +2941,12 @@ float rutaExtTapeteCm() {
   return (1500.0f - perp) / 10.0f - 6.5f;
 }
 
-// Servo para un ángulo de rueda de la ruta (+ = derecha), sin wallPanic.
+// Servo para un ángulo de rueda (+ = derecha), sin wallPanic. Acota a ±RUEDA_TOPE_DEG
+// (R 134 mm) y usa la ganancia de cada lado.
 int rutaServo(float ruedaDeg) {
-  float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
-                             (float)(SERVO_MIN_DEG - centroServo), (float)(SERVO_MAX_DEG - centroServo));
-  return centroServo - (int)lroundf(servoDeg);
+  ruedaDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
+  float ticks = ruedaDeg >= 0.0f ? ruedaDeg / RUEDA_POR_TICK_DER : ruedaDeg / RUEDA_POR_TICK_IZQ;
+  return constrain(centroServo - (int)lroundf(ticks), SERVO_MIN_DEG, SERVO_MAX_DEG);
 }
 
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
@@ -3890,6 +3905,7 @@ void loop() {
         inicioAdentro  = false;
         inicioY0       = poseYf;
         inicioOdom0    = odomMmF;
+        inicio3pHecho  = false;
         motorAdelante();
         // El servo llega a tope ANTES de rodar (una sola vez: con delay en cada
         // loop el chequeo de ángulo corría cada ~100 ms y la fase 1 se pasaba ~25°).
@@ -3917,24 +3933,48 @@ void loop() {
         Serial.print(" ang="); Serial.println(anguloGyro, 1);
         if (inicioFase == 2 && deltaIni < (float)(INICIO_ANG_ADENTRO_DEG - INICIO_OVERSHOOT_DEG)) {
           inicioFase   = 1;                       // vuelve a tope hasta ~90°
-          inicioFaseMs = millis() - INICIO_RAMP_MS;
+          inicioFaseMs = millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS;
         }
       }
 
       if (inicioFase == 1) {
-        int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
+        unsigned long tSw = millis() - inicioFaseMs;
+        int vel = tSw < INICIO_SERVO_ESPERA_MS ? 0
+                : rampaPWM(tSw - INICIO_SERVO_ESPERA_MS, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         setMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
         bool swingListo   = (deltaIni >= (float)(angSwing - INICIO_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
+        if (!swingListo && !inicio3pHecho && INICIO_3P_ANG_DEG > 0 && deltaIni >= INICIO_3P_ANG_DEG) {
+          inicio3pHecho   = true;
+          inicioFase      = 11;
+          inicioFaseMs    = millis();
+          inicioOdomRecto = odomMmF;
+          Serial.print("INICIO fase 1: reversa de correccion ang="); Serial.println(anguloGyro, 1);
+          break;
+        }
         if (swingListo || swingTimeout) {
           escribirServo(centroServo);
           inicioFase      = 2;
           inicioFaseMs    = millis();
           inicioOdomRecto = odomMmF;
           if (swingTimeout) Serial.println("INICIO fase 1: timeout de swing");
+        }
+        break;
+      }
+
+      // ── Fase 11: reversa corta con el servo al otro tope, y de vuelta al arco ──
+      if (inicioFase == 11) {
+        motorReversa();
+        escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);
+        setMotor(inicioPwm());
+        if (odomMmF > inicioOdomRecto) inicioOdomRecto = odomMmF;   // la reversa cuenta desde donde paró
+        if (inicioOdomRecto - odomMmF >= INICIO_3P_REV_MM || millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS) {
+          motorCoast();
+          inicioFase   = 1;
+          inicioFaseMs = millis();   // espera de servo y rampa otra vez
         }
         break;
       }
@@ -4967,8 +5007,8 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
-          parkServoU = uturnIzqP ? centroServo + ticks : centroServo - ticks;
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          parkServoU = rutaServo(uturnIzqP ? -delta : delta);
           Serial.print("PARK U servo="); Serial.print(parkServoU);
           Serial.print(" ext="); Serial.println(extAhoraP);
         }
@@ -6310,9 +6350,8 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          // 70 ticks (servo 160) = ~43.9° de rueda equivalente (README v2 §2.4).
-          int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
-          puntaServoU = uturnIzq ? centroServo + ticks : centroServo - ticks;
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          puntaServoU = rutaServo(uturnIzq ? -delta : delta);
           Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
           Serial.print(" ext="); Serial.println(extAhora);
         }

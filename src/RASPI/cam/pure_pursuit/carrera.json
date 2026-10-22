@@ -53,6 +53,6 @@
  "ROUTE_UPLOAD_DIFF_MM": 60.0,
  "ROUTE_UPLOAD_LINES": 2,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
- "_fuente": "pk46.json",
+ "_fuente": "carrera_bench.json",
  "_preset": "ruta_perfil"
 }
