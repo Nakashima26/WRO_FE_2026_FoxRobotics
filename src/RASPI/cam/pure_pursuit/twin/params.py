@@ -49,51 +49,43 @@ class SteeringParams:
     # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
     # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
     # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 19..161 (±71°).
-    gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
-    gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
+    # Medido 2026-10-21 (p7_radios, calib_fit_steer): 0.474 izq / 0.600 der °rueda por °servo.
+    gain_left: float = 42.62
+    gain_right: float = 54.04
     servo_center_deg: float = 90.0
     servo_min_deg: float = 19.0
     servo_max_deg: float = 161.0
     slew_deg_per_s: float = 600.0
-    deadband_deg: float = 0.5
+    deadband_deg: float = 2.0   # calib 2026-10-21 p7_centro: ±2 de juego alrededor del centro
 
     def __post_init__(self) -> None:
-        _prov(
-            "steering.gain_left/right",
-            "supuesto",
-            "README v2 §2.4 (CAD): 53.1° int./37.0° ext. a ±71° de servo → 44.5° equivalente "
-            "bicicleta (config.MAX_WHEEL_STEER_DEG). Lineal en el comando (en realidad la "
-            "cremallera es algo no lineal). Topes 19/161 = ±71° (cremallera v2, README §2.4); "
-            "firmware y twin igualados en 19..161",
-        )
+        _prov("steering.gain_left/right", "medido", "calib 2026-10-21 radios encoder+BNO: rueda máx 41.2°, R mín 129 mm")
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
-        _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")
+        _prov("steering.deadband_deg", "medido", "calib 2026-10-21: correcciones de 1-2 no mueven las llantas")
 
 
 @dataclass
 class MotorParams:
-    k_mm_s_per_pwm: float = 3.5
-    pwm0: float = 25.0
-    k_rev_mm_s_per_pwm: float = 3.5
-    tau_drive_s: float = 0.25
-    # 100:1 + etapa LEGO: en coast el carro se frena rápido. Con 0.35 s el twin
-    # seguía rodando ~10 cm tras el retroceso de MANIOBRA y se comía la pared de
-    # atrás en casi todas las esquinas; con 0.12 el baseline completa vueltas.
-    tau_coast_s: float = 0.12
-    scrub_coeff: float = 0.35
-    # Tope de aceleración por agarre; None = sin tope.
-    a_max_mm_s2: float | None = None
+    # Medido 2026-10-21 (calib/medidas_20261021, calib_fit_motor, 12.5 V, engrane 1.25):
+    # v = k·(PWM − pwm0) con R² 0.997 (80→152, 120→315, 255→856 mm/s).
+    k_mm_s_per_pwm: float = 4.02
+    pwm0: float = 42.1
+    k_rev_mm_s_per_pwm: float = 4.07
+    tau_drive_s: float = 0.173
+    tau_coast_s: float = 0.091
+    # p8_curva: PWM 160 a servo 15 (casi tope) −11%, a servo 40 −2%.
+    scrub_coeff: float = 0.12
+    # Tope de aceleración por agarre; None = sin tope. 0.8·0.55·g (no medido; las llantas patinan ~1 cm al arrancar).
+    a_max_mm_s2: float | None = 4316.0
+    # Tope lateral medido (p8_curva_rapida): arriba de ~2.4-2.9 m/s² la curva se abre (subviraje).
+    a_lat_max_mm_s2: float | None = 2600.0
 
     def __post_init__(self) -> None:
-        _prov(
-            "motor.k/pwm0",
-            "supuesto",
-            "~245 mm/s a PWM 95 (firmware 21–31 cm/s); PWM 120 → ~333 mm/s",
-        )
-        _prov("motor.tau_drive_s", "supuesto", "arranque N20+reductora")
-        _prov("motor.tau_coast_s", "supuesto",
-              "coast TB6612 A1=A2=0; medir cuánto rueda tras cortar a PWM 100")
-        _prov("motor.scrub_coeff", "supuesto", "pérdida por scrub al volante")
+        _prov("motor.k/pwm0", "medido", "calib 2026-10-21 rampas 20-255 (12.5 V)")
+        _prov("motor.tau_drive_s", "medido", "calib 2026-10-21 escalones 90/160/230")
+        _prov("motor.tau_coast_s", "medido", "calib 2026-10-21 coast 120/230")
+        _prov("motor.scrub_coeff", "medido", "calib 2026-10-21 p8_curva: −11% a servo 15, −2% a 40 (PWM 160)")
+        _prov("motor.a_lat_max_mm_s2", "medido", "calib 2026-10-21 p8_curva_rapida: 2360-2860 mm/s² según servo")
         _prov("motor.a_max_mm_s2", "supuesto", "mu*fracción en eje trasero*g")
 
 

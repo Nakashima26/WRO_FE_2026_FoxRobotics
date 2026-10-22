@@ -30,8 +30,8 @@ MIN_FREE = 20 * 2**30
 ENV = {
     **os.environ,
     "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-    "PYTHONUTF8": "1", "PYTHONPATH": ".", "TWIN_MOTOR": "fisico", "TWIN_GEAR": "1.25",
-    "TWIN_MASS_KG": "0.564", "TWIN_FW_PARAMS": "serial2_us_per_char=21.7,serial_us_per_char=21.7",
+    "PYTHONUTF8": "1", "PYTHONPATH": ".",
+    "TWIN_FW_PARAMS": "serial2_us_per_char=21.7,serial_us_per_char=21.7",
     "TWIN_PI_UART_US_PER_BYTE": "21.7",
 }
 # (clave en cfg["fw"], minimo, maximo, entero)

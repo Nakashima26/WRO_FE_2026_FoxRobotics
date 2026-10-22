@@ -203,7 +203,7 @@ def test_steer_fit_gains_and_ppservogain(tmp_path):
     assert res["min_turn_radius_mm"] > 0
     patches = fs.build_patches(res, ROOT)
     dp = patches[cc.PARAMS_REL][0]
-    assert "gain_left: float = " in dp and "C.MAX_WHEEL_STEER_DEG" in dp   # lo viejo en las lineas '-'
+    assert "-    gain_left: float = " in dp and "+    gain_left: float = " in dp
     di = patches[cc.INO_REL][0]
     assert "+float ppServoGain = 1.8" in di or "+float ppServoGain = 1.7" in di
 

@@ -101,7 +101,8 @@ def test_preset_contra_ino_sintetico(monkeypatch):
     assert by["servo.fuera_de_topes"].real.startswith("15 ")
     # El 0..180 de escribirServo no cuenta como tope de maniobra.
     assert by["servo.topes"].real.startswith("19..161") and not by["servo.topes"].difiere
-    assert not by["servo.rueda_der"].difiere and not by["servo.rueda_izq"].difiere
+    # Twin con la dirección medida (2026-10-21); el .ino sigue con la geometría del CAD.
+    assert by["servo.rueda_der"].difiere and by["servo.rueda_izq"].difiere
     joined = " | ".join(errors)
     for k in ("NO_ESTA", "FOX_SUELTO", "FOX_NADA", "PARK_Y_MM"):
         assert k in joined, k
