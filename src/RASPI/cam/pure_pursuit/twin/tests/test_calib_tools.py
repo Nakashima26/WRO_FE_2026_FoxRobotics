@@ -273,7 +273,10 @@ def test_calibfox_session_to_fit_roundtrip(mock_exe, tmp_path):
     s.lock(100, [90, 40], 1, 2500, prompt=False)
     port.close()
     (tmp_path / "enc_runs.csv").write_text("counts_fwd,dist_mm,counts_net,enc_err\n9000,1000,0,0\n9010,1000,1,0\n")
-    res = fm.fit_all(tmp_path)
+    # El mock gira con 0.627 °rueda/°servo alrededor de 90 (no la dirección medida del twin).
+    sj = tmp_path / "steer_mock.json"
+    sj.write_text('{"gain_left_per90": 56.43, "gain_right_per90": 56.43, "wheel_max_deg": 44.54}')
+    res = fm.fit_all(tmp_path, steer_json=sj)
     assert res["counts_per_mm"] == pytest.approx(9.005, abs=0.01)
     assert res["speed_fwd"]["k"] == pytest.approx(4.2, rel=0.04)
     assert res["speed_fwd"]["pwm0"] == pytest.approx(18.0, abs=2.0)

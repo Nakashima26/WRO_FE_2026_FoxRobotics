@@ -66,10 +66,10 @@ MPU6050 mpu(Wire);
 #endif
 
 #if FOX_ENCODER && !defined(FOX_SIL)
-// Encoder de cuadratura del N20 (hardware nuevo). 34/39 son solo-entrada y SIN
+// Encoder de cuadratura del N20 (hardware nuevo). 34/36 son solo-entrada y SIN
 // pull-up interno: el encoder debe traer pull-ups (o ponerlos en la PCB).
 #define ENC_PIN_A   34
-#define ENC_PIN_B   39
+#define ENC_PIN_B   36   // morado (CalibFox / EncoderTest de parking)
 #endif
 
 #if FOX_TOF && !defined(FOX_SIL)
@@ -193,9 +193,9 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
-int centroServo    = 90;
-const int SERVO_MIN_DEG = 19;   // 90 - 71: tope derecho (cremallera v2, README 2.4)
-const int SERVO_MAX_DEG = 161;  // 90 + 71: tope izquierdo
+int centroServo    = 77;   // medido 2026-10-21 (p7_centro)
+const int SERVO_MIN_DEG = 2;    // tope derecho medido (p7_extremos)
+const int SERVO_MAX_DEG = 150;  // tope izquierdo: en 154 la dirección se traba
 // Dirección v2 (README §2.4): 44.54° de rueda equivalente (modelo bicicleta) a ±71° de
 // servo = 0.627°/tick, o sea 43.91° a 70 ticks (la fórmula de las U usa `delta / 43.91 * 70`).
 // Debe coincidir con config.MAX_WHEEL_STEER_DEG * 70 / SERVO_FULL_LOCK_CMD_DEG.
@@ -513,7 +513,7 @@ const float GIRO_PI_CUENTA_DEG   = 0.0f;
 const float ODOM_PWM_K           = 3.5f;
 const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
-const float ENC_CUENTAS_POR_MM   = 20.73f;   // 7*4*50*2/(PI*43), recalibrar en pista
+const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -1950,7 +1950,7 @@ void actualizarOdometria() {
   cnt = encCount;
   portEXIT_CRITICAL(&encMux);
 #endif
-  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/20.73 = 0.0482 mm/cuenta.
+  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/5.45 = 0.183 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
   encCountPrev = cnt;
 #else

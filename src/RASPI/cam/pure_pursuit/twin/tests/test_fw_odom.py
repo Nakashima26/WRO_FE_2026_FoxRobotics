@@ -109,7 +109,7 @@ def test_pwm_odom_and_yaw_integration():
 
 
 def test_encoder_odom():
-    counts_per_mm = 20.73
+    counts_per_mm = 5.45
     target_mm = 500.0
     target_counts = int(round(target_mm * counts_per_mm))
 
@@ -174,7 +174,7 @@ def test_tof_ack():
 
 def test_encoder_odom_sub_mm_ticks_accumulate():
     """Ticks de <0.5 mm: con lroundf por tick od/px se quedaban en 0."""
-    counts_per_mm = 20.73
+    counts_per_mm = 5.45
     fw = FirmwareSIL(defines={"FOX_ENCODER": "1"})
     fw.set_param("loop_overhead_us", 20000)
     fw.set_param("mpu_update_us", 0)
@@ -189,7 +189,7 @@ def test_encoder_odom_sub_mm_ticks_accumulate():
     fw.setup()
     fw.push_serial2(V2_PP)
     for _ in range(400):
-        enc[0] += 6  # 0.29 mm por loop
+        enc[0] += 1  # 0.18 mm por loop
         fw.push_serial2(V2_PP)
         fw.loop()
     ack = _latest_ack(fw)

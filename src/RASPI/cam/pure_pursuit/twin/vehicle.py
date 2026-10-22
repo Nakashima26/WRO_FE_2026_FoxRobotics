@@ -125,7 +125,7 @@ class Vehicle:
         wh = _radians(wheel)
         if abs(wh) > 1e-9 and abs(veh.wheelbase_mm) > 1e-6:
             yaw_rate_rad = vel / veh.wheelbase_mm * _tan(wh)
-            alat = mot.a_lat_max_mm_s2
+            alat = mot.a_lat_left_mm_s2 if yaw_rate_rad > 0 else mot.a_lat_right_mm_s2
             if alat and abs(vel) > 1e-3 and abs(yaw_rate_rad * vel) > alat:   # subviraje: la curva se abre
                 yaw_rate_rad = _copysign(alat / abs(vel), yaw_rate_rad)
             self.heading_deg += _degrees(yaw_rate_rad * dt)

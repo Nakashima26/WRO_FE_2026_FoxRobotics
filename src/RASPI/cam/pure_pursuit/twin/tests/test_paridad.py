@@ -98,9 +98,9 @@ def test_preset_contra_ino_sintetico(monkeypatch):
     by = {r.name: r for r in rows}
     assert by["TURNS_PER_RACE"].difiere and by["PARK_X_MM"].difiere
     assert not by["inject_map_truth"].difiere
-    assert by["servo.fuera_de_topes"].real.startswith("15 ")
+    assert by["servo.fuera_de_topes"].real.startswith("165 ")   # el twin acota a 2..150 (medido)
     # El 0..180 de escribirServo no cuenta como tope de maniobra.
-    assert by["servo.topes"].real.startswith("19..161") and not by["servo.topes"].difiere
+    assert by["servo.topes"].real.startswith("19..161") and by["servo.topes"].difiere
     # Twin con la dirección medida (2026-10-21); el .ino sigue con la geometría del CAD.
     assert by["servo.rueda_der"].difiere and by["servo.rueda_izq"].difiere
     joined = " | ".join(errors)

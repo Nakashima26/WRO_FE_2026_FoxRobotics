@@ -52,9 +52,10 @@ class SteeringParams:
     # Medido 2026-10-21 (p7_radios, calib_fit_steer): 0.474 izq / 0.600 der °rueda por °servo.
     gain_left: float = 42.62
     gain_right: float = 54.04
-    servo_center_deg: float = 90.0
-    servo_min_deg: float = 19.0
-    servo_max_deg: float = 161.0
+    # Medido 2026-10-21 (p7_centro/p7_extremos): centro 77, rango útil 2..150 (en 154 la dirección se traba).
+    servo_center_deg: float = 77.0
+    servo_min_deg: float = 2.0
+    servo_max_deg: float = 150.0
     slew_deg_per_s: float = 600.0
     deadband_deg: float = 2.0   # calib 2026-10-21 p7_centro: ±2 de juego alrededor del centro
 
@@ -77,15 +78,17 @@ class MotorParams:
     scrub_coeff: float = 0.12
     # Tope de aceleración por agarre; None = sin tope. 0.8·0.55·g (no medido; las llantas patinan ~1 cm al arrancar).
     a_max_mm_s2: float | None = 4316.0
-    # Tope lateral medido (p8_curva_rapida): arriba de ~2.4-2.9 m/s² la curva se abre (subviraje).
-    a_lat_max_mm_s2: float | None = 2600.0
+    # Tope lateral medido (p8_curva_rapida): arriba de esto la curva se abre (subviraje); None = sin tope.
+    # Der (servo 5/20) ~2610-2860, izq (servo 134) ~2400.
+    a_lat_right_mm_s2: float | None = 2750.0
+    a_lat_left_mm_s2: float | None = 2400.0
 
     def __post_init__(self) -> None:
         _prov("motor.k/pwm0", "medido", "calib 2026-10-21 rampas 20-255 (12.5 V)")
         _prov("motor.tau_drive_s", "medido", "calib 2026-10-21 escalones 90/160/230")
         _prov("motor.tau_coast_s", "medido", "calib 2026-10-21 coast 120/230")
         _prov("motor.scrub_coeff", "medido", "calib 2026-10-21 p8_curva: −11% a servo 15, −2% a 40 (PWM 160)")
-        _prov("motor.a_lat_max_mm_s2", "medido", "calib 2026-10-21 p8_curva_rapida: 2360-2860 mm/s² según servo")
+        _prov("motor.a_lat_left/right_mm_s2", "medido", "calib 2026-10-21 p8_curva_rapida: 2360-2860 mm/s² según servo")
         _prov("motor.a_max_mm_s2", "supuesto", "mu*fracción en eje trasero*g")
 
 
@@ -106,19 +109,14 @@ def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
 
 @dataclass
 class EncoderParams:
-    counts_per_mm: float = 20.7
+    counts_per_mm: float = 5.45   # medido 2026-10-19 (CalibFox x4, enc_runs)
     slip_bias_sigma: float = 0.01
     slip_c_acc: float = 2e-5
     slip_c_acc_cap: float = 0.05
     slip_c_scrub: float = 0.02
 
     def __post_init__(self) -> None:
-        _prov(
-            "encoder.counts_per_mm",
-            "supuesto",
-            "7 PPR×4 (cuadratura x4)×50 (N20)×2 (LEGO) / (π×43) = 20.73 cuentas/mm "
-            "(0.0482 mm/cuenta) — encoder del hardware nuevo; recalibrar en pista",
-        )
+        _prov("encoder.counts_per_mm", "medido", "calib 2026-10-19 enc_runs (CalibFox x4): 5.45 cuentas/mm")
         _prov("encoder.slip_*", "supuesto", "deriva multiplicativa por acel/scrub")
 
 
