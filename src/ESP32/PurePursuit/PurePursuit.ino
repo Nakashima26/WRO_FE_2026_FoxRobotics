@@ -196,11 +196,15 @@ int velocidadMotor = 160;
 int centroServo    = 78;   // mitad de 1..156 (el 77 de p7_centro estaba mal medido; 2026-10-22)
 const int SERVO_MIN_DEG = 1;    // tope derecho medido 2026-10-22
 const int SERVO_MAX_DEG = 156;  // tope izquierdo medido 2026-10-22 (antes se trababa en 154)
-// Dirección (supuesto del usuario 2026-10-21): llantas a 53° a tope en 1..156 → 53° de
-// rueda equivalente (bicicleta, R ~85 mm) a 77 ticks del centro (el lado corto, der 78-1).
-// Debe coincidir con config.MAX_WHEEL_STEER_DEG / SERVO_FULL_LOCK_CMD_DEG.
-const float RUEDA_TOPE_DEG   = 53.0f;
-const int   SERVO_TOPE_TICKS = 77;
+// Dirección medida 2026-10-22 en el tapete (twin/calib/medidas_20261022): grados de rueda
+// equivalente (bicicleta, atan(113/R)) por tick de servo desde el centro, uno por lado.
+// Der lineal hasta el tope (servo 1 -> R 123 mm); izq lineal hasta 144 y de 148 a 156 se
+// queda en R ~134 (la llanta de afuera ya no acompaña).
+const float RUEDA_POR_TICK_DER = 0.552f;
+const float RUEDA_POR_TICK_IZQ = 0.588f;
+// Tope simétrico por si acaso (usuario 2026-10-22): R 134 mm a los dos lados = atan(113/134).
+// Debe coincidir con config.MAX_WHEEL_STEER_DEG y KAPPA_MAX de route_planner.py.
+const float RUEDA_TOPE_DEG     = 40.1f;
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -249,8 +253,6 @@ int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odomet
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
-// Grados de servo por grado de rueda.
-const float RUTA_SERVO_POR_RUEDA = SERVO_TOPE_TICKS / RUEDA_TOPE_DEG;
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
 const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
@@ -2934,11 +2936,12 @@ float rutaExtTapeteCm() {
   return (1500.0f - perp) / 10.0f - 6.5f;
 }
 
-// Servo para un ángulo de rueda de la ruta (+ = derecha), sin wallPanic.
+// Servo para un ángulo de rueda (+ = derecha), sin wallPanic. Acota a ±RUEDA_TOPE_DEG
+// (R 134 mm) y usa la ganancia de cada lado.
 int rutaServo(float ruedaDeg) {
-  float servoDeg = constrain(ruedaDeg * RUTA_SERVO_POR_RUEDA,
-                             (float)(SERVO_MIN_DEG - centroServo), (float)(SERVO_MAX_DEG - centroServo));
-  return centroServo - (int)lroundf(servoDeg);
+  ruedaDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
+  float ticks = ruedaDeg >= 0.0f ? ruedaDeg / RUEDA_POR_TICK_DER : ruedaDeg / RUEDA_POR_TICK_IZQ;
+  return constrain(centroServo - (int)lroundf(ticks), SERVO_MIN_DEG, SERVO_MAX_DEG);
 }
 
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
@@ -4999,8 +5002,8 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          int ticks = constrain((int)(delta / RUEDA_TOPE_DEG * SERVO_TOPE_TICKS), 28, SERVO_TOPE_TICKS);
-          parkServoU = uturnIzqP ? centroServo + ticks : centroServo - ticks;
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          parkServoU = rutaServo(uturnIzqP ? -delta : delta);
           Serial.print("PARK U servo="); Serial.print(parkServoU);
           Serial.print(" ext="); Serial.println(extAhoraP);
         }
@@ -6342,8 +6345,8 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          int ticks = constrain((int)(delta / RUEDA_TOPE_DEG * SERVO_TOPE_TICKS), 28, SERVO_TOPE_TICKS);
-          puntaServoU = uturnIzq ? centroServo + ticks : centroServo - ticks;
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          puntaServoU = rutaServo(uturnIzq ? -delta : delta);
           Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
           Serial.print(" ext="); Serial.println(extAhora);
         }

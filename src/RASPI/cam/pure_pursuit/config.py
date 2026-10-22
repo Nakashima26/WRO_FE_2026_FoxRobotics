@@ -93,10 +93,12 @@ WHEEL_INNER_FULL_LOCK_DEG = 53.1  # README v2 §2.4 (medido en el ensamble CAD)
 WHEEL_OUTER_FULL_LOCK_DEG = 37.0  # README v2 §2.4
 # Comando de servo (° desde el centro) con el que se logra ese tope: recorrido de la
 # cremallera medido en el CAD (±71°, no el ±90° nominal).
-SERVO_FULL_LOCK_CMD_DEG   = 71.0
-MAX_WHEEL_STEER_DEG  = round(float(np.degrees(np.arctan(
-    WHEELBASE_MM / (WHEELBASE_MM / np.tan(np.radians(WHEEL_INNER_FULL_LOCK_DEG))
-                    + KINGPIN_TRACK_MM / 2.0)))), 2)   # ≈44.54° (equivalente bicicleta)
+# Medido 2026-10-22 en el tapete (twin/calib/medidas_20261022): R mínimo 123 mm der / 134 izq.
+# Por si acaso se toma 134 a los DOS lados (usuario): atan(113/134) = 40.1°, que el ESP
+# alcanza a ~73 ticks der (0.552°/tick) y ~68 izq (0.588°/tick); 70 = promedio para la Pi.
+# Debe coincidir con RUEDA_TOPE_DEG de PurePursuit.ino y KAPPA_MAX de route_planner.py.
+SERVO_FULL_LOCK_CMD_DEG   = 70.0
+MAX_WHEEL_STEER_DEG  = 40.1   # bici a tope, R 134 mm (CAD decía 44.54 con la interior a 53.1°)
 # OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo maneja otra tarea,
 # no se cambia aquí.
 # Cámara (NoIR ancho)
@@ -130,7 +132,7 @@ VEHICLE_DIMS_PROVENANCE = {
     "FRONT_OVERHANG_MM": "largo medido 2026-10-22 − batalla − voladizo trasero",
     "TRACK_MM": "CAD v2 (GLB)",
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
-    "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
+    "MAX_WHEEL_STEER_DEG": "medido 2026-10-22: R 134 mm (tope izq en tapete) a los dos lados",
     "CAMERA_TILT_DEG": "confirmado por usuario",
     "CAMERA_HEIGHT_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 85 en el origen del nodo, no el centro óptico)",
     "CAMERA_FWD_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 134 en el origen del nodo)",

@@ -182,8 +182,10 @@ def test_params_patch_roundtrip_values(tmp_path):
 
 # ── direccion ─────────────────────────────────────────────────────────────────
 def test_steer_inner_conversion_matches_config():
+    # La interior de 53.1° del CAD da 44.54° bici. config.MAX_WHEEL_STEER_DEG ya no sale de
+    # aquí: es el R mínimo medido en el tapete (2026-10-22, 134 mm = 40.1°).
     d = fs.delta_eq_from_inner(C.WHEEL_INNER_FULL_LOCK_DEG, C.WHEELBASE_MM, C.KINGPIN_TRACK_MM)
-    assert d == pytest.approx(C.MAX_WHEEL_STEER_DEG, abs=0.02)
+    assert d == pytest.approx(44.54, abs=0.02)
 
 
 def test_steer_fit_gains_and_ppservogain(tmp_path):

@@ -55,7 +55,7 @@ PILLAR_HALF = 25.0           # señal 50x50
 CAR_REAR_MM = 21.8
 CAR_FRONT_MM = 147.6
 CAR_HALF_W_MM = 66.0
-KAPPA_MAX = 1.0 / 115.0      # radio mínimo al centro del eje trasero
+KAPPA_MAX = 1.0 / 134.0      # radio mínimo al centro del eje trasero (medido 2026-10-22, 134 a los dos lados)
 
 _PILLAR_CIRC = PILLAR_HALF * math.sqrt(2.0)
 _COLORS = ("Red", "Green")
