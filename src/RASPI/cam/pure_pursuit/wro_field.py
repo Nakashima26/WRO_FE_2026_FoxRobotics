@@ -10,7 +10,7 @@ Medidas del reglamento (WRO-2026-Future-Engineers-Self-Driving-Cars):
   - Señal: paralelepípedo 50 × 50 × 100 mm. Rojo se pasa por la derecha,
     verde por la izquierda. Hasta 7 de cada color.
   - Cajón: dos maderas magenta 200 × 20 × 100 mm. El largo libre es
-    1.5 × el largo del robot (180 mm → 270 mm). En el programa oficial
+    1.5 × el largo del robot (176 mm → 264 mm). En el programa oficial
     de 2024 ese hueco está fijo en 300 mm; aquí se usa el reglamento 2026.
 
 Asientos y cartas: el reglamento describe el sorteo (moneda + 36 cartas)
@@ -59,13 +59,13 @@ SIGN_MM = 50.0                        # 13.19
 LINE_MM = 20.0                        # 13.9
 PARK_BARRIER_THICK_MM = 20.0
 PARK_BARRIER_INTO_MM = 200.0          # los 20 cm de la madera, hacia el pasillo
-PARK_GAP_MM = 270.0                   # 1.5 × 180 mm (el programa oficial dibuja 300)
+PARK_GAP_MM = 1.5 * _C.ROBOT_LENGTH_MM  # reglamento: 1.5 × largo del robot (176 → 264); el programa oficial dibuja 300
 # El programa oficial pone el cajón al inicio de la recta (w = 1000), pero los
 # jueces lo pueden mover a lo largo de la recta, pegado a la pared exterior
 # (pasó en el nacional 2026). w0 = cara de atrás de la primera madera.
 PARK_LEN_MM = 2.0 * PARK_BARRIER_THICK_MM + PARK_GAP_MM
 PARK_W_MIN = 1000.0
-PARK_W_MAX = 2000.0 - PARK_LEN_MM     # 1690
+PARK_W_MAX = 2000.0 - PARK_LEN_MM     # 1696 con el carro de 176
 
 # Coordenadas de una recta norte, como el programa oficial:
 # (h, w) con h = mm desde el borde exterior y w = mm desde el oeste del tapete.

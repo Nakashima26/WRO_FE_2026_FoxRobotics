@@ -668,7 +668,7 @@ def main():
                     help="centro, zona o cajon; vacío = el del preset")
     ap.add_argument("--park-pos", default="",
                     help="cajón a lo largo de la recta: random (según la semilla) o w0 en mm "
-                         "(1000..1690); vacío = fijo en 1000 como el programa oficial")
+                         "(1000..1696); vacío = fijo en 1000 como el programa oficial")
     ap.add_argument("--calib", default="pure_pursuit/twin/calib/bev_calib_main_2026-08-19.npz")
     ap.add_argument("--fw", action="append", default=[])
     ap.add_argument("--pi", action="append", default=[])
