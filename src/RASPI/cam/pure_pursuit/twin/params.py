@@ -49,9 +49,10 @@ class SteeringParams:
     # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
     # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
     # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 19..161 (±71°).
-    # Medido 2026-10-21 (p7_radios, calib_fit_steer): 0.474 izq / 0.600 der °rueda por °servo.
-    gain_left: float = 42.62
-    gain_right: float = 54.04
+    # Usuario 2026-10-21: llanta interior ~53° a tope a los dos lados (bici 38.9°, R 140 mm) en 2..150.
+    # p7_radios midió der 129 / izq 171 mm (izq 0.474, der 0.600 °/°servo); el usuario lo descarta para la izq.
+    gain_left: float = 47.93
+    gain_right: float = 46.65
     # Medido 2026-10-21 (p7_centro/p7_extremos): centro 77, rango útil 2..150 (en 154 la dirección se traba).
     servo_center_deg: float = 77.0
     servo_min_deg: float = 2.0
@@ -60,7 +61,7 @@ class SteeringParams:
     deadband_deg: float = 2.0   # calib 2026-10-21 p7_centro: ±2 de juego alrededor del centro
 
     def __post_init__(self) -> None:
-        _prov("steering.gain_left/right", "medido", "calib 2026-10-21 radios encoder+BNO: rueda máx 41.2°, R mín 129 mm")
+        _prov("steering.gain_left/right", "supuesto", "usuario: llanta interior 53° a tope ambos lados (p7_radios: R der 129 / izq 171 mm)")
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "medido", "calib 2026-10-21: correcciones de 1-2 no mueven las llantas")
 
