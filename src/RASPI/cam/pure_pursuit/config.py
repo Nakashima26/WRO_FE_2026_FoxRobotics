@@ -75,11 +75,11 @@ BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0
 # Fuente: GLB del CAD v2 (VehicleDirTest_V2.glb, SolidWorks, 2026-10-09), cajas
 # alineadas al eje; el eje trasero es el origen. Atrás: borde de la llanta trasera
 # (−21.8); adelante: cara del ultrasónico frontal (147.6; el chasis base acaba en 127.9).
-ROBOT_LENGTH_MM      = 169.4    # CAD: −21.8 … 147.6 (README: ≈170 / 168.7)
-ROBOT_WIDTH_MM       = 132.0    # CAD: llantas traseras ±66 (README 128 era sin llantas: tapa ±58.7)
+ROBOT_LENGTH_MM      = 176.0    # medido 2026-10-22 en el carro (CAD decía 169.4); −21.8 … 154.2
+ROBOT_WIDTH_MM       = 125.0    # medido 2026-10-22 en el carro (CAD decía 132)
 WHEELBASE_MM         = 113.0    # CAD: 112.85 (el .ino también usa 113)
 REAR_OVERHANG_MM     = 21.8     # CAD (borde de llanta trasera)
-FRONT_OVERHANG_MM    = 34.6     # CAD (147.6 − 113; cara del ultrasónico frontal)
+FRONT_OVERHANG_MM    = 41.2     # 176 − 113 − 21.8 (medido 2026-10-22; lo que sobra va adelante)
 TRACK_MM             = 110.0    # CAD: entre centros de llantas traseras (±55; llanta de 22 mm)
 WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
 # Dirección v2 (README §2.4, piñón de 19 dientes, CAD): a tope de servo la rueda
@@ -123,11 +123,11 @@ SENSOR_MOUNTS = {
 }
 # Procedencia, para el twin (describe()) y para quien mida.
 VEHICLE_DIMS_PROVENANCE = {
-    "ROBOT_LENGTH_MM": "CAD v2 (GLB); medir en el carro impreso",
-    "ROBOT_WIDTH_MM": "CAD v2 (GLB, con llantas)",
+    "ROBOT_LENGTH_MM": "medido en el carro impreso 2026-10-22",
+    "ROBOT_WIDTH_MM": "medido en el carro impreso 2026-10-22",
     "WHEELBASE_MM": "CAD v2 (GLB, 112.85)",
     "REAR_OVERHANG_MM": "CAD v2 (GLB)",
-    "FRONT_OVERHANG_MM": "CAD v2 (GLB)",
+    "FRONT_OVERHANG_MM": "largo medido 2026-10-22 − batalla − voladizo trasero",
     "TRACK_MM": "CAD v2 (GLB)",
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
     "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
@@ -738,7 +738,7 @@ MIDTURN_SIDE_DEADBAND_PX  = 24.0   # |bev_x - eje| bajo esto -> lado '?' (indeci
 # CLEAR_PX = medio ancho del chasis + inflado de la lata. Si el centro de la
 # lata está a >= esto del eje de avance, el borde del carro libra el borde
 # inflado de la lata yendo recto.
-ROBOT_HALF_WIDTH_PX      = round(ROBOT_WIDTH_MM / 2.0 / MM_PER_PX)  # chasis 130mm -> 32 px
+ROBOT_HALF_WIDTH_PX      = round(ROBOT_WIDTH_MM / 2.0 / MM_PER_PX)  # carro 125 mm
 OBS_MEM_GEOM_CLEAR_PX    = ROBOT_HALF_WIDTH_PX + OBS_INFLATE_R   # 35 + 36 = 71 px
 # ── Perillas de AJUSTE FINO (mover solo estas en pista) ─────────────────────
 # AHEAD_MARGIN_PX: cuánto puede seguir ADELANTE la lata (marco actual) y aún

@@ -35,11 +35,11 @@ class VehicleParams:
     wheel_diameter_mm: float = C.WHEEL_DIAMETER_MM
 
     def __post_init__(self) -> None:
-        _prov("vehicle.length_mm", "medido", "180 mm, confirmado por usuario (aprox) — config.py")
-        _prov("vehicle.width_mm", "medido", "130 mm, confirmado por usuario (aprox) — config.py")
+        _prov("vehicle.length_mm", "medido", "176 mm, medido en el carro 2026-10-22 — config.py")
+        _prov("vehicle.width_mm", "medido", "125 mm, medido en el carro 2026-10-22 — config.py")
         _prov("vehicle.wheelbase_mm", "medido", "batalla 113 mm, confirmada por usuario — config.py")
         _prov("vehicle.rear_overhang_mm", "supuesto", "derivado (180-113)/2, pendiente medir")
-        _prov("vehicle.front_overhang_mm", "supuesto", "derivado (180-113)/2, pendiente medir")
+        _prov("vehicle.front_overhang_mm", "medido", "176 − 113 − 21.8 = 41.2 mm (2026-10-22) — config.py")
         _prov("vehicle.track_mm", "supuesto", "solo dibujo; no entra al modelo bicicleta")
         _prov("vehicle.wheel_diameter_mm", "medido", "README llanta 43 mm")
 
@@ -49,10 +49,17 @@ class SteeringParams:
     # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
     # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
     # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 19..161 (±71°).
-    # Usuario 2026-10-21: las llantas abren 53° a tope a los dos lados (bici 53°, R ~85 mm) en 1..156 (2026-10-22: 156 ya no se traba).
-    # p7_radios midió der 129 / izq 171 mm (izq 0.474, der 0.600 °/°servo); el usuario lo descarta para la izq.
-    gain_left: float = 61.15
-    gain_right: float = 61.95
+    # Medido 2026-10-22 en el tapete (calib/medidas_20261022/rango_tapete_p150, PWM 150, 3 rep. a ±1 mm),
+    # radio al centro del eje trasero -> bici atan(113/R), centro 78:
+    #   der: servo 1/4/8/16 -> R 123/130/142/166 mm, lineal 0.552 °/°servo (residuo < 0.2°).
+    #   izq: servo 140/144 -> R 153/140 mm, lineal 0.588 °/°servo; de 148 a 156 se queda en R 134-136
+    #   (la llanta de afuera ya no acompaña) -> tope ~39.9° (wheel_max_left_deg).
+    # Las llantas abren ~53° a tope (llanta INTERIOR, a ojo); el equivalente bici que da el radio real
+    # es 42.6° der / 39.9° izq. Con 53° bici el twin giraba en R ~85 mm.
+    gain_left: float = 52.94
+    gain_right: float = 49.71
+    wheel_max_left_deg: float = 39.9    # bici a tope izq (R 134-136 mm de 148 a 156)
+    wheel_max_right_deg: float = 42.6   # bici a tope der (R 123 mm en servo 1)
     # Medido 2026-10-21 (p7_centro/p7_extremos): centro 77, rango útil 2..150 (en 154 la dirección se traba).
     servo_center_deg: float = 78.0
     servo_min_deg: float = 1.0
@@ -61,7 +68,8 @@ class SteeringParams:
     deadband_deg: float = 2.0   # calib 2026-10-21 p7_centro: ±2 de juego alrededor del centro
 
     def __post_init__(self) -> None:
-        _prov("steering.gain_left/right", "supuesto", "usuario: llanta interior 53° a tope ambos lados (p7_radios: R der 129 / izq 171 mm)")
+        _prov("steering.gain_left/right", "medido", "radios en tapete 2026-10-22 (PWM 150): der 0.552, izq 0.588 °/°servo con centro 78")
+        _prov("steering.wheel_max_left/right_deg", "medido", "R min tapete 2026-10-22: izq 134-136 mm (148..156), der 123 mm (servo 1)")
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "medido", "calib 2026-10-21: correcciones de 1-2 no mueven las llantas")
 
@@ -302,8 +310,8 @@ def wheel_deg_from_servo(servo_deg: float, steering: SteeringParams) -> float:
     """Rueda + = derecha; servo > 90 = izquierda (firmware)."""
     delta = steering.servo_center_deg - servo_deg
     if delta >= 0.0:
-        return delta * steering.gain_right / 90.0
-    return delta * steering.gain_left / 90.0
+        return min(delta * steering.gain_right / 90.0, steering.wheel_max_right_deg)
+    return max(delta * steering.gain_left / 90.0, -steering.wheel_max_left_deg)
 
 
 def max_wheel_deg(steering: SteeringParams) -> float:

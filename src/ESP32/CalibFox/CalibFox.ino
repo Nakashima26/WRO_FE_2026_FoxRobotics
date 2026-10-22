@@ -164,8 +164,8 @@ static const int resMotor  = 8;
 // ── Parametros de la herramienta ──────────────────────────────────────────────
 static const unsigned long FRENO_MS      = 300;     // = MANIOBRA_FRENO_MS del .ino
 static const unsigned long RUN_HARD_MAX_MS = 20000;
-static const int   SERVO_MIN_SAFE = 2;     // topes mecánicos del v2 (RectaBnoTest: 2..154)
-static const int   SERVO_MAX_SAFE = 154;
+static const int   SERVO_MIN_SAFE = 1;     // topes mecánicos del v2: 1..156 (en 160 el servo se fuerza, 2026-10-22)
+static const int   SERVO_MAX_SAFE = 156;
 static const unsigned long PING_TIMEOUT_US = 7000;   // = pulseIn del .ino l.2579
 static const int   LT_MAX = 1000;                    // muestras max de LOOPTIME
 
@@ -692,7 +692,7 @@ static void handleLine(char *line) {
   }
   if (!strcmp(cmd, "SERVO")) {
     long v; if (!getInt(ctx, v)) { IO.println("ERR SERVO deg"); return; }
-    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { IO.println("ERR SERVO fuera de 2..154"); return; }
+    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { IO.println("ERR SERVO fuera de 1..156"); return; }
     servoWrite((int)v); IO.println("OK SERVO"); return;
   }
   if (!strcmp(cmd, "SERVOOFF")) { ledcWrite(SERVO_PIN, 0); servoActive = false; IO.println("OK SERVOOFF"); return; }
@@ -737,7 +737,7 @@ static void handleLine(char *line) {
     if (!getInt(ctx, v) || !getInt(ctx, ms)) { IO.println("ERR PWM v ms [servo]"); return; }
     if (v < -255 || v > 255) { IO.println("ERR PWM -255..255"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 2..154"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 1..156"); return; }
       servoWrite((int)sv);
       delay(400);   // que el servo llegue antes de arrancar
     }
@@ -759,7 +759,7 @@ static void handleLine(char *line) {
     unsigned long total = (unsigned long)(nSteps * hold);
     if (total > RUN_HARD_MAX_MS) { IO.println("ERR RAMP > 20 s: menos escalones o hold menor"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 2..154"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { IO.println("ERR servo 1..156"); return; }
       servoWrite((int)sv); delay(400);
     }
     Profile p = {PM_STAIRS, (int)a, (int)b, (int)st, (unsigned long)hold, total, total, false};
