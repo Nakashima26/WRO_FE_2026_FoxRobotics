@@ -816,6 +816,15 @@ const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear 
 // (salida_cajon.py): 2 = ADENTRO (cruzar al carril interior: rojo en CW / verde en
 // CCW) -> la S se abre a ~90° (una "caja") hasta pasar la fila interior.
 const bool INICIO_REVERSA              = false; // true = fases 4-8 de antes (reversa colchón)
+// Servo a tope ANTES de mover el carro: con la llanta interior a ~53° (R ~140 mm) el arco
+// necesita ~95 mm libres delante de la nariz; arrancar mientras el servo viaja (~73° a
+// ~600°/s) se come ese margen y la esquina delantera toca la madera de enfrente.
+const unsigned long INICIO_SERVO_ESPERA_MS = 150;
+// Aun así, con R ~140 mm la esquina delantera exterior toca la madera de enfrente a ~36° de
+// giro (por ~6 mm). A los INICIO_3P_ANG_DEG da una reversa corta con el servo al otro tope
+// (la nariz sigue entrando y la cola ya se alejó de la madera de atrás) y vuelve al arco.
+const float INICIO_3P_ANG_DEG          = 18.0f;  // 0 = sin corrección
+const float INICIO_3P_REV_MM           = 15.0f;
 const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
 const float INICIO_LAT_AFUERA_MM       = 200.0f; // desplazamiento lateral final, salida normal (centro a ~33 cm de la pared)
 const float INICIO_LAT_ADENTRO_MM      = 620.0f; // ídem con isal=2 (centro a ~75 cm: más allá de la fila interior a 60 cm)
@@ -840,6 +849,7 @@ bool  piSenalSalida = false;   // isen= de la Pi: señal a <~1.3 m adelante del 
 // Salida rápida solo sin señal cerca de la salida; con señal, el PWM de siempre.
 int inicioPwm() { return (piSenalSalida && INICIO_PWM_SENAL > 0) ? INICIO_PWM_SENAL : INICIO_PWM; }
 bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
+bool  inicio3pHecho = false;   // la reversa de corrección (fase 11) solo una vez
 float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
 float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample de la fase 6
@@ -3885,6 +3895,7 @@ void loop() {
         inicioAdentro  = false;
         inicioY0       = poseYf;
         inicioOdom0    = odomMmF;
+        inicio3pHecho  = false;
         motorAdelante();
         // El servo llega a tope ANTES de rodar (una sola vez: con delay en cada
         // loop el chequeo de ángulo corría cada ~100 ms y la fase 1 se pasaba ~25°).
@@ -3912,24 +3923,48 @@ void loop() {
         Serial.print(" ang="); Serial.println(anguloGyro, 1);
         if (inicioFase == 2 && deltaIni < (float)(INICIO_ANG_ADENTRO_DEG - INICIO_OVERSHOOT_DEG)) {
           inicioFase   = 1;                       // vuelve a tope hasta ~90°
-          inicioFaseMs = millis() - INICIO_RAMP_MS;
+          inicioFaseMs = millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS;
         }
       }
 
       if (inicioFase == 1) {
-        int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
+        unsigned long tSw = millis() - inicioFaseMs;
+        int vel = tSw < INICIO_SERVO_ESPERA_MS ? 0
+                : rampaPWM(tSw - INICIO_SERVO_ESPERA_MS, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         setMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
         bool swingListo   = (deltaIni >= (float)(angSwing - INICIO_OVERSHOOT_DEG));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
+        if (!swingListo && !inicio3pHecho && INICIO_3P_ANG_DEG > 0 && deltaIni >= INICIO_3P_ANG_DEG) {
+          inicio3pHecho   = true;
+          inicioFase      = 11;
+          inicioFaseMs    = millis();
+          inicioOdomRecto = odomMmF;
+          Serial.print("INICIO fase 1: reversa de correccion ang="); Serial.println(anguloGyro, 1);
+          break;
+        }
         if (swingListo || swingTimeout) {
           escribirServo(centroServo);
           inicioFase      = 2;
           inicioFaseMs    = millis();
           inicioOdomRecto = odomMmF;
           if (swingTimeout) Serial.println("INICIO fase 1: timeout de swing");
+        }
+        break;
+      }
+
+      // ── Fase 11: reversa corta con el servo al otro tope, y de vuelta al arco ──
+      if (inicioFase == 11) {
+        motorReversa();
+        escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);
+        setMotor(inicioPwm());
+        if (odomMmF > inicioOdomRecto) inicioOdomRecto = odomMmF;   // la reversa cuenta desde donde paró
+        if (inicioOdomRecto - odomMmF >= INICIO_3P_REV_MM || millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS) {
+          motorCoast();
+          inicioFase   = 1;
+          inicioFaseMs = millis();   // espera de servo y rampa otra vez
         }
         break;
       }
