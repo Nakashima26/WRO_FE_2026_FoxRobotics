@@ -369,7 +369,7 @@ void IRAM_ATTR encIsr() {
   uint8_t ab = (a << 1) | b;
   int8_t d = encTrans[(encPrevAB << 2) | ab];
   encPrevAB = ab;
-  if (d) encCount += d;
+  if (d) encCount -= d;   // azul->34, morado->36: la tabla cuenta adelante negativo (EncoderTest/VueltaCalibracion SIGNO -1)
 }
 #endif
 #endif
