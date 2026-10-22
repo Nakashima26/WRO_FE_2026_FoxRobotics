@@ -49,14 +49,14 @@ class SteeringParams:
     # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
     # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
     # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 19..161 (±71°).
-    # Usuario 2026-10-21: llanta interior ~53° a tope a los dos lados (bici 38.9°, R 140 mm) en 2..150.
+    # Usuario 2026-10-21: las llantas abren 53° a tope a los dos lados (bici 53°, R ~85 mm) en 1..156 (2026-10-22: 156 ya no se traba).
     # p7_radios midió der 129 / izq 171 mm (izq 0.474, der 0.600 °/°servo); el usuario lo descarta para la izq.
-    gain_left: float = 47.93
-    gain_right: float = 46.65
+    gain_left: float = 61.15
+    gain_right: float = 61.95
     # Medido 2026-10-21 (p7_centro/p7_extremos): centro 77, rango útil 2..150 (en 154 la dirección se traba).
-    servo_center_deg: float = 77.0
-    servo_min_deg: float = 2.0
-    servo_max_deg: float = 150.0
+    servo_center_deg: float = 78.0
+    servo_min_deg: float = 1.0
+    servo_max_deg: float = 156.0
     slew_deg_per_s: float = 600.0
     deadband_deg: float = 2.0   # calib 2026-10-21 p7_centro: ±2 de juego alrededor del centro
 

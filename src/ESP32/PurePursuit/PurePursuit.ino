@@ -193,12 +193,14 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
-int centroServo    = 77;   // medido 2026-10-21 (p7_centro)
-const int SERVO_MIN_DEG = 2;    // tope derecho medido (p7_extremos)
-const int SERVO_MAX_DEG = 150;  // tope izquierdo: en 154 la dirección se traba
-// Dirección v2 (README §2.4): 44.54° de rueda equivalente (modelo bicicleta) a ±71° de
-// servo = 0.627°/tick, o sea 43.91° a 70 ticks (la fórmula de las U usa `delta / 43.91 * 70`).
-// Debe coincidir con config.MAX_WHEEL_STEER_DEG * 70 / SERVO_FULL_LOCK_CMD_DEG.
+int centroServo    = 78;   // mitad de 1..156 (el 77 de p7_centro estaba mal medido; 2026-10-22)
+const int SERVO_MIN_DEG = 1;    // tope derecho medido 2026-10-22
+const int SERVO_MAX_DEG = 156;  // tope izquierdo medido 2026-10-22 (antes se trababa en 154)
+// Dirección (supuesto del usuario 2026-10-21): llantas a 53° a tope en 1..156 → 53° de
+// rueda equivalente (bicicleta, R ~85 mm) a 77 ticks del centro (el lado corto, der 78-1).
+// Debe coincidir con config.MAX_WHEEL_STEER_DEG / SERVO_FULL_LOCK_CMD_DEG.
+const float RUEDA_TOPE_DEG   = 53.0f;
+const int   SERVO_TOPE_TICKS = 77;
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -247,8 +249,8 @@ int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odomet
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
-// Grados de servo por grado de rueda: 71° de servo = 44.54° de rueda (v2).
-const float RUTA_SERVO_POR_RUEDA = 71.0f / 44.54f;
+// Grados de servo por grado de rueda.
+const float RUTA_SERVO_POR_RUEDA = SERVO_TOPE_TICKS / RUEDA_TOPE_DEG;
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
 const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
@@ -823,7 +825,7 @@ const unsigned long INICIO_SERVO_ESPERA_MS = 150;
 // Aun así, con R ~140 mm la esquina delantera exterior toca la madera de enfrente a ~36° de
 // giro (por ~6 mm). A los INICIO_3P_ANG_DEG da una reversa corta con el servo al otro tope
 // (la nariz sigue entrando y la cola ya se alejó de la madera de atrás) y vuelve al arco.
-const float INICIO_3P_ANG_DEG          = 18.0f;  // 0 = sin corrección
+const float INICIO_3P_ANG_DEG          = 0.0f;   // 0 = sin corrección; con 53° reales sale directo (2026-10-22)
 const float INICIO_3P_REV_MM           = 15.0f;
 const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
 const float INICIO_LAT_AFUERA_MM       = 200.0f; // desplazamiento lateral final, salida normal (centro a ~33 cm de la pared)
@@ -4997,7 +4999,7 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
+          int ticks = constrain((int)(delta / RUEDA_TOPE_DEG * SERVO_TOPE_TICKS), 28, SERVO_TOPE_TICKS);
           parkServoU = uturnIzqP ? centroServo + ticks : centroServo - ticks;
           Serial.print("PARK U servo="); Serial.print(parkServoU);
           Serial.print(" ext="); Serial.println(extAhoraP);
@@ -6340,8 +6342,7 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          // 70 ticks (servo 160) = ~43.9° de rueda equivalente (README v2 §2.4).
-          int ticks = constrain((int)(delta / 43.91f * 70.0f), 28, 70);
+          int ticks = constrain((int)(delta / RUEDA_TOPE_DEG * SERVO_TOPE_TICKS), 28, SERVO_TOPE_TICKS);
           puntaServoU = uturnIzq ? centroServo + ticks : centroServo - ticks;
           Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
           Serial.print(" ext="); Serial.println(extAhora);
