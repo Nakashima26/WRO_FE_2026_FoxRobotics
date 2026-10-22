@@ -1,0 +1,7 @@
+servo_deg,radius_mm,rep,note
+160,132.5,1,"auto enc+BNO: avance 1276 mm, giro +552.1 grados"
+1,125.7,1,"auto enc+BNO: avance 1361 mm, giro -620.4 grados"
+160,134.2,1,"auto enc+BNO: avance 1197 mm, giro +510.8 grados"
+1,126.5,1,"auto enc+BNO: avance 1333 mm, giro -603.4 grados"
+160,135.7,1,"auto enc+BNO: avance 1177 mm, giro +497.1 grados"
+1,127.0,1,"auto enc+BNO: avance 1316 mm, giro -593.7 grados"

@@ -75,10 +75,10 @@ const unsigned long RAMPA_MS = 500;
 
 // ── Control (convenciones de RondaAbierta: servo = centro + X, X > 0 = izquierda)
 int       centroServo    = 77;    // medido 2026-10-21 (juego de ±2 alrededor)
-const int SERVO_MIN      = 0;
-const int SERVO_MAX      = 150;   // en 154 la dirección se traba (calib 2026-10-21)
-const int SERVO_TOPE_DER = 0;
-const int SERVO_TOPE_IZQ = 150;   // el giro izquierdo más cerrado (radio 154 mm); 156 trababa la dirección
+const int SERVO_MIN      = 1;     // topes mecánicos del carro: 1..156
+const int SERVO_MAX      = 156;
+const int SERVO_TOPE_DER = 1;
+const int SERVO_TOPE_IZQ = 156;   // tope mecánico izquierdo
 float KpRumbo = 1.0f;                  // grados de servo por grado de error (el de RondaAbierta)
 const int PWM_REF_PID = 255;
 // Control lateral con la posición estimada: corre el rumbo objetivo

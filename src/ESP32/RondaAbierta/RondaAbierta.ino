@@ -25,7 +25,7 @@
  *
  * PINES:
  *   Driver TB6612: PWMA=23, AIN1=18, AIN2=19
- *   Servo:         GPIO 13 (0 = todo a la derecha, 150 = todo a la izquierda, centro 77)
+ *   Servo:         GPIO 13 (1 = todo a la derecha, 156 = todo a la izquierda, centro 77)
  *   ToF (VIN=3.3V, GND, SDA=21, SCL=22):
  *     Frontal XSHUT=0 -> 0x30 | Izquierdo XSHUT=15 -> 0x31 | Derecho XSHUT=5 -> 0x32
  *     Trasero XSHUT=4 se deja apagado.
@@ -96,10 +96,10 @@ const unsigned long TERMINANDO_MS  = 1000;    // recta tras el último giro hast
 // Centro medido 2026-10-21 con encoder + BNO (CalibFox): 75/77/79 van casi
 // recto (juego de ±2 en la dirección); 75 se iba a la derecha en la recta.
 int       centroServo    = 77;
-const int SERVO_MIN      = 0;
-const int SERVO_MAX      = 150;   // en 154 la dirección se traba (calib 2026-10-21)
-const int SERVO_TOPE_DER = 0;     // giro a tope
-const int SERVO_TOPE_IZQ = 150;   // el giro izquierdo más cerrado (radio 154 mm); 156 trababa la dirección
+const int SERVO_MIN      = 1;     // topes mecánicos del carro: 1..156
+const int SERVO_MAX      = 156;
+const int SERVO_TOPE_DER = 1;     // giro a tope
+const int SERVO_TOPE_IZQ = 156;   // tope mecánico izquierdo
 
 // ── Velocidades (PWM 0-255) — números del carro viejo, calibrar en pista ─────
 const int MOTOR_MAX         = 255;   // rectas
