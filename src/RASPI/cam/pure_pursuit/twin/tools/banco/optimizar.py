@@ -77,8 +77,11 @@ def parse_out(path):
 def ok_t(rec):
     """(ok, suma de vueltas 1-3); ok requiere al menos 3 vueltas."""
     laps = (rec or {}).get("lap_times_s") or []
-    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca
-    if len(laps) < 3 or (rec or {}).get("ignored_contacts"):
+    if len(laps) < 3:
+        return (False, None)
+    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca.
+    # Solo cuenta hasta el fin de la vuelta 3 (lo que optimizan estas perillas; U/cajón es otra sesión).
+    if any(c["t"] < sum(laps[:3]) for c in (rec or {}).get("ignored_contacts") or []):
         return (False, None)
     return (True, float(sum(laps[:3])))
 
@@ -95,8 +98,8 @@ def score(base, cand):
         median=float(np.median(d)) if d else None,
         n=len(d), new_fail=new_fail, fails=fails,
     )
-    # semilla que falla en 2+ ruidos: rechazo duro
-    if any(n >= 2 for n in Counter(s for _, s in fails).values()) or not d:
+    # semilla que falla NUEVA en 2+ ruidos: rechazo duro (las que ya fallan en la base no cuentan)
+    if any(n >= 2 for n in Counter(s for _, s in new_fail).values()) or not d:
         return math.inf, info
     return float(np.mean(d)) + len(new_fail), info
 
