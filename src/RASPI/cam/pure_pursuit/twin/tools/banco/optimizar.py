@@ -75,33 +75,39 @@ def parse_out(path):
 
 
 def ok_t(rec):
-    """(ok, suma de vueltas 1-3); ok requiere al menos 3 vueltas."""
+    """(ok, suma de vueltas 1-3, roce tardío). ok: >= 3 vueltas y sin roce de pared hasta el fin de la
+    vuelta 3. Roce tardío: roce de pared después (U/cajón), que estas perillas casi no controlan."""
     laps = (rec or {}).get("lap_times_s") or []
     if len(laps) < 3:
-        return (False, None)
-    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca. Cuenta en toda la
-    # carrera (también U/cajón): el usuario no quiere que toque la pared nunca.
-    if (rec or {}).get("ignored_contacts"):
-        return (False, None)
-    return (True, float(sum(laps[:3])))
+        return (False, None, False)
+    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca
+    end3 = sum(laps[:3])
+    cts = [c["t"] for c in (rec or {}).get("ignored_contacts") or []]
+    if any(c < end3 for c in cts):
+        return (False, None, False)
+    return (True, float(end3), bool(cts))
 
 
 def score(base, cand):
-    """Puntuacion del candidato vs base; ambos son {(nz, seed): (ok, t)}."""
+    """Puntuacion del candidato vs base; ambos son {(nz, seed): (ok, t, roce_tardio)}."""
     keys = [k for k in cand if k in base]
     both = [k for k in keys if base[k][0] and cand[k][0]]
     d = [cand[k][1] - base[k][1] for k in both]
     new_fail = [k for k in keys if base[k][0] and not cand[k][0]]
     fails = [k for k in cand if not cand[k][0]]
+    # El roce en la U/cajón es caótico corrida a corrida: se compara el total, no par a par, y solo
+    # castiga lo que pasa de 2 sigmas del ruido de conteo (0.1 s por roce de más).
+    lb, lc = sum(base[k][2] for k in keys), sum(cand[k][2] for k in keys)
+    late_pen = 0.1 * max(0.0, (lc - lb) - 2.0 * math.sqrt(lb + lc))
     info = dict(
         mean=float(np.mean(d)) if d else None,
         median=float(np.median(d)) if d else None,
-        n=len(d), new_fail=new_fail, fails=fails,
+        n=len(d), new_fail=new_fail, fails=fails, late_base=lb, late_cand=lc, late_pen=late_pen,
     )
-    # semilla que falla NUEVA en 2+ ruidos: rechazo duro (las que ya fallan en la base no cuentan)
+    # semilla que falla NUEVA (vueltas 1-3) en 2+ ruidos: rechazo duro
     if any(n >= 2 for n in Counter(s for _, s in new_fail).values()) or not d:
         return math.inf, info
-    return float(np.mean(d)) + len(new_fail), info
+    return float(np.mean(d)) + len(new_fail) + late_pen, info
 
 
 def sample(st, lam, rng):
@@ -191,7 +197,7 @@ def screen(ctx, st, c):
                             key=lambda b: b["score"])[:10]
     save_state(ctx.out, st)
     params = " ".join(f"{k.replace('ROUTE_PROFILE_', '').replace('ROUTE_', '')}={v:g}" for k, v in pi.items())
-    print(f"e{c['id']} g{gen} score={fmt(s)} mean={fmt(info['mean'])} fails={len(info['fails'])} {params}",
+    print(f"e{c['id']} g{gen} score={fmt(s)} mean={fmt(info['mean'])} fails={len(info['fails'])} pared_tarde={info['late_cand']}/{info['late_base']} {params}",
           flush=True)
 
 
