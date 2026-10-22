@@ -79,9 +79,9 @@ def ok_t(rec):
     laps = (rec or {}).get("lap_times_s") or []
     if len(laps) < 3:
         return (False, None)
-    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca.
-    # Solo cuenta hasta el fin de la vuelta 3 (lo que optimizan estas perillas; U/cajón es otra sesión).
-    if any(c["t"] < sum(laps[:3]) for c in (rec or {}).get("ignored_contacts") or []):
+    # roce de pared exterior ignorado por --solo-cajon: en el carro real sí choca. Cuenta en toda la
+    # carrera (también U/cajón): el usuario no quiere que toque la pared nunca.
+    if (rec or {}).get("ignored_contacts"):
         return (False, None)
     return (True, float(sum(laps[:3])))
 
