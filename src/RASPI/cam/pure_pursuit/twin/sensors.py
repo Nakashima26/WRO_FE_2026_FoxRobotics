@@ -177,6 +177,9 @@ class ToF:
             self._held_mm[sensor_id] = -1
             return -1
 
+        if sensor_id in p.short_map_ids:
+            xs, ys = p.short_map_true_mm, p.short_map_read_mm
+            mean_d = mean_d + ys[0] - xs[0] if mean_d < xs[0] else float(np.interp(mean_d, xs, ys))
         noise = self.rng.normal(0.0, p.noise_sigma_mm)
         out = mean_d * (1.0 + self.rng.normal(0.0, p.noise_rel)) + noise
         self._held_mm[sensor_id] = int(round(max(0.0, out)))

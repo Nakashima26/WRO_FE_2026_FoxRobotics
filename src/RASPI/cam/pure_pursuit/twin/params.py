@@ -187,7 +187,13 @@ class ToFMount:
 class ToFParams:
     half_fov_deg: float = 13.5
     ray_step_deg: float = 1.5
-    black_wall_max_mm: float = 250.0
+    # Pared negra visible a 80 cm en Short y a 150 cm en Long (calib 2026-10-21 tof); 250 era del VL53L0X.
+    black_wall_max_mm: float = 1500.0
+    # Lectura medida contra distancia real, pared negra, Short ROI 16 (lo que usa el firmware en L/R/atrás):
+    # +19 mm cerca y desde ~60 cm el cono ve el piso (800 -> 610, se satura). Solo para los ids de abajo.
+    short_map_true_mm: tuple[float, ...] = (100.0, 200.0, 300.0, 450.0, 600.0, 800.0)
+    short_map_read_mm: tuple[float, ...] = (119.0, 217.0, 319.0, 462.0, 550.0, 610.0)
+    short_map_ids: tuple[int, ...] = (0, 1, 2)
     max_range_mm: float = 4000.0
     noise_sigma_mm: float = 5.0
     noise_rel: float = 0.01
@@ -207,7 +213,8 @@ class ToFParams:
 
     def __post_init__(self) -> None:
         _prov("tof.reflectivity", "supuesto", "VL53 en pared negra vs magenta vs señal")
-        _prov("tof.black_wall_max_mm", "medido", "README VL53L0X fuera de rango ~300 mm negro")
+        _prov("tof.black_wall_max_mm", "medido", "calib 2026-10-21 tof: negro visible a 800 (Short) y 1500 mm (Long)")
+        _prov("tof.short_map", "medido", "calib 2026-10-21 lateral izq Short ROI 16 50 ms, todo status 0; der/atrás sin medir (misma curva)")
         _prov("tof.mounts", "supuesto", "L/R/atrás/frente; frente nuevo, espejo del trasero; pendiente medir")
         _prov("tof.rate_range", "supuesto", "firmware v2: L/R/atrás Short 20 ms (50 Hz, ~1.3 m), frente Long 33 ms (30 Hz, 4 m); ST: modo Short máx 50 Hz y ~1.3 m; sin medir en el carro")
 

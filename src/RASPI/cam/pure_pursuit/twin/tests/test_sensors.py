@@ -129,7 +129,7 @@ def test_tof_black_wall_range(rng):
     x_wall = OUTER_HALF_MM
     world = _EastWallWorld(x_wall)
     lateral = params.tof.mounts[1].right_mm
-    for dist, valid in ((200.0, True), (400.0, False)):
+    for dist, valid in ((200.0, True), (2000.0, False)):   # negro visible (medido); 2000 > rango Short
         x_rear = x_wall - dist - lateral
         pose = Pose(x_rear, 0.0, 0.0)
         r = tof.read_mm(1, world, pose, float(dist))
@@ -138,6 +138,16 @@ def test_tof_black_wall_range(rng):
             assert abs(r - dist) < 40.0
         else:
             assert r == -1
+
+
+def test_tof_short_map_measured(rng):
+    """Short ROI 16 en pared negra (calib 2026-10-21): +19 cerca, 800 -> 610 (ve el piso)."""
+    params = replace(TwinParams().tof, noise_sigma_mm=0.0, noise_rel=0.0)
+    world = _EastWallWorld(OUTER_HALF_MM)
+    lateral = params.mounts[1].right_mm
+    for dist, want in ((300.0, 319), (800.0, 610), (1100.0, 610)):
+        r = ToF(params, rng).read_mm(1, world, Pose(OUTER_HALF_MM - dist - lateral, 0.0, 0.0), 0.0)
+        assert abs(r - want) < 15, (dist, r)
 
 
 def test_tof_red_sign(rng):
@@ -159,7 +169,7 @@ _RANGE_TEST_BLACK_WALL_MM = 3000.0
 
 
 def test_tof_lateral_range_limit_1300(rng):
-    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM, short_map_ids=())
     x_wall = OUTER_HALF_MM
     lateral = params.mounts[1].right_mm
     for dist, valid in ((1000.0, True), (1500.0, False)):
@@ -192,7 +202,7 @@ def test_tof_sample_period_per_sensor(rng):
     assert params.sample_period_s_by_id[3] == pytest.approx(1.0 / 30.0)
     # Comportamiento: el lateral (0.020 s) re-muestrea a los 21 ms y no a los 15 ms;
     # el frontal (1/30 s) no re-muestrea a los 20 ms.
-    lat = replace(params, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    lat = replace(params, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM, short_map_ids=())
     tof = ToF(lat, np.random.default_rng(42))
     world = _EastWallWorld(OUTER_HALF_MM)
     near = Pose(OUTER_HALF_MM - 200.0 - lat.mounts[1].right_mm, 0.0, 0.0)
