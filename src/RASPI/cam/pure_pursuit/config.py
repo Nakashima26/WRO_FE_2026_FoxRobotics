@@ -1264,7 +1264,10 @@ ROUTE_FOLLOW = False
 ROUTE_LOOKAHEAD_MM = 200.0
 # Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
 ROUTE_W_KAPPA = 3.0e4
-ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10: diagonales más rectas, ~5x más lento)
+ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10 directo: ~5x más lento y 400 MB de caché)
+# Refinamiento: segunda DP con este paso solo en +-ROUTE_REFINE_WIN_MM alrededor de la ruta gruesa (rutas ~1.4 % más cortas, ~2x el costo). 0 = apagado.
+ROUTE_REFINE_STEP = 10.0
+ROUTE_REFINE_WIN_MM = 80.0
 # Frames que se adelanta la pose de odometría (llega atrasada por el UART).
 # 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
 ROUTE_PREDICT_FRAMES = 0.0
