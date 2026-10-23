@@ -52,6 +52,9 @@ def _route_params():
     return RR.RouteParams(
         w_kappa=float(getattr(C, "ROUTE_W_KAPPA", 3.0e4)),
         d_step=float(getattr(C, "ROUTE_D_STEP", 20.0)),
+        refine_step=float(getattr(C, "ROUTE_REFINE_STEP", 0.0)),
+        refine_win_mm=float(getattr(C, "ROUTE_REFINE_WIN_MM", 80.0)),
+        refine_keep_park=bool(getattr(C, "ROUTE_REFINE_KEEP_PARK", True)),
         hard_clear_mm=float(getattr(C, "ROUTE_HARD_CLEAR_MM", 55.0)),
         soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
         w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),
