@@ -361,7 +361,13 @@ def simular(ruta, paso, cerrada, salida, a):
                 vel_med = (dist - prev[1]) / (t - prev[0])
                 giro_med = (th - prev[2]) / (t - prev[0])
             prev = (t, dist, th)
-        rueda_ruta = seg.rueda(x, y, th)
+        ant = getattr(a, "anticipo", 0.0) or 0.0
+        if ant:
+            thm = math.radians(th + giro_med * ant * 0.5)
+            rueda_ruta = seg.rueda(x + vel_med * ant * math.cos(thm), y + vel_med * ant * math.sin(thm),
+                                   th + giro_med * ant)
+        else:
+            rueda_ruta = seg.rueda(x, y, th)
         rueda = rueda_ruta
         if kd > 0 and vel_med > 100:
             giro_pedido = math.degrees(vel_med * math.tan(math.radians(rueda_ruta)) / BATALLA_MM)
@@ -702,7 +708,8 @@ def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
     txt = (f"# PC tipo={tipo} cerrada={int(cerrada)} paso={paso:.3f} vueltas={a.vueltas} "
            f"salida={salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f} pwm={a.pwm} pwm_curva={a.pwm_curva} "
            f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO} kd={getattr(a, 'kd', None) or 0} "
-           f"pared={getattr(a, 'pared', 0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
+           f"pared={getattr(a, 'pared', 0)} enc_curva={getattr(a, 'enc_curva', 0.15)} "
+           f"bno_escala={getattr(a, 'bno_escala', 0.996)} anticipo={getattr(a, 'anticipo', 0.0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
            f"# PC titulo {titulo}\n")
     return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
 
@@ -731,7 +738,9 @@ def comando_salida(a, salida):
     kd = getattr(a, "kd", None)
     kd = 0.04 if kd is None else kd
     return (f"RTS,{salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f},{a.pwm},{a.pwm_curva},"
-            f"{a.vueltas},{a.lookahead:.0f},{CENTRO_SERVO},{kd:.3f},{getattr(a, 'pared', 0)}\n")
+            f"{a.vueltas},{a.lookahead:.0f},{CENTRO_SERVO},{kd:.3f},{getattr(a, 'pared', 0)},"
+            f"{getattr(a, 'enc_curva', 0.15):.3f},{getattr(a, 'bno_escala', 0.996):.4f},"
+            f"{getattr(a, 'anticipo', 0.0):.3f}\n")
 
 
 def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
@@ -837,6 +846,11 @@ def main():
                        help="amortiguamiento con el giro del BNO, ° de rueda por °/s (0 = apagado; 0.08 ya oscila a 255)")
         p.add_argument("--paso", type=float, default=20.0, help="mm entre puntos de la ruta")
         p.add_argument("--pista", type=float, default=PISTA_MM, help="lado de la pista, pared a pared por dentro (mm)")
+        p.add_argument("--enc-curva", type=float, default=0.15,
+                       help="el encoder cuenta de más con la rueda girada: fracción a tope (ajustado 2026-10-23: 0.15)")
+        p.add_argument("--bno-escala", type=float, default=0.996, help="grados reales por grado del BNO (ajustado: 0.996)")
+        p.add_argument("--anticipo", type=float, default=0.0,
+                       help="s que el pure pursuit se adelanta al servo (0 = apagado; en simulación 0.04 ayudó)")
         p.add_argument("--interior", type=float,
                        help="lado del cuadro interior, centrado (mm; sin esto: un tercio de --pista, todo a escala)")
         p.add_argument("--pared", type=int, default=0,
@@ -926,7 +940,8 @@ def main():
     # Salida: el primer punto, viendo hacia el segundo.
     salida = (ruta[0, 0], ruta[0, 1], math.degrees(math.atan2(ruta[1, 1] - ruta[0, 1], ruta[1, 0] - ruta[0, 0])))
     titulo = (f"{titulo} | pwm {a.pwm}/{a.pwm_curva} lookahead {a.lookahead:.0f} centro {CENTRO_SERVO}"
-              + (f" kd {a.kd:g}" if a.kd else "") + (f" pared {a.pared}" if a.pared else ""))
+              + (f" kd {a.kd:g}" if a.kd else "") + (f" pared {a.pared}" if a.pared else "")
+              + (f" anticipo {a.anticipo:g}" if a.anticipo else ""))
 
     largo = np.sum(np.hypot(*np.diff(ruta, axis=0).T)) + (np.hypot(*(ruta[0] - ruta[-1])) if cerrada else 0)
     r = radios(ruta, cerrada)

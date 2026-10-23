@@ -26,7 +26,7 @@
  *                          cerrada 1 = vuelta (sin el campo = 1, como PurePursuit), 0 = abierta
  *   RTP,i,x,y,x,y,...      puntos desde el índice i (enteros, mm), en orden
  *   RTE,n                  fin: la ruta queda cargada si llegaron los n puntos
- *   RTS,x,y,th,pwm,pwmCurva,vueltas,lookahead,centro,kd,pared
+ *   RTS,x,y,th,pwm,pwmCurva,vueltas,lookahead,centro,kd,pared,encCurva,bnoEscala,anticipo
  *                          pose de salida y parámetros (se pueden omitir desde
  *                          la derecha; sin RTS sale del 1er punto viendo al 2º)
  *   RTM,x0,y0,x1,y1,ix0,iy0,ix1,iy1
@@ -153,7 +153,20 @@ const float MM_POR_CUENTA = 1.0f / 5.45f;   // medido 2026-10-19 (4031 cuentas e
 const int   SIGNO_ENC     = -1;             // adelante cuenta negativo
 
 const int   BNO_SIGNO  = -1;     // yaw del BNO crece a la derecha; th crece a la izquierda
-const float BNO_ESCALA = 1.0f;   // el de RondaAbierta (1080 / ángulo medido al girarlo 3 vueltas a mano)
+// Calibración de la odometría, ajustada el 2026-10-23 con las paredes (vuelta a 180,
+// los dos ToF laterales contra la pared exterior: error 41 -> 10 mm). RTS las cambia.
+//   encCurva: el encoder cuenta de más con la rueda girada (las traseras se arrastran,
+//     no hay diferencial): avance real = encoder · (1 − encCurva · |rueda| / 40°).
+//     0.15 = 15 % con la rueda a tope, ~9 % en las esquinas de 300 mm. Sin esto el
+//     carro cree que ya avanzó más en la curva, gira antes y corta la esquina hacia
+//     adentro (5–9 cm a la salida de cada esquina, a 180 y a 255 igual).
+//   bnoEscala: grados reales por grado del BNO (medía ~0.4 % de más en vuelta).
+float encCurva  = 0.15f;
+float bnoEscala = 0.996f;
+// Anticipo: el pure pursuit calcula con la pose de dentro de `anticipo` s (velocidad
+// y giro medidos), para adelantarse al servo (~0.12 s). En la simulación 0.04 bajó
+// la oscilación en rectas sin empeorar las esquinas. 0 = apagado. RTS lo cambia.
+float anticipoS = 0.0f;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Estado
@@ -288,7 +301,7 @@ void leerBno() {
     for (int i = 2; i < 18; i++) suma += bnoBuf[i];
     if (suma != bnoBuf[18]) continue;
     float yaw = (int16_t)(bnoBuf[3] | (bnoBuf[4] << 8)) * 0.01f;
-    if (yawInicial) anguloGyro += BNO_SIGNO * BNO_ESCALA * normaliza(yaw - yawPrev);
+    if (yawInicial) anguloGyro += BNO_SIGNO * bnoEscala * normaliza(yaw - yawPrev);
     yawPrev = yaw;
     yawInicial = true;
     bnoPaquetes++;
@@ -384,6 +397,12 @@ void actualizarPose() {
   float thMed = (th + thPrev) * 0.5f;
   thPrev = th;
   if (fase != CORRIENDO || ds == 0) return;   // parado, moverlo a mano no cuenta
+  // Con la rueda girada el encoder cuenta de más (ver encCurva); la rueda es la del servo.
+  if (servoActual >= 0) {
+    int dsv = servoActual - centroServo;
+    float rueda = fabsf(dsv / (dsv >= 0 ? SERVO_POR_RUEDA_IZQ : SERVO_POR_RUEDA_DER));
+    ds *= 1.0f - encCurva * min(rueda, 40.0f) / 40.0f;
+  }
   x += ds * cosf(thMed * DEG_TO_RAD);
   y += ds * sinf(thMed * DEG_TO_RAD);
 }
@@ -576,12 +595,16 @@ bool buscarCercano() {
   return true;
 }
 
-// Ángulo de rueda del pure pursuit, + = izquierda.
+// Ángulo de rueda del pure pursuit, + = izquierda. Con anticipoS > 0 desde la pose
+// donde va a estar el carro dentro de anticipoS (el servo tarda en llegar).
 float ruedaPP() {
   float px, py;
   puntoRuta(rutaI + (int)(lookaheadMm / rutaPaso + 0.5f), px, py);
-  float h = thActual() * DEG_TO_RAD, c = cosf(h), s = sinf(h);
-  float dx = px - x, dy = py - y;
+  float thp = thActual() + giroDegS * anticipoS;
+  float hm = (thActual() + giroDegS * anticipoS * 0.5f) * DEG_TO_RAD;
+  float xp = x + velMmS * anticipoS * cosf(hm), yp = y + velMmS * anticipoS * sinf(hm);
+  float h = thp * DEG_TO_RAD, c = cosf(h), s = sinf(h);
+  float dx = px - xp, dy = py - yp;
   float adelante  =  dx * c + dy * s;
   float izquierda = -dx * s + dy * c;
   float ld2 = max(adelante * adelante + izquierda * izquierda, 1.0f);
@@ -661,7 +684,9 @@ void procesarLinea(char* s) {
     int p1 = pwmCrucero, p2 = pwmCurva, v = vueltas, c = centroServo;
     float kd = kdGiro;
     int pm = paredModo;
-    sscanf(s + 4, "%f,%f,%f,%d,%d,%d,%f,%d,%f,%d", &sx, &sy, &sth, &p1, &p2, &v, &la, &c, &kd, &pm);
+    float ec = encCurva, be = bnoEscala, an = anticipoS;
+    sscanf(s + 4, "%f,%f,%f,%d,%d,%d,%f,%d,%f,%d,%f,%f,%f", &sx, &sy, &sth, &p1, &p2, &v, &la, &c, &kd, &pm,
+           &ec, &be, &an);
     salX = sx; salY = sy; salTh = sth;
     pwmCrucero = constrain(p1, 0, 255);
     pwmCurva   = constrain(p2, 0, 255);
@@ -670,9 +695,14 @@ void procesarLinea(char* s) {
     centroServo = constrain(c, 60, 95);
     kdGiro = constrain(kd, 0.0f, 1.0f);
     paredModo = constrain(pm, 0, 15);
+    encCurva  = constrain(ec, 0.0f, 0.5f);
+    bnoEscala = constrain(be, 0.9f, 1.1f);
+    anticipoS = constrain(an, 0.0f, 0.3f);
     escribirServo(centroServo);
-    Log.printf("# salida x=%.0f y=%.0f th=%.1f pwm=%d/%d vueltas=%d lookahead=%.0f centro=%d kd=%.3f pared=%d\n",
-               salX, salY, salTh, pwmCrucero, pwmCurva, vueltas, lookaheadMm, centroServo, kdGiro, paredModo);
+    Log.printf("# salida x=%.0f y=%.0f th=%.1f pwm=%d/%d vueltas=%d lookahead=%.0f centro=%d kd=%.3f pared=%d"
+               " encCurva=%.3f bnoEscala=%.4f anticipo=%.3f\n",
+               salX, salY, salTh, pwmCrucero, pwmCurva, vueltas, lookaheadMm, centroServo, kdGiro, paredModo,
+               encCurva, bnoEscala, anticipoS);
   } else if (strncmp(s, "RTM,", 4) == 0) {
     float m[8];
     if (sscanf(s + 4, "%f,%f,%f,%f,%f,%f,%f,%f", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &m[6], &m[7]) == 8) {
