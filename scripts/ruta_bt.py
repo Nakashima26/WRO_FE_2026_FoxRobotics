@@ -107,8 +107,23 @@ RADIO_AVISO_MM = 180.0   # entre esto y RADIO_MIN_MM va a tope: se puede, pero s
 # ── Simulación ────────────────────────────────────────────────────────────────
 # Velocidad en recta: PWM 180 ≈ 540 mm/s (vuelta_20261019_125759), PWM 90 ≈ 145 mm/s
 # (CalibFox 2026-10-22) -> recta por esos dos puntos.
+# Modelo de velocidad, medido en las corridas del 2026-10-23 (docs/route-following-bench.md):
+# - en recta, por PWM: 90 -> 145 (CalibFox), 150 -> ~400 (llegada), 180 -> 540, 255 -> ~830 mm/s
+#   (antes una recta 4.39·(PWM−57), que a 255 daba 869 y la simulación salía 5-6 % rápida);
+# - la velocidad sigue al PWM con retraso: arranque 10->90 % en ~0.65 s con la rampa de 0.5 s,
+#   y de 255 a 150 baja el 90 % en ~0.55 s -> primer orden de 0.24 s;
+# - en curva pierde ~4 % (805 -> 776 mm/s con ~25° de rueda);
+# - frenando en seco desde ~400-520 mm/s rueda 9-15 mm (~8.5 m/s²). Desde ~830 el encoder dice
+#   24 mm, pero ahí las llantas se bloquean y se barre: el real es más (no medido).
+PWM_VEL = ((57.0, 0.0), (90.0, 145.0), (150.0, 400.0), (180.0, 540.0), (255.0, 830.0))
+TAU_VEL_S = 0.24
+PERDIDA_CURVA_POR_GRADO = 0.0016
+FRENO_MM_S2 = 8500.0
+
+
 def vel_por_pwm(pwm):
-    return max(0.0, 4.39 * (pwm - 57))
+    """Velocidad en recta (mm/s) a la que llega el carro con ese PWM."""
+    return float(np.interp(pwm, [p for p, _ in PWM_VEL], [v for _, v in PWM_VEL]))
 
 # Retraso del servo (primer orden). 0.12 s reproduce el rango del servo y el error
 # de las vueltas reales a PWM 210, 240 y 255 (2026-10-23); con 0.08 la simulación
@@ -463,11 +478,18 @@ def simular(ruta, paso, cerrada, salida, a):
     kd = getattr(a, "kd", None) or 0.0
     rueda_real, t, filas = 0.0, 0.0, []
     dist, vel_med, giro_med, prev = 0.0, 0.0, 0.0, None   # prev = (t, dist, th) de la última medición
+    v = 0.0                                               # velocidad real (sigue al PWM con TAU_VEL_S)
     while True:
         if t > 120:
             return np.array(filas), "timeout"
         seg.cercano(x, y, th)
         if seg.terminada():
+            # Lo que rueda frenando en seco, en la dirección en que va.
+            d = v * v / (2.0 * FRENO_MM_S2)
+            if filas:
+                fila = filas[-1]
+                filas.append((t * 1000 + 1000 * v / FRENO_MM_S2, x + d * math.cos(math.radians(th)),
+                              y + d * math.sin(math.radians(th)), th, fila[4], fila[5], fila[6], 0))
             return np.array(filas), "ruta completa"
         lat = seg.lateral(x, y)
         if abs(lat) > LAT_MAX_MM:
@@ -494,7 +516,8 @@ def simular(ruta, paso, cerrada, salida, a):
         if rampa_fin > 0 and falta < rampa_fin:   # llegada suave, como el sketch
             pwm = min(pwm, pwm_fin if escalon else round(pwm_fin + (a.pwm - pwm_fin) * max(falta, 0.0) / rampa_fin))
         filas.append((t * 1000, x, y, th, seg.i, lat, servo, pwm))
-        v = vel_por_pwm(pwm)
+        objetivo = vel_por_pwm(pwm) * (1.0 - PERDIDA_CURVA_POR_GRADO * abs(rueda_real))
+        v += (objetivo - v) * DT_SIM / TAU_VEL_S
         dist += v * DT_SIM
         rueda_real += (rueda_para_servo(servo) - rueda_real) * DT_SIM / TAU_RUEDA_S
         x += v * DT_SIM * math.cos(math.radians(th))
@@ -1024,7 +1047,7 @@ def main():
     def comunes(p, x0=500.0, y0=500.0, con_salida=True):
         p.add_argument("--sim", action="store_true", help="solo simula y grafica, no se conecta")
         p.add_argument("--puerto", help="COM del ESP32 (sin esto busca el Bluetooth; COM9 = USB)")
-        p.add_argument("--pwm", type=int, default=150, help="PWM en recta (180 ≈ 540 mm/s)")
+        p.add_argument("--pwm", type=int, default=150, help="PWM en recta (180 ≈ 540 mm/s, 255 ≈ 830)")
         p.add_argument("--pwm-curva", type=int, default=120, help="PWM con la rueda muy cerrada")
         p.add_argument("--lookahead", type=float, default=275.0,
                        help="mm (2026-10-23 a 255: 150 bailaba, 200 oscilaba, 250-300 suave; 275 el elegido)")

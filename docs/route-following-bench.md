@@ -60,7 +60,9 @@ User observation: all three runs passed every sign on the correct side with no c
 
 ## 4. Real vs simulation
 
-The simulation in `ruta_bt.py` uses the same pure pursuit and damping as the firmware, a kinematic bicycle on the rear axle, a first-order servo lag, the measured wheel→servo map and speed `v = 4.39 · (PWM − 57)` mm/s. The firmware itself, compiled on the PC, matches this simulation within 1–5 mm on every route.
+The simulation in `ruta_bt.py` uses the same pure pursuit and damping as the firmware, a kinematic bicycle on the rear axle, a first-order servo lag and the measured wheel→servo map. The firmware itself, compiled on the PC, matches this simulation within 1–5 mm on every route.
+
+The table below is with the first speed model (`v = 4.39 · (PWM − 57)` mm/s, speed changes instantly). Section 4.1 has the model after adding the measured dynamics.
 
 | Run | Route | Time real / sim | Lateral rms real / sim | Lateral max real / sim | Servo std straights real / sim |
 |---|---|---|---|---|---|
@@ -81,6 +83,30 @@ What the comparison shows:
 * **Lookahead 150 is the clearest failure of the model:** the simulation stays calm (std 6.4) and the car oscillates (11.4, servo hitting 18–145). Short lookahead amplifies the unmodeled servo backlash.
 * **The S-curve** shows more servo activity on the car (9.7 vs 3.8) with the same tracking error: the real servo corrects its own play.
 * **The simulation cannot see odometry errors.** The car's belief matched the simulation, but the walls showed 1–6 cm of real lateral error per straight (§3.1). That gap is what the wall correction closes.
+
+### 4.1 Speed model fitted to the logs
+
+From the pose log (25 Hz) of the runs above:
+
+| Quantity | Measured | How it is in the model now |
+|---|---|---|
+| Straight speed per PWM | 90 → 145, 150 → ~400, 180 → 540, 255 → 830–850 mm/s | Piecewise linear through those points (the old line gave 869 at 255) |
+| Speed response | Start: 10 → 90 % of top speed in 0.63–0.73 s (0.8–1.0 m/s² mean, ~2 m/s² peak) with the firmware's 0.5 s PWM ramp. Step 255 → 150: 90 % of the drop in 0.52–0.60 s (0.6–0.8 m/s²) over 30–35 cm | First-order lag, τ = 0.24 s |
+| Speed loss in curves | 805 → 776 mm/s with ~25° of wheel at PWM 255 | −0.16 % per degree of wheel |
+| Hard brake (TB6612 short brake) | From 400–520 mm/s: 9–15 mm (~8.5–9 m/s²). From ~830 mm/s the encoder says 24 mm (~14.5 m/s², above the ~2.5 m/s² grip): the wheels lock and the car slides, which the encoder does not see | 8.5 m/s² applied at the end of the route |
+
+Result with the new model (same runs, both models use the same pure pursuit):
+
+| Run | Time real / sim | Straight speed p90 real / sim | Brake real / sim |
+|---|---|---|---|
+| 131742 (180/150) | 45.3 / 43.8 s | 533 / 540 mm/s | 15 / 13 mm |
+| 142317 (lookahead 250) | 28.4 / 28.5 s | 849 / 829 | 8 / 13 |
+| 142749 (lookahead 275) | 28.5 / 28.4 s | 842 / 829 | 10 / 13 |
+| 143643 (CW) | 28.7 / 28.7 s | 836 / 829 | 8 / 13 |
+| 150923 (walls, fresh battery) | 29.1 / 28.7 s | 834 / 829 | 10 / 13 |
+| 152546 (obstacles) | 26.3 / 26.0 s | 834 / 826 | 10 / 13 |
+
+Lap times now agree within 0.1–0.4 s at 255 (they were 1.4–1.7 s fast). Still not modeled: servo backlash (why lookahead 150 oscillates on the car and not in the simulation), the skid when braking from full speed, and the battery's effect on speed.
 
 ## 5. Parameter sweeps
 
