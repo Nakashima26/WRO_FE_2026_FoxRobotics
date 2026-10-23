@@ -38,7 +38,7 @@
  *
  * PRUEBAS SIN SUBIR EL SKETCH: todo lo que se ajusta en las pruebas está en la tabla
  * `parametros` (SET / PAR). Para dar vueltas seguidas sin tocar el carro:
- *   rampaFin     en los últimos rampaFin mm baja la velocidad hasta pwmFin (sin derrapar)
+ *   rampaFin     en los últimos rampaFin mm baja a pwmFin (finEscalon 1: de golpe; 0: en rampa)
  *   frenoAntes   y frena esto antes de la meta (mm) para pararse en la salida
  *   salidaPared  1 = al arrancar corrige la posición con la pared exterior (promedio de
  *                los ToF laterales parado), así no hay que ponerlo a mano cada vez
@@ -124,8 +124,13 @@ const unsigned long FRENO_QUIETO_MS = 200;   // al terminar: el encoder sin move
 // lo que todavía rueda al frenar desde pwmFin; la vuelta ya termina ~medio paso
 // (10 mm) antes de la meta, porque el punto más cercano cambia a la mitad del tramo
 // (SET rampaFin / pwmFin / frenoAntes).
-float rampaFinMm   = 400.0f;
-int   pwmFin       = 100;
+// finEscalon 1 = en vez de rampa, el PWM baja DE GOLPE a pwmFin al entrar a los
+// últimos rampaFinMm: bajar en rampa 30 cm casi no frenaba (seguía a ~810 mm/s), y
+// a 180 frenando en seco paraba justo en la salida. Con la vuelta de 2975 la última
+// recta mide ~690 mm: rampaFin 650 = baja a pwmFin al salir del último giro.
+float rampaFinMm   = 650.0f;
+int   pwmFin       = 150;
+int   finEscalon   = 1;
 float frenoAntesMm = 0.0f;
 // 1 = al arrancar, la posición lateral se toma de la pared exterior (promedio de los
 // ToF laterales con el carro parado) en vez de confiar en que lo pusieron exacto.
@@ -297,6 +302,7 @@ Parametro parametros[] = {
   {"pwmArranque", nullptr, &PWM_ARRANQUE}, {"rampaMs", nullptr, &RAMPA_MS},
   {"latMax", &LAT_MAX_MM, nullptr},       {"frenoAntes", &frenoAntesMm, nullptr},
   {"rampaFin", &rampaFinMm, nullptr},     {"pwmFin", nullptr, &pwmFin},
+  {"finEscalon", nullptr, &finEscalon},
   {"salidaPared", nullptr, &salidaPared}, {"pared", nullptr, &paredModo},
   {"paredKPos", &PARED_K_POS, nullptr},   {"paredPasoMax", &PARED_PASO_MAX_MM, nullptr},
   {"paredGate", &PARED_GATE_MM, nullptr}, {"paredIncMax", &PARED_INC_MAX_DEG, nullptr},
@@ -969,7 +975,8 @@ void recorrido() {
   // Llegada: baja hasta pwmFin en los últimos rampaFinMm (ver rampaFinMm).
   float falta = faltaMm();
   if (rampaFinMm > 0 && falta < rampaFinMm)
-    pwm = min(pwm, (int)lroundf(pwmFin + (pwmCrucero - pwmFin) * max(falta, 0.0f) / rampaFinMm));
+    pwm = min(pwm, finEscalon ? pwmFin
+                              : (int)lroundf(pwmFin + (pwmCrucero - pwmFin) * max(falta, 0.0f) / rampaFinMm));
   setMotor(pwm);
 
   if (t - tPose >= POSE_MS) {

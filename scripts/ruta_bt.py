@@ -356,7 +356,8 @@ def simular(ruta, paso, cerrada, salida, a):
     topes medidos y servo en grados enteros. Devuelve (filas, motivo)."""
     sets = sets_de(a)
     seg = Seguidor(ruta, paso, cerrada, a.lookahead, a.vueltas, float(sets.get("frenoAntes", 0.0)))
-    rampa_fin, pwm_fin = float(sets.get("rampaFin", 400.0)), int(float(sets.get("pwmFin", 100)))
+    rampa_fin, pwm_fin = float(sets.get("rampaFin", 650.0)), int(float(sets.get("pwmFin", 150)))
+    escalon = int(float(sets.get("finEscalon", 1)))
     x, y, th = salida
     if not seg.cercano(x, y, th):
         return np.zeros((0, 8)), "la salida no va en el sentido de la ruta"
@@ -392,7 +393,7 @@ def simular(ruta, paso, cerrada, salida, a):
         pwm = pwm_para(rueda_ruta, t * 1000, a.pwm, a.pwm_curva)
         falta = seg.falta()
         if rampa_fin > 0 and falta < rampa_fin:   # llegada suave, como el sketch
-            pwm = min(pwm, round(pwm_fin + (a.pwm - pwm_fin) * max(falta, 0.0) / rampa_fin))
+            pwm = min(pwm, pwm_fin if escalon else round(pwm_fin + (a.pwm - pwm_fin) * max(falta, 0.0) / rampa_fin))
         filas.append((t * 1000, x, y, th, seg.i, lat, servo, pwm))
         v = vel_por_pwm(pwm)
         dist += v * DT_SIM
