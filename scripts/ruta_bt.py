@@ -51,11 +51,13 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── Pista (mm) ────────────────────────────────────────────────────────────────
 PISTA_MM = 3000.0          # por omisión; --pista la cambia (la lona del 2026-10-23 mide 2975)
-INTERIOR_LADO_MM = 1000.0  # cuadro interior, centrado
 
 
-def mapa_pista(pista=PISTA_MM, interior=INTERIOR_LADO_MM):
-    """Cuadro exterior e interior (x0, y0, x1, y1), mm, origen en la esquina exterior."""
+def mapa_pista(pista=PISTA_MM, interior=None):
+    """Cuadro exterior e interior (x0, y0, x1, y1), mm, origen en la esquina exterior.
+    Sin `interior`, todo a escala de la pista: el interior mide un tercio y queda centrado
+    (lona de 2975 -> interior de 991.7, pasillos de 991.7)."""
+    interior = pista / 3 if interior is None else interior
     c, m = pista / 2, interior / 2
     return (0.0, 0.0, pista, pista), (c - m, c - m, c + m, c + m)
 
@@ -194,7 +196,7 @@ def ruta_s(a):
 def ruta_vuelta(a):
     """Una vuelta a la pista por el centro de los pasillos (a `carril` mm de la
     pared exterior), esquinas en arco de `radio`. Sentido izq = antihorario."""
-    d = a.carril
+    d = a.pista / 6 if a.carril is None else a.carril   # sin --carril: centro del pasillo, a escala
     lado = a.pista - 2 * d
     inicio = lado / 2 if a.inicio is None else a.inicio
     if not (a.radio <= inicio <= lado - a.radio):
@@ -715,7 +717,7 @@ def comandos_ruta(ruta, paso, cerrada):
 
 
 def mapa_de(a):
-    return mapa_pista(getattr(a, "pista", PISTA_MM), getattr(a, "interior", INTERIOR_LADO_MM))
+    return mapa_pista(getattr(a, "pista", PISTA_MM), getattr(a, "interior", None))
 
 
 def comando_mapa(a):
@@ -834,7 +836,8 @@ def main():
                        help="amortiguamiento con el giro del BNO, ° de rueda por °/s (0 = apagado; 0.08 ya oscila a 255)")
         p.add_argument("--paso", type=float, default=20.0, help="mm entre puntos de la ruta")
         p.add_argument("--pista", type=float, default=PISTA_MM, help="lado de la pista, pared a pared por dentro (mm)")
-        p.add_argument("--interior", type=float, default=INTERIOR_LADO_MM, help="lado del cuadro interior, centrado (mm)")
+        p.add_argument("--interior", type=float,
+                       help="lado del cuadro interior, centrado (mm; sin esto: un tercio de --pista, todo a escala)")
         p.add_argument("--pared", type=int, default=0,
                        help="corrección con paredes: 1 posición, 2 rumbo, 4 avance (se suman; 0 = solo registrar)")
         p.add_argument("--auto", action="store_true", help="arranca sin esperar Enter")
@@ -869,7 +872,7 @@ def main():
     comunes(p, con_salida=False)
     p.add_argument("--sentido", choices=["izq", "der"], default="izq", help="izq = antihorario")
     p.add_argument("--radio", type=float, default=300.0, help="radio de las esquinas (mm)")
-    p.add_argument("--carril", type=float, default=500.0, help="distancia a la pared exterior (mm)")
+    p.add_argument("--carril", type=float, help="distancia a la pared exterior (mm; sin esto: medio pasillo, a escala)")
     p.add_argument("--inicio", type=float, help="salida a esto de la esquina (default: media recta)")
     p.add_argument("--vueltas", type=int, default=1)
     p.set_defaults(gen=ruta_vuelta)
