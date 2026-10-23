@@ -23,7 +23,7 @@ junto a donde cree él (línea naranja): la diferencia es lo que se le fue la
 odometría. --pared además lo corrige en el carro (bits, se suman):
   1 posición con los laterales   2 rumbo con los laterales   4 avance con el frontal
   8 usar también el cuadro interior (sin él, solo las paredes exteriores)
-  --pared 1 = solo posición con las exteriores   --pared 0 = solo registrar (default)
+  --pared 1 = solo posición con las exteriores (default)   --pared 0 = solo registrar
 
 PARÁMETROS SIN SUBIR EL SKETCH: --set clave=valor (se repite) cambia cualquier
 parámetro del ESP32 por nombre (la lista sale con PAR; queda en el log como
@@ -853,7 +853,10 @@ def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
         if not carro.esperar("# salida", desde=desde):
             print("El ESP32 no confirmó la salida (RTS).")
             return nombre
-        sets = {"tofLIzq": TOFS["L"][1], "tofRIzq": TOFS["R"][1], **sets_de(a)}
+        # Lo que quedó mejor el 2026-10-23 a 255 (lookahead 275): corrección de posición con la
+        # pared exterior en pasos de hasta 5 mm (más fuerte hacía bailar al servo) y salida por pared.
+        sets = {"tofLIzq": TOFS["L"][1], "tofRIzq": TOFS["R"][1], "salidaPared": 1,
+                "paredKPos": 0.3, "paredPasoMax": 5, **sets_de(a)}
         for clave, valor in sets.items():
             desde = len(carro.lineas)
             carro.mandar(f"SET,{clave},{valor}\n")
@@ -937,7 +940,7 @@ def main():
                        help="s que el pure pursuit se adelanta al servo (0 = apagado; en simulación 0.04 ayudó)")
         p.add_argument("--interior", type=float,
                        help="lado del cuadro interior, centrado (mm; sin esto: un tercio de --pista, todo a escala)")
-        p.add_argument("--pared", type=int, default=0,
+        p.add_argument("--pared", type=int, default=1,
                        help="corrección con paredes: 1 posición, 2 rumbo, 4 avance, 8 también el cuadro interior "
                             "(se suman; 0 = solo registrar; sin el 8 solo las paredes exteriores)")
         p.add_argument("--auto", action="store_true", help="arranca sin esperar Enter")
