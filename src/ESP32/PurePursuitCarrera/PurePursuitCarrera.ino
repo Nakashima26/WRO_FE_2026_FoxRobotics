@@ -5981,11 +5981,17 @@ void loop() {
       // ── Fase 8: FULL INTERNO; luego SIEMPRE acomodo ENFRENTE ────────────
       if (parkFase == 8) {
         motorReversa();
-        // Tope derecho R=123 mm mete la esquina delantera en la punta; servo 6 ≈ R 135, igual que el izquierdo.
-        int servoContra = (servoDesdePared == SERVO_MIN_DEG) ? 6 : servoDesdePared;
-        escribirServo(servoContra);
-        setMotor(PARK_REV_PWM);
+        // Tope derecho al final del arco clava la esquina: cerrado solo arriba de 50°.
+        // PWM 130 arriba de 65°. En el derecho, solo mientras va cerrado.
         float difHeading = fabs(anguloGyro - parkRumboRef);
+        int servoSuave = (servoDesdePared == SERVO_MIN_DEG) ? 6 : servoDesdePared;
+        bool ladoTope = (servoDesdePared == SERVO_MIN_DEG);
+        bool cierra = difHeading > 50.0f && ladoTope;
+        int servoContra = cierra ? servoDesdePared : servoSuave;
+        escribirServo(servoContra);
+        // El otro tope ya es el cerrado en todo el arco: el PWM 130 temprano
+        // no lo alarga. En el derecho solo mientras también va cerrado.
+        setMotor((difHeading > 65.0f && (cierra || !ladoTope)) ? 130 : PARK_REV_PWM);
         bool  alineado   = (difHeading <= PARK_ENDEREZA_TOL_DEG);
         bool  pegado     = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
         bool  timeout    = (millis() - parkFaseMs >= PARK_CONTRA_TIMEOUT_MS);

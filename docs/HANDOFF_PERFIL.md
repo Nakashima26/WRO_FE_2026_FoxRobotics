@@ -251,3 +251,5 @@ la anterior y las referencias (combo1).
 - **vuelta 2 con κ del lookahead (e4bad0c, 2026-10-23):** con 4 ≤ tc < 8 el perfil usa el κ del pure pursuit (lookahead 200 mm), vuelta 3 sigue con κ local. carrera_bench 72/72, 0 pared, vueltas 2+3 −0.13 s. Grok contra m4b: 96/96, total −0.11 s.
 - **paralelo: freno de cola en fase 8 + fase 13 a PWM 130 (539738c + 65dd292, 2026-10-23):** freno cuando el lateral ≤ 5 cm; fase 13 a 130 mientras falten > 20°. carrera_bench 72/72, 0 pared, mediana −0.09/−0.10/−0.09 s. Grok contra m5: 96/96, pareado −0.09 s (media −0.12), ninguna más lenta, pared mínima 4.4 → 4.8 mm.
   **1.25:1 mejor = ~36.2 s mediana (carrera_bench)**
+- **fase 8 con topes cerrados por yaw (06f5fc3 + 3883eff, 2026-10-23):** el tope cierra solo arriba de 50° y el PWM 130 solo arriba de 65°, en los dos lados. carrera_bench 72/72, 0 pared, contra 599767e −0.18/−0.19/−0.19 s (incluye cbd0ce3), mediana 35.73/36.19/36.12, ninguna más lenta. Grok contra mag6: 96/96, pareado −0.09 s, n5 s15 +0.08 s, pared mínima 4.2 mm (n5 s7).
+  **1.25:1 mejor = ~36.0 s mediana (carrera_bench)**
