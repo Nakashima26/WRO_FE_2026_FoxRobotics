@@ -1352,6 +1352,7 @@ int           parkTrimUpd           = 0;
 long          parkTrimD[PARK_TRIM_N];
 float         parkTrimA[PARK_TRIM_N];
 unsigned long parkTrimT[PARK_TRIM_N];
+float         parkTrimV[PARK_TRIM_N];   // cm/s comandados en cada muestra de la ventana
 int           parkTrimN             = 0;
 int           parkTrimIdx           = 0;
 float         parkRumboRef          = 0.0f;
@@ -2143,23 +2144,29 @@ void parkTrimMuestra(long ext, float ang, unsigned long ahora, float haciaPared)
   parkTrimD[parkTrimIdx] = ext;
   parkTrimA[parkTrimIdx] = ang;
   parkTrimT[parkTrimIdx] = ahora;
+  parkTrimV[parkTrimIdx] = (pwmActual - 42.1f) * 0.402f;   // cm/s, línea del gemelo
   parkTrimIdx = (parkTrimIdx + 1) % PARK_TRIM_N;   // ahora apunta a la MÁS VIEJA
   if (parkTrimN < PARK_TRIM_N) { parkTrimN++; return; }
 
   unsigned long t0 = parkTrimT[parkTrimIdx];
-  float st = 0, sd = 0, stt = 0, std_ = 0, sa = 0;
+  float st = 0, sd = 0, stt = 0, std_ = 0, sa = 0, sv = 0;
   for (int i = 0; i < PARK_TRIM_N; i++) {
     float t = (float)(long)(parkTrimT[i] - t0) / 1000.0f;
     float d = (float)parkTrimD[i];
     st += t; sd += d; stt += t * t; std_ += t * d; sa += parkTrimA[i];
+    sv += parkTrimV[i];
   }
   float n   = (float)PARK_TRIM_N;
   float den = n * stt - st * st;
   if (den < 1e-3f) return;                    // ventana sin span de tiempo
   float pend   = (n * std_ - st * sd) / den;  // cm/s (+ = alejándose de la pared)
   float angMed = sa / n;
-  // phi = rumbo REAL respecto a "paralelo", en el marco de signos del gyro.
-  float sn  = constrain(pend / PARK_TRIM_VEL_CM_S, -0.6f, 0.6f);
+  // phi = asin(pend/v). La constante está calibrada al escaneo lento; si la
+  // ventana se llenó a PWM 255, v~86 y dividir por 31 satura phi: el candado
+  // de armado tira el poste bueno. Ahí se usa la v media de la ventana.
+  float vUse = sv / n;
+  if (vUse < PARK_TRIM_VEL_CM_S + 20.0f) vUse = PARK_TRIM_VEL_CM_S;
+  float sn  = constrain(pend / vUse, -0.6f, 0.6f);
   float phi = -haciaPared * degrees(asin(sn));
   float medido = constrain(angMed - phi, -PARK_TRIM_MAX_DEG, PARK_TRIM_MAX_DEG);
 
@@ -5432,8 +5439,18 @@ void loop() {
           motorAdelante();
           servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
           // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
+          // El PWM no cae en seco: tau de tracción ~0.17 s. 2 tau bastan para llegar
+          // a la velocidad lenta; el piso PARK_SCAN_RAPIDO_MM sigue de tope.
+          float vRap = ((float)PARK_SCAN_RAPIDO_PWM - 42.1f) * 4.02f;
+          float vLen = ((float)PARK_PUNTA_PWM - 42.1f) * 4.02f;
+          float dFreno = (float)PARK_SCAN_RAPIDO_MM;
+          if (vRap > vLen + 50.0f) {
+            float tau = 0.17f, T = 2.0f * tau;
+            float d = vLen * T + (vRap - vLen) * tau * (1.0f - expf(-T / tau)) + 50.0f;
+            if (d < dFreno) dFreno = d;
+          }
           bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0
-                        && !isnan(rutaPka) && alongSalidaMm() > rutaPka + (float)PARK_SCAN_RAPIDO_MM;
+                        && !isnan(rutaPka) && alongSalidaMm() > rutaPka + dFreno;
           setMotorTope(rapido ? (int)PARK_SCAN_RAPIDO_PWM : PARK_PUNTA_PWM, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
 
