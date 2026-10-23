@@ -45,6 +45,15 @@ _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
 _CLUSTER_GAP_MM = 150.0
 _FENCE_STEP_MM = 100.0
 
+def _lead_mm(v_max: float, latency_s: float, lap2: bool) -> float:
+    """Adelanto del freno. En la vuelta 2, 0.7 del completo.
+
+    La mitad roza la pared de n1 s17 (−0.9 mm a t=32). 0.7 cabe: peor pared
+    local 7.0 mm, por encima de los 4 mm que la fase 13 dejó en 6.8 en Grok.
+    """
+    return float(v_max) * float(latency_s) * (0.7 if lap2 else 1.0)
+
+
 def _pursuit_kappa(route, idx, lookahead_mm):
     """|κ| del pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
 
@@ -810,7 +819,7 @@ class RouteMode:
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
         win = int(C.ROUTE_PROFILE_KAPPA_WIN)
         # Adelanto por latencia a la velocidad máxima (conservador).
-        lead = v_max * float(C.ROUTE_PROFILE_LATENCY_S)
+        lead = _lead_mm(v_max, float(C.ROUTE_PROFILE_LATENCY_S), lap2)
         span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
         step = r.length_mm / n
         m = int(span / step) + 1

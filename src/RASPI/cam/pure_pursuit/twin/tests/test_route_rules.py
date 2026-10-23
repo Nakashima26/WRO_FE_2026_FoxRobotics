@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from pure_pursuit.route_mode import RouteMode
+from pure_pursuit.route_mode import RouteMode, _lead_mm
 from pure_pursuit.wro_field import SECTIONS_CW, SEATS
 
 
 def _all_but(sec, keep):
     return {(sec, s) for s in SEATS if s not in keep}
+
+
+def test_vuelta2_adelanta_siete_decimos():
+    assert _lead_mm(800.0, 0.12, False) == 96.0
+    assert abs(_lead_mm(800.0, 0.12, True) - 67.2) < 1e-9
 
 
 def test_x_confirmada_deja_vacios_los_demas_de_la_recta():
