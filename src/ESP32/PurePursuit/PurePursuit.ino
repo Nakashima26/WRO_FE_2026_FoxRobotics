@@ -3747,8 +3747,10 @@ void loop() {
   if (raceFinished) {
     setMotor(0);
     // Modo RUTA: rodando hasta parar sigue la ruta; con el servo al centro a la salida de la curva iba recto a la isla.
+    // En el cajón no: la ruta deja el volante cruzado y el coast de la fase 13 mete la esquina trasera (n7 s9, n10 s14).
     float ruedaDeg;
-    if (piRuta && rutaSteer(ruedaDeg)) {
+    bool enCajon = (parkFase == 7 || puntaFase == 6);
+    if (!enCajon && piRuta && rutaSteer(ruedaDeg)) {
       escribirServo(rutaServo(ruedaDeg));
       actualizarOdometria();
     } else {
@@ -5838,7 +5840,12 @@ void loop() {
       if (parkFase == 3) {
         motorReversa();
         escribirServo(servoHaciaPared);
-        setMotor(PARK_REV_PWM);
+        // La fase 1 deja ~300 mm/s hacia adelante: el arco entero se va en
+        // invertir eso. PWM 130 solo en la primera mitad; el corte de 9°
+        // sigue con PARK_REV_PWM y la misma tasa de giro.
+        float swingAhora = fabsf(anguloGyro - parkRumboRef);
+        int pwm3 = (swingAhora < 0.40f * parkAngObjetivo) ? 130 : PARK_REV_PWM;
+        setMotor(pwm3);
         // Red de seguridad trasera (ver PARK_ATRAS_MIN_CM): corta la entrada
         // YA y pasa a corregir hacia ENFRENTE (fase 9), no a terminar.
         if (parkAtrasPegado()) {
