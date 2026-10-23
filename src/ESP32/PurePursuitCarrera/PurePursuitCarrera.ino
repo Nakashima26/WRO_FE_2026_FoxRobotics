@@ -1101,6 +1101,7 @@ const unsigned long PARK_FASE_DIST_TIMEOUT_MS = 3000;   // si el encoder no avan
 long                parkOdom0                 = 0;      // odomMm al entrar a la fase
 long                parkColaMm               = 0;      // odom más atrás en el freno de la fase 11
 bool                parkFrenoCola            = false;  // solo si el lateral ya está a ≤5 cm
+bool                parkFrenoFin             = false;  // freno del desliz al cortar la fase 13 guiñada
 float               parkRectoMm               = 0.0f;   // largo de la fase 14 (encoder)
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
 PARK_AJ float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
@@ -6081,7 +6082,10 @@ void loop() {
         parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
         bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
         bool timeout = (millis() - parkFaseMs >= PARK_FWD_MS);
-        if (dfTope || timeout) {
+        // 12 mm adelante de la cola ya despegan la pared; el freno del final
+        // para el desliz que antes dejaba este corte en 5.1 mm.
+        bool colaYa = parkFrenoCola && !frenando && (odomMm - parkColaMm) >= 12;
+        if (dfTope || timeout || colaYa) {
           motorCoast();
           escribirServo(centroServo);
           float dif = fabs(anguloGyro - parkRumboRef);
@@ -6108,6 +6112,7 @@ void loop() {
           prevErrorRev  = 0;
           lastRevHoldMs = millis();
           motorReversa();
+          parkFrenoFin = false;
           parkFase   = 13;
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 13: REV hasta heading 0");
@@ -6133,6 +6138,16 @@ void loop() {
       // vale ~2.3°), pero cada cm sale del aire con la pared TRASERA, que es el
       // único lado sin sensor. Por eso el timeout es corto y no negociable.
       if (parkFase == 13) {
+        // Cortó de lado con guiñada de sobra: el coast deja la cola deslizándose
+        // contra la pared. Freno adelante hasta que el encoder deja de retroceder.
+        if (parkFrenoFin) {
+          if (odomMm < parkColaMm) parkColaMm = odomMm;
+          motorAdelante();
+          escribirServo(centroServo);
+          if (odomMm <= parkColaMm) setMotor(PARK_FRENO_COLA_PWM);
+          else finalizarPark("REV FINAL: freno desliz");
+          break;
+        }
         motorReversa();
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
         float dif      = fabs(anguloGyro - parkRumboRef);
@@ -6158,6 +6173,9 @@ void loop() {
             Serial.println(": no derecho todavia -> fase 9 (ENFRENTE) de nuevo");
             parkFase   = 9;
             parkFaseMs = millis(); parkOdom0 = odomMm;
+          } else if (pegado && dif > 12.0f) {
+            parkFrenoFin = true;
+            parkColaMm = odomMm;
           } else {
             finalizarPark(frenteOk    ? "REV FINAL: dF objetivo"
                         : alineado    ? "REV FINAL: ya alineado"

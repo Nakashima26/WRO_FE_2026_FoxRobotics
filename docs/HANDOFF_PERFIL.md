@@ -253,3 +253,4 @@ la anterior y las referencias (combo1).
   **1.25:1 mejor = ~36.2 s mediana (carrera_bench)**
 - **fase 8 con topes cerrados por yaw (06f5fc3 + 3883eff, 2026-10-23):** el tope cierra solo arriba de 50° y el PWM 130 solo arriba de 65°, en los dos lados. carrera_bench 72/72, 0 pared, contra 599767e −0.18/−0.19/−0.19 s (incluye cbd0ce3), mediana 35.73/36.19/36.12, ninguna más lenta. Grok contra mag6: 96/96, pareado −0.09 s, n5 s15 +0.08 s, pared mínima 4.2 mm (n5 s7).
   **1.25:1 mejor = ~36.0 s mediana (carrera_bench)**
+- **fase 13 frena la cola si corta de lado (9186ed4 + ea618fc, 2026-10-23):** margen, no tiempo. carrera_bench 72/72, 0 pared, una semilla +0.017 s. Grok contra mag8: 96/96, mediana 0, media −0.004 s, peor +0.11 s (n5 s16); pared mínima 4.2 → 6.8 mm.
