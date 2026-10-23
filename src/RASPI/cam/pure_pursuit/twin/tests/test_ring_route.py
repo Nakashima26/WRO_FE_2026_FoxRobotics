@@ -13,6 +13,12 @@ from pure_pursuit.route_mode import RouteMode
 from pure_pursuit.wro_field import SEATS, randomize, section_to_world
 
 
+def test_margen_blando_solo_con_mapa_completo():
+    from pure_pursuit.route_mode import _prm_for
+    assert _prm_for([]).soft_clear_mm == 100.0
+    assert _prm_for([("N", "T1")]).soft_clear_mm == 140.0
+
+
 @pytest.mark.parametrize("seed", [1, 2, 9, 14, 3170839])
 def test_plan_valida(seed):
     """Ruta factible, con holgura de la huella, radio y lado de paso correctos."""
