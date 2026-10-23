@@ -82,6 +82,24 @@ def _ack_est(ack):
     return ack.split("est=", 1)[1][:1]
 
 
+def _pursuit_kappa(route, lookahead_mm: float) -> np.ndarray:
+    """κ del pure pursuit con el carro sobre la ruta (arco al punto de lookahead).
+
+    El κ de la polilínea pica en quiebres que el seguimiento corta; frenar con ese
+    pico pide el piso en un radio que el carro no llega a tomar.
+    """
+    n = len(route.x)
+    step = route.length_mm / n
+    ahead = max(1, int(round(lookahead_mm / max(step, 1e-9)))) % n or 1
+    j = (np.arange(n) + ahead) % n
+    h = np.radians(route.heading_deg)
+    dx = route.x[j] - route.x
+    dy = route.y[j] - route.y
+    fwd = dx * np.sin(h) + dy * np.cos(h)
+    right = dx * np.cos(h) - dy * np.sin(h)
+    return 2.0 * right / np.maximum(fwd * fwd + right * right, 1.0)
+
+
 def _pwm(name):
     """Tope de PWM de `name`; None en config = ROUTE_SLOW_PWM."""
     v = getattr(C, name, None)
@@ -756,6 +774,7 @@ class RouteMode:
     def _profile_pwm(self, signs=None) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
+        κ es el del pure pursuit (lookahead), no el pico de la polilínea.
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
         (max en recta) y, para llegar a ella frenando con A_BRAKE desde la
         distancia d (menos la latencia), v_permitida = sqrt(v_curva² + 2·A·d).
@@ -794,8 +813,11 @@ class RouteMode:
         m = int(span / step) + 1
         i = max(self.follower.i, 0)
         # Anillo cerrado: índices módulo n. Ventana ±win para |κ| máximo móvil.
+        # shortcut: mitad lookahead / mitad polilínea, subir el lookahead si el cajón (n2 s12) y la pared (n1 s21) aguantan el arco entero
+        k_pp = np.abs(_pursuit_kappa(r, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0))))
+        k_src = 0.5 * (k_pp + np.abs(r.kappa))
         idx = (i + np.arange(-win, m + win)) % n
-        kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
+        kmax = np.lib.stride_tricks.sliding_window_view(k_src[idx], 2 * win + 1).max(axis=1)
         j = idx[win:win + m]
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
