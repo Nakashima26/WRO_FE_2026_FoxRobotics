@@ -1235,6 +1235,10 @@ const int           PARK_CENTER_PWM_PAR       = 80;
 // PWM 80 frena a ~1900 mm/s² y se come el hueco (para en ~7 mm). A 180 el
 // objetivo ya pega con a_max (~4300 mm/s²): v²/2a ≈ 4 mm, la cola no cierra.
 const int           PARK_FRENO_COLA_PWM       = 180;
+// Fase 3: el carro ya viene rodando (~300 mm/s), no hay fricción de arranque que
+// proteger; la rampa de reversa de setMotor() (300 ms) solo retrasa el frenado.
+const unsigned long PARK_F3_RAMPA_MS          = 50;
+const unsigned long PARK_F13_RAMPA_MS         = 300;   // ídem fase 13 (sale de un coast de 47 ms, ya con la inercia del acomodo)
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
 // El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
@@ -5860,6 +5864,12 @@ void loop() {
         // sigue con PARK_REV_PWM y la misma tasa de giro.
         float swingAhora = fabsf(anguloGyro - parkRumboRef);
         int pwm3 = (swingAhora < 0.40f * parkAngObjetivo) ? 130 : PARK_REV_PWM;
+        if (PARK_F3_RAMPA_MS < MOTOR_REV_RAMPA_MS) {
+          unsigned long t3 = millis() - parkFaseMs;
+          if (t3 < PARK_F3_RAMPA_MS)
+            pwm3 = (int)map((long)t3, 0, (long)PARK_F3_RAMPA_MS, MOTOR_REV_RAMPA_MIN, (long)pwm3);
+          motorDirMs = millis() - MOTOR_REV_RAMPA_MS;   // la rampa de setMotor ya no aplica
+        }
         setMotor(pwm3);
         // Red de seguridad trasera (ver PARK_ATRAS_MIN_CM): corta la entrada
         // YA y pasa a corregir hacia ENFRENTE (fase 9), no a terminar.
@@ -6155,7 +6165,14 @@ void loop() {
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
         float dif      = fabs(anguloGyro - parkRumboRef);
         // PWM alto hasta el corte de 5° se pasa del poste; por encima de 20° el arco tiene aire.
-        setMotor(dif > 20.0f ? 130 : PARK_REV_PWM);
+        int pwm13 = dif > 20.0f ? 130 : PARK_REV_PWM;
+        if (PARK_F13_RAMPA_MS < MOTOR_REV_RAMPA_MS) {
+          unsigned long t13 = millis() - parkFaseMs;
+          if (t13 < PARK_F13_RAMPA_MS)
+            pwm13 = (int)map((long)t13, 0, (long)PARK_F13_RAMPA_MS, MOTOR_REV_RAMPA_MIN, (long)pwm13);
+          motorDirMs = millis() - MOTOR_REV_RAMPA_MS;
+        }
+        setMotor(pwm13);
         bool  alineado = (dif <= PARK_FINAL_TOL_DEG);          // ya derecho: no sigas
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
