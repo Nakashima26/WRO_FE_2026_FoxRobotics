@@ -22,7 +22,8 @@ pone, en cada recta, dónde dicen las paredes que estaba el carro (puntos L/R)
 junto a donde cree él (línea naranja): la diferencia es lo que se le fue la
 odometría. --pared además lo corrige en el carro (bits, se suman):
   1 posición con los laterales   2 rumbo con los laterales   4 avance con el frontal
-  --pared 3 = posición + rumbo (lo normal)   --pared 0 = solo registrar (default)
+  8 usar también el cuadro interior (sin él, solo las paredes exteriores)
+  --pared 1 = solo posición con las exteriores   --pared 0 = solo registrar (default)
 
 COORDENADAS (las de VueltaCalibracion): mm, origen en la esquina EXTERIOR de la
 pista detrás del carro, th en grados (0 = +x, crece a la izquierda). El punto
@@ -839,7 +840,8 @@ def main():
         p.add_argument("--interior", type=float,
                        help="lado del cuadro interior, centrado (mm; sin esto: un tercio de --pista, todo a escala)")
         p.add_argument("--pared", type=int, default=0,
-                       help="corrección con paredes: 1 posición, 2 rumbo, 4 avance (se suman; 0 = solo registrar)")
+                       help="corrección con paredes: 1 posición, 2 rumbo, 4 avance, 8 también el cuadro interior "
+                            "(se suman; 0 = solo registrar; sin el 8 solo las paredes exteriores)")
         p.add_argument("--auto", action="store_true", help="arranca sin esperar Enter")
         p.add_argument("--no-mostrar", action="store_true", help="solo guarda el PNG")
         if con_salida:   # vuelta y archivo salen del primer punto de su ruta

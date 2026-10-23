@@ -50,6 +50,10 @@
  *   2  rumbo: con varias lecturas de la misma pared a lo largo de la recta, la
  *      pendiente dice si el carro va de verdad paralelo; corrige th.
  *   4  avance: lo mismo que 1 con el frontal contra la pared de enfrente.
+ *   8  usar también el cuadro interior. Sin este bit solo cuentan las paredes
+ *      EXTERIORES (el borde de la lona): el 2026-10-23 el ToF izquierdo contra el
+ *      cuadro interior no coincidía con el derecho contra el exterior (~5 cm en
+ *      un lado) y la corrección de rumbo con él se fue a −8° en 3 vueltas.
  *   Solo se usan lecturas en recta (rumbo cerca de un múltiplo de 90, rueda casi
  *   derecha), con el cono entero en una sola pared y poco ángulo de incidencia.
  *
@@ -472,6 +476,7 @@ void corregirConPared(Tof& t) {
   float medido = t.mm - (lateral ? 0.0f : FRONTAL_CORR_MM);
   float e = (medido - esperado) * cosInc;   // + = el carro está más lejos de la pared de lo que cree
   if (fabsf(e) > PARED_GATE_MM) return;
+  if (seg >= 4 && !(paredModo & 8)) return;   // pared interior: solo con el bit 8
 
   if (quierePos) {
     float paso = constrain(PARED_K_POS * e, -PARED_PASO_MAX_MM, PARED_PASO_MAX_MM);
@@ -664,7 +669,7 @@ void procesarLinea(char* s) {
     lookaheadMm = constrain(la, 50.0f, 1000.0f);
     centroServo = constrain(c, 60, 95);
     kdGiro = constrain(kd, 0.0f, 1.0f);
-    paredModo = constrain(pm, 0, 7);
+    paredModo = constrain(pm, 0, 15);
     escribirServo(centroServo);
     Log.printf("# salida x=%.0f y=%.0f th=%.1f pwm=%d/%d vueltas=%d lookahead=%.0f centro=%d kd=%.3f pared=%d\n",
                salX, salY, salTh, pwmCrucero, pwmCurva, vueltas, lookaheadMm, centroServo, kdGiro, paredModo);
