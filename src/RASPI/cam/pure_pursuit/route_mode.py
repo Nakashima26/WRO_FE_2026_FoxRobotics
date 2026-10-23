@@ -82,6 +82,20 @@ def _ack_est(ack):
     return ack.split("est=", 1)[1][:1]
 
 
+def _pursuit_kappa(route, lookahead_mm: float) -> np.ndarray:
+    """κ del pure pursuit con el carro sobre la ruta (arco al punto de lookahead)."""
+    n = len(route.x)
+    step = route.length_mm / n
+    ahead = max(1, int(round(lookahead_mm / max(step, 1e-9)))) % n or 1
+    j = (np.arange(n) + ahead) % n
+    h = np.radians(route.heading_deg)
+    dx = route.x[j] - route.x
+    dy = route.y[j] - route.y
+    fwd = dx * np.sin(h) + dy * np.cos(h)
+    right = dx * np.cos(h) - dy * np.sin(h)
+    return 2.0 * right / np.maximum(fwd * fwd + right * right, 1.0)
+
+
 def _pwm(name):
     """Tope de PWM de `name`; None en config = ROUTE_SLOW_PWM."""
     v = getattr(C, name, None)
@@ -670,7 +684,9 @@ class RouteMode:
             cap = int(C.ROUTE_PENDING_PWM)
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
-        prof = self._profile_pwm(self._sign_xy(conf, empty))
+        # Solo la vuelta 2. La 3 alimenta la U: ir más rápido ahí mete el cajón (n2 s2 en 32598ca).
+        tc = _ack_num(ack or "", "tc")
+        prof = self._profile_pwm(self._sign_xy(conf, empty), blend=tc is not None and 4 <= tc < 8)
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
@@ -753,7 +769,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None) -> int | None:
+    def _profile_pwm(self, signs=None, blend: bool = False) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -794,8 +810,12 @@ class RouteMode:
         m = int(span / step) + 1
         i = max(self.follower.i, 0)
         # Anillo cerrado: índices módulo n. Ventana ±win para |κ| máximo móvil.
+        # shortcut: mitad lookahead / mitad polilínea solo en la vuelta 2, ampliar a la 3 si el cajón de n2 s2 aguanta
+        k = np.abs(r.kappa)
+        if blend:
+            k = 0.5 * (k + np.abs(_pursuit_kappa(r, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0)))))
         idx = (i + np.arange(-win, m + win)) % n
-        kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
+        kmax = np.lib.stride_tricks.sliding_window_view(k[idx], 2 * win + 1).max(axis=1)
         j = idx[win:win + m]
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
