@@ -10,6 +10,10 @@ Uso:
   python scripts/ruta_bt.py s --radio 400 --angulo 50     slalom de arcos
   python scripts/ruta_bt.py vuelta --sentido izq --radio 300 --vueltas 3
   python scripts/ruta_bt.py archivo mi_ruta.csv           puntos "x,y" en mm, uno por renglón
+  python scripts/ruta_bt.py obstaculos --senales abajo:T1:R,derecha:X2:V --sentido izq
+      ronda de obstáculos: el planificador del gemelo (ring_route.py) arma la vuelta
+      que esquiva las señales (roja por la derecha, verde por la izquierda); también
+      --cartas abajo=14,arriba=3 (las 36 cartas del reglamento, una por recta)
   python scripts/ruta_bt.py ver logs_tof/ruta_recta_FECHA.txt   vuelve a graficar un log
 
 Opciones de todas: --sim (solo simula y grafica, no se conecta), --puerto COM9
@@ -236,6 +240,99 @@ def ruta_archivo(a):
     if len(pts) < 2:
         sys.exit(f"{a.csv}: no encontré puntos x,y")
     return pts, a.cerrada, f"archivo {os.path.basename(a.csv)}"
+
+
+# ── Obstáculos: planificador del gemelo digital ───────────────────────────────
+# ring_route.py y wro_field.py viven en las ramas del gemelo (fox/perfil-isla), no
+# en parking: se usan desde el worktree WRO2026-isla junto a este repo (--gemelo).
+GEMELO_DIR = os.path.join(os.path.dirname(RAIZ), "WRO2026-isla", "src", "RASPI", "cam")
+LADOS = {"abajo": "S", "derecha": "E", "arriba": "N", "izquierda": "W",
+         "s": "S", "e": "E", "n": "N", "w": "W"}
+NOMBRE_LADO = {"S": "abajo", "E": "derecha", "N": "arriba", "W": "izquierda"}
+COLORES = {"r": "Red", "rojo": "Red", "roja": "Red", "red": "Red",
+           "v": "Green", "verde": "Green", "g": "Green", "green": "Green"}
+
+
+def gemelo(a):
+    d = getattr(a, "gemelo", None) or GEMELO_DIR
+    if not os.path.isdir(os.path.join(d, "pure_pursuit")):
+        sys.exit(f"No encontré el planificador del gemelo en {d} (pásalo con --gemelo <carpeta src/RASPI/cam>)")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    from pure_pursuit import ring_route, wro_field
+    return ring_route, wro_field
+
+
+def senales_de(a, wf):
+    """--senales lado:asiento:color,...  y/o  --cartas lado=N,...  ->  {(sección, asiento): color}."""
+    seats = {}
+    for item in (a.senales or "").split(","):
+        if not item.strip():
+            continue
+        try:
+            lado, asiento, color = (z.strip() for z in item.split(":"))
+            seats[(LADOS[lado.lower()], asiento.upper())] = COLORES[color.lower()]
+        except (ValueError, KeyError):
+            sys.exit(f"Señal '{item}': usa lado:asiento:color, p. ej. abajo:T1:R (lados abajo/derecha/arriba/"
+                     f"izquierda, asientos {'/'.join(wf.SEATS)}, color R o V)")
+    for item in (a.cartas or "").split(","):
+        if not item.strip():
+            continue
+        try:
+            lado, n = (z.strip() for z in item.split("="))
+            for asiento, color in wf.CARDS[int(n) - 1]:
+                seats[(LADOS[lado.lower()], asiento)] = color
+        except (ValueError, KeyError, IndexError):
+            sys.exit(f"Carta '{item}': usa lado=número (1-36), p. ej. abajo=14")
+    for (sec, asiento) in seats:
+        if asiento not in wf.SEATS:
+            sys.exit(f"Asiento {asiento} no existe: {'/'.join(wf.SEATS)}")
+    return seats
+
+
+def ruta_obstaculos(a):
+    """Vuelta que esquiva las señales, del planificador del gemelo (marco: centro del
+    tapete, rumbo 0 = +y) pasada al de SeguirRuta (esquina exterior, th 0 = +x)."""
+    rr, wf = gemelo(a)
+    seats = senales_de(a, wf)
+    if not seats:
+        sys.exit("Sin señales: pasa --senales o --cartas")
+    m = wf.OUTER_HALF_MM                         # 1500: del centro del tapete a la pared exterior
+    ccw = a.sentido == "izq"
+    r = rr.plan("CCW" if ccw else "CW", seats, parking=None, laps=3, start_section="S" if ccw else "W")
+    if not r.report.get("feasible", False):
+        sys.exit(f"El planificador no encontró una ruta que cumpla las holguras: {r.report}")
+    x, y = r.x + m, r.y + m
+    # Salida: a la mitad del tramo derecho más largo de la ruta (rumbo a menos de 2.5°
+    # de una pared), para que el carro se ponga paralelo a la pared y no a media
+    # maniobra (con salida fija a 70 cm caía en diagonal esquivando la 1a señal).
+    th = np.degrees(np.arctan2(np.roll(y, -1) - y, np.roll(x, -1) - x))
+    recto = np.abs(((th + 45) % 90) - 45) < 2.5
+    n = len(x)
+    mejor, ini, largo = (0, 0), None, 0
+    for k in range(2 * n):                       # dos pasadas: el tramo puede cruzar el índice 0
+        if recto[k % n]:
+            if ini is None:
+                ini = k
+            largo = k - ini + 1
+            if largo > mejor[1] and largo <= n:
+                mejor = (ini, largo)
+        else:
+            ini = None
+    i0 = (mejor[0] + mejor[1] // 2) % n
+    pts = np.column_stack([np.roll(x, -i0), np.roll(y, -i0)])
+    a.senales_xy = []
+    print("Pon las señales (centro de cada una, cm desde la esquina de abajo a la izquierda, por dentro):")
+    for (sec, asiento), color in sorted(seats.items()):
+        h, w = wf.SEATS[asiento]
+        sx, sy = wf.section_to_world(sec, h, w)
+        sx, sy = sx + m, sy + m
+        a.senales_xy.append((sx, sy, color))
+        print(f"  {'ROJA ' if color == 'Red' else 'VERDE'} recta de {NOMBRE_LADO[sec]:9s} ({asiento}): "
+              f"a {sx / 10:5.1f} cm de la pared izquierda y {sy / 10:5.1f} cm de la de abajo")
+    rep_ = r.report
+    return pts, True, (f"obstáculos {a.sentido} {len(seats)} señales x{a.vueltas} "
+                       f"(holgura señal {rep_.get('sign_mm', 0):.0f} mm, R min {rep_.get('r_min_mm', 0):.0f} mm)")
 
 
 def radios(ruta, cerrada):
@@ -575,7 +672,7 @@ def resumen_pared(W, P):
 # Gráfica
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar, mapa=None, pared=None):
+def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar, mapa=None, pared=None, senales=None):
     import matplotlib
     if not mostrar:
         matplotlib.use("Agg")
@@ -593,6 +690,9 @@ def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar, mapa=None, 
         for (x0, y0, x1, y1) in mapa:
             ax.plot([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0], color="#c9c8c2", lw=1.2, zorder=0)
 
+    for sx, sy, color in senales or []:
+        ax.add_patch(plt.Rectangle((sx - 25, sy - 25), 50, 50, color="#d03b3b" if color == "Red" else "#2e9e4f",
+                                   zorder=3))
     r = np.vstack([ruta, ruta[:1]]) if cerrada else ruta
     ax.plot(r[:, 0], r[:, 1], color=COLOR_RUTA, lw=6, alpha=0.35, solid_capstyle="round", label="ruta pedida")
     if len(sim):
@@ -681,6 +781,9 @@ def leer_log(ruta_log):
             if linea.startswith("R,"):
                 c = linea.split(",")
                 pts.append((float(c[1]), float(c[2])))
+            elif linea.startswith("S,"):
+                c = linea.strip().split(",")
+                meta.setdefault("senales", []).append((float(c[1]), float(c[2]), c[3]))
             elif linea.startswith("# PC "):
                 for kv in linea[5:].split():
                     if "=" in kv:
@@ -780,6 +883,7 @@ def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
            f"pared={getattr(a, 'pared', 0)} set={';'.join(getattr(a, 'set', None) or [])} enc_curva={getattr(a, 'enc_curva', 0.0)} "
            f"bno_escala={getattr(a, 'bno_escala', 1.0)} anticipo={getattr(a, 'anticipo', 0.0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
            f"# PC titulo {titulo}\n")
+    txt += "".join(f"S,{sx:.0f},{sy:.0f},{color}\n" for sx, sy, color in getattr(a, "senales_xy", []))
     return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
 
 
@@ -987,6 +1091,15 @@ def main():
     p.add_argument("--vueltas", type=int, default=1)
     p.set_defaults(gen=ruta_archivo)
 
+    p = sub.add_parser("obstaculos", help="ronda de obstáculos con el planificador del gemelo (cerrada)")
+    comunes(p, con_salida=False)
+    p.add_argument("--senales", help="lado:asiento:color separados por coma, p. ej. abajo:T1:R,derecha:X2:V")
+    p.add_argument("--cartas", help="lado=carta (1-36 del reglamento), p. ej. abajo=14,arriba=3")
+    p.add_argument("--sentido", choices=["izq", "der"], default="izq", help="izq = antihorario")
+    p.add_argument("--vueltas", type=int, default=3)
+    p.add_argument("--gemelo", help=f"carpeta src/RASPI/cam con pure_pursuit/ring_route.py (default {GEMELO_DIR})")
+    p.set_defaults(gen=ruta_obstaculos)
+
     p = sub.add_parser("ver", help="vuelve a graficar un log de ruta_bt")
     p.add_argument("log")
     p.add_argument("--no-mostrar", action="store_true")
@@ -1021,7 +1134,8 @@ def main():
         print(linea_resumen(real, W, meta, T))
         if not a.sin_grafica:
             graficar(ruta, cerrada, (sx, sy, sth), sim, real, titulo,
-                     os.path.splitext(a.log)[0] + ".png", not a.no_mostrar, mapa=mapa, pared=W)
+                     os.path.splitext(a.log)[0] + ".png", not a.no_mostrar, mapa=mapa, pared=W,
+                     senales=meta.get("senales"))
         return
 
     if a.centro is not None:
@@ -1052,7 +1166,7 @@ def main():
         os.makedirs(os.path.join(RAIZ, "logs_tof"), exist_ok=True)
         png = os.path.join(RAIZ, "logs_tof", f"sim_{a.tipo}.png")
         graficar(ruta, cerrada, salida, sim, None, titulo + " (solo simulación)", png, not a.no_mostrar,
-                 mapa=mapa_de(a))
+                 mapa=mapa_de(a), senales=getattr(a, "senales_xy", None))
         return
 
     nombre = subir_y_correr(a, ruta, paso, cerrada, salida, titulo, a.tipo)
@@ -1069,7 +1183,7 @@ def main():
         print(linea)
     print(linea_resumen(real, W, meta, T))
     graficar(ruta, cerrada, salida, sim, real, titulo, os.path.splitext(nombre)[0] + ".png", not a.no_mostrar,
-             mapa=mapa_de(a), pared=W)
+             mapa=mapa_de(a), pared=W, senales=getattr(a, "senales_xy", None))
 
 
 if __name__ == "__main__":
