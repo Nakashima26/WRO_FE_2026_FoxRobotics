@@ -783,11 +783,12 @@ const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_G
 // más corto (la pared) fija a la vez el lado de salida Y la dirección de giro de
 // toda la pista (se latchea como hace GIRANDO en la 1ª esquina).
 // TODOS estos números son de ARRANQUE — hay que tunearlos en el tapete.
-const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra
+const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra (ruta: 195 por config; ver inicioMotor)
 const int  INICIO_PWM_SENAL            = 0;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
+const int  INICIO_ADENTRO_OVERSHOOT_DEG = 8;  // ídem para el giro de 90° (isal=2): a mayor PWM la inercia pasa más de 90° y la contravuelta se come la fila de señales
 const int  INICIO_OVERSHOOT_DEG        = 8;    // corta el servo antes; la inercia completa (0 = sin corte)
 const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
                                                      //  ángulo — patina / topa la pared del cajón —
@@ -836,6 +837,8 @@ const float INICIO_R_CONTRA_MM         = 130.0f; // radio efectivo de la contrav
 const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto (red de seguridad)
 const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
+const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
+const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
 const int  INICIO_CONTRA_FIN_DEG       = 6;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
 const bool INICIO_SETTLE_MOTOR         = false; // fase 6: true = sigue a INICIO_PWM con el servo al centro mientras se aquieta el giro (no pierde la inercia); false = coast
 
@@ -852,6 +855,8 @@ int   piSalida      = 0;       // isal= de la Pi: 0 sin dato | 1 afuera | 2 aden
 bool  piSenalSalida = false;   // isen= de la Pi: señal a <~1.3 m adelante del cajón (sticky)
 // Salida rápida solo sin señal cerca de la salida; con señal, el PWM de siempre.
 int inicioPwm() { return (piSenalSalida && INICIO_PWM_SENAL > 0) ? INICIO_PWM_SENAL : INICIO_PWM; }
+void setMotorTope(int velocidad, int tope);
+void inicioMotor(int v) { setMotorTope(v, 255); }   // la salida no se recorta a MOTOR_MAX (155 en ruta): recta/arcos pueden ir más rápido
 bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
 bool  inicio3pHecho = false;   // la reversa de corrección (fase 11) solo una vez
 float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
@@ -3938,9 +3943,9 @@ void loop() {
                 : rampaPWM(tSw - INICIO_SERVO_ESPERA_MS, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
-        setMotor(vel);
+        inicioMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
-        bool swingListo   = (deltaIni >= (float)(angSwing - INICIO_OVERSHOOT_DEG));
+        bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_OVERSHOOT_DEG)));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
         if (!swingListo && !inicio3pHecho && INICIO_3P_ANG_DEG > 0 && deltaIni >= INICIO_3P_ANG_DEG) {
           inicio3pHecho   = true;
@@ -3964,7 +3969,7 @@ void loop() {
       if (inicioFase == 11) {
         motorReversa();
         escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);
-        setMotor(inicioPwm());
+        inicioMotor(inicioPwm());
         if (odomMmF > inicioOdomRecto) inicioOdomRecto = odomMmF;   // la reversa cuenta desde donde paró
         if (inicioOdomRecto - odomMmF >= INICIO_3P_REV_MM || millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS) {
           motorCoast();
@@ -3980,13 +3985,21 @@ void loop() {
       if (inicioFase == 2) {
         motorAdelante();
         escribirServo(centroServo);
-        setMotor(inicioPwm());
+        inicioMotor(INICIO_RECTO_PWM > 0 ? INICIO_RECTO_PWM : inicioPwm());
+        // Velocidad por odometría (EMA) para el adelanto de frenado.
+        static float odomPrev = 0.0f; static unsigned long msPrev = 0; static float vMmS = 0.0f;
+        if (millis() - inicioFaseMs < 30) { odomPrev = odomMmF; msPrev = millis(); vMmS = 0.0f; }
+        else if (millis() - msPrev >= 30) {
+          vMmS += 0.4f * ((odomMmF - odomPrev) * 1000.0f / (float)(millis() - msPrev) - vMmS);
+          odomPrev = odomMmF; msPrev = millis();
+        }
         bool fin;
         if (INICIO_REVERSA) {
           fin = (millis() - inicioFaseMs >= INICIO_MID_MS);
         } else {
           float lat     = fabs(poseYf - inicioY0);
-          float latPred = lat + INICIO_R_CONTRA_MM * (1.0f - cosf(deltaIni * PI / 180.0f));
+          float latPred = lat + INICIO_R_CONTRA_MM * (1.0f - cosf(deltaIni * PI / 180.0f))
+                          + INICIO_RECTO_LEAD_S * fabs(vMmS) * sinf(deltaIni * PI / 180.0f);
           float objetivo = inicioAdentro ? INICIO_LAT_ADENTRO_MM : INICIO_LAT_AFUERA_MM;
           bool tope = (odomMmF - inicioOdomRecto >= INICIO_RECTO_MAX_MM)
                       || (millis() - inicioFaseMs >= INICIO_RECTO_TIMEOUT_MS)
@@ -4011,7 +4024,7 @@ void loop() {
       if (inicioFase == 3) {
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);   // full al lado CONTRARIO
-        setMotor(inicioPwm());
+        inicioMotor(inicioPwm());
         // Corrige solo INICIO_CONTRA_CORRIGE_DEG desde el pico (o llega al piso de
         // margen si el pico fue chico); el residuo lo cierra la reversa (fase 5).
         // Sin reversa la contravuelta cierra sola hasta ~0 (INICIO_CONTRA_FIN_DEG).
