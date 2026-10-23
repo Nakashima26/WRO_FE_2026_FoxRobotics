@@ -3747,8 +3747,10 @@ void loop() {
   if (raceFinished) {
     setMotor(0);
     // Modo RUTA: rodando hasta parar sigue la ruta; con el servo al centro a la salida de la curva iba recto a la isla.
+    // En el cajón no: la ruta deja el volante cruzado y el coast de la fase 13 mete la esquina trasera (n7 s9, n10 s14).
     float ruedaDeg;
-    if (piRuta && rutaSteer(ruedaDeg)) {
+    bool enCajon = (parkFase == 7 || puntaFase == 6);
+    if (!enCajon && piRuta && rutaSteer(ruedaDeg)) {
       escribirServo(rutaServo(ruedaDeg));
       actualizarOdometria();
     } else {
@@ -6087,15 +6089,23 @@ void loop() {
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
         bool  pegado   = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
         bool  atrasPegado = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
+        // El ToF al centro sigue en 4 cm cuando la esquina ya va a 1 cm y el
+        // coast no alcanza a parar (n10 s14). Cortar ahí y terminar, sin otro ciclo.
+        bool  esquinaFinal = false;
+        if (distB_filtrada > 0.0f && dif <= 20.0f) {
+          float yaw = dif * 0.0174533f;
+          float esquinaCm = distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw);
+          esquinaFinal = (esquinaCm <= 2.8f);
+        }
         bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
-        if (frenteOk || alineado || pegado || atrasPegado || timeout) {
+        if (frenteOk || alineado || pegado || atrasPegado || esquinaFinal || timeout) {
           Serial.print("PARK fase 13 fin: dif="); Serial.print(dif, 1);
           Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" ext="); Serial.print(extRaw);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
           // El tope de lado ya es un punto del cajón; la pasada siguiente solo
           // cierra los últimos grados y vuelve a ver el poste. Atrás y timeout sí.
-          if (!alineado && !pegado && parkCiclos < PARK_CICLOS_MAX) {
+          if (!alineado && !pegado && !esquinaFinal && parkCiclos < PARK_CICLOS_MAX) {
             parkCiclos++;
             motorCoast(); escribirServo(centroServo);
             Serial.print("PARK ciclo "); Serial.print(parkCiclos);
@@ -6103,11 +6113,12 @@ void loop() {
             parkFase   = 9;
             parkFaseMs = millis(); parkOdom0 = odomMm;
           } else {
-            finalizarPark(frenteOk    ? "REV FINAL: dF objetivo"
-                        : alineado    ? "REV FINAL: ya alineado"
-                        : pegado      ? "REV FINAL: pegado de lado"
-                        : atrasPegado ? "REV FINAL: pegado atras"
-                                      : "REV FINAL: TIMEOUT (ciclos agotados)");
+            finalizarPark(frenteOk     ? "REV FINAL: dF objetivo"
+                        : alineado     ? "REV FINAL: ya alineado"
+                        : pegado       ? "REV FINAL: pegado de lado"
+                        : esquinaFinal ? "REV FINAL: esquina"
+                        : atrasPegado  ? "REV FINAL: pegado atras"
+                                       : "REV FINAL: TIMEOUT (ciclos agotados)");
           }
         }
         break;
