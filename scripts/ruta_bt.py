@@ -70,7 +70,11 @@ RADIO_AVISO_MM = 180.0   # entre esto y RADIO_MIN_MM va a tope: se puede, pero s
 def vel_por_pwm(pwm):
     return max(0.0, 4.39 * (pwm - 57))
 
-TAU_RUEDA_S = 0.08   # retraso del servo (primer orden)
+# Retraso del servo (primer orden). 0.12 s reproduce el rango del servo y el error
+# de las vueltas reales a PWM 210, 240 y 255 (2026-10-23); con 0.08 la simulación
+# no oscilaba al salir de las esquinas y el carro sí.
+TAU_RUEDA_S = 0.12
+VEL_MS = 20          # ventana con la que el ESP32 mide velocidad y giro (kd)
 DT_SIM = 0.01
 
 COLOR_RUTA = "#8a8a85"
@@ -312,7 +316,9 @@ def simular(ruta, paso, cerrada, salida, a):
     x, y, th = salida
     if not seg.cercano(x, y, th):
         return np.zeros((0, 8)), "la salida no va en el sentido de la ruta"
+    kd = getattr(a, "kd", None) or 0.0
     rueda_real, t, filas = 0.0, 0.0, []
+    dist, vel_med, giro_med, prev = 0.0, 0.0, 0.0, None   # prev = (t, dist, th) de la última medición
     while True:
         if t > 120:
             return np.array(filas), "timeout"
@@ -322,11 +328,21 @@ def simular(ruta, paso, cerrada, salida, a):
         lat = seg.lateral(x, y)
         if abs(lat) > LAT_MAX_MM:
             return np.array(filas), "se salió de la ruta"
-        rueda = seg.rueda(x, y, th)
+        if prev is None or t - prev[0] >= VEL_MS / 1000 - 1e-9:
+            if prev is not None:
+                vel_med = (dist - prev[1]) / (t - prev[0])
+                giro_med = (th - prev[2]) / (t - prev[0])
+            prev = (t, dist, th)
+        rueda_ruta = seg.rueda(x, y, th)
+        rueda = rueda_ruta
+        if kd > 0 and vel_med > 100:
+            giro_pedido = math.degrees(vel_med * math.tan(math.radians(rueda_ruta)) / BATALLA_MM)
+            rueda += kd * (giro_pedido - giro_med)
         servo = servo_para_rueda(rueda)
-        pwm = pwm_para(rueda, t * 1000, a.pwm, a.pwm_curva)
+        pwm = pwm_para(rueda_ruta, t * 1000, a.pwm, a.pwm_curva)
         filas.append((t * 1000, x, y, th, seg.i, lat, servo, pwm))
         v = vel_por_pwm(pwm)
+        dist += v * DT_SIM
         rueda_real += (rueda_para_servo(servo) - rueda_real) * DT_SIM / TAU_RUEDA_S
         x += v * DT_SIM * math.cos(math.radians(th))
         y += v * DT_SIM * math.sin(math.radians(th))
@@ -448,6 +464,8 @@ def leer_log(ruta_log):
                         meta[k] = v
             elif linea.startswith("# SeguirRuta") and "centro=" in linea:
                 meta["centro_carro"] = linea.split("centro=")[1].split()[0]
+                if "kd=" in linea:
+                    meta["kd_carro"] = linea.split("kd=")[1].split()[0]
             elif linea.startswith("# fin x="):
                 c = linea[6:].split()
                 meta["fin"] = tuple(float(kv.split("=")[1]) for kv in c[:3])   # x, y, th ya parado
@@ -527,7 +545,8 @@ def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
     """Lo que va al principio del log para poder regraficarlo con `ver`."""
     txt = (f"# PC tipo={tipo} cerrada={int(cerrada)} paso={paso:.3f} vueltas={a.vueltas} "
            f"salida={salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f} pwm={a.pwm} pwm_curva={a.pwm_curva} "
-           f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO}\n# PC titulo {titulo}\n")
+           f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO} kd={getattr(a, 'kd', None) or 0}\n"
+           f"# PC titulo {titulo}\n")
     return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
 
 
@@ -542,9 +561,14 @@ def comandos_ruta(ruta, paso, cerrada):
 
 
 def comando_salida(a, salida):
-    centro = f",{a.centro}" if getattr(a, "centro", None) is not None else ""
+    # centro y kd son opcionales desde la derecha: sin ellos el ESP32 deja los suyos.
+    extra = ""
+    if getattr(a, "kd", None) is not None:
+        extra = f",{CENTRO_SERVO},{a.kd:.3f}"
+    elif getattr(a, "centro", None) is not None:
+        extra = f",{a.centro}"
     return (f"RTS,{salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f},{a.pwm},{a.pwm_curva},"
-            f"{a.vueltas},{a.lookahead:.0f}{centro}\n")
+            f"{a.vueltas},{a.lookahead:.0f}{extra}\n")
 
 
 def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
@@ -642,6 +666,8 @@ def main():
         p.add_argument("--pwm-curva", type=int, default=120, help="PWM con la rueda muy cerrada")
         p.add_argument("--lookahead", type=float, default=200.0, help="mm (el de PurePursuit.ino: 200)")
         p.add_argument("--centro", type=int, help=f"servo con el que va derecho (sin esto: el del sketch, {CENTRO_SERVO})")
+        p.add_argument("--kd", type=float, default=0.04,
+                       help="amortiguamiento con el giro del BNO, ° de rueda por °/s (0 = apagado; 0.08 ya oscila a 255)")
         p.add_argument("--paso", type=float, default=20.0, help="mm entre puntos de la ruta")
         p.add_argument("--auto", action="store_true", help="arranca sin esperar Enter")
         p.add_argument("--no-mostrar", action="store_true", help="solo guarda el PNG")
@@ -702,6 +728,7 @@ def main():
         a.vueltas = int(meta.get("vueltas", 1))
         a.pwm, a.pwm_curva = int(meta.get("pwm", 150)), int(meta.get("pwm_curva", 120))
         a.lookahead = float(meta.get("lookahead", 200))
+        a.kd = float(meta.get("kd_carro", meta.get("kd", 0)))
         CENTRO_SERVO = int(meta.get("centro_carro", meta.get("centro", CENTRO_SERVO)))
         sim, motivo = simular(ruta, paso, cerrada, (sx, sy, sth), a)
         print(resumen(f"simulación ({motivo})", sim))
@@ -718,7 +745,8 @@ def main():
     ruta, paso = remuestrear(pts, a.paso, cerrada)
     # Salida: el primer punto, viendo hacia el segundo.
     salida = (ruta[0, 0], ruta[0, 1], math.degrees(math.atan2(ruta[1, 1] - ruta[0, 1], ruta[1, 0] - ruta[0, 0])))
-    titulo = f"{titulo} | pwm {a.pwm}/{a.pwm_curva} lookahead {a.lookahead:.0f} centro {CENTRO_SERVO}"
+    titulo = (f"{titulo} | pwm {a.pwm}/{a.pwm_curva} lookahead {a.lookahead:.0f} centro {CENTRO_SERVO}"
+              + (f" kd {a.kd:g}" if a.kd else ""))
 
     largo = np.sum(np.hypot(*np.diff(ruta, axis=0).T)) + (np.hypot(*(ruta[0] - ruta[-1])) if cerrada else 0)
     r = radios(ruta, cerrada)

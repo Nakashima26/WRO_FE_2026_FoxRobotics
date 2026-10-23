@@ -26,16 +26,16 @@
  *                          cerrada 1 = vuelta (sin el campo = 1, como PurePursuit), 0 = abierta
  *   RTP,i,x,y,x,y,...      puntos desde el índice i (enteros, mm), en orden
  *   RTE,n                  fin: la ruta queda cargada si llegaron los n puntos
- *   RTS,x,y,th,pwm,pwmCurva,vueltas,lookahead,centro
+ *   RTS,x,y,th,pwm,pwmCurva,vueltas,lookahead,centro,kd
  *                          pose de salida y parámetros (se pueden omitir desde
  *                          la derecha; sin RTS sale del 1er punto viendo al 2º)
  *   g -> arrancar   x -> parar   (sueltos, sin Enter)
  *
  * LOG (por USB y Bluetooth, BT_NOMBRE):
  *   # ...                               configuración, avisos, resumen
- *   P,t_ms,x,y,th,i,lat,servo,pwm       cada POSE_MS: pose, punto más cercano,
+ *   P,t_ms,x,y,th,i,lat,servo,pwm,giro  cada POSE_MS: pose, punto más cercano,
  *                                       error lateral (mm, + = carro a la izquierda
- *                                       de la ruta), servo y PWM
+ *                                       de la ruta), servo, PWM y giro medido (°/s)
  *   E,t_ms,texto                        eventos (arranque, fin)
  *
  * SEGURIDAD: para solo si el error lateral pasa de LAT_MAX_MM, si el encoder no
@@ -54,6 +54,14 @@
 // ── Seguimiento ──────────────────────────────────────────────────────────────
 const float BATALLA_MM = 113.0f;   // eje trasero a eje delantero (RUTA_BATALLA_MM)
 float lookaheadMm      = 200.0f;   // RUTA_LOOKAHEAD_MM; RTS lo cambia
+// Amortiguamiento con el giro del BNO: rueda += kdGiro · (giro que pide el pure
+// pursuit − giro medido), en grados de rueda por °/s. A 255 el pure pursuit solo
+// oscila al salir de las esquinas (el servo tarda ~0.12 s): esto le quita volante
+// cuando el carro ya está girando más de lo pedido. 0 = apagado. RTS lo cambia.
+// 2026-10-23 a PWM 255/230: 0 -> lateral rms 8 / max 20 mm; 0.08 -> oscilación
+// rápida (~3 Hz) al salir de la 1a esquina; 0.04 -> 2-3 / 6 mm en 3 vueltas.
+float kdGiro = 0.04f;
+const unsigned long VEL_MS = 20;   // ventana para medir velocidad y giro
 // Ventana del punto más cercano: de 5 puntos atrás a esto adelante.
 const float VENTANA_MM = 600.0f;
 
@@ -154,6 +162,9 @@ float salX = 0, salY = 0, salTh = 0;
 // Pose
 float x = 0, y = 0, th0 = 0;
 float distPrev = 0, thPrev = 0, dist0 = 0;
+float velMmS = 0, giroDegS = 0;            // medidos cada VEL_MS
+float velDPrev = 0, velAPrev = 0;
+unsigned long velTPrev = 0;                // 0 = sin medición previa
 
 enum Fase { ESPERA, CORRIENDO };
 Fase fase = ESPERA;
@@ -295,6 +306,22 @@ void actualizarPose() {
   if (fase != CORRIENDO || ds == 0) return;   // parado, moverlo a mano no cuenta
   x += ds * cosf(thMed * DEG_TO_RAD);
   y += ds * sinf(thMed * DEG_TO_RAD);
+}
+
+// Velocidad (encoder) y giro (BNO) en una ventana de VEL_MS: derivar cada loop
+// sería puro ruido (una cuenta = 0.18 mm, el BNO manda cada 10 ms).
+void actualizarVelocidades() {
+  unsigned long now = millis();
+  if (velTPrev != 0 && now - velTPrev < VEL_MS) return;
+  float d = distanciaMm();
+  if (velTPrev != 0) {
+    float dt = (now - velTPrev) / 1000.0f;
+    velMmS   = (d - velDPrev) / dt;
+    giroDegS = (anguloGyro - velAPrev) / dt;
+  }
+  velTPrev = now;
+  velDPrev = d;
+  velAPrev = anguloGyro;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -439,16 +466,18 @@ void procesarLinea(char* s) {
   } else if (strncmp(s, "RTS,", 4) == 0) {
     float sx = salX, sy = salY, sth = salTh, la = lookaheadMm;
     int p1 = pwmCrucero, p2 = pwmCurva, v = vueltas, c = centroServo;
-    sscanf(s + 4, "%f,%f,%f,%d,%d,%d,%f,%d", &sx, &sy, &sth, &p1, &p2, &v, &la, &c);
+    float kd = kdGiro;
+    sscanf(s + 4, "%f,%f,%f,%d,%d,%d,%f,%d,%f", &sx, &sy, &sth, &p1, &p2, &v, &la, &c, &kd);
     salX = sx; salY = sy; salTh = sth;
     pwmCrucero = constrain(p1, 0, 255);
     pwmCurva   = constrain(p2, 0, 255);
     vueltas    = max(v, 1);
     lookaheadMm = constrain(la, 50.0f, 1000.0f);
     centroServo = constrain(c, 60, 95);
+    kdGiro = constrain(kd, 0.0f, 1.0f);
     escribirServo(centroServo);
-    Log.printf("# salida x=%.0f y=%.0f th=%.1f pwm=%d/%d vueltas=%d lookahead=%.0f centro=%d\n",
-               salX, salY, salTh, pwmCrucero, pwmCurva, vueltas, lookaheadMm, centroServo);
+    Log.printf("# salida x=%.0f y=%.0f th=%.1f pwm=%d/%d vueltas=%d lookahead=%.0f centro=%d kd=%.3f\n",
+               salX, salY, salTh, pwmCrucero, pwmCurva, vueltas, lookaheadMm, centroServo, kdGiro);
   }
 }
 
@@ -487,12 +516,14 @@ void arrancar() {
     return;
   }
   float lat = errorLateral();
-  Log.printf("# SeguirRuta n=%d paso=%.1f cerrada=%d vueltas=%d lookahead=%.0f pwm=%d/%d centro=%d\n",
-             rutaN, rutaPaso, rutaCerrada ? 1 : 0, vueltas, lookaheadMm, pwmCrucero, pwmCurva, centroServo);
+  Log.printf("# SeguirRuta n=%d paso=%.1f cerrada=%d vueltas=%d lookahead=%.0f pwm=%d/%d centro=%d kd=%.3f\n",
+             rutaN, rutaPaso, rutaCerrada ? 1 : 0, vueltas, lookaheadMm, pwmCrucero, pwmCurva, centroServo, kdGiro);
   Log.printf("# start x=%.0f y=%.0f th=%.1f i=%d lat=%.0f\n", x, y, th0, rutaI, lat);
   if (fabsf(lat) > 150) Log.println("# OJO: la salida queda a más de 15 cm de la ruta");
   tArranque = millis();
   tPose = 0;
+  velTPrev = 0;   // la ventana de giro no cruza el reset de anguloGyro
+  velMmS = giroDegS = 0;
   digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
   fase = CORRIENDO;
   Log.printf("E,0,ARRANCA\n");
@@ -537,18 +568,26 @@ void recorrido() {
   latN++;
   if (fabsf(lat) > LAT_MAX_MM) { terminar("se salió de la ruta"); return; }
 
-  float rueda = ruedaPP();
+  float ruedaRuta = ruedaPP();
+  float rueda = ruedaRuta;
+  // Amortiguamiento (kdGiro): giro que pide el pure pursuit contra el que mide el BNO
+  // (+ = izquierda en los dos). Si ya gira más de lo pedido, le quita volante.
+  if (kdGiro > 0 && velMmS > 100) {
+    float giroPedido = velMmS * tanf(ruedaRuta * DEG_TO_RAD) / BATALLA_MM * RAD_TO_DEG;
+    rueda += kdGiro * (giroPedido - giroDegS);
+  }
   escribirServo(servoParaRueda(rueda));
 
-  // Más lento con la rueda cerrada; rampa al arrancar.
-  float f = constrain((fabsf(rueda) - RUEDA_CURVA_MIN) / (RUEDA_CURVA_MAX - RUEDA_CURVA_MIN), 0.0f, 1.0f);
+  // Más lento con la rueda cerrada (la de la ruta: la corrección no debe mover el PWM); rampa al arrancar.
+  float f = constrain((fabsf(ruedaRuta) - RUEDA_CURVA_MIN) / (RUEDA_CURVA_MAX - RUEDA_CURVA_MIN), 0.0f, 1.0f);
   int pwm = (int)lroundf(pwmCrucero + (pwmCurva - pwmCrucero) * f);
   if (t < RAMPA_MS) pwm = min(pwm, (int)map(t, 0, RAMPA_MS, PWM_ARRANQUE, pwmCrucero));
   setMotor(pwm);
 
   if (t - tPose >= POSE_MS) {
     tPose = t;
-    Log.printf("P,%lu,%.0f,%.0f,%.2f,%d,%.0f,%d,%d\n", t, x, y, thActual(), rutaI, lat, servoActual, pwmActual);
+    Log.printf("P,%lu,%.0f,%.0f,%.2f,%d,%.0f,%d,%d,%.0f\n", t, x, y, thActual(), rutaI, lat, servoActual, pwmActual,
+               giroDegS);
   }
 }
 
@@ -596,6 +635,7 @@ void setup() {
 void loop() {
   leerBno();
   actualizarPose();
+  actualizarVelocidades();
   leerTofFrontal();
 
   static char linUsb[256], linBt[256];
