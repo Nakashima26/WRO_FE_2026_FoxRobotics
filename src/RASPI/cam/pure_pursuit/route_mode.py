@@ -38,12 +38,55 @@ from .digital_map import feet_world
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
-                        SECTIONS_CW, orange_segments, section_to_world, world_to_section)
+                        SECTIONS_CW, SIGN_MM, orange_segments, section_to_world, world_to_section)
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
 _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
 _CLUSTER_GAP_MM = 150.0
 _FENCE_STEP_MM = 100.0
+
+def cte_urgent_holds(cte_mm: float, dh_deg: float, wall_mm: float, sign_mm: float, island_mm: float) -> bool:
+    """Sigue el tope de 110 salvo en la cuerda larga.
+
+    Ahí el carro va a más de 100 mm de la ruta y la ruta, a 500 mm, ya dobla
+    (n3 s21 / n2 s24 / n3 s24: |cte| > 120 mm y más de 30°). n3 s16 es el
+    mismo desvío sobre una recta (0–5°) y n1 s8 solo llega a 49 mm: soltar
+    el tope ahí alarga la vuelta. Con la huella a menos de 40 mm de pared,
+    lata confirmada o isla, el tope se queda.
+    """
+    if abs(cte_mm) < 100.0 or dh_deg < 25.0:
+        return True
+    return min(wall_mm, sign_mm, island_mm) < 40.0
+
+
+def _grip_pwm(steer_deg: float) -> int:
+    """PWM que aguanta el agarre medido (2400 mm/s²) en el radio de este volante.
+
+    La cuerda solo suelta el 110 si esto llega al PWM máximo: a tope (R~134)
+    255 derrapa y la salida queda abierta (n5 s21 roza al estacionar).
+    """
+    st = math.radians(min(abs(float(steer_deg)), float(C.MAX_WHEEL_STEER_DEG)))
+    if st < math.radians(5.0):
+        return int(getattr(C, "ROUTE_PROFILE_MAX_PWM", 255))
+    v = math.sqrt(2400.0 * float(C.WHEELBASE_MM) / math.tan(st))
+    K = float(getattr(C, "ROUTE_PROFILE_K_MM_S_PER_PWM", 3.5))
+    pwm0 = float(getattr(C, "ROUTE_PROFILE_PWM0", 25.0))
+    pwm = int(v / K + pwm0)
+    lo = int(getattr(C, "ROUTE_CTE_URGENT_PWM", 110))
+    hi = int(getattr(C, "ROUTE_PROFILE_MAX_PWM", 255))
+    return max(lo, min(hi, pwm))
+
+
+def _chord_ahead(follower, ahead_mm: float = 500.0) -> tuple[float]:
+    """Cuánto dobla la ruta (grados) en los próximos ahead_mm."""
+    r = follower.route
+    n = len(r.kappa)
+    i = max(follower.i, 0)
+    step = r.length_mm / n
+    k = (i + max(1, int(round(ahead_mm / max(step, 1e-9))))) % n
+    dh = abs((float(r.heading_deg[k]) - float(r.heading_deg[i]) + 180.0) % 360.0 - 180.0)
+    return (dh,)
+
 
 def _pursuit_kappa(route, idx, lookahead_mm):
     """|κ| del pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
@@ -665,11 +708,17 @@ class RouteMode:
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
             cte_cap = _pwm("ROUTE_CTE_PWM")
             if getattr(C, "ROUTE_CTE_URGENT_MM", None) is not None and self._cte_urgent(conf, empty):
-                cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
                 if not self.fixed:
                     # 110 en vez de 105 corre ~2 cm y el cajón magenta (n4 s24).
+                    if getattr(C, "ROUTE_BLIND_PWM", None) is None or float(C.ROUTE_BLIND_PWM) <= 110:
+                        cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
                     b = getattr(C, "ROUTE_BLIND_PWM", None)
                     cte_cap = min(cte_cap, slow if b is None else int(b))
+                elif (cte_urgent_holds(self.follower.cte, *_chord_ahead(self.follower), *self._offset_body(conf))
+                      or _grip_pwm(wheel) < int(C.ROUTE_PROFILE_MAX_PWM)):
+                    # Soltar el 110 a tope abre el estacionamiento: sin tope, n5 s21
+                    # entra 9.8 mm; con el PWM del agarre, n4 s21 queda a 3.0 mm.
+                    cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
         self.pi_steer = (bool(self.upload) and not self.hold
                          and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and self._upload_risky())
@@ -764,6 +813,35 @@ class RouteMode:
         c1 = clearance(r.x[j] + cte * rx, r.y[j] + cte * ry)
         lim = float(C.ROUTE_CTE_URGENT_MM)
         return bool(np.any((c1 < lim) & (c1 < c0 - 20.0)))
+
+    def _offset_body(self, conf) -> tuple[float, float, float]:
+        """Holgura de la huella (pared, lata confirmada, isla), corrida el cte y sobre la ruta."""
+        r = self.follower.route
+        n = len(r.kappa)
+        i = max(self.follower.i, 0)
+        step = r.length_mm / n
+        m = int(float(getattr(C, "ROUTE_CTE_HORIZON_MM", 600.0)) / step) + 1
+        j = (i + np.arange(m)) % n
+        h = np.radians(r.heading_deg[j])
+        cte = float(self.follower.cte)
+        rx, ry = np.cos(h), -np.sin(h)
+        px = r.x[j] + cte * rx
+        py = r.y[j] + cte * ry
+        wall = island = 1e9
+        ih = float(INNER_HALF_MM)
+        for pts in (RR._corners_pose(px, py, h), RR._corners_pose(r.x[j], r.y[j], h)):
+            for cx, cy in pts:
+                wall = min(wall, float(OUTER_HALF_MM - np.maximum(np.abs(cx), np.abs(cy)).max()))
+                isl = np.hypot(np.maximum(np.abs(cx) - ih, 0.0), np.maximum(np.abs(cy) - ih, 0.0))
+                island = min(island, float(isl.min()))
+        signs = np.asarray(
+            [section_to_world(sec, *SEATS[seat]) for sec, seat in conf], dtype=float).reshape(-1, 2)
+        if len(signs) == 0:
+            sign = 1e9
+        else:
+            gap = RR._rect_dist_pose(signs[:, 0], signs[:, 1], px, py, h) - SIGN_MM * 0.5 * math.sqrt(2.0)
+            sign = float(gap.min())
+        return wall, sign, island
 
     def _sign_xy(self, conf, empty) -> np.ndarray:
         """Posiciones (x, y) en mm del tapete de las señales y asientos sin resolver.
