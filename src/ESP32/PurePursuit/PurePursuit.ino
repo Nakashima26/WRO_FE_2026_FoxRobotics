@@ -6124,8 +6124,9 @@ void loop() {
       if (parkFase == 13) {
         motorReversa();
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
-        setMotor(PARK_REV_PWM);
         float dif      = fabs(anguloGyro - parkRumboRef);
+        // PWM alto hasta el corte de 5° se pasa del poste; por encima de 20° el arco tiene aire.
+        setMotor(dif > 20.0f ? 130 : PARK_REV_PWM);
         bool  alineado = (dif <= PARK_FINAL_TOL_DEG);          // ya derecho: no sigas
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
