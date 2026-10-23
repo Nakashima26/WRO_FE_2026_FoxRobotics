@@ -83,7 +83,9 @@
 
 // ── Seguimiento ──────────────────────────────────────────────────────────────
 const float BATALLA_MM = 113.0f;   // eje trasero a eje delantero (RUTA_BATALLA_MM)
-float lookaheadMm      = 200.0f;   // RUTA_LOOKAHEAD_MM; RTS lo cambia
+// 2026-10-23 a PWM 255 sin paredes: 150 -> servo bailando (std 11.4), 200 -> 6-8,
+// 250/275/300 -> 5.0-5.6 y se mete menos en las esquinas. RTS lo cambia.
+float lookaheadMm      = 275.0f;
 // Amortiguamiento con el giro del BNO: rueda += kdGiro · (giro que pide el pure
 // pursuit − giro medido), en grados de rueda por °/s. A 255 el pure pursuit solo
 // oscila al salir de las esquinas (el servo tarda ~0.12 s): esto le quita volante

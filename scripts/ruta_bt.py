@@ -916,7 +916,8 @@ def main():
         p.add_argument("--puerto", help="COM del ESP32 (sin esto busca el Bluetooth; COM9 = USB)")
         p.add_argument("--pwm", type=int, default=150, help="PWM en recta (180 ≈ 540 mm/s)")
         p.add_argument("--pwm-curva", type=int, default=120, help="PWM con la rueda muy cerrada")
-        p.add_argument("--lookahead", type=float, default=200.0, help="mm (el de PurePursuit.ino: 200)")
+        p.add_argument("--lookahead", type=float, default=275.0,
+                       help="mm (2026-10-23 a 255: 150 bailaba, 200 oscilaba, 250-300 suave; 275 el elegido)")
         p.add_argument("--centro", type=int, help=f"servo con el que va derecho (sin esto: el del sketch, {CENTRO_SERVO})")
         p.add_argument("--kd", type=float, default=0.04,
                        help="amortiguamiento con el giro del BNO, ° de rueda por °/s (0 = apagado; 0.08 ya oscila a 255)")
