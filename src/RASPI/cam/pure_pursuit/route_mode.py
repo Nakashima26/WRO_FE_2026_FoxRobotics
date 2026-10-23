@@ -38,12 +38,31 @@ from .digital_map import feet_world
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
-                        SECTIONS_CW, orange_segments, section_to_world, world_to_section)
+                        SECTIONS_CW, _barrier_corners, orange_segments, section_to_world, world_to_section)
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
 _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
 _CLUSTER_GAP_MM = 150.0
 _FENCE_STEP_MM = 100.0
+
+def _pursuit_kappa(route, idx, lookahead_mm):
+    """|κ| que pide el pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
+
+    Misma cuenta que rutaSteer del ESP (blanco a lookahead fijo, κ = 2·lateral/ld²).
+    """
+    n = len(route.x)
+    step = route.length_mm / n
+    ahead = max(1, int(round(float(lookahead_mm) / max(step, 1e-9))))
+    j = np.asarray(idx, dtype=int) % n
+    q = (j + ahead) % n
+    h = np.radians(route.heading_deg[j])
+    sh, ch = np.sin(h), np.cos(h)
+    dx = route.x[q] - route.x[j]
+    dy = route.y[q] - route.y[j]
+    fwd = dx * sh + dy * ch
+    right = dx * ch - dy * sh
+    return np.abs(2.0 * right / np.maximum(fwd * fwd + right * right, 1.0))
+
 
 def _prm_for(unknown):
     """Mapa completo: no comprar arco hasta 140 mm (arquea la recta hacia la pared).
@@ -670,7 +689,10 @@ class RouteMode:
             cap = int(C.ROUTE_PENDING_PWM)
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
-        prof = self._profile_pwm(self._sign_xy(conf, empty))
+        bars = None
+        if self.park_w is not None:
+            bars = np.array([p for box in _barrier_corners(dm.parking, self.park_w) for p in box], dtype=float)
+        prof = self._profile_pwm(self._sign_xy(conf, empty), bars)
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
@@ -753,7 +775,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None) -> int | None:
+    def _profile_pwm(self, signs=None, barriers=None) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -786,24 +808,29 @@ class RouteMode:
         tight_on = False
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
-        win = int(C.ROUTE_PROFILE_KAPPA_WIN)
         # Adelanto por latencia a la velocidad máxima (conservador).
         lead = v_max * float(C.ROUTE_PROFILE_LATENCY_S)
         span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
         step = r.length_mm / n
         m = int(span / step) + 1
         i = max(self.follower.i, 0)
-        # Anillo cerrado: índices módulo n. Ventana ±win para |κ| máximo móvil.
-        idx = (i + np.arange(-win, m + win)) % n
-        kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
-        j = idx[win:win + m]
+        j = (i + np.arange(m)) % n
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
+        # κ que el ESP pide de verdad (lookahead fijo). Un pico más corto no se recorre:
+        # frenar por el κ local deja al carro lento en una curva que ya cortó.
+        kuse = _pursuit_kappa(r, j, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0)))
+        if barriers is not None and len(barriers):
+            # Junto a las maderas el arco planeado es el que cabe: el corte del lookahead
+            # entra al cajón magenta (Grok n5 s12). Ahí se vuelve al κ local.
+            near = np.hypot(r.x[j, None] - barriers[None, :, 0],
+                            r.y[j, None] - barriers[None, :, 1]).min(axis=1)
+            kuse = np.where(near < 700.0, np.maximum(kuse, np.abs(r.kappa[j])), kuse)
         tight = getattr(C, "ROUTE_PROFILE_TIGHT_KAPPA", None)
         a_c = a_lat if tight is None else np.where(
-            kmax > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
-        v_c = np.where(kmax < 1e-9, v_max,
-                       np.clip(np.sqrt(a_c / np.maximum(kmax, 1e-12)), v_min, v_max))
+            kuse > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
+        v_c = np.where(kuse < 1e-9, v_max,
+                       np.clip(np.sqrt(a_c / np.maximum(kuse, 1e-12)), v_min, v_max))
         if signs is not None and len(signs):
             # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
             sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))
