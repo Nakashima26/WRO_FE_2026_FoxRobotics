@@ -243,3 +243,5 @@ la anterior y las referencias (combo1).
   **1.25:1 mejor = 37.6-37.9 s mediana (carrera_bench)**
 - **sin ciclo por pegado de lado (export, 2026-10-23):** en la fase 13 el tope de lado ya no vuelve a la fase 9 (atrás y timeout sí ciclan). carrera_bench ruidos 1-3: 72/72 limpias, 0 pared, ninguna más lenta, pareado media −0.20/−0.24/−0.23 s (hasta −0.62). Grok ruidos 4/5/7/10 (con salida): mismas 92/96 que 171fc0d, media −0.21 s, peor 0. Rumbo final peor 8.7° (n2 s23) con las esquinas dentro.
   **1.25:1 mejor = 37.4-37.7 s mediana (carrera_bench)**
+- **recta ciega por perfil + ruta a margen blando 100 mm (2026-10-23, a2b5804 + 4868490):** vuelta 1: con dF ≥ 100 cm el tope deja de ser ROUTE_BLIND_PWM 105 (tope 105 si el CTE es urgente y el avance no cerró); mapa completo: margen blando 100 mm, la recta deja de arquearse a la pared. carrera_bench ruidos 1-3: 72/72, 0 pared, pareado −0.95/−0.45/−0.63 s, mediana 36.45/36.75/36.82. Grok 4/5/7/10 contra man1: **96/96** (base 92/96), 0 pared, pareado −0.65 s. Pared más cerca 5.3 mm sin contacto.
+  **1.25:1 mejor = 36.5-36.8 s mediana (carrera_bench)**
