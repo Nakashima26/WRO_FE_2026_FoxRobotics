@@ -72,7 +72,9 @@ def mapa_pista(pista=PISTA_MM, interior=None):
 
 # ToF como en SeguirRuta.ino: (adelante, izquierda, ángulo °) de la cara que mide desde
 # el centro del eje trasero, y las mismas reglas para decidir si una lectura sirve.
-TOFS = {"F": (141.4, 0.0, 0.0), "L": (113.0, 35.2, 90.0), "R": (113.0, -35.2, -90.0)}
+# Laterales: cara a 32.8 (L) / 36.8 (R) mm del centro, medido 2026-10-23 con el carro centrado
+# en el pasillo de 991.7 mm (L 463, R 459 mm parado; antes 35.2 del CAD para los dos).
+TOFS = {"F": (141.4, 0.0, 0.0), "L": (113.0, 32.8, 90.0), "R": (113.0, -36.8, -90.0)}
 PARED_GATE_MM = 120.0
 PARED_INC_MAX_DEG = 20.0
 PARED_RECTA_DEG = 8.0
@@ -851,7 +853,8 @@ def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
         if not carro.esperar("# salida", desde=desde):
             print("El ESP32 no confirmó la salida (RTS).")
             return nombre
-        for clave, valor in sets_de(a).items():
+        sets = {"tofLIzq": TOFS["L"][1], "tofRIzq": TOFS["R"][1], **sets_de(a)}
+        for clave, valor in sets.items():
             desde = len(carro.lineas)
             carro.mandar(f"SET,{clave},{valor}\n")
             r = carro.esperar("# set", "# SET:", desde=desde, timeout=3)

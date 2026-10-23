@@ -244,8 +244,10 @@ struct Tof {
 };
 Tof tofs[] = {
   {"F", 0,  0x30, true,  141.4f,   0.0f,   0.0f, 1200},
-  {"L", 15, 0x31, false, 113.0f,  35.2f,  90.0f,  650},   // adelante = eje delantero (usuario 2026-10-23)
-  {"R", 5,  0x32, false, 113.0f, -35.2f, -90.0f,  650},
+  // adelante = eje delantero (usuario 2026-10-23); a un lado: medido con el carro centrado
+  // en el pasillo de 991.7 mm (L 463, R 459 mm parado) -> 32.8 / 36.8 (el CAD decía 35.2)
+  {"L", 15, 0x31, false, 113.0f,  32.8f,  90.0f,  650},
+  {"R", 5,  0x32, false, 113.0f, -36.8f, -90.0f,  650},
 };
 const int N_TOF = sizeof(tofs) / sizeof(tofs[0]);
 Tof& tofF = tofs[0];
