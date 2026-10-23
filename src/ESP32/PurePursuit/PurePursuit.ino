@@ -922,6 +922,10 @@ PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la m
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
 PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
 const int           PARK_REV_PWM             = 85;    // PWM de marcha atrás — suave para control preciso
+// Fase 3 hasta 25° antes del corte. A 85 el arco va a ~180 mm/s (a_lat ~250
+// con R~130; el agarre aguanta ~500). Esos 25° y el recto siguen a 85: si el
+// recto arranca rápido, la fase 13 toca el cajón.
+PARK_AJ int           PARK_REV_ARCO_PWM        = 100;
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
@@ -2332,7 +2336,7 @@ void silPreParkSeed() {
   if (hecho || sil_param("pp_on", 0.0) < 0.5) return;
   hecho = true;
 #define SIL_AJ(n) n = (decltype(n))sil_param(#n, (double)n)
-  SIL_AJ(PARK_ANG_IN_DEG); SIL_AJ(PARK_ANG_MIN_IN_DEG); SIL_AJ(PARK_OVERSHOOT_DEG);
+  SIL_AJ(PARK_ANG_IN_DEG); SIL_AJ(PARK_ANG_MIN_IN_DEG); SIL_AJ(PARK_OVERSHOOT_DEG); SIL_AJ(PARK_REV_ARCO_PWM);
   SIL_AJ(PARK_PARED_CM); SIL_AJ(PARK_RADIO_CM); SIL_AJ(PARK_FINAL_CM);
   PARK_RECTO_D0_CM = PARK_FINAL_CM + PARK_RADIO_CM;
   SIL_AJ(PARK_POSTE2_MM); SIL_AJ(PARK_RECTO_MAX_MM); SIL_AJ(PARK_ENDEREZA_TOL_DEG);
@@ -5838,7 +5842,10 @@ void loop() {
       if (parkFase == 3) {
         motorReversa();
         escribirServo(servoHaciaPared);
-        setMotor(PARK_REV_PWM);
+        // El servo tarda ~150 ms en llegar al tope. En esa ventana un PWM
+        // más alto alarga el arco (R todavía grande) y con ruido el cajón se come.
+        int pwm = (millis() - parkFaseMs < 150) ? PARK_REV_PWM : (int)PARK_REV_ARCO_PWM;
+        setMotor(pwm);
         // Red de seguridad trasera (ver PARK_ATRAS_MIN_CM): corta la entrada
         // YA y pasa a corregir hacia ENFRENTE (fase 9), no a terminar.
         if (parkAtrasPegado()) {
@@ -5849,6 +5856,10 @@ void loop() {
           break;
         }
         float swingMag    = fabs(anguloGyro - parkRumboRef);
+        // Los últimos 25° vuelven a PWM 85 para salir con la misma tasa que
+        // antes: si el recto arranca rápido, la fase 13 toca el cajón.
+        float falta = (parkAngObjetivo - (float)PARK_OVERSHOOT_DEG) - swingMag;
+        if (falta < 25.0f) setMotor(PARK_REV_PWM);
         bool  swingListo  = (swingMag >= (parkAngObjetivo - (float)PARK_OVERSHOOT_DEG));
         bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
         if (swingListo || swingTimeout) {
