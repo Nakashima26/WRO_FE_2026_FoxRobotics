@@ -375,7 +375,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         best = None
         for k_s, sec in enumerate(secs):
             u, d_p = sec.frame(ex, ey)
-            if -100.0 <= u <= 3100.0 and -100.0 <= d_p <= 1100.0 and 1000.0 <= u <= 2000.0:
+            if -100.0 <= u <= 3100.0 and -100.0 <= d_p <= 1100.0 and 700.0 <= u <= 2300.0:   # el marco supuesto del arranque ciego corre la fila hasta ±~700 mm; con 1000..2000 se perdía el lado
                 best = (k_s, u, d_p)
                 break
         if best is None:
