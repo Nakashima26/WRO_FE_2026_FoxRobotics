@@ -5973,8 +5973,15 @@ void loop() {
         // Tope derecho R=123 mm mete la esquina delantera en la punta; servo 6 ≈ R 135, igual que el izquierdo.
         int servoContra = (servoDesdePared == SERVO_MIN_DEG) ? 6 : servoDesdePared;
         escribirServo(servoContra);
-        setMotor(PARK_REV_PWM);
         float difHeading = fabs(anguloGyro - parkRumboRef);
+        // Lejos del corte de la esquina el arco va a 120 (a 85 son ~190 mm/s,
+        // a_lat ~280 con R~130). Los primeros 150 ms el servo aún no está en
+        // el tope, y los últimos 12° vuelven a 85 para no alargar el coast
+        // contra el fondo.
+        float yawCorte = (servoDesdePared == SERVO_MIN_DEG) ? 30.0f : 36.0f;
+        int pwm8 = PARK_REV_PWM;
+        if (millis() - parkFaseMs >= 150 && difHeading > yawCorte + 12.0f) pwm8 = 120;
+        setMotor(pwm8);
         bool  alineado   = (difHeading <= PARK_ENDEREZA_TOL_DEG);
         bool  pegado     = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
         bool  timeout    = (millis() - parkFaseMs >= PARK_CONTRA_TIMEOUT_MS);
@@ -5986,7 +5993,6 @@ void loop() {
         // llega al fondo con distB todavía en 6 cm y el coast cierra el resto.
         // No cortar antes de que pase el mínimo de la esquina delantera (~45°):
         // 36° izq / 30° der. Más temprano, la fase 11 cruza el carro.
-        float yawCorte = (servoDesdePared == SERVO_MIN_DEG) ? 30.0f : 36.0f;
         if (!atrasPegado && distB_filtrada > 0.0f && difHeading <= yawCorte) {
           float yaw = difHeading * 0.0174533f;
           float esquinaCm = distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw);
