@@ -5014,7 +5014,14 @@ void loop() {
       // ── Fase 27: ENDEREZA al rumbo del carril y arranca la U (fase 24) ────
       if (parkFase == 27) {
         motorAdelante();
-        servoRumboPark(parkRumboGiro0);
+        // El tope de 35 ticks del heading-hold es para el cajón. Acá la
+        // esquina deja hasta ~30° y ese tope gira a ~60°/s. El stop
+        // mecánico es el mismo de la U; por debajo de 22° vuelve el PD.
+        float errCarril = parkRumboGiro0 - anguloGyro;
+        if (fabs(errCarril) > 22.0f)
+          escribirServo(errCarril > 0 ? SERVO_MAX_DEG : SERVO_MIN_DEG);
+        else
+          servoRumboPark(parkRumboGiro0);
         setMotorTope(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
         if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
