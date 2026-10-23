@@ -21,7 +21,8 @@ def _mode(sign_offset_mm=130.0):
     m = RouteMode.__new__(RouteMode)
     s = np.linspace(0.0, LEN, N)
     x = s - 200.0
-    r = SimpleNamespace(kappa=np.zeros(N), s=s, x=x, y=np.zeros(N), length_mm=LEN)
+    r = SimpleNamespace(kappa=np.zeros(N), s=s, x=x, y=np.zeros(N), length_mm=LEN,
+                        heading_deg=np.full(N, 90.0))
     m.follower = SimpleNamespace(route=r, i=0)
     signs = np.array([[0.0, sign_offset_mm]])
     return m, signs

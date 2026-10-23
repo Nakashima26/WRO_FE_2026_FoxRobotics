@@ -45,6 +45,25 @@ _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
 _CLUSTER_GAP_MM = 150.0
 _FENCE_STEP_MM = 100.0
 
+def _pursuit_kappa(route, idx, lookahead_mm):
+    """|κ| que pide el pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
+
+    Misma cuenta que rutaSteer del ESP (blanco a lookahead fijo, κ = 2·lateral/ld²).
+    """
+    n = len(route.x)
+    step = route.length_mm / n
+    ahead = max(1, int(round(float(lookahead_mm) / max(step, 1e-9))))
+    j = np.asarray(idx, dtype=int) % n
+    q = (j + ahead) % n
+    h = np.radians(route.heading_deg[j])
+    sh, ch = np.sin(h), np.cos(h)
+    dx = route.x[q] - route.x[j]
+    dy = route.y[q] - route.y[j]
+    fwd = dx * sh + dy * ch
+    right = dx * ch - dy * sh
+    return np.abs(2.0 * right / np.maximum(fwd * fwd + right * right, 1.0))
+
+
 def _prm_for(unknown):
     """Mapa completo: no comprar arco hasta 140 mm (arquea la recta hacia la pared).
 
@@ -786,24 +805,23 @@ class RouteMode:
         tight_on = False
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
-        win = int(C.ROUTE_PROFILE_KAPPA_WIN)
         # Adelanto por latencia a la velocidad máxima (conservador).
         lead = v_max * float(C.ROUTE_PROFILE_LATENCY_S)
         span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
         step = r.length_mm / n
         m = int(span / step) + 1
         i = max(self.follower.i, 0)
-        # Anillo cerrado: índices módulo n. Ventana ±win para |κ| máximo móvil.
-        idx = (i + np.arange(-win, m + win)) % n
-        kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
-        j = idx[win:win + m]
+        j = (i + np.arange(m)) % n
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
+        # κ que el ESP pide de verdad (lookahead fijo). Un pico más corto no se recorre:
+        # frenar por el κ local deja al carro lento en una curva que ya cortó.
+        kuse = _pursuit_kappa(r, j, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0)))
         tight = getattr(C, "ROUTE_PROFILE_TIGHT_KAPPA", None)
         a_c = a_lat if tight is None else np.where(
-            kmax > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
-        v_c = np.where(kmax < 1e-9, v_max,
-                       np.clip(np.sqrt(a_c / np.maximum(kmax, 1e-12)), v_min, v_max))
+            kuse > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
+        v_c = np.where(kuse < 1e-9, v_max,
+                       np.clip(np.sqrt(a_c / np.maximum(kuse, 1e-12)), v_min, v_max))
         if signs is not None and len(signs):
             # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
             sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))

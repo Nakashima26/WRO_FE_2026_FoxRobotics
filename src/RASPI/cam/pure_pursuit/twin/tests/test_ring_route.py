@@ -13,6 +13,15 @@ from pure_pursuit.route_mode import RouteMode
 from pure_pursuit.wro_field import SEATS, randomize, section_to_world
 
 
+def test_pursuit_kappa_corta_el_pico():
+    """El κ del lookahead queda bajo el pico local: el perfil no frena una curva que el carro corta."""
+    from pure_pursuit.route_mode import _pursuit_kappa
+    f = randomize(1)
+    r = RR.plan(f.direction, RR.signs_from_field(f), f.parking_section)
+    kpp = _pursuit_kappa(r, np.arange(len(r.x)), 200.0)
+    assert kpp.max() < np.abs(r.kappa).max()
+
+
 def test_margen_blando_solo_con_mapa_completo():
     from pure_pursuit.route_mode import _prm_for
     assert _prm_for([]).soft_clear_mm == 100.0
