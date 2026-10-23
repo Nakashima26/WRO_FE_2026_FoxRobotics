@@ -505,6 +505,13 @@ class RouteMode:
                 # Sin la línea, el pico de antes de la pared del fondo es de señales
                 # (n3 s24: δ=-87 a dF=200 y cruza E/T3; la base cierra con dF=97).
                 delta = None
+            if (delta is None and d_f is not None and d_f <= 100.0 and len(self._line_d) >= 8
+                    and float(np.max(self._line_d) - np.min(self._line_d)) <= 40.0
+                    and self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1] < 0.5):
+                # Recta corta: dF ya < 100 y el sonar sigue plano, así que el tope 105
+                # se come el tramo (n3 s23). Si el pico ya pesa, se espera al sonar
+                # (n3 s24: la línea a n=8 iba 32 mm corrida).
+                delta = float(np.median(self._line_d))
             forced = False
             if delta is None and self._past_straight(dm, pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
