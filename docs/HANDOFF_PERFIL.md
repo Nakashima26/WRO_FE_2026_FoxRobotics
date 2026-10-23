@@ -249,3 +249,5 @@ la anterior y las referencias (combo1).
 - **paralelo: fase 3 invierte antes la inercia de la fase 1 (3ee3617, 2026-10-23):** PWM 130 en la primera mitad del swing, servo al centro al terminar. carrera_bench 72/72, 0 pared, pareado −0.30/−0.30/−0.31 s, mediana 36.15/36.46/36.53. Grok contra m3: 96/96, −0.30 s.
   **1.25:1 mejor = 36.2-36.5 s mediana (carrera_bench)**
 - **vuelta 2 con κ del lookahead (e4bad0c, 2026-10-23):** con 4 ≤ tc < 8 el perfil usa el κ del pure pursuit (lookahead 200 mm), vuelta 3 sigue con κ local. carrera_bench 72/72, 0 pared, vueltas 2+3 −0.13 s. Grok contra m4b: 96/96, total −0.11 s.
+- **paralelo: freno de cola en fase 8 + fase 13 a PWM 130 (539738c + 65dd292, 2026-10-23):** freno cuando el lateral ≤ 5 cm; fase 13 a 130 mientras falten > 20°. carrera_bench 72/72, 0 pared, mediana −0.09/−0.10/−0.09 s. Grok contra m5: 96/96, pareado −0.09 s (media −0.12), ninguna más lenta, pared mínima 4.4 → 4.8 mm.
+  **1.25:1 mejor = ~36.2 s mediana (carrera_bench)**

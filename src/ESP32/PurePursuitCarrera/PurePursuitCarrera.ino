@@ -1099,6 +1099,8 @@ const float         PARK_WIGGLE_INT_MM        = 0.0f;
 const float         PARK_WIGGLE_EXT_MM        = 0.0f;
 const unsigned long PARK_FASE_DIST_TIMEOUT_MS = 3000;   // si el encoder no avanza (atorado)
 long                parkOdom0                 = 0;      // odomMm al entrar a la fase
+long                parkColaMm               = 0;      // odom más atrás en el freno de la fase 11
+bool                parkFrenoCola            = false;  // solo si el lateral ya está a ≤5 cm
 float               parkRectoMm               = 0.0f;   // largo de la fase 14 (encoder)
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
 PARK_AJ float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
@@ -1228,6 +1230,10 @@ PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (p
 // PARA REVERTIR: PARK_CENTER_DEB = 1.
 const int           PARK_CENTER_DEB           = 3;
 const int           PARK_CENTER_PWM_PAR       = 80;
+// Fase 8 corta ~30° con ~180 mm/s de reversa y la cola a ~9 mm de la pared.
+// PWM 80 frena a ~1900 mm/s² y se come el hueco (para en ~7 mm). A 180 el
+// objetivo ya pega con a_max (~4300 mm/s²): v²/2a ≈ 4 mm, la cola no cierra.
+const int           PARK_FRENO_COLA_PWM       = 180;
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
 // El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
@@ -5998,19 +6004,38 @@ void loop() {
           if (esquinaCm <= 2.5f) atrasPegado = true;
         }
         if (alineado || pegado || timeout || atorado || atrasPegado) {
-          motorCoast();
-          escribirServo(centroServo);
           parkAtoroDisparo = atorado;
-          parkFase   = 9;
+          parkCenterCnt = 0;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
-          Serial.print(difHeading, 1);
-          Serial.print(" ext="); Serial.print(extRaw);
-          if (alineado) Serial.print(" ALINEADO");
-          if (pegado)   Serial.print(" PEGADO");
-          if (atorado)  Serial.print(" ATORADO");
-          if (atrasPegado) { Serial.print(" ATRAS PEGADO distB="); Serial.print(distB_filtrada, 1); }
-          Serial.println(timeout ? " TIMEOUT)" : ")");
+          parkColaMm = odomMm;
+          // La cola ya está a ~9 mm solo si el lateral también dice cerca
+          // (ext<=5). Con ext 8-9 el corte es el yaw, no la pared: frenar
+          // ahí deja el carro corto y la fase 13 pega en el poste.
+          bool colaPared = atrasPegado && !alineado && !pegado
+                           && extRaw > 0 && extRaw <= 5;
+          if (colaPared) {
+            motorAdelante();
+            escribirServo(centroServo);
+            parkFase = 11;
+            parkFrenoCola = true;
+            Serial.print("PARK fase 11: FRENO COLA (dif=");
+            Serial.print(difHeading, 1);
+            Serial.print(" distB="); Serial.print(distB_filtrada, 1);
+            Serial.println(")");
+          } else {
+            motorCoast();
+            escribirServo(centroServo);
+            parkFase = 9;
+            parkFrenoCola = false;
+            Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
+            Serial.print(difHeading, 1);
+            Serial.print(" ext="); Serial.print(extRaw);
+            if (alineado) Serial.print(" ALINEADO");
+            if (pegado)   Serial.print(" PEGADO");
+            if (atorado)  Serial.print(" ATORADO");
+            if (atrasPegado) { Serial.print(" ATRAS PEGADO distB="); Serial.print(distB_filtrada, 1); }
+            Serial.println(timeout ? " TIMEOUT)" : ")");
+          }
         }
         break;
       }
@@ -6024,6 +6049,8 @@ void loop() {
           parkCenterCnt = 0;          // arma limpio el debounce de la fase 11
           parkFase   = 11;
           parkFaseMs = millis(); parkOdom0 = odomMm;
+          parkColaMm = odomMm;
+          parkFrenoCola = false;
           Serial.println("PARK fase 11: ACOMODO ENFRENTE");
         }
         break;
@@ -6032,8 +6059,18 @@ void loop() {
       // ── Fase 11: ACOMODO ENFRENTE ──────────────────────────────────────
       if (parkFase == 11) {
         motorAdelante();
-        servoRumboPark(parkRumboRef);
-        setMotor(PARK_CENTER_PWM_PAR);
+        // El mínimo del odom es el fondo de la reversa. En cuanto vuelve a
+        // subir, la velocidad cambió de signo: ruedas al centro y freno al
+        // tope de agarre, si no la cola cierra los ~9 mm que quedan.
+        bool frenando = parkFrenoCola && (odomMm <= parkColaMm);
+        if (odomMm < parkColaMm) parkColaMm = odomMm;
+        if (frenando) {
+          escribirServo(centroServo);
+          setMotor(PARK_FRENO_COLA_PWM);
+        } else {
+          servoRumboPark(parkRumboRef);
+          setMotor(PARK_CENTER_PWM_PAR);
+        }
         bool dfCerca = (distF_filtrada > 0 && distF_filtrada <= PARK_CENTER_HI_CM);
         parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
         bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
@@ -6092,8 +6129,9 @@ void loop() {
       if (parkFase == 13) {
         motorReversa();
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
-        setMotor(PARK_REV_PWM);
         float dif      = fabs(anguloGyro - parkRumboRef);
+        // PWM alto hasta el corte de 5° se pasa del poste; por encima de 20° el arco tiene aire.
+        setMotor(dif > 20.0f ? 130 : PARK_REV_PWM);
         bool  alineado = (dif <= PARK_FINAL_TOL_DEG);          // ya derecho: no sigas
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
