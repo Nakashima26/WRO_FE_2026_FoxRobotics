@@ -1,0 +1,755 @@
+"""
+Rutas de prueba para SeguirRuta.ino: genera una ruta, la simula con el mismo
+pure pursuit del ESP32, la sube por Bluetooth (o USB), arranca el carro, graba
+el log y grafica la ruta pedida contra la que hizo el carro (y la simulada).
+
+Uso:
+  python scripts/ruta_bt.py recta                         2 m derecho
+  python scripts/ruta_bt.py recta --largo 3000 --pwm 180
+  python scripts/ruta_bt.py carril --desp 300             cambio de carril de 30 cm (+ = izquierda)
+  python scripts/ruta_bt.py s --radio 400 --angulo 50     slalom de arcos
+  python scripts/ruta_bt.py vuelta --sentido izq --radio 300 --vueltas 3
+  python scripts/ruta_bt.py archivo mi_ruta.csv           puntos "x,y" en mm, uno por renglón
+  python scripts/ruta_bt.py ver logs_tof/ruta_recta_FECHA.txt   vuelve a graficar un log
+
+Opciones de todas: --sim (solo simula y grafica, no se conecta), --puerto COM9
+(COM9 = cable USB; sin puerto busca el Bluetooth del ESP32), --pwm, --pwm-curva,
+--lookahead, --paso, --auto (arranca sin esperar Enter), --no-mostrar.
+
+COORDENADAS (las de VueltaCalibracion): mm, origen en la esquina EXTERIOR de la
+pista detrás del carro, th en grados (0 = +x, crece a la izquierda). El punto
+del carro es el centro del EJE TRASERO. Antes de arrancar el script dice dónde
+poner el carro; si pruebas en el piso, solo respeta la distancia a una pared o
+marca de cinta "de atrás" (x) y "de la derecha" (y).
+
+OJO: el log es la posición que el carro CREE tener (encoder + BNO). Si dice que
+siguió perfecto pero en el piso se fue chueco, el error es de odometría, no del
+seguidor: al terminar mide dónde quedó de verdad el eje trasero y compáralo con
+la posición final que imprime el script.
+
+El log queda en logs_tof/ruta_<tipo>_FECHA.txt y la gráfica junto a él (.png).
+"""
+import argparse
+import datetime
+import math
+import os
+import sys
+import threading
+import time
+
+import numpy as np
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── Pista (mm) ────────────────────────────────────────────────────────────────
+PISTA_MM = 3000.0
+INTERIOR = (1000.0, 1000.0, 2000.0, 2000.0)
+
+# ── Igual que SeguirRuta.ino ──────────────────────────────────────────────────
+BATALLA_MM = 113.0
+CENTRO_SERVO = 75   # el default de SeguirRuta.ino; --centro lo cambia
+SERVO_MIN, SERVO_MAX = 1, 156
+SERVO_POR_RUEDA_IZQ = 1.75
+SERVO_POR_RUEDA_DER = 1.78
+RUEDA_MAX_IZQ = 40.0
+RUEDA_MAX_DER = 42.5
+VENTANA_MM = 600.0
+RUEDA_CURVA_MIN, RUEDA_CURVA_MAX = 10.0, 30.0
+PWM_ARRANQUE, RAMPA_MS = 90, 500
+LAT_MAX_MM = 400.0
+RUTA_MAX = 1500
+
+# Radio más cerrado medido en el tapete (eje trasero): der 123, izq 134 mm.
+# Una ruta más cerrada que esto el carro no la puede seguir.
+RADIO_MIN_MM = 134.0
+RADIO_AVISO_MM = 180.0   # entre esto y RADIO_MIN_MM va a tope: se puede, pero sin margen
+
+# ── Simulación ────────────────────────────────────────────────────────────────
+# Velocidad en recta: PWM 180 ≈ 540 mm/s (vuelta_20261019_125759), PWM 90 ≈ 145 mm/s
+# (CalibFox 2026-10-22) -> recta por esos dos puntos.
+def vel_por_pwm(pwm):
+    return max(0.0, 4.39 * (pwm - 57))
+
+TAU_RUEDA_S = 0.08   # retraso del servo (primer orden)
+DT_SIM = 0.01
+
+COLOR_RUTA = "#8a8a85"
+COLOR_SIM = "#2a78d6"
+COLOR_REAL = "#eb6834"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Rutas
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class Tortuga:
+    """Dibuja con rectas y arcos tangentes (sin quiebres de rumbo)."""
+
+    def __init__(self, x, y, th_deg):
+        self.x, self.y, self.th = x, y, math.radians(th_deg)
+        self.pts = [(x, y)]
+
+    def recta(self, largo):
+        n = max(1, int(abs(largo) / 5))
+        for k in range(1, n + 1):
+            d = largo * k / n
+            self.pts.append((self.x + d * math.cos(self.th), self.y + d * math.sin(self.th)))
+        self.x, self.y = self.pts[-1]
+
+    def arco(self, radio, ang_deg):
+        """ang > 0 = a la izquierda."""
+        lado = 1 if ang_deg > 0 else -1
+        cx = self.x - lado * radio * math.sin(self.th)
+        cy = self.y + lado * radio * math.cos(self.th)
+        a0 = self.th - lado * math.pi / 2
+        ang = math.radians(ang_deg)
+        n = max(2, int(abs(ang) * radio / 5))
+        for k in range(1, n + 1):
+            a = a0 + ang * k / n
+            self.pts.append((cx + radio * math.cos(a), cy + radio * math.sin(a)))
+        self.th += ang
+        self.x, self.y = self.pts[-1]
+
+
+def remuestrear(pts, paso, cerrada):
+    """Puntos separados exactamente `paso` mm (o lo más cerca que dé el largo)."""
+    pts = np.asarray(pts, float)
+    if cerrada and np.hypot(*(pts[0] - pts[-1])) > 1e-6:
+        pts = np.vstack([pts, pts[:1]])
+    d = np.hypot(*np.diff(pts, axis=0).T)
+    pts = pts[np.concatenate([[True], d > 1e-9])]
+    d = d[d > 1e-9]
+    s = np.concatenate([[0.0], np.cumsum(d)])
+    largo = s[-1]
+    if cerrada:
+        n = max(10, round(largo / paso))
+        paso_r = largo / n
+        ss = np.arange(n) * paso_r
+    else:
+        n = max(10, round(largo / paso) + 1)
+        paso_r = largo / (n - 1)
+        ss = np.linspace(0, largo, n)
+    return np.column_stack([np.interp(ss, s, pts[:, 0]), np.interp(ss, s, pts[:, 1])]), paso_r
+
+
+def ruta_recta(a):
+    t = Tortuga(a.x0, a.y0, 0)
+    t.recta(a.largo)
+    return t.pts, False, f"recta {a.largo:.0f} mm"
+
+
+def ruta_carril(a):
+    """Recta, cambio de carril suave (coseno) y recta."""
+    pts = [(a.x0, a.y0)]
+    x = a.x0 + a.antes
+    pts.append((x, a.y0))
+    for k in range(1, 201):
+        u = k / 200
+        pts.append((x + u * a.cambio, a.y0 + a.desp * (1 - math.cos(math.pi * u)) / 2))
+    pts.append((x + a.cambio + a.despues, a.y0 + a.desp))
+    return pts, False, f"carril {a.desp:+.0f} mm en {a.cambio:.0f} mm"
+
+
+def ruta_s(a):
+    """Slalom de arcos tangentes: +ang, -2ang, +2ang, ..., y vuelve al rumbo 0."""
+    t = Tortuga(a.x0, a.y0, 0)
+    t.recta(a.antes)
+    giros = [a.angulo] + [(-1) ** (k + 1) * 2 * a.angulo for k in range(a.curvas)]
+    giros.append(-sum(giros))
+    for g in giros:
+        t.arco(a.radio, g)
+    t.recta(a.despues)
+    return t.pts, False, f"s radio {a.radio:.0f} ángulo {a.angulo:.0f}° curvas {a.curvas}"
+
+
+def ruta_vuelta(a):
+    """Una vuelta a la pista por el centro de los pasillos (a `carril` mm de la
+    pared exterior), esquinas en arco de `radio`. Sentido izq = antihorario."""
+    d = a.carril
+    lado = PISTA_MM - 2 * d
+    inicio = lado / 2 if a.inicio is None else a.inicio
+    if not (a.radio <= inicio <= lado - a.radio):
+        sys.exit(f"--inicio tiene que quedar en la recta: entre {a.radio:.0f} y {lado - a.radio:.0f}")
+    t = Tortuga(d + inicio, d, 0)
+    t.recta(lado - a.radio - inicio)
+    for k in range(4):
+        t.arco(a.radio, 90)
+        t.recta(lado - 2 * a.radio if k < 3 else inicio - a.radio)
+    pts = t.pts
+    if a.sentido == "der":
+        # Espejo sobre x = y: la exterior queda a la izquierda y gira a la derecha
+        # (como VueltaCalibracion DER: sale viendo hacia +y).
+        pts = [(py, px) for px, py in pts]
+    return pts, True, f"vuelta {a.sentido} radio {a.radio:.0f} carril {d:.0f} x{a.vueltas}"
+
+
+def ruta_archivo(a):
+    pts = []
+    with open(a.csv, encoding="utf-8") as f:
+        for linea in f:
+            c = linea.replace(";", ",").split(",")
+            try:
+                pts.append((float(c[0]), float(c[1])))
+            except (ValueError, IndexError):
+                continue   # encabezado o renglón vacío
+    if len(pts) < 2:
+        sys.exit(f"{a.csv}: no encontré puntos x,y")
+    return pts, a.cerrada, f"archivo {os.path.basename(a.csv)}"
+
+
+def radios(ruta, cerrada):
+    """Radio de curvatura en cada punto (círculo por el anterior, él y el siguiente)."""
+    p = ruta
+    if cerrada:
+        a, b, c = np.roll(p, 1, axis=0), p, np.roll(p, -1, axis=0)
+    else:
+        a, b, c = p[:-2], p[1:-1], p[2:]
+    ab, bc, ca = np.hypot(*(b - a).T), np.hypot(*(c - b).T), np.hypot(*(a - c).T)
+    cruz = np.abs((b - a)[:, 0] * (c - a)[:, 1] - (b - a)[:, 1] * (c - a)[:, 0])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = ab * bc * ca / (2 * cruz)
+    return np.where(cruz < 1e-9, np.inf, r)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Seguidor: copia de SeguirRuta.ino (si cambias uno, cambia el otro)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class Seguidor:
+    def __init__(self, ruta, paso, cerrada, lookahead, vueltas):
+        self.X, self.Y = ruta[:, 0], ruta[:, 1]
+        self.n, self.paso, self.cerrada = len(ruta), paso, cerrada
+        self.lookahead, self.vueltas = lookahead, vueltas
+        self.i, self.progreso = -1, 0
+
+    def idx(self, i):
+        return i % self.n if self.cerrada else min(max(i, 0), self.n - 1)
+
+    def punto(self, i):
+        n = self.n
+        if not self.cerrada and i > n - 1:
+            dx, dy = self.X[n - 1] - self.X[n - 2], self.Y[n - 1] - self.Y[n - 2]
+            d = max(math.hypot(dx, dy), 1.0)
+            extra = (i - (n - 1)) * self.paso
+            return self.X[n - 1] + dx / d * extra, self.Y[n - 1] + dy / d * extra
+        k = self.idx(i)
+        return self.X[k], self.Y[k]
+
+    def cercano(self, x, y, th):
+        if self.i < 0:
+            c, s = math.cos(math.radians(th)), math.sin(math.radians(th))
+            best = 1e18
+            for i in range(self.n):
+                a, b = i, i + 1
+                if not self.cerrada and b >= self.n:
+                    a, b = self.n - 2, self.n - 1
+                tx, ty = self.X[self.idx(b)] - self.X[a], self.Y[self.idx(b)] - self.Y[a]
+                if tx * c + ty * s < 0.3 * self.paso:
+                    continue
+                d2 = (self.X[i] - x) ** 2 + (self.Y[i] - y) ** 2
+                if d2 < best:
+                    best, self.i = d2, i
+            return self.i >= 0
+        best_o, best = 0, 1e18
+        for o in range(-5, int(VENTANA_MM / self.paso) + 2):
+            i = self.i + o
+            if not self.cerrada and (i < 0 or i >= self.n):
+                continue
+            k = self.idx(i)
+            d2 = (self.X[k] - x) ** 2 + (self.Y[k] - y) ** 2
+            if d2 < best:
+                best, best_o = d2, o
+        self.progreso += best_o
+        self.i = self.idx(self.i + best_o)
+        return True
+
+    def rueda(self, x, y, th):
+        px, py = self.punto(self.i + int(self.lookahead / self.paso + 0.5))
+        c, s = math.cos(math.radians(th)), math.sin(math.radians(th))
+        dx, dy = px - x, py - y
+        adelante, izquierda = dx * c + dy * s, -dx * s + dy * c
+        ld2 = max(adelante ** 2 + izquierda ** 2, 1.0)
+        return math.degrees(math.atan(2 * BATALLA_MM * izquierda / ld2))
+
+    def lateral(self, x, y):
+        a, b = self.i, self.i + 1
+        if not self.cerrada and b >= self.n:
+            a, b = self.n - 2, self.n - 1
+        ax, ay = self.X[a], self.Y[a]
+        tx, ty = self.X[self.idx(b)] - ax, self.Y[self.idx(b)] - ay
+        d = max(math.hypot(tx, ty), 1.0)
+        return (tx * (y - ay) - ty * (x - ax)) / d
+
+    def terminada(self):
+        return self.progreso >= self.vueltas * self.n if self.cerrada else self.i >= self.n - 1
+
+
+def servo_para_rueda(rueda):
+    rueda = min(max(rueda, -RUEDA_MAX_DER), RUEDA_MAX_IZQ)
+    s = rueda * (SERVO_POR_RUEDA_IZQ if rueda >= 0 else SERVO_POR_RUEDA_DER)
+    return min(max(CENTRO_SERVO + int(round(s)), SERVO_MIN), SERVO_MAX)
+
+
+def rueda_para_servo(servo):
+    """Lo que de verdad gira la rueda con ese servo (inverso del mapeo, con topes)."""
+    d = servo - CENTRO_SERVO
+    r = d / SERVO_POR_RUEDA_IZQ if d >= 0 else d / SERVO_POR_RUEDA_DER
+    return min(max(r, -RUEDA_MAX_DER), RUEDA_MAX_IZQ)
+
+
+def pwm_para(rueda, t_ms, pwm, pwm_curva):
+    f = min(max((abs(rueda) - RUEDA_CURVA_MIN) / (RUEDA_CURVA_MAX - RUEDA_CURVA_MIN), 0.0), 1.0)
+    p = round(pwm + (pwm_curva - pwm) * f)
+    if t_ms < RAMPA_MS:
+        p = min(p, PWM_ARRANQUE + (pwm - PWM_ARRANQUE) * t_ms // RAMPA_MS)
+    return p
+
+
+def simular(ruta, paso, cerrada, salida, a):
+    """Bicicleta cinemática en el eje trasero, con el retraso del servo, los
+    topes medidos y servo en grados enteros. Devuelve (filas, motivo)."""
+    seg = Seguidor(ruta, paso, cerrada, a.lookahead, a.vueltas)
+    x, y, th = salida
+    if not seg.cercano(x, y, th):
+        return np.zeros((0, 8)), "la salida no va en el sentido de la ruta"
+    rueda_real, t, filas = 0.0, 0.0, []
+    while True:
+        if t > 120:
+            return np.array(filas), "timeout"
+        seg.cercano(x, y, th)
+        if seg.terminada():
+            return np.array(filas), "ruta completa"
+        lat = seg.lateral(x, y)
+        if abs(lat) > LAT_MAX_MM:
+            return np.array(filas), "se salió de la ruta"
+        rueda = seg.rueda(x, y, th)
+        servo = servo_para_rueda(rueda)
+        pwm = pwm_para(rueda, t * 1000, a.pwm, a.pwm_curva)
+        filas.append((t * 1000, x, y, th, seg.i, lat, servo, pwm))
+        v = vel_por_pwm(pwm)
+        rueda_real += (rueda_para_servo(servo) - rueda_real) * DT_SIM / TAU_RUEDA_S
+        x += v * DT_SIM * math.cos(math.radians(th))
+        y += v * DT_SIM * math.sin(math.radians(th))
+        th += math.degrees(v * DT_SIM * math.tan(math.radians(rueda_real)) / BATALLA_MM)
+        t += DT_SIM
+
+
+def resumen(nombre, filas):
+    if len(filas) == 0:
+        return f"{nombre}: sin datos"
+    lat = filas[:, 5]
+    dist = np.sum(np.hypot(np.diff(filas[:, 1]), np.diff(filas[:, 2])))
+    return (f"{nombre}: lateral rms {np.sqrt(np.mean(lat ** 2)):.0f} mm, max {np.max(np.abs(lat)):.0f} mm | "
+            f"{dist:.0f} mm en {filas[-1, 0] / 1000:.1f} s | final x={filas[-1, 1]:.0f} y={filas[-1, 2]:.0f} "
+            f"th={filas[-1, 3]:.1f}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gráfica
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar):
+    import matplotlib
+    if not mostrar:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(13, 7.5))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.25, 1], hspace=0.35, wspace=0.22)
+    ax = fig.add_subplot(gs[:, 0])
+    ax_lat = fig.add_subplot(gs[0, 1])
+    ax_srv = fig.add_subplot(gs[1, 1], sharex=ax_lat)
+
+    # Pista de fondo si la ruta cae dentro de ella.
+    if ruta[:, 0].min() > -50 and ruta[:, 1].min() > -50 and ruta.max() < PISTA_MM + 50:
+        for (x0, y0, x1, y1) in ((0, 0, PISTA_MM, PISTA_MM), INTERIOR):
+            ax.plot([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0], color="#c9c8c2", lw=1.2, zorder=0)
+
+    r = np.vstack([ruta, ruta[:1]]) if cerrada else ruta
+    ax.plot(r[:, 0], r[:, 1], color=COLOR_RUTA, lw=6, alpha=0.35, solid_capstyle="round", label="ruta pedida")
+    if len(sim):
+        ax.plot(sim[:, 1], sim[:, 2], color=COLOR_SIM, lw=1.6, ls="--", label="simulación")
+    if real is not None and len(real):
+        ax.plot(real[:, 1], real[:, 2], color=COLOR_REAL, lw=2, label="carro (odometría)")
+        ax.plot(real[-1, 1], real[-1, 2], "o", color=COLOR_REAL, ms=8, mec="white", mew=2)
+    sx, sy, sth = salida
+    ax.annotate("", xy=(sx + 150 * math.cos(math.radians(sth)), sy + 150 * math.sin(math.radians(sth))),
+                xytext=(sx, sy), arrowprops=dict(arrowstyle="-|>", color="#3d3d3a", lw=1.5))
+    ax.plot(sx, sy, "s", color="#3d3d3a", ms=7)
+    ax.set_aspect("equal")
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
+    ax.grid(color="#ecebe6", lw=0.8)
+    ax.legend(loc="best", frameon=False, fontsize=9)
+
+    for filas, color, ls, nombre in ((sim, COLOR_SIM, "--", "simulación"),
+                                     (real, COLOR_REAL, "-", "carro")):
+        if filas is None or len(filas) == 0:
+            continue
+        t = filas[:, 0] / 1000
+        ax_lat.plot(t, filas[:, 5], color=color, ls=ls, lw=1.6, label=nombre)
+        ax_srv.plot(t, filas[:, 6], color=color, ls=ls, lw=1.6, label=nombre)
+    ax_lat.axhline(0, color="#3d3d3a", lw=0.8)
+    ax_lat.set_ylabel("error lateral (mm)\n+ = carro a la izquierda", fontsize=9)
+    ax_lat.set_title("Error lateral contra la ruta", fontsize=10, loc="left")
+    ax_srv.axhline(CENTRO_SERVO, color="#3d3d3a", lw=0.8)
+    ax_srv.set_ylabel("servo (°)\n> centro = izquierda", fontsize=9)
+    ax_srv.set_xlabel("tiempo (s)")
+    ax_srv.set_title("Servo", fontsize=10, loc="left")
+    for a_ in (ax_lat, ax_srv):
+        a_.grid(color="#ecebe6", lw=0.8)
+        a_.legend(loc="best", frameon=False, fontsize=9)
+        for lado in ("top", "right"):
+            a_.spines[lado].set_visible(False)
+
+    fig.suptitle(titulo, fontsize=11, x=0.06, ha="left")
+    fig.savefig(png, dpi=110, bbox_inches="tight")
+    print(f"Gráfica: {png}")
+    if mostrar:
+        plt.show()
+    plt.close(fig)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Log
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def filas_p(lineas):
+    """P,t,x,y,th,i,lat,servo,pwm -> array (N, 8)."""
+    filas = []
+    for linea in lineas:
+        i = linea.find("P,")
+        if i < 0 or (i > 0 and linea[i - 1] != " "):
+            continue
+        c = linea[i:].split(",")
+        if len(c) < 9:
+            continue
+        try:
+            filas.append(tuple(float(v) for v in c[1:9]))
+        except ValueError:
+            continue
+    return np.array(filas) if filas else np.zeros((0, 8))
+
+
+def leer_log(ruta_log):
+    """Lo que el script escribió al principio (# PC ..., R,x,y) y las P del carro."""
+    pts, meta, lineas = [], {}, []
+    with open(ruta_log, encoding="utf-8", errors="replace") as f:
+        for linea in f:
+            linea = linea.rstrip("\r\n")
+            lineas.append(linea)
+            if linea.startswith("R,"):
+                c = linea.split(",")
+                pts.append((float(c[1]), float(c[2])))
+            elif linea.startswith("# PC "):
+                for kv in linea[5:].split():
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        meta[k] = v
+            elif linea.startswith("# SeguirRuta") and "centro=" in linea:
+                meta["centro_carro"] = linea.split("centro=")[1].split()[0]
+            elif linea.startswith("# fin x="):
+                c = linea[6:].split()
+                meta["fin"] = tuple(float(kv.split("=")[1]) for kv in c[:3])   # x, y, th ya parado
+    return np.array(pts), meta, filas_p(lineas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Conexión con el carro
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class Carro:
+    """Lee el puerto en un hilo: guarda todo en el archivo y en `lineas`."""
+
+    def __init__(self, puerto, archivo):
+        import serial
+        print(f"Conectando a {puerto}... (si el carro está apagado, préndelo; Ctrl+C para salir)")
+        intentos = 0
+        while True:
+            try:
+                self.ser = serial.Serial(puerto, 115200, timeout=0.2)
+                break
+            except serial.SerialException as e:
+                intentos += 1
+                if intentos == 1 or intentos % 10 == 0:
+                    print(f"  esperando al ESP32... ({e.__class__.__name__}; ¿otra app ya está conectada?)")
+                time.sleep(0.5)
+        self.f = archivo
+        self.lineas = []
+        self.vivo = True
+        self.n_p = 0
+        threading.Thread(target=self._leer, daemon=True).start()
+
+    def _leer(self):
+        listo_visto = False
+        while self.vivo:
+            try:
+                linea = self.ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+            except Exception:
+                break
+            if not linea:
+                continue
+            self.f.write(linea + "\n")
+            self.lineas.append(linea)
+            if linea.startswith("P,"):
+                self.n_p += 1
+                if self.n_p % 25 == 0:
+                    c = linea.split(",")
+                    print(f"\r  t={int(c[1]) / 1000:5.1f} s  x={c[2]:>5} y={c[3]:>5} th={c[4]:>7}  "
+                          f"lateral={c[6]:>4} mm  servo={c[7]:>3} pwm={c[8]:>3}   ", end="", flush=True)
+            elif linea.startswith("# listo"):
+                if not listo_visto:
+                    print(linea)
+                listo_visto = True
+            else:
+                print(("\n" if self.n_p else "") + linea)
+
+    def mandar(self, texto):
+        self.ser.write(texto.encode())
+
+    def esperar(self, *prefijos, desde=0, timeout=10.0):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            for linea in self.lineas[desde:]:
+                for p in prefijos:
+                    if linea.startswith(p):
+                        return linea
+            time.sleep(0.05)
+        return None
+
+    def cerrar(self):
+        self.vivo = False
+        time.sleep(0.3)
+        self.ser.close()
+
+
+def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
+    """Lo que va al principio del log para poder regraficarlo con `ver`."""
+    txt = (f"# PC tipo={tipo} cerrada={int(cerrada)} paso={paso:.3f} vueltas={a.vueltas} "
+           f"salida={salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f} pwm={a.pwm} pwm_curva={a.pwm_curva} "
+           f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO}\n# PC titulo {titulo}\n")
+    return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
+
+
+def comandos_ruta(ruta, paso, cerrada):
+    """RTB, RTP de 10 puntos por línea y RTE (protocolo de PurePursuit.ino)."""
+    lineas = [f"RTB,{len(ruta)},{paso:.3f},{int(cerrada)}\n"]
+    for i in range(0, len(ruta), 10):
+        pares = ",".join(f"{int(round(px))},{int(round(py))}" for px, py in ruta[i:i + 10])
+        lineas.append(f"RTP,{i},{pares}\n")
+    lineas.append(f"RTE,{len(ruta)}\n")
+    return lineas
+
+
+def comando_salida(a, salida):
+    centro = f",{a.centro}" if getattr(a, "centro", None) is not None else ""
+    return (f"RTS,{salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f},{a.pwm},{a.pwm_curva},"
+            f"{a.vueltas},{a.lookahead:.0f}{centro}\n")
+
+
+def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
+    if len(ruta) > RUTA_MAX:
+        sys.exit(f"La ruta tiene {len(ruta)} puntos y el ESP32 guarda {RUTA_MAX}: sube --paso")
+    puerto = a.puerto
+    if not puerto:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from grabar_bt import buscar_puerto
+        puerto = buscar_puerto()
+        if not puerto:
+            sys.exit("No encontré el ESP32 entre los puertos Bluetooth. ¿Está emparejado en Windows?\n"
+                     "Pasa uno a mano con --puerto (COM9 = cable USB), o prueba solo la simulación con --sim.")
+
+    os.makedirs(os.path.join(RAIZ, "logs_tof"), exist_ok=True)
+    nombre = os.path.join(RAIZ, "logs_tof", datetime.datetime.now().strftime(f"ruta_{tipo}_%Y%m%d_%H%M%S.txt"))
+    f = open(nombre, "w", encoding="utf-8")
+    f.write(encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo))
+    f.flush()
+
+    carro = Carro(puerto, f)
+    try:
+        if not carro.esperar("# listo", timeout=15):
+            print("El ESP32 no dijo '# listo' en 15 s: ¿tiene cargado SeguirRuta.ino? ¿BNO y encoder OK?")
+            return nombre
+
+        desde = len(carro.lineas)
+        for linea in comandos_ruta(ruta, paso, cerrada):
+            carro.mandar(linea)
+            time.sleep(0.02)   # que no se llene el buffer del Bluetooth
+        r = carro.esperar("# ruta OK", "# ruta RECHAZADA", "# ignorado", desde=desde)
+        if not r or not r.startswith("# ruta OK"):
+            print("No se cargó la ruta" + ("" if r else " (sin respuesta)") + ". Vuelve a intentar.")
+            return nombre
+        desde = len(carro.lineas)
+        carro.mandar(comando_salida(a, salida))
+        if not carro.esperar("# salida", desde=desde):
+            print("El ESP32 no confirmó la salida (RTS).")
+            return nombre
+
+        print("\n" + "=" * 70)
+        print(f"Pon el centro del EJE TRASERO en x={salida[0]:.0f} mm, y={salida[1]:.0f} mm, "
+              f"viendo a {salida[2]:.0f}°")
+        # Dónde quedan las paredes x = 0 y y = 0 según hacia dónde mira el carro.
+        lados = {0: ("atrás", "la derecha"), 90: ("la izquierda", "atrás"),
+                 180: ("adelante", "la izquierda"), 270: ("la derecha", "adelante")}
+        lx, ly = lados[int(round(salida[2] / 90.0)) % 4 * 90]
+        print(f"  = a {salida[0]:.0f} mm de la pared/marca de {lx} (x = 0) y a {salida[1]:.0f} mm "
+              f"de la pared/marca de {ly} (y = 0)")
+        print("  Alinéalo bien: un error de rumbo al arrancar NO lo ve el carro (5° = ~17 cm de error en 2 m).")
+        print("=" * 70)
+        if not a.auto:
+            input("Enter para arrancar (luego: x + Enter lo para, Ctrl+C también)... ")
+
+        def teclado():
+            for linea in sys.stdin:
+                if linea.strip().lower().startswith("x"):
+                    carro.mandar("x")
+
+        desde = len(carro.lineas)
+        carro.mandar("g")
+        r = carro.esperar("E,0,ARRANCA", "# no hay ruta", "# la salida", desde=desde, timeout=3)
+        if not r or not r.startswith("E,0,ARRANCA"):
+            print("El carro no arrancó.")
+            return nombre
+        threading.Thread(target=teclado, daemon=True).start()
+        try:
+            while not any(l.startswith("E,") and ",FIN" in l for l in carro.lineas[desde:]):
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            carro.mandar("x")
+            print("\nParado.")
+        carro.esperar("# fin", desde=desde, timeout=2)
+    finally:
+        carro.cerrar()
+        f.close()
+    print(f"\nLog: {nombre}")
+    return nombre
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# main
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def main():
+    global CENTRO_SERVO
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="tipo", required=True)
+
+    def comunes(p, x0=500.0, y0=500.0, con_salida=True):
+        p.add_argument("--sim", action="store_true", help="solo simula y grafica, no se conecta")
+        p.add_argument("--puerto", help="COM del ESP32 (sin esto busca el Bluetooth; COM9 = USB)")
+        p.add_argument("--pwm", type=int, default=150, help="PWM en recta (180 ≈ 540 mm/s)")
+        p.add_argument("--pwm-curva", type=int, default=120, help="PWM con la rueda muy cerrada")
+        p.add_argument("--lookahead", type=float, default=200.0, help="mm (el de PurePursuit.ino: 200)")
+        p.add_argument("--centro", type=int, help=f"servo con el que va derecho (sin esto: el del sketch, {CENTRO_SERVO})")
+        p.add_argument("--paso", type=float, default=20.0, help="mm entre puntos de la ruta")
+        p.add_argument("--auto", action="store_true", help="arranca sin esperar Enter")
+        p.add_argument("--no-mostrar", action="store_true", help="solo guarda el PNG")
+        if con_salida:   # vuelta y archivo salen del primer punto de su ruta
+            p.add_argument("--x0", type=float, default=x0, help="salida: x del eje trasero (mm)")
+            p.add_argument("--y0", type=float, default=y0, help="salida: y del eje trasero (mm)")
+
+    p = sub.add_parser("recta", help="línea recta")
+    comunes(p)
+    p.add_argument("--largo", type=float, default=2000.0)
+    p.set_defaults(gen=ruta_recta, vueltas=1)
+
+    p = sub.add_parser("carril", help="recta con cambio de carril")
+    comunes(p)
+    p.add_argument("--desp", type=float, default=300.0, help="mm a un lado (+ = izquierda)")
+    p.add_argument("--antes", type=float, default=500.0, help="recta antes del cambio (mm)")
+    p.add_argument("--cambio", type=float, default=800.0, help="largo del cambio (mm)")
+    p.add_argument("--despues", type=float, default=700.0, help="recta después (mm)")
+    p.set_defaults(gen=ruta_carril, vueltas=1)
+
+    p = sub.add_parser("s", help="slalom de arcos")
+    comunes(p, y0=350.0)   # el slalom sube ~290 mm: queda centrado en el pasillo de abajo
+    p.add_argument("--radio", type=float, default=400.0)
+    p.add_argument("--angulo", type=float, default=50.0, help="grados del primer arco")
+    p.add_argument("--curvas", type=int, default=2, help="arcos completos en medio")
+    p.add_argument("--antes", type=float, default=300.0)
+    p.add_argument("--despues", type=float, default=300.0)
+    p.set_defaults(gen=ruta_s, vueltas=1)
+
+    p = sub.add_parser("vuelta", help="vuelta a la pista (cerrada)")
+    comunes(p, con_salida=False)
+    p.add_argument("--sentido", choices=["izq", "der"], default="izq", help="izq = antihorario")
+    p.add_argument("--radio", type=float, default=300.0, help="radio de las esquinas (mm)")
+    p.add_argument("--carril", type=float, default=500.0, help="distancia a la pared exterior (mm)")
+    p.add_argument("--inicio", type=float, help="salida a esto de la esquina (default: media recta)")
+    p.add_argument("--vueltas", type=int, default=1)
+    p.set_defaults(gen=ruta_vuelta)
+
+    p = sub.add_parser("archivo", help="ruta de un CSV x,y en mm")
+    comunes(p, con_salida=False)
+    p.add_argument("csv")
+    p.add_argument("--cerrada", action="store_true", help="la ruta es una vuelta")
+    p.add_argument("--vueltas", type=int, default=1)
+    p.set_defaults(gen=ruta_archivo)
+
+    p = sub.add_parser("ver", help="vuelve a graficar un log de ruta_bt")
+    p.add_argument("log")
+    p.add_argument("--no-mostrar", action="store_true")
+    a = ap.parse_args()
+
+    if a.tipo == "ver":
+        ruta, meta, real = leer_log(a.log)
+        if len(ruta) == 0:
+            sys.exit("Ese log no trae la ruta (renglones R,x,y): ¿es de ruta_bt.py?")
+        cerrada = meta.get("cerrada") == "1"
+        paso = float(meta.get("paso", 20))
+        sx, sy, sth = (float(v) for v in meta.get("salida", f"{ruta[0][0]},{ruta[0][1]},0").split(","))
+        a.vueltas = int(meta.get("vueltas", 1))
+        a.pwm, a.pwm_curva = int(meta.get("pwm", 150)), int(meta.get("pwm_curva", 120))
+        a.lookahead = float(meta.get("lookahead", 200))
+        CENTRO_SERVO = int(meta.get("centro_carro", meta.get("centro", CENTRO_SERVO)))
+        sim, motivo = simular(ruta, paso, cerrada, (sx, sy, sth), a)
+        print(resumen(f"simulación ({motivo})", sim))
+        print(resumen("carro", real))
+        titulo = next((l[12:].strip() for l in open(a.log, encoding="utf-8", errors="replace")
+                       if l.startswith("# PC titulo")), meta.get("tipo", ""))
+        graficar(ruta, cerrada, (sx, sy, sth), sim, real, titulo,
+                 os.path.splitext(a.log)[0] + ".png", not a.no_mostrar)
+        return
+
+    if a.centro is not None:
+        CENTRO_SERVO = a.centro
+    pts, cerrada, titulo = a.gen(a)
+    ruta, paso = remuestrear(pts, a.paso, cerrada)
+    # Salida: el primer punto, viendo hacia el segundo.
+    salida = (ruta[0, 0], ruta[0, 1], math.degrees(math.atan2(ruta[1, 1] - ruta[0, 1], ruta[1, 0] - ruta[0, 0])))
+    titulo = f"{titulo} | pwm {a.pwm}/{a.pwm_curva} lookahead {a.lookahead:.0f} centro {CENTRO_SERVO}"
+
+    largo = np.sum(np.hypot(*np.diff(ruta, axis=0).T)) + (np.hypot(*(ruta[0] - ruta[-1])) if cerrada else 0)
+    r = radios(ruta, cerrada)
+    print(f"Ruta: {titulo}")
+    print(f"  {len(ruta)} puntos cada {paso:.1f} mm, {largo:.0f} mm, {'cerrada' if cerrada else 'abierta'}, "
+          f"radio mínimo {np.min(r):.0f} mm")
+    if np.min(r) < RADIO_MIN_MM:
+        print(f"  !! Hay curvas más cerradas que el radio mínimo del carro ({RADIO_MIN_MM:.0f} mm): "
+              "no las va a poder seguir.")
+    elif np.min(r) < RADIO_AVISO_MM:
+        print(f"  ! Curvas de menos de {RADIO_AVISO_MM:.0f} mm: va a ir a tope, sin margen.")
+
+    sim, motivo = simular(ruta, paso, cerrada, salida, a)
+    print("  " + resumen(f"simulación ({motivo}, ~{vel_por_pwm(a.pwm):.0f} mm/s)", sim))
+
+    if a.sim:
+        os.makedirs(os.path.join(RAIZ, "logs_tof"), exist_ok=True)
+        png = os.path.join(RAIZ, "logs_tof", f"sim_{a.tipo}.png")
+        graficar(ruta, cerrada, salida, sim, None, titulo + " (solo simulación)", png, not a.no_mostrar)
+        return
+
+    nombre = subir_y_correr(a, ruta, paso, cerrada, salida, titulo, a.tipo)
+    _, meta, real = leer_log(nombre)
+    print(resumen("carro", real))
+    if "fin" in meta:
+        fx, fy, fth = meta["fin"]
+        print(f"Ya parado (con lo que rodó al frenar) el carro cree estar en x={fx:.0f} y={fy:.0f} th={fth:.1f}.")
+        print("Mide dónde quedó DE VERDAD el eje trasero: la diferencia es error de odometría (encoder/BNO), "
+              "no del seguidor.")
+    graficar(ruta, cerrada, salida, sim, real, titulo, os.path.splitext(nombre)[0] + ".png", not a.no_mostrar)
+
+
+if __name__ == "__main__":
+    main()
