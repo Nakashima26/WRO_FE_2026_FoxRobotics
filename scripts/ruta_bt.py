@@ -14,7 +14,15 @@ Uso:
 
 Opciones de todas: --sim (solo simula y grafica, no se conecta), --puerto COM9
 (COM9 = cable USB; sin puerto busca el Bluetooth del ESP32), --pwm, --pwm-curva,
---lookahead, --paso, --auto (arranca sin esperar Enter), --no-mostrar.
+--lookahead, --paso, --auto (arranca sin esperar Enter), --no-mostrar,
+--pista 2975 (lado real de la pista), --pared N (corrección con paredes, abajo).
+
+PAREDES: el carro registra los 3 ToF (renglones T del log). Con eso la gráfica
+pone, en cada recta, dónde dicen las paredes que estaba el carro (puntos L/R)
+junto a donde cree él (línea naranja): la diferencia es lo que se le fue la
+odometría. --pared además lo corrige en el carro (bits, se suman):
+  1 posición con los laterales   2 rumbo con los laterales   4 avance con el frontal
+  --pared 3 = posición + rumbo (lo normal)   --pared 0 = solo registrar (default)
 
 COORDENADAS (las de VueltaCalibracion): mm, origen en la esquina EXTERIOR de la
 pista detrás del carro, th en grados (0 = +x, crece a la izquierda). El punto
@@ -42,8 +50,24 @@ import numpy as np
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── Pista (mm) ────────────────────────────────────────────────────────────────
-PISTA_MM = 3000.0
-INTERIOR = (1000.0, 1000.0, 2000.0, 2000.0)
+PISTA_MM = 3000.0          # por omisión; --pista la cambia (la lona del 2026-10-23 mide 2975)
+INTERIOR_LADO_MM = 1000.0  # cuadro interior, centrado
+
+
+def mapa_pista(pista=PISTA_MM, interior=INTERIOR_LADO_MM):
+    """Cuadro exterior e interior (x0, y0, x1, y1), mm, origen en la esquina exterior."""
+    c, m = pista / 2, interior / 2
+    return (0.0, 0.0, pista, pista), (c - m, c - m, c + m, c + m)
+
+
+# ToF como en SeguirRuta.ino: (adelante, izquierda, ángulo °) de la cara que mide desde
+# el centro del eje trasero, y las mismas reglas para decidir si una lectura sirve.
+TOFS = {"F": (141.4, 0.0, 0.0), "L": (110.6, 35.2, 90.0), "R": (110.6, -35.2, -90.0)}
+PARED_GATE_MM = 120.0
+PARED_INC_MAX_DEG = 20.0
+PARED_RECTA_DEG = 8.0
+PARED_RUEDA_MAX = 12.0
+CONO_MEDIO_DEG = 7.5
 
 # ── Igual que SeguirRuta.ino ──────────────────────────────────────────────────
 BATALLA_MM = 113.0
@@ -80,6 +104,7 @@ DT_SIM = 0.01
 COLOR_RUTA = "#8a8a85"
 COLOR_SIM = "#2a78d6"
 COLOR_REAL = "#eb6834"
+COLOR_PARED = {"L": "#1baf7a", "R": "#eda100"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -170,7 +195,7 @@ def ruta_vuelta(a):
     """Una vuelta a la pista por el centro de los pasillos (a `carril` mm de la
     pared exterior), esquinas en arco de `radio`. Sentido izq = antihorario."""
     d = a.carril
-    lado = PISTA_MM - 2 * d
+    lado = a.pista - 2 * d
     inicio = lado / 2 if a.inicio is None else a.inicio
     if not (a.radio <= inicio <= lado - a.radio):
         sys.exit(f"--inicio tiene que quedar en la recta: entre {a.radio:.0f} y {lado - a.radio:.0f}")
@@ -361,10 +386,121 @@ def resumen(nombre, filas):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Paredes: dónde dicen los ToF que estaba el carro
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def segmentos(mapa):
+    segs = []
+    for x0, y0, x1, y1 in mapa:
+        segs += [((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))]
+    return segs
+
+
+def rayo(ox, oy, dx, dy, segs):
+    """Distancia a la primera pared, su índice y dónde cae en ella (0..1); (-1, -1, 0) si no hay."""
+    best, kb, ub = -1.0, -1, 0.0
+    for k, ((ax, ay), (bx, by)) in enumerate(segs):
+        ex, ey = bx - ax, by - ay
+        den = dx * ey - dy * ex
+        if abs(den) < 1e-9:
+            continue
+        wx, wy = ax - ox, ay - oy
+        tr = (wx * ey - wy * ex) / den
+        us = (wx * dy - wy * dx) / den
+        if tr > 0 and 0 <= us <= 1 and (best < 0 or tr < best):
+            best, kb, ub = tr, k, us
+    return best, kb, ub
+
+
+def leer_tof(ruta_log):
+    """Renglones T del log: (t_ms, sensor, mm, status)."""
+    T = []
+    with open(ruta_log, encoding="utf-8", errors="replace") as f:
+        for linea in f:
+            if linea.startswith("T,"):
+                c = linea.strip().split(",")
+                try:
+                    T.append((float(c[1]), c[2], float(c[3]), int(c[4])))
+                except (ValueError, IndexError):
+                    continue
+    return T
+
+
+def pared_vs_odometria(P, T, mapa, centro):
+    """Las mismas reglas que corregirConPared(): por cada lectura lateral útil en
+    recta, e = cuánto más lejos de la pared está el carro de lo que cree (mm,
+    perpendicular) y el error lateral contra la ruta que tendría si la pared tiene
+    razón. Filas: (t_ms, 0=L/1=R, e, x_pared, y_pared, lat_pared)."""
+    if len(P) < 2 or not T:
+        return np.zeros((0, 6))
+    segs = segmentos(mapa)
+    rueda_max_servo = PARED_RUEDA_MAX * SERVO_POR_RUEDA_DER
+    out = []
+    for t, sen, mm, st in T:
+        if sen not in ("L", "R") or st not in (0, 2, 7) or not 40 <= mm <= 650:
+            continue
+        i = np.searchsorted(P[:, 0], t)
+        if i == 0 or i >= len(P):
+            continue
+        f = (t - P[i - 1, 0]) / max(P[i, 0] - P[i - 1, 0], 1)
+        x, y, th, lat = (P[i - 1, k] + f * (P[i, k] - P[i - 1, k]) for k in (1, 2, 3, 5))
+        if abs(((th + 45) % 90) - 45) > PARED_RECTA_DEG or abs(P[i, 6] - centro) > rueda_max_servo:
+            continue
+        adel, izq, ang = TOFS[sen]
+        h = math.radians(th)
+        ox = x + adel * math.cos(h) - izq * math.sin(h)
+        oy = y + adel * math.sin(h) + izq * math.cos(h)
+        dx, dy = math.cos(h + math.radians(ang)), math.sin(h + math.radians(ang))
+        esperado, k, u = rayo(ox, oy, dx, dy, segs)
+        if esperado < 0:
+            continue
+        (ax, ay), (bx, by) = segs[k]
+        largo = math.hypot(bx - ax, by - ay)
+        nx, ny = -(by - ay) / largo, (bx - ax) / largo
+        if (ox - ax) * nx + (oy - ay) * ny < 0:
+            nx, ny = -nx, -ny
+        cos_inc = -(dx * nx + dy * ny)
+        if cos_inc < math.cos(math.radians(PARED_INC_MAX_DEG)):
+            continue
+        margen = esperado * math.tan(math.radians(CONO_MEDIO_DEG)) / cos_inc + 30
+        if u * largo < margen or (1 - u) * largo < margen:
+            continue
+        e = (mm - esperado) * cos_inc
+        if abs(e) > PARED_GATE_MM:
+            continue
+        # n·(izquierda del carro): cuánto de e cae en el error lateral contra la ruta.
+        n_izq = -nx * math.sin(h) + ny * math.cos(h)
+        out.append((t, 0 if sen == "L" else 1, e, x + e * nx, y + e * ny, lat + e * n_izq))
+    return np.array(out) if out else np.zeros((0, 6))
+
+
+def resumen_pared(W, P):
+    """Por recta: error lateral según la odometría y según cada pared."""
+    if len(W) == 0:
+        return ["Paredes: no hay lecturas laterales útiles (¿sketch sin ToF, o ninguna recta?)"]
+    lineas = ["Paredes (por recta): error lateral contra la ruta, mm (+ = carro a la izquierda)",
+              "  recta  rumbo   odometría   según L    según R"]
+    tP = P[:, 0]
+    th_w = np.interp(W[:, 0], tP, P[:, 3])
+    tramo = np.round(th_w / 90).astype(int)
+    for k in np.unique(tramo):
+        m = tramo == k
+        tw = W[m, 0]
+        mp = (tP >= tw.min()) & (tP <= tw.max())
+        lat_odo = P[mp, 5].mean() if mp.any() else float("nan")
+        celdas = []
+        for sen in (0, 1):
+            ms = m & (W[:, 1] == sen)
+            celdas.append(f"{W[ms, 5].mean():+7.0f} ({ms.sum():2d})" if ms.sum() >= 3 else "      -     ")
+        lineas.append(f"  {k:5d}  {90 * k:5d}°   {lat_odo:+7.0f}    {celdas[0]}  {celdas[1]}")
+    return lineas
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Gráfica
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar):
+def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar, mapa=None, pared=None):
     import matplotlib
     if not mostrar:
         matplotlib.use("Agg")
@@ -377,8 +513,9 @@ def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar):
     ax_srv = fig.add_subplot(gs[1, 1], sharex=ax_lat)
 
     # Pista de fondo si la ruta cae dentro de ella.
-    if ruta[:, 0].min() > -50 and ruta[:, 1].min() > -50 and ruta.max() < PISTA_MM + 50:
-        for (x0, y0, x1, y1) in ((0, 0, PISTA_MM, PISTA_MM), INTERIOR):
+    mapa = mapa or mapa_pista()
+    if ruta[:, 0].min() > -50 and ruta[:, 1].min() > -50 and ruta.max() < mapa[0][2] + 50:
+        for (x0, y0, x1, y1) in mapa:
             ax.plot([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0], color="#c9c8c2", lw=1.2, zorder=0)
 
     r = np.vstack([ruta, ruta[:1]]) if cerrada else ruta
@@ -388,6 +525,12 @@ def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar):
     if real is not None and len(real):
         ax.plot(real[:, 1], real[:, 2], color=COLOR_REAL, lw=2, label="carro (odometría)")
         ax.plot(real[-1, 1], real[-1, 2], "o", color=COLOR_REAL, ms=8, mec="white", mew=2)
+    if pared is not None and len(pared):
+        for sen, nombre in ((0, "L"), (1, "R")):
+            m = pared[:, 1] == sen
+            if m.any():
+                ax.plot(pared[m, 3], pared[m, 4], ".", color=COLOR_PARED[nombre], ms=4,
+                        label=f"según ToF {nombre} (pared)")
     sx, sy, sth = salida
     ax.annotate("", xy=(sx + 150 * math.cos(math.radians(sth)), sy + 150 * math.sin(math.radians(sth))),
                 xytext=(sx, sy), arrowprops=dict(arrowstyle="-|>", color="#3d3d3a", lw=1.5))
@@ -405,6 +548,12 @@ def graficar(ruta, cerrada, salida, sim, real, titulo, png, mostrar):
         t = filas[:, 0] / 1000
         ax_lat.plot(t, filas[:, 5], color=color, ls=ls, lw=1.6, label=nombre)
         ax_srv.plot(t, filas[:, 6], color=color, ls=ls, lw=1.6, label=nombre)
+    if pared is not None and len(pared):
+        for sen, nombre in ((0, "L"), (1, "R")):
+            m = pared[:, 1] == sen
+            if m.any():
+                ax_lat.plot(pared[m, 0] / 1000, pared[m, 5], ".", color=COLOR_PARED[nombre], ms=5,
+                            label=f"según ToF {nombre}")
     ax_lat.axhline(0, color="#3d3d3a", lw=0.8)
     ax_lat.set_ylabel("error lateral (mm)\n+ = carro a la izquierda", fontsize=9)
     ax_lat.set_title("Error lateral contra la ruta", fontsize=10, loc="left")
@@ -466,6 +615,8 @@ def leer_log(ruta_log):
                 meta["centro_carro"] = linea.split("centro=")[1].split()[0]
                 if "kd=" in linea:
                     meta["kd_carro"] = linea.split("kd=")[1].split()[0]
+                if "pared=" in linea:
+                    meta["pared_carro"] = linea.split("pared=")[1].split()[0]
             elif linea.startswith("# fin x="):
                 c = linea[6:].split()
                 meta["fin"] = tuple(float(kv.split("=")[1]) for kv in c[:3])   # x, y, th ya parado
@@ -509,6 +660,8 @@ class Carro:
                 continue
             self.f.write(linea + "\n")
             self.lineas.append(linea)
+            if linea.startswith("T,"):
+                continue   # ToF: solo al archivo (son ~60 por segundo)
             if linea.startswith("P,"):
                 self.n_p += 1
                 if self.n_p % 25 == 0:
@@ -545,7 +698,8 @@ def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
     """Lo que va al principio del log para poder regraficarlo con `ver`."""
     txt = (f"# PC tipo={tipo} cerrada={int(cerrada)} paso={paso:.3f} vueltas={a.vueltas} "
            f"salida={salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f} pwm={a.pwm} pwm_curva={a.pwm_curva} "
-           f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO} kd={getattr(a, 'kd', None) or 0}\n"
+           f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO} kd={getattr(a, 'kd', None) or 0} "
+           f"pared={getattr(a, 'pared', 0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
            f"# PC titulo {titulo}\n")
     return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
 
@@ -560,15 +714,21 @@ def comandos_ruta(ruta, paso, cerrada):
     return lineas
 
 
+def mapa_de(a):
+    return mapa_pista(getattr(a, "pista", PISTA_MM), getattr(a, "interior", INTERIOR_LADO_MM))
+
+
+def comando_mapa(a):
+    return "RTM," + ",".join(f"{v:.0f}" for r in mapa_de(a) for v in r) + "\n"
+
+
 def comando_salida(a, salida):
-    # centro y kd son opcionales desde la derecha: sin ellos el ESP32 deja los suyos.
-    extra = ""
-    if getattr(a, "kd", None) is not None:
-        extra = f",{CENTRO_SERVO},{a.kd:.3f}"
-    elif getattr(a, "centro", None) is not None:
-        extra = f",{a.centro}"
+    # Los campos son posicionales: centro, kd y pared van siempre para que el ESP32
+    # use los de aquí (con un sketch viejo los que no conoce se ignoran).
+    kd = getattr(a, "kd", None)
+    kd = 0.04 if kd is None else kd
     return (f"RTS,{salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f},{a.pwm},{a.pwm_curva},"
-            f"{a.vueltas},{a.lookahead:.0f}{extra}\n")
+            f"{a.vueltas},{a.lookahead:.0f},{CENTRO_SERVO},{kd:.3f},{getattr(a, 'pared', 0)}\n")
 
 
 def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
@@ -603,6 +763,10 @@ def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
         if not r or not r.startswith("# ruta OK"):
             print("No se cargó la ruta" + ("" if r else " (sin respuesta)") + ". Vuelve a intentar.")
             return nombre
+        desde = len(carro.lineas)
+        carro.mandar(comando_mapa(a))
+        if not carro.esperar("# mapa", desde=desde, timeout=3):
+            print("  (el ESP32 no confirmó el mapa: ¿sketch viejo? Sigo, pero sin paredes)")
         desde = len(carro.lineas)
         carro.mandar(comando_salida(a, salida))
         if not carro.esperar("# salida", desde=desde):
@@ -669,6 +833,10 @@ def main():
         p.add_argument("--kd", type=float, default=0.04,
                        help="amortiguamiento con el giro del BNO, ° de rueda por °/s (0 = apagado; 0.08 ya oscila a 255)")
         p.add_argument("--paso", type=float, default=20.0, help="mm entre puntos de la ruta")
+        p.add_argument("--pista", type=float, default=PISTA_MM, help="lado de la pista, pared a pared por dentro (mm)")
+        p.add_argument("--interior", type=float, default=INTERIOR_LADO_MM, help="lado del cuadro interior, centrado (mm)")
+        p.add_argument("--pared", type=int, default=0,
+                       help="corrección con paredes: 1 posición, 2 rumbo, 4 avance (se suman; 0 = solo registrar)")
         p.add_argument("--auto", action="store_true", help="arranca sin esperar Enter")
         p.add_argument("--no-mostrar", action="store_true", help="solo guarda el PNG")
         if con_salida:   # vuelta y archivo salen del primer punto de su ruta
@@ -735,8 +903,15 @@ def main():
         print(resumen("carro", real))
         titulo = next((l[12:].strip() for l in open(a.log, encoding="utf-8", errors="replace")
                        if l.startswith("# PC titulo")), meta.get("tipo", ""))
+        mapa = mapa_pista()
+        if "mapa" in meta:
+            v = [float(z) for z in meta["mapa"].split(",")]
+            mapa = (tuple(v[:4]), tuple(v[4:8]))
+        W = pared_vs_odometria(real, leer_tof(a.log), mapa, CENTRO_SERVO)
+        for linea in resumen_pared(W, real):
+            print(linea)
         graficar(ruta, cerrada, (sx, sy, sth), sim, real, titulo,
-                 os.path.splitext(a.log)[0] + ".png", not a.no_mostrar)
+                 os.path.splitext(a.log)[0] + ".png", not a.no_mostrar, mapa=mapa, pared=W)
         return
 
     if a.centro is not None:
@@ -746,7 +921,7 @@ def main():
     # Salida: el primer punto, viendo hacia el segundo.
     salida = (ruta[0, 0], ruta[0, 1], math.degrees(math.atan2(ruta[1, 1] - ruta[0, 1], ruta[1, 0] - ruta[0, 0])))
     titulo = (f"{titulo} | pwm {a.pwm}/{a.pwm_curva} lookahead {a.lookahead:.0f} centro {CENTRO_SERVO}"
-              + (f" kd {a.kd:g}" if a.kd else ""))
+              + (f" kd {a.kd:g}" if a.kd else "") + (f" pared {a.pared}" if a.pared else ""))
 
     largo = np.sum(np.hypot(*np.diff(ruta, axis=0).T)) + (np.hypot(*(ruta[0] - ruta[-1])) if cerrada else 0)
     r = radios(ruta, cerrada)
@@ -765,7 +940,8 @@ def main():
     if a.sim:
         os.makedirs(os.path.join(RAIZ, "logs_tof"), exist_ok=True)
         png = os.path.join(RAIZ, "logs_tof", f"sim_{a.tipo}.png")
-        graficar(ruta, cerrada, salida, sim, None, titulo + " (solo simulación)", png, not a.no_mostrar)
+        graficar(ruta, cerrada, salida, sim, None, titulo + " (solo simulación)", png, not a.no_mostrar,
+                 mapa=mapa_de(a))
         return
 
     nombre = subir_y_correr(a, ruta, paso, cerrada, salida, titulo, a.tipo)
@@ -776,7 +952,11 @@ def main():
         print(f"Ya parado (con lo que rodó al frenar) el carro cree estar en x={fx:.0f} y={fy:.0f} th={fth:.1f}.")
         print("Mide dónde quedó DE VERDAD el eje trasero: la diferencia es error de odometría (encoder/BNO), "
               "no del seguidor.")
-    graficar(ruta, cerrada, salida, sim, real, titulo, os.path.splitext(nombre)[0] + ".png", not a.no_mostrar)
+    W = pared_vs_odometria(real, leer_tof(nombre), mapa_de(a), CENTRO_SERVO)
+    for linea in resumen_pared(W, real):
+        print(linea)
+    graficar(ruta, cerrada, salida, sim, real, titulo, os.path.splitext(nombre)[0] + ".png", not a.no_mostrar,
+             mapa=mapa_de(a), pared=W)
 
 
 if __name__ == "__main__":
