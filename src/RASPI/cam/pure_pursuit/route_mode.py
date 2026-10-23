@@ -78,6 +78,30 @@ def _pwm(name):
     return int(getattr(C, "ROUTE_SLOW_PWM", 100))
 
 
+def upload_cap_pwm(dist_mm, n_lines, lines_per_frame, fps, latency_s, slow, k, pwm0, top,
+                   margin_mm: float = 80.0, approach_mm: float = 300.0):
+    """Tope mientras sube la ruta. None = el tramo de adelante coincide, no frenar.
+
+    Los últimos approach_mm antes del apartamiento se hacen al escalón `slow`
+    (ahí la ruta nueva se abre y hay que llegar despacio). Más atrás se puede
+    ir más rápido, sin alcanzar el apartamiento antes de que el ESP tenga la ruta.
+    """
+    if dist_mm is None:
+        return slow
+    if dist_mm == float("inf"):
+        return None
+    t = max(n_lines, 1) / max(lines_per_frame, 1) / fps + latency_s
+    far = float(dist_mm) - margin_mm - approach_mm
+    if far <= 0.0:
+        return slow
+    v_slow = k * (slow - pwm0)
+    t_app = approach_mm / max(v_slow, 1.0)
+    if t <= t_app:
+        return top
+    v = far / (t - t_app)
+    return min(top, max(int(round(v / k + pwm0)), slow))
+
+
 _COL = {"T4": 0, "T2": 0, "X2": 1, "X1": 1, "T3": 2, "T1": 2}    # columna (w 1000/1500/2000)
 
 
@@ -620,17 +644,28 @@ class RouteMode:
             if getattr(C, "ROUTE_CTE_URGENT_MM", None) is not None and self._cte_urgent(conf, empty):
                 cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
+        risky = bool(self.upload) and self._upload_risky()
         self.pi_steer = (bool(self.upload) and not self.hold
-                         and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and self._upload_risky())
+                         and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and risky)
         if self.upload:
             # Mientras la ruta nueva no llega completa al ESP, lento; detenido
             # si cambió desde la pose (otro carril cerca del carro).
             # ROUTE_UPLOAD_SLOW=False: el ESP sigue la ruta anterior completa
             # (doble buffer, swap en RTE), así que solo se frena en el ALTO.
             # pi_steer: el ESP gira con la Pi, sin tope de subida (pi_steer nunca va con hold: el ALTO sigue).
-            if not self.pi_steer and (self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky())):
-                cap = 0 if self.hold else _pwm("ROUTE_UPLOAD_PWM")
-                self.rv = cap if self.rv is None else min(self.rv, cap)
+            # Si el apartamiento queda lejos, el tope es el que alcanza a subir la ruta, no el escalón entero.
+            if not self.pi_steer and self.hold:
+                self.rv = 0
+            elif not self.pi_steer and bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and risky:
+                cap = upload_cap_pwm(
+                    self._div_mm, len(self.upload), int(getattr(C, "ROUTE_UPLOAD_LINES", 1)),
+                    float(getattr(C, "PI_FPS", 40.0)), float(getattr(C, "ROUTE_PROFILE_LATENCY_S", 0.0)),
+                    _pwm("ROUTE_UPLOAD_PWM"), float(getattr(C, "ROUTE_PROFILE_K_MM_S_PER_PWM", 3.5)),
+                    float(getattr(C, "ROUTE_PROFILE_PWM0", 25.0)), int(getattr(C, "ROUTE_PROFILE_MAX_PWM", 255)),
+                    # 300 mm baja la vuelta 1 pero en ruido 2 chocan el cajón (semillas 1 y 24).
+                    approach_mm=450.0)
+                if cap is not None:
+                    self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
         if getattr(C, "ROUTE_PENDING_PWM", None) is not None and (self._delay_left is not None or self._job is not None):
@@ -662,19 +697,27 @@ class RouteMode:
     def _upload_risky(self) -> bool:
         """Mientras sube la ruta: ¿la nueva se aparta de la del ESP en el tramo de adelante?
 
-        Sin ROUTE_UPLOAD_DIFF_MM, sin ruta previa en el ESP o en otro marco (arranque
-        ciego), siempre True (frenar, como antes).
+        Deja en self._div_mm la distancia al primer apartamiento (inf si no hay,
+        None si no hay ruta previa comparable). Sin ROUTE_UPLOAD_DIFF_MM, sin ruta
+        previa en el ESP o en otro marco (arranque ciego), siempre True (frenar, como antes).
         """
+        self._div_mm = None
         tol = getattr(C, "ROUTE_UPLOAD_DIFF_MM", None)
         old = self.esp_route
-        if tol is None or old is None or self.esp_shift != self.upload_shift:
+        if tol is None or old is None or self.esp_shift != self.upload_shift or len(old.x) == 0:
             return True
         r = self.follower.route
         n = len(r.x)
+        i = max(self.follower.i, 0)
         m = int(float(getattr(C, "ROUTE_UPLOAD_HORIZON_MM", 700.0)) / (r.length_mm / n)) + 1
-        j = (max(self.follower.i, 0) + np.arange(m)) % n
+        j = (i + np.arange(m)) % n
         d = np.hypot(r.x[j, None] - old.x[None, :], r.y[j, None] - old.y[None, :]).min(axis=1)
-        return bool(d.max() > float(tol))
+        hit = np.flatnonzero(d > float(tol))
+        if len(hit) == 0:
+            self._div_mm = float("inf")
+            return False
+        self._div_mm = float(np.mod(r.s[j[hit[0]]] - r.s[i], r.length_mm))
+        return True
 
     def _cte_urgent(self, conf, empty) -> bool:
         """El carro, corrido |cte| de la ruta, va hacia la isla, una señal o la pared.
