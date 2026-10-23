@@ -13,6 +13,24 @@ from pure_pursuit.route_mode import RouteMode
 from pure_pursuit.wro_field import SEATS, randomize, section_to_world
 
 
+def test_kappa_de_pursuit_ignora_el_pico_corto():
+    from pure_pursuit.route_mode import _pursuit_kappa
+    n = 100
+    x = np.arange(n, dtype=float) * 10.0
+    y = np.zeros(n)
+    y[50] = 40.0
+
+    class R:
+        pass
+
+    r = R()
+    r.x, r.y, r.length_mm = x, y, 1000.0
+    r.heading_deg = np.full(n, 90.0)
+    assert _pursuit_kappa(r, np.array([50]), 200.0)[0] < 0.003
+    r.y = np.zeros(n)
+    assert _pursuit_kappa(r, np.array([50]), 200.0)[0] < 1e-9
+
+
 def test_margen_blando_solo_con_mapa_completo():
     from pure_pursuit.route_mode import _prm_for
     assert _prm_for([]).soft_clear_mm == 100.0
