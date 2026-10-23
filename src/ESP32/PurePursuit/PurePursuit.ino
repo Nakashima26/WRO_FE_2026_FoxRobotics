@@ -1232,6 +1232,9 @@ const int           PARK_CENTER_PWM_PAR       = 75;
 const int           PARK_FRENO_COLA_PWM       = 180;
 // Fase 3: el carro ya viene rodando (~300 mm/s), no hay fricción de arranque que
 // proteger; la rampa de reversa de setMotor() (300 ms) solo retrasa el frenado.
+// Frena la cola al terminar la fase 13 en cualquier corte (no solo pegado de lado): el coast deja ~10 mm de desliz contra el poste.
+const bool          PARK_FRENO_FIN_TODO       = true;
+const int           PARK_F12_FRENO_PWM        = 70;    // >0: fase 12 frena con reversa suave en vez de coast (el coast deja ~10 mm hacia el poste); 0 = coast
 const unsigned long PARK_F3_RAMPA_MS          = 50;
 const unsigned long PARK_F13_RAMPA_MS         = 300;   // ídem fase 13 (sale de un coast de 47 ms, ya con la inercia del acomodo)
 
@@ -6113,7 +6116,13 @@ void loop() {
 
       // ── Fase 12: COAST antes de reversear a 0 ──────────────────────────
       if (parkFase == 12) {
-        motorCoast();
+        if (PARK_F12_FRENO_PWM > 0) {
+          // El coast deja ~10 mm de avance hacia el poste: frena con reversa corta.
+          motorReversa(); motorDirMs = millis() - MOTOR_REV_RAMPA_MS;
+          setMotor(PARK_F12_FRENO_PWM);
+        } else {
+          motorCoast();
+        }
         escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           integralRev   = 0;
@@ -6188,7 +6197,7 @@ void loop() {
             Serial.println(": no derecho todavia -> fase 9 (ENFRENTE) de nuevo");
             parkFase   = 9;
             parkFaseMs = millis(); parkOdom0 = odomMm;
-          } else if (pegado && dif > 12.0f) {
+          } else if (PARK_FRENO_FIN_TODO || (pegado && dif > 12.0f)) {
             parkFrenoFin = true;
             parkColaMm = odomMm;
           } else {
