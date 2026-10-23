@@ -35,7 +35,7 @@ import numpy as np
 from . import config as C
 from . import ring_route as RR
 from .digital_map import feet_world
-from .localizer import Localizer
+from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
                         SECTIONS_CW, orange_segments, section_to_world, world_to_section)
@@ -487,6 +487,12 @@ class RouteMode:
                     and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
                     and abs(float(delta) - float(np.median(self._line_d))) > float(tol)):
                 delta = None   # la masa converge a un pico que la línea contradice: seguir leyendo
+            d_f = _ack_num(ack or "", "dF")
+            if (delta is not None and len(self._line_d) < int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
+                    and (d_f is None or d_f > 100.0)):
+                # Sin la línea, el pico de antes de la pared del fondo es de señales
+                # (n3 s24: δ=-87 a dF=200 y cruza E/T3; la base cierra con dF=97).
+                delta = None
             forced = False
             if delta is None and self._past_straight(dm, pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
@@ -611,9 +617,12 @@ class RouteMode:
             speed_unknown = [k for k in unknown if k not in roi_seats]
             self.rv = self._speed(speed_unknown, (x - ds * ax, y - ds * ay, hd)) if lap1 else None
         else:
-            # Sin el avance: lento, la esquina todavía no se sabe dónde está.
-            blind = getattr(C, "ROUTE_BLIND_PWM", None)
-            self.rv = slow if blind is None else int(blind)
+            # Sin el avance: lento. Con el frontal lejos de la pared del fondo
+            # (dF >= 100 cm, sin eco = 200) el perfil manda; al verla, tope ciego.
+            d_f = _ack_num(ack or "", "dF")
+            if not (d_f is not None and d_f >= 100.0):
+                blind = getattr(C, "ROUTE_BLIND_PWM", None)
+                self.rv = slow if blind is None else int(blind)
         if abs(self.follower.cte) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
             cte_cap = _pwm("ROUTE_CTE_PWM")
