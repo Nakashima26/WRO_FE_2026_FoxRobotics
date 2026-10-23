@@ -248,3 +248,4 @@ la anterior y las referencias (combo1).
 - **recta corta con línea naranja (76e733a, 2026-10-23):** dF ≤ 100 con el histograma del sonar plano → 8 votos de la línea dentro de 40 mm cierran el avance. carrera_bench 72/72, 0 pared, media −0.07 s (mediana 0; s8 −1.0 a −1.3 s). Grok contra m3: 96/96, media −0.06 s.
 - **paralelo: fase 3 invierte antes la inercia de la fase 1 (3ee3617, 2026-10-23):** PWM 130 en la primera mitad del swing, servo al centro al terminar. carrera_bench 72/72, 0 pared, pareado −0.30/−0.30/−0.31 s, mediana 36.15/36.46/36.53. Grok contra m3: 96/96, −0.30 s.
   **1.25:1 mejor = 36.2-36.5 s mediana (carrera_bench)**
+- **vuelta 2 con κ del lookahead (e4bad0c, 2026-10-23):** con 4 ≤ tc < 8 el perfil usa el κ del pure pursuit (lookahead 200 mm), vuelta 3 sigue con κ local. carrera_bench 72/72, 0 pared, vueltas 2+3 −0.13 s. Grok contra m4b: 96/96, total −0.11 s.
