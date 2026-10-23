@@ -176,7 +176,10 @@ const int   BNO_SIGNO  = -1;     // yaw del BNO crece a la derecha; th crece a l
 //     carro cree que ya avanzó más en la curva, gira antes y corta la esquina hacia
 //     adentro (5–9 cm a la salida de cada esquina, a 180 y a 255 igual).
 //   bnoEscala: grados reales por grado del BNO (medía ~0.4 % de más en vuelta).
-float encCurva  = 0.15f;
+// OJO 2026-10-23: con 0.15 / 0.08 el encoder contó 22.6-22.8 m en 3 vueltas en vez de
+// 22.3 (sin corrección): el carro recorría 30-50 cm DE MÁS y terminaba adelante de la
+// salida. La teoría de "cuenta de más en curva" no cuadra con el avance: queda en 0.
+float encCurva  = 0.0f;
 float bnoEscala = 0.996f;
 // Anticipo: el pure pursuit calcula con la pose de dentro de `anticipo` s (velocidad
 // y giro medidos), para adelantarse al servo (~0.12 s). En la simulación 0.04 bajó
