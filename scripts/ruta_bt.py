@@ -255,11 +255,11 @@ def radios(ruta, cerrada):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class Seguidor:
-    def __init__(self, ruta, paso, cerrada, lookahead, vueltas, freno_antes=25.0):
+    def __init__(self, ruta, paso, cerrada, lookahead, vueltas, freno_antes=0.0):
         self.X, self.Y = ruta[:, 0], ruta[:, 1]
         self.n, self.paso, self.cerrada = len(ruta), paso, cerrada
         self.lookahead, self.vueltas = lookahead, vueltas
-        self.antes = int(round(freno_antes / paso))   # frenoAntes del sketch: frena antes de la meta
+        self.antes = int(freno_antes / paso)   # frenoAntes del sketch: frena antes de la meta
         self.i, self.progreso = -1, 0
 
     def idx(self, i):
@@ -321,9 +321,13 @@ class Seguidor:
         return (tx * (y - ay) - ty * (x - ax)) / d
 
     def terminada(self):
+        return self.falta() <= 0
+
+    def falta(self):
+        """mm de ruta que faltan para frenar (como faltaMm() del sketch)."""
         if self.cerrada:
-            return self.progreso >= self.vueltas * self.n - self.antes
-        return self.i >= self.n - 1 - self.antes
+            return (self.vueltas * self.n - self.antes - self.progreso) * self.paso
+        return (self.n - 1 - self.antes - self.i) * self.paso
 
 
 def servo_para_rueda(rueda):
@@ -350,8 +354,9 @@ def pwm_para(rueda, t_ms, pwm, pwm_curva):
 def simular(ruta, paso, cerrada, salida, a):
     """Bicicleta cinemática en el eje trasero, con el retraso del servo, los
     topes medidos y servo en grados enteros. Devuelve (filas, motivo)."""
-    seg = Seguidor(ruta, paso, cerrada, a.lookahead, a.vueltas,
-                   float(sets_de(a).get("frenoAntes", 25.0)))
+    sets = sets_de(a)
+    seg = Seguidor(ruta, paso, cerrada, a.lookahead, a.vueltas, float(sets.get("frenoAntes", 0.0)))
+    rampa_fin, pwm_fin = float(sets.get("rampaFin", 400.0)), int(float(sets.get("pwmFin", 100)))
     x, y, th = salida
     if not seg.cercano(x, y, th):
         return np.zeros((0, 8)), "la salida no va en el sentido de la ruta"
@@ -385,6 +390,9 @@ def simular(ruta, paso, cerrada, salida, a):
             rueda += kd * (giro_pedido - giro_med)
         servo = servo_para_rueda(rueda)
         pwm = pwm_para(rueda_ruta, t * 1000, a.pwm, a.pwm_curva)
+        falta = seg.falta()
+        if rampa_fin > 0 and falta < rampa_fin:   # llegada suave, como el sketch
+            pwm = min(pwm, round(pwm_fin + (a.pwm - pwm_fin) * max(falta, 0.0) / rampa_fin))
         filas.append((t * 1000, x, y, th, seg.i, lat, servo, pwm))
         v = vel_por_pwm(pwm)
         dist += v * DT_SIM

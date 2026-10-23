@@ -38,7 +38,8 @@
  *
  * PRUEBAS SIN SUBIR EL SKETCH: todo lo que se ajusta en las pruebas está en la tabla
  * `parametros` (SET / PAR). Para dar vueltas seguidas sin tocar el carro:
- *   frenoAntes   la vuelta frena esto antes de la meta (mm) para pararse en la salida
+ *   rampaFin     en los últimos rampaFin mm baja la velocidad hasta pwmFin (sin derrapar)
+ *   frenoAntes   y frena esto antes de la meta (mm) para pararse en la salida
  *   salidaPared  1 = al arrancar corrige la posición con la pared exterior (promedio de
  *                los ToF laterales parado), así no hay que ponerlo a mano cada vez
  *
@@ -117,9 +118,15 @@ float LAT_MAX_MM        = 400.0f;
 const unsigned long TIMEOUT_MS = 120000;
 const int   FRENO_FRONTAL_MM  = 120;      // ToF frontal con status 0 a menos de esto
 const unsigned long FRENO_QUIETO_MS = 200;   // al terminar: el encoder sin moverse esto = ya se paró
-// La vuelta frena esto antes de la meta: frenando a 255 rueda ~25 mm, y sin esto
-// cada corrida empezaba 2-3 cm más adelante que la anterior (SET frenoAntes).
-float frenoAntesMm = 25.0f;
+// Llegada: en los últimos rampaFinMm el PWM baja poco a poco hasta pwmFin y se frena
+// ya despacio. Frenar en seco a 255 (~870 mm/s) hacía derrapar al carro, y lo que se
+// barre el encoder no lo ve: terminaba de más (usuario, 2026-10-23). frenoAntesMm =
+// lo que todavía rueda al frenar desde pwmFin; la vuelta ya termina ~medio paso
+// (10 mm) antes de la meta, porque el punto más cercano cambia a la mitad del tramo
+// (SET rampaFin / pwmFin / frenoAntes).
+float rampaFinMm   = 400.0f;
+int   pwmFin       = 100;
+float frenoAntesMm = 0.0f;
 // 1 = al arrancar, la posición lateral se toma de la pared exterior (promedio de los
 // ToF laterales con el carro parado) en vez de confiar en que lo pusieron exacto.
 int   salidaPared = 0;
@@ -289,6 +296,7 @@ Parametro parametros[] = {
   {"ruedaCurvaMin", &RUEDA_CURVA_MIN, nullptr}, {"ruedaCurvaMax", &RUEDA_CURVA_MAX, nullptr},
   {"pwmArranque", nullptr, &PWM_ARRANQUE}, {"rampaMs", nullptr, &RAMPA_MS},
   {"latMax", &LAT_MAX_MM, nullptr},       {"frenoAntes", &frenoAntesMm, nullptr},
+  {"rampaFin", &rampaFinMm, nullptr},     {"pwmFin", nullptr, &pwmFin},
   {"salidaPared", nullptr, &salidaPared}, {"pared", nullptr, &paredModo},
   {"paredKPos", &PARED_K_POS, nullptr},   {"paredPasoMax", &PARED_PASO_MAX_MM, nullptr},
   {"paredGate", &PARED_GATE_MM, nullptr}, {"paredIncMax", &PARED_INC_MAX_DEG, nullptr},
@@ -716,9 +724,15 @@ float errorLateral() {
   return (tx * (y - ay) - ty * (x - ax)) / d;
 }
 
+// mm de ruta que faltan para frenar (ya descontado frenoAntesMm).
+float faltaMm() {
+  long antes = (long)(frenoAntesMm / rutaPaso);    // frena antes para pararse en la meta
+  long faltan = rutaCerrada ? (long)vueltas * rutaN - antes - progreso : rutaN - 1 - antes - rutaI;
+  return faltan * rutaPaso;
+}
+
 bool rutaTerminada() {
-  long antes = lroundf(frenoAntesMm / rutaPaso);   // frena antes para pararse en la meta
-  return rutaCerrada ? progreso >= (long)vueltas * rutaN - antes : rutaI >= rutaN - 1 - antes;
+  return faltaMm() <= 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -952,6 +966,10 @@ void recorrido() {
   float f = constrain((fabsf(ruedaRuta) - RUEDA_CURVA_MIN) / (RUEDA_CURVA_MAX - RUEDA_CURVA_MIN), 0.0f, 1.0f);
   int pwm = (int)lroundf(pwmCrucero + (pwmCurva - pwmCrucero) * f);
   if (t < (unsigned long)RAMPA_MS) pwm = min(pwm, (int)map(t, 0, RAMPA_MS, PWM_ARRANQUE, pwmCrucero));
+  // Llegada: baja hasta pwmFin en los últimos rampaFinMm (ver rampaFinMm).
+  float falta = faltaMm();
+  if (rampaFinMm > 0 && falta < rampaFinMm)
+    pwm = min(pwm, (int)lroundf(pwmFin + (pwmCrucero - pwmFin) * max(falta, 0.0f) / rampaFinMm));
   setMotor(pwm);
 
   if (t - tPose >= POSE_MS) {
