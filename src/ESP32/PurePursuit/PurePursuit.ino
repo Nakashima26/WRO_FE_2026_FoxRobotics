@@ -6077,7 +6077,10 @@ void loop() {
         parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
         bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
         bool timeout = (millis() - parkFaseMs >= PARK_FWD_MS);
-        if (dfTope || timeout) {
+        // 12 mm adelante de la cola ya despegan la pared; el freno del final
+        // para el desliz que antes dejaba este corte en 5.1 mm.
+        bool colaYa = parkFrenoCola && !frenando && (odomMm - parkColaMm) >= 12;
+        if (dfTope || timeout || colaYa) {
           motorCoast();
           escribirServo(centroServo);
           float dif = fabs(anguloGyro - parkRumboRef);
