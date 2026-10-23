@@ -191,8 +191,8 @@ struct Tof {
 };
 Tof tofs[] = {
   {"F", 0,  0x30, true,  141.4f,   0.0f,   0.0f, 1200},
-  {"L", 15, 0x31, false, 110.6f,  35.2f,  90.0f,  650},
-  {"R", 5,  0x32, false, 110.6f, -35.2f, -90.0f,  650},
+  {"L", 15, 0x31, false, 113.0f,  35.2f,  90.0f,  650},   // adelante = eje delantero (usuario 2026-10-23)
+  {"R", 5,  0x32, false, 113.0f, -35.2f, -90.0f,  650},
 };
 const int N_TOF = sizeof(tofs) / sizeof(tofs[0]);
 Tof& tofF = tofs[0];

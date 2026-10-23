@@ -62,7 +62,7 @@ def mapa_pista(pista=PISTA_MM, interior=INTERIOR_LADO_MM):
 
 # ToF como en SeguirRuta.ino: (adelante, izquierda, ángulo °) de la cara que mide desde
 # el centro del eje trasero, y las mismas reglas para decidir si una lectura sirve.
-TOFS = {"F": (141.4, 0.0, 0.0), "L": (110.6, 35.2, 90.0), "R": (110.6, -35.2, -90.0)}
+TOFS = {"F": (141.4, 0.0, 0.0), "L": (113.0, 35.2, 90.0), "R": (113.0, -35.2, -90.0)}
 PARED_GATE_MM = 120.0
 PARED_INC_MAX_DEG = 20.0
 PARED_RECTA_DEG = 8.0
