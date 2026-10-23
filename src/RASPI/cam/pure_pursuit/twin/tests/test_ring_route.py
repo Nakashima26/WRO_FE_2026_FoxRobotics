@@ -56,6 +56,26 @@ def test_plan_desconocidos_y_ancla():
     assert np.hypot(r2.x - anchor[0], r2.y - anchor[1]).min() < 45.0
 
 
+def test_lock_abre_el_lado_de_a_poco():
+    """Tras el candado, d no puede saltar de lado más rápido que una esquina."""
+    f = randomize(24)
+    seats = dict(RR.signs_from_field(f))
+    r = RR.plan(f.direction, seats, f.parking_section)
+    n = len(r.d_stations)
+    key = ("S", "T4")
+    ks = RR.station_of(r, *section_to_world(key[0], *SEATS[key[1]]))
+    k0 = (ks - 18) % n
+    lock = {(k0 + j) % n: float(r.d_stations[(k0 + j) % n]) for j in range(7)}
+    seats[key] = "Green" if seats[key] == "Red" else "Red"
+    r2 = RR.plan(f.direction, seats, f.parking_section, lock=lock)
+    assert r2.report["feasible"]
+    for j in range(7):
+        assert abs(r2.d_stations[(k0 + j) % n] - lock[(k0 + j) % n]) <= 15.0
+    d0 = lock[(k0 + 6) % n]
+    for j in range(1, 13):
+        assert abs(r2.d_stations[(k0 + 6 + j) % n] - d0) <= 60.0 * j + 15.0
+
+
 def test_follower_recto():
     """Sobre la ruta y alineado, el pure pursuit casi no gira en recta."""
     f = randomize(1)

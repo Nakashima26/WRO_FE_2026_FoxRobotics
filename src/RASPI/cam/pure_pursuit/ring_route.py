@@ -495,6 +495,17 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                     allowed_d[kb] &= ok
     for k, dval in (lock or {}).items():
         allowed_d[int(k) % n] &= np.abs(D - dval) <= 0.5 * prm.d_step
+    if lock:
+        # Un cambio de lado (~300 mm) justo al salir de las 7 estaciones fijas
+        # cabe en el lookahead (200 mm): el follower va a tope y el CTE urgente
+        # deja el tramo a PWM 110 (n3 s24, ~2.5 s). Se abre d a ritmo de giro.
+        keys = sorted(lock, key=lambda k: (int(k) - min(int(x) for x in lock)) % n)
+        k0 = int(keys[-1]) % n
+        d0 = float(lock[keys[-1]])
+        step = 60.0  # mm/estación: una esquina normal; más que eso es un quiebre
+        for j in range(1, 13):
+            k = (k0 + j) % n
+            allowed_d[k] &= np.abs(D - d0) <= step * j + 0.5 * prm.d_step
 
     INF = 1e18
     N = laps * n
