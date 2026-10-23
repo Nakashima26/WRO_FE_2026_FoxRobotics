@@ -192,7 +192,9 @@ const int   BNO_SIGNO  = -1;     // yaw del BNO crece a la derecha; th crece a l
 // 22.3 (sin corrección): el carro recorría 30-50 cm DE MÁS y terminaba adelante de la
 // salida. La teoría de "cuenta de más en curva" no cuadra con el avance: queda en 0.
 float encCurva  = 0.0f;
-float bnoEscala = 0.996f;
+// bnoEscala: 0.996 salió del mismo ajuste malo que encCurva; con él el error crecía hacia
+// adentro vuelta a vuelta (~0.36° por esquina). CalibFox a mano midió 0.9998 -> 1.0.
+float bnoEscala = 1.0f;
 // Anticipo: el pure pursuit calcula con la pose de dentro de `anticipo` s (velocidad
 // y giro medidos), para adelantarse al servo (~0.12 s). En la simulación 0.04 bajó
 // la oscilación en rectas sin empeorar las esquinas. 0 = apagado. RTS lo cambia.

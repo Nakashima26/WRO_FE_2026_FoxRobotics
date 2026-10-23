@@ -776,7 +776,7 @@ def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
            f"salida={salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f} pwm={a.pwm} pwm_curva={a.pwm_curva} "
            f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO} kd={getattr(a, 'kd', None) or 0} "
            f"pared={getattr(a, 'pared', 0)} set={';'.join(getattr(a, 'set', None) or [])} enc_curva={getattr(a, 'enc_curva', 0.0)} "
-           f"bno_escala={getattr(a, 'bno_escala', 0.996)} anticipo={getattr(a, 'anticipo', 0.0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
+           f"bno_escala={getattr(a, 'bno_escala', 1.0)} anticipo={getattr(a, 'anticipo', 0.0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
            f"# PC titulo {titulo}\n")
     return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
 
@@ -806,7 +806,7 @@ def comando_salida(a, salida):
     kd = 0.04 if kd is None else kd
     return (f"RTS,{salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f},{a.pwm},{a.pwm_curva},"
             f"{a.vueltas},{a.lookahead:.0f},{CENTRO_SERVO},{kd:.3f},{getattr(a, 'pared', 0)},"
-            f"{getattr(a, 'enc_curva', 0.0):.3f},{getattr(a, 'bno_escala', 0.996):.4f},"
+            f"{getattr(a, 'enc_curva', 0.0):.3f},{getattr(a, 'bno_escala', 1.0):.4f},"
             f"{getattr(a, 'anticipo', 0.0):.3f}\n")
 
 
@@ -925,7 +925,8 @@ def main():
         p.add_argument("--enc-curva", type=float, default=0.0,
                        help="corrección del encoder con la rueda girada (0 = apagada; 2026-10-23: 0.08-0.15 hacía "
                             "que el carro recorriera 30-50 cm DE MÁS en 3 vueltas, no usar)")
-        p.add_argument("--bno-escala", type=float, default=0.996, help="grados reales por grado del BNO (ajustado: 0.996)")
+        p.add_argument("--bno-escala", type=float, default=1.0,
+                       help="grados reales por grado del BNO (CalibFox a mano: 0.9998; 0.996 hacía crecer el error hacia adentro)")
         p.add_argument("--set", action="append", metavar="CLAVE=VALOR",
                        help="cambia un parámetro del ESP32 por nombre (se repite; la lista: PAR)")
         p.add_argument("--anticipo", type=float, default=0.0,
