@@ -34,6 +34,44 @@ def test_plan_valida(seed):
         assert (right < 0) == (s.color == "Red"), (s.section, s.seat, s.color)
 
 
+def test_refine_acorta_sin_apretar():
+    """Con el mapa completo, el paso fino no alarga ni acerca la ruta a señal o pared."""
+    from dataclasses import replace
+    f = randomize(6)
+    seats = RR.signs_from_field(f)
+    coarse = RR.RouteParams(d_step=20.0, refine_step=0.0, hard_clear_mm=70.0)
+    fine = replace(coarse, refine_step=10.0, refine_win_mm=40.0)
+    a = RR.plan(f.direction, seats, f.parking_section, prm=coarse, park_w=f.parking_w)
+    b = RR.plan(f.direction, seats, f.parking_section, prm=fine, park_w=f.parking_w)
+    assert b.length_mm < a.length_mm - 10.0
+    assert b.report["r_min_mm"] >= a.report["r_min_mm"] - 3.0
+    assert b.report["sign_mm"] >= a.report["sign_mm"] - 3.0
+    assert b.report["wall_mm"] >= a.report["wall_mm"] - 8.0
+    # vuelta 1 (hay asientos sin ver): misma ruta que la gruesa
+    unknown = [(sec, st) for sec in "NESW" for st in SEATS if (sec, st) not in seats]
+    c = RR.plan(f.direction, seats, f.parking_section, prm=fine, park_w=f.parking_w, unknown=unknown)
+    d = RR.plan(f.direction, seats, f.parking_section, prm=coarse, park_w=f.parking_w, unknown=unknown)
+    assert np.array_equal(c.d_stations, d.d_stations)
+
+
+def test_final_d_step_solo_con_mapa_completo():
+    """La malla final de 10 mm acorta sin bajar de R 160; con asientos sin ver no corre."""
+    from dataclasses import replace
+    f = randomize(6)
+    seats = RR.signs_from_field(f)
+    coarse = RR.RouteParams(d_step=20.0, hard_clear_mm=70.0, final_d_step=0.0)
+    fine = replace(coarse, final_d_step=10.0)
+    a = RR.plan(f.direction, seats, f.parking_section, prm=coarse, park_w=f.parking_w)
+    b = RR.plan(f.direction, seats, f.parking_section, prm=fine, park_w=f.parking_w)
+    assert b.length_mm <= a.length_mm
+    assert b.report["r_min_mm"] >= 160.0
+    assert b.report["sign_mm"] >= min(a.report["sign_mm"], 80.0) - 1e-6
+    unknown = [(sec, st) for sec in "NESW" for st in SEATS if (sec, st) not in seats]
+    c = RR.plan(f.direction, seats, f.parking_section, prm=fine, park_w=f.parking_w, unknown=unknown)
+    d = RR.plan(f.direction, seats, f.parking_section, prm=coarse, park_w=f.parking_w, unknown=unknown)
+    assert np.array_equal(c.d_stations, d.d_stations)
+
+
 def test_plan_desconocidos_y_ancla():
     """Con asientos sin ver la ruta los esquiva; el ancla la hace pasar por el carro."""
     f = randomize(3)

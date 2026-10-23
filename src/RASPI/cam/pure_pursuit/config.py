@@ -1264,7 +1264,15 @@ ROUTE_FOLLOW = False
 ROUTE_LOOKAHEAD_MM = 200.0
 # Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
 ROUTE_W_KAPPA = 3.0e4
-ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10: diagonales más rectas, ~5x más lento)
+ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10 directo: ~5x más lento y 400 MB de caché)
+# Refinamiento del mapa completo: segunda DP en +-ROUTE_REFINE_WIN_MM. 0 = apagado.
+# ±40 mm bajó vueltas 2-3 ~0.02-0.05 s y falló el cajón en semillas nuevas; ±10 mm no movió el tiempo.
+ROUTE_REFINE_STEP = 0.0
+ROUTE_REFINE_WIN_MM = 40.0
+ROUTE_REFINE_KEEP_PARK = True   # la recta del cajón queda con la ruta gruesa (U y estacionamiento dependen de cómo llega el carro)
+# DP a este paso solo cuando ya se vieron las 4 rectas. 0 = apagado. La de 20 mm
+# deja ~85 mm de largo por vuelta; ±40 mm alrededor de la gruesa no lo alcanza.
+ROUTE_FINAL_D_STEP = 10.0
 # Frames que se adelanta la pose de odometría (llega atrasada por el UART).
 # 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
 ROUTE_PREDICT_FRAMES = 0.0

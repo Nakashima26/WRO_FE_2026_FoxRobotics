@@ -31,7 +31,7 @@ import ctypes
 import math
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -88,6 +88,14 @@ class RouteParams:
     view_max_mm: float = 550.0
     view_half_deg: float = 40.0
     step_mm: float = 10.0           # muestreo de la ruta final
+    # Refinamiento: tras la DP gruesa (d_step), una segunda DP con paso fino solo en una ventana
+    # +-refine_win_mm alrededor de la ruta gruesa (m chico, casi sin costo). 0 = apagado.
+    refine_step: float = 0.0
+    refine_win_mm: float = 40.0
+    refine_keep_park: bool = True   # no refina la recta del cajón (ahí arranca la U/estacionamiento)
+    # Segunda DP con este paso, solo con el mapa completo. 0 = apagado.
+    # La de 20 mm deja ~85 mm de largo; la ventana de ±40 mm no lo alcanza.
+    final_d_step: float = 0.0
 
 
 def _order(direction: str, start: str = "N") -> list[str]:
@@ -320,7 +328,7 @@ def _geom_kernel():
 def plan(direction: str, seats: dict, parking: str | None = None,
          prm: RouteParams | None = None, start_section: str | None = None,
          laps: int = 3, unknown=None, anchor=None, lock=None,
-         park_w: float | None = None, extra=None) -> Route:
+         park_w: float | None = None, extra=None, _retry: int = 0, _D=None) -> Route:
     """seats: {(sección, asiento): "Red"|"Green"} en el marco del tapete.
 
     park_w: w0 del cajón en su recta (None = el del programa oficial).
@@ -346,9 +354,11 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     secs = [_sec(nm, direction) for nm in order]
     n = prm.n_stations
     sig, O, V, sec_idx, loc = _stations(secs, n)
-    D = np.arange(prm.d_min, prm.d_max + 0.5, prm.d_step)
-    m = len(D)
-    P = O[:, None, :] + D[None, :, None] * V[:, None, :]          # (n, m, 2)
+    fine = _D is not None            # ventana fina por estación: sin cachés (la malla cambia en cada plan)
+    Dg = _D if fine else np.tile(np.arange(prm.d_min, prm.d_max + 0.5, prm.d_step)[None, :], (n, 1))   # (n, m)
+    m = Dg.shape[1]
+    SC, GC, RC, SGC, VC = ({}, {}, {}, {}, {}) if fine else (_STATIC_CACHE, _GEOM_CACHE, _RANGE_CACHE, _SIGN_CACHE, _VIS_CACHE)
+    P = O[:, None, :] + Dg[:, :, None] * V[:, None, :]          # (n, m, 2)
 
     # Obstáculos puntuales: señales y maderas.
     pillars = []
@@ -365,7 +375,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         st = int(round((k * _SEC_SIGMA + (u - 1000.0)) / (4.0 * _SEC_SIGMA / n))) % n
         right_is_in = direction == "CW"
         go_in = (color == "Red") == right_is_in            # pasar del lado de la isla
-        side_rules.append((st, D < d_p if go_in else D > d_p))
+        side_rules.append((st, Dg[st] < d_p if go_in else Dg[st] > d_p))
     extra_centers = []
     for ex, ey, color in (extra or ()):
         if color is None:
@@ -383,7 +393,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         k_s, u, d_p = best
         st = int(round((k_s * _SEC_SIGMA + (u - 1000.0)) / (4.0 * _SEC_SIGMA / n))) % n
         go_in = (color == "Red") == (direction == "CW")
-        side_rules.append((st, D < d_p if go_in else D > d_p))
+        side_rules.append((st, Dg[st] < d_p if go_in else Dg[st] > d_p))
     # Holgura por (estación k, d anterior j, d actual i): rumbo = P[k,i] - P[k-1,j].
     # Paredes, isla y maderas no cambian en la carrera: caché por (sentido,
     # cajón, malla). Las señales (conocidas o posibles) se suman encima, solo
@@ -396,14 +406,13 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     # park_w cambia al fijar el arranque (antes eso recalculaba todo: ~45 ms).
     gridkey = (direction, start_section or "N", n, prm.d_min, prm.d_max, prm.d_step)
     ckey = gridkey + (parking, park_w)
-    clear = _STATIC_CACHE.get(ckey)
+    clear = SC.get(ckey)
     if clear is None:
-        base = _STATIC_CACHE.get(gridkey)
+        base = SC.get(gridkey)
         if base is None:
-            base = np.empty((n, m, m))
-            for k in range(n):
-                base[k] = _static_clearance(xx[k], yy[k], hd[k], None, shd[k], chd[k])
-            _STATIC_CACHE[gridkey] = base
+            # Una sola llamada: el bucle por estación era el costo del refinamiento (misma cuenta).
+            base = _static_clearance(xx, yy, hd, None, shd, chd)
+            SC[gridkey] = base
         clear = base.copy()
         if parking is not None:
             bpts = []
@@ -417,7 +426,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 near = bar[np.hypot(bar[:, 0] - O[k, 0], bar[:, 1] - O[k, 1]) < 1300.0]
                 if len(near):
                     clear[k] = np.minimum(clear[k], _rect_dist_pose(near[:, 0], near[:, 1], xx[k], yy[k], hd[k], shd[k], chd[k]).min(-1))
-        _STATIC_CACHE[ckey] = clear
+        SC[ckey] = clear
     clear = clear.copy()
     centers = [(px, py) for px, py, _c in pillars] + extra_centers
     for sname, seat in (unknown or ()):
@@ -426,13 +435,13 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     r_sign = SIGN_MM / 2.0 * math.sqrt(2.0)
     for cx, cy in centers:
         sk = (gridkey, float(cx), float(cy))
-        if sk not in _SIGN_CACHE:
+        if sk not in SGC:
             ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
             dsg = None
             if len(ks) > 0:
                 dsg = _rect_dist_pose(np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks], shd[ks], chd[ks])[..., 0] - r_sign
-            _SIGN_CACHE[sk] = (ks, dsg)
-        ks, dsg = _SIGN_CACHE[sk]
+            SGC[sk] = (ks, dsg)
+        ks, dsg = SGC[sk]
         if len(ks) == 0:
             continue
         clear[ks] = np.minimum(clear[ks], dsg)
@@ -458,7 +467,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 # detección medida ~98 %): la ruta pasa mirándolo y se resuelve.
                 cam = float(getattr(C, "CAMERA_FWD_MM", 140.0))
                 vk = (gridkey, float(ux), float(uy), cam, prm.view_min_mm, prm.view_max_mm, prm.view_half_deg)
-                if vk not in _VIS_CACHE:
+                if vk not in VC:
                     kv = np.flatnonzero(np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1500.0)
                     s, c = shd[kv], chd[kv]
                     cx = xx[kv] + cam * s
@@ -469,8 +478,8 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                     dist = np.hypot(fwd, latv)
                     vis = (fwd > 0) & (dist >= prm.view_min_mm) & (dist <= prm.view_max_mm) & (
                         np.abs(latv) <= fwd * math.tan(math.radians(prm.view_half_deg)))
-                    _VIS_CACHE[vk] = (kv, vis)
-                kv, vis = _VIS_CACHE[vk]
+                    VC[vk] = (kv, vis)
+                kv, vis = VC[vk]
                 bonus[kv] -= prm.w_visible * vis
     allowed_d = np.ones((n, m), dtype=bool)
     for st, mask in side_rules:
@@ -478,7 +487,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     if anchor is not None:
         dist = np.hypot(P[..., 0] - anchor[0], P[..., 1] - anchor[1])     # (n, m)
         ka, ja = np.unravel_index(int(np.argmin(dist)), dist.shape)
-        near_d = np.abs(D - D[ja]) <= 30.0
+        near_d = np.abs(Dg[ka] - Dg[ka, ja]) <= 30.0
         allowed_d[ka] &= near_d
         # sin dejar estaciones vacías (si choca con una regla de lado, manda el ancla)
         if not allowed_d[ka].any():
@@ -494,7 +503,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 if (allowed_d[kb] & ok).any():
                     allowed_d[kb] &= ok
     for k, dval in (lock or {}).items():
-        allowed_d[int(k) % n] &= np.abs(D - dval) <= 0.5 * prm.d_step
+        allowed_d[int(k) % n] &= np.abs(Dg[int(k) % n] - dval) <= 0.5 * (prm.refine_step if fine else prm.d_step)
 
     INF = 1e18
     N = laps * n
@@ -502,12 +511,13 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     # salida, malla y parámetros de costo/curvatura.
     gkey = (direction, start_section or "N", n, prm.d_min, prm.d_max, prm.d_step, prm.w_len, prm.w_kappa,
             prm.time_cost, prm.a_lat_mm_s2, prm.v_min_mm_s, prm.v_max_mm_s, prm.r_min_mm, prm.max_angle_deg)
-    geo = _GEOM_CACHE.get(gkey)
+    geo = GC.get(gkey)
     if geo is None:
         # Ángulo de cada tramo (b en k -> c en k+1) contra la dirección del pasillo:
         # sin esto la DP "brinca" de lado entre estaciones (la curvatura de 3 puntos
         # no lo ve y la holgura solo se mide en las estaciones).
-        lane_t = P[(np.arange(n) + 1) % n] - P                     # (n, m, 2) mismo d
+        nxt = (np.arange(n) + 1) % n
+        lane_t = O[nxt][:, None, :] + Dg[:, :, None] * V[nxt][:, None, :] - P      # (n, m, 2) mismo d en la estación siguiente
         lane_t /= np.linalg.norm(lane_t, axis=-1, keepdims=True)
         max_cos = math.cos(math.radians(prm.max_angle_deg))
         side_ok = np.empty((n, m, m), dtype=bool)
@@ -516,7 +526,7 @@ def plan(direction: str, seats: dict, parking: str | None = None,
             ln = np.linalg.norm(seg, axis=-1)
             cosang = (seg[..., 0] * lane_t[k][:, None, 0] + seg[..., 1] * lane_t[k][:, None, 1]) / np.maximum(ln, 1e-9)
             side_ok[k] = cosang >= max_cos
-        geo = _GEOM_CACHE[gkey] = _dp_geometry(P, prm, side_ok)
+        geo = GC[gkey] = _dp_geometry(P, prm, side_ok)
     G, DS, MASK = geo
     # V[a, b]: costo de llegar con d_{t-1}=a, d_t=b. Arranque libre en t=1.
     Vc = np.where(bad[1] | ~allowed_d[1][None, :], INF, 0.0)
@@ -533,13 +543,13 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         sparse = _dp_sparse_kernel() if os.environ.get("FOX_DP_SPARSE", "1") != "0" else None
         if sparse is not None:
             # Solo recorre a permitidos por (k,b,c): mismo resultado que el bucle denso.
-            if gkey not in _RANGE_CACHE:
+            if gkey not in RC:
                 ok = ~MASK                                   # (n, a, b, c)
                 anyv = ok.any(axis=1)
                 alo = np.where(anyv, ok.argmax(axis=1), m).astype(np.int16)
                 ahi = np.where(anyv, m - 1 - ok[:, ::-1].argmax(axis=1), -1).astype(np.int16)
-                _RANGE_CACHE[gkey] = (np.ascontiguousarray(alo), np.ascontiguousarray(ahi))
-            alo, ahi = _RANGE_CACHE[gkey]
+                RC[gkey] = (np.ascontiguousarray(alo), np.ascontiguousarray(ahi))
+            alo, ahi = RC[gkey]
             sparse(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
                    penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
                    alo.ctypes.data, ahi.ctypes.data,
@@ -568,32 +578,102 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     path = path[::-1]                                # d index por t = 0..N-1
     di = np.array(path[:N])
     mid = di[n:2 * n] if laps >= 3 else di[-n:]
-    d_lap = D[mid].astype(float)
+    d_lap = Dg[np.arange(n), mid].astype(float)
     xy = O + d_lap[:, None] * V
     route = _resample(xy, prm.step_mm, direction)
     route.report = check(route, pillars, parking, park_w)
     route.report["feasible"] = bool(feasible)
-    route.report["junction_dd"] = float(abs(D[di[2 * n]] - D[di[n]])) if laps >= 3 else 0.0
+    route.report["junction_dd"] = float(abs(Dg[0, di[2 * n]] - Dg[0, di[n]])) if laps >= 3 else 0.0
     route.report["solve_ms"] = (time.perf_counter() - t0) * 1000.0
     route.d_stations = d_lap
     route.pillars = pillars
     route.station_O = O
     route.station_V = V
     route.feasible = bool(feasible)
-    if not feasible and lock:
+    if feasible and _retry < 2 and not unknown and route.report["r_min_mm"] < 0.85 * prm.r_min_mm:
+        # La B-spline de la ruta final dobla más cerrado que la malla. En la vuelta 1 (hay
+        # asientos sin ver) no se reintenta: abría la ruta ~1 m y costaba ~2 s (semilla 17).
+        again = plan(direction, seats, parking, replace(prm, r_min_mm=prm.r_min_mm * 1.2), start_section,
+                     laps, unknown, anchor, lock, park_w=park_w, extra=extra, _retry=_retry + 1)
+        if again.feasible and again.report["r_min_mm"] > route.report["r_min_mm"]:
+            return again
+    if not feasible and lock and not fine:
         # El tramo fijo ya no cabe con lo nuevo: se acorta (la mitad) y se reintenta.
         keys = sorted(lock, key=lambda k: (int(k) - min(lock)) % n)
         short = {k: lock[k] for k in keys[: len(keys) // 2]}
         return plan(direction, seats, parking, prm, start_section, laps, unknown, anchor, short or None,
                     park_w=park_w, extra=extra)
-    if not feasible and anchor is not None:
+    if not feasible and anchor is not None and not fine:
         # El ancla cae donde no cabe (p. ej. el carro pegado a algo): sin ancla.
         return plan(direction, seats, parking, prm, start_section, laps, unknown, None,
                     park_w=park_w, extra=extra)
-    if not feasible and unknown:
-        # Lo desconocido tapa el paso: se planea solo con lo conocido.
-        return plan(direction, seats, parking, prm, start_section, laps, None, None,
-                    park_w=park_w, extra=extra)
+    if not feasible and unknown and not fine:
+        # Lo desconocido tapa el paso: se planea solo con lo conocido, sin refinar
+        # (sigue siendo vuelta 1; la malla fina ahí cierra el radio contra la señal).
+        return plan(direction, seats, parking, replace(prm, refine_step=0.0, final_d_step=0.0), start_section, laps,
+                    None, None, park_w=park_w, extra=extra)
+    if prm.refine_step > 0.0 and not fine and feasible and not unknown:
+        # Solo con el mapa completo: en la vuelta 1 la malla de 10 mm aprieta la spline (R~150)
+        # y el morro pega con la señal de afuera (W/T3, ruido 3 semilla 6). La gruesa queda
+        # dentro de la ventana, así que el óptimo fino nunca es peor en la malla.
+        offs = np.arange(-prm.refine_win_mm, prm.refine_win_mm + 0.5, prm.refine_step)
+        ctr = np.clip(d_lap, prm.d_min + prm.refine_win_mm, prm.d_max - prm.refine_win_mm)
+        lock2 = dict(lock or {})
+        if parking is not None and prm.refine_keep_park and parking in order:
+            # La recta del cajón (y el final de la esquina que entra) conserva la ruta gruesa: ahí
+            # arranca la U y el estacionamiento, que dependen de cómo llega el carro.
+            per = n // 4
+            k0 = order.index(parking) * per
+            # Toda la sección anterior: si solo se traba la esquina, el carro llega
+            # 40 mm corrido y falla el cajón (ruido 3 semilla 6).
+            for q in range(k0 - per, k0 + per):
+                lock2.setdefault(q % n, float(d_lap[q % n]))
+        for k_, dv in lock2.items():
+            ctr[int(k_) % n] = dv
+        fr = plan(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock2,
+                  park_w=park_w, extra=extra, _retry=_retry, _D=ctr[:, None] + offs[None, :])
+        # La spline fina a veces cierra más el radio o se acerca a señal/pared: eso es lo que choca.
+        cr, fp = route.report, fr.report
+        # No se acepta si la spline aprieta radio u holgura: en semilla 20 eso
+        # bastó para fallar el cajón aunque la recta de llegada quedara igual.
+        if (fr.feasible and fr.length_mm <= route.length_mm - 1.0
+                and fp["r_min_mm"] >= cr["r_min_mm"] - 0.5
+                and fp.get("sign_mm", 1e9) >= cr.get("sign_mm", 0.0) - 0.5
+                and fp.get("wall_mm", 0.0) >= cr.get("wall_mm", 0.0) - 0.5
+                and fp.get("island_mm", 0.0) >= cr.get("island_mm", 0.0) - 0.5
+                and fp.get("barrier_mm", 1e9) >= cr.get("barrier_mm", 0.0) - 0.5):
+            return fr
+    if (prm.final_d_step > 0.0 and prm.final_d_step < prm.d_step - 1e-9
+            and not fine and feasible and not unknown):
+        # Solo con el mapa completo. En la vuelta 1 la malla de 10 mm cierra la spline
+        # (R~151) y el morro pega la señal de afuera (W/T3, ruido 3 semilla 6).
+        step = prm.final_d_step
+        lock2 = dict(lock or {})
+        if parking is not None and parking in order:
+            # La llegada (media sección antes del cajón + la recta) queda en la ruta gruesa.
+            # Sin eso el carro entra ~70 mm corrido y falla el cajón (ruido 1 semilla 8).
+            per = n // 4
+            k0 = order.index(parking) * per
+            for q in range(k0 - per // 2, k0 + per):
+                lock2.setdefault(q % n, float(d_lap[q % n]))
+        fr = plan(direction, seats, parking, replace(prm, d_step=step, refine_step=0.0, final_d_step=0.0),
+                  start_section, laps, unknown, anchor, lock2, park_w=park_w, extra=extra, _retry=_retry)
+        # La geometría de la malla fina son ~400 MB y el plan siguiente ya trae otros obstáculos.
+        for ck in list(_GEOM_CACHE):
+            if len(ck) > 5 and ck[5] == step:
+                _GEOM_CACHE.pop(ck, None)
+                _RANGE_CACHE.pop(ck, None)
+        cr, fp = route.report, fr.report
+        # R>=160: por debajo el carro no sigue el ápice (el choque de la malla fina fue a R~151).
+        # Menos de 50 mm no baja el tiempo y en ruido 3 semilla 5 (atajo de 33 mm)
+        # el carro dejó de ver una corrección del mapa y falló el cajón.
+        if (fr.feasible and fr.length_mm <= route.length_mm - 50.0
+                and fp["r_min_mm"] >= 160.0
+                and fp.get("sign_mm", 1e9) >= max(80.0, cr.get("sign_mm", 0.0) - 5.0)
+                and fp.get("island_mm", 0.0) >= cr.get("island_mm", 0.0) - 5.0
+                and fp.get("wall_mm", 0.0) >= cr.get("wall_mm", 0.0) - 5.0
+                and fp.get("barrier_mm", 1e9) >= cr.get("barrier_mm", 0.0) - 5.0):
+            return fr
     return route
 
 

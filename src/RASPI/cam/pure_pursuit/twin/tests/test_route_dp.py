@@ -14,15 +14,22 @@ _SEATS_ALL = [(s, t) for s in "NESW" for t in RR.SEATS]
 
 
 def _params(time_cost):
-    """Parámetros del planificador como en el carro (perfil de la Pi)."""
-    saved = (C.ROUTE_TIME_COST, C.ROUTE_PROFILE_BASE_PWM, C.ROUTE_PROFILE_A_LAT_MM_S2)
+    """Parámetros del planificador como en el carro (perfil de la Pi).
+
+    El golden es la DP gruesa: el refinamiento lateral es otra ruta a propósito.
+    """
+    saved = (C.ROUTE_TIME_COST, C.ROUTE_PROFILE_BASE_PWM, C.ROUTE_PROFILE_A_LAT_MM_S2,
+             getattr(C, "ROUTE_REFINE_STEP", 0.0), getattr(C, "ROUTE_FINAL_D_STEP", 0.0))
     try:
         C.ROUTE_TIME_COST = time_cost
         C.ROUTE_PROFILE_BASE_PWM = 205
         C.ROUTE_PROFILE_A_LAT_MM_S2 = 2000.0
+        C.ROUTE_REFINE_STEP = 0.0
+        C.ROUTE_FINAL_D_STEP = 0.0
         return _route_params()
     finally:
-        C.ROUTE_TIME_COST, C.ROUTE_PROFILE_BASE_PWM, C.ROUTE_PROFILE_A_LAT_MM_S2 = saved
+        (C.ROUTE_TIME_COST, C.ROUTE_PROFILE_BASE_PWM, C.ROUTE_PROFILE_A_LAT_MM_S2,
+         C.ROUTE_REFINE_STEP, C.ROUTE_FINAL_D_STEP) = saved
 
 
 def _cases():
