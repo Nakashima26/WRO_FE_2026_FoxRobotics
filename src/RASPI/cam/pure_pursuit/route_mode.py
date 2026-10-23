@@ -45,6 +45,18 @@ _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
 _CLUSTER_GAP_MM = 150.0
 _FENCE_STEP_MM = 100.0
 
+def _prm_for(unknown):
+    """Mapa completo: no comprar arco hasta 140 mm (arquea la recta hacia la pared).
+
+    Con asientos sin ver se queda el margen de config. Semilla 21 ruido 2 chocó
+    Red N/T4 en la vuelta 1 cuando el margen bajaba también ahí.
+    """
+    prm = _route_params()
+    if not unknown:
+        prm.soft_clear_mm = 100.0
+    return prm
+
+
 def _route_params():
     """Parámetros del planificador con lo ajustable desde config.py."""
     K = float(getattr(C, "ROUTE_PROFILE_K_MM_S_PER_PWM", 3.5))
@@ -578,12 +590,12 @@ class RouteMode:
                 # Twin: el plan sale ya, pero se adopta tras el retraso de la Pi (ruta anterior mientras).
                 if self._delay_left is None:
                     self._job_key = key
-                    self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_route_params(), unknown=args[3],
+                    self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3]), unknown=args[3],
                                                 anchor=args[4], lock=args[5], park_w=args[6], extra=args[7]),
                                         key, dict(plan_seats), list(plan_unknown), self.shift, hold)
                     self._delay_left = int(round(float(C.ROUTE_PLAN_DELAY_S) * float(getattr(C, "PI_FPS", 40.0))))
             else:
-                self._adopt(RR.plan(args[0], args[1], args[2], prm=_route_params(), unknown=args[3],
+                self._adopt(RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3]), unknown=args[3],
                                     anchor=args[4], lock=args[5], park_w=args[6], extra=args[7]),
                             key, plan_seats, plan_unknown, empty, dm, self.shift, hold)
         if self._delay_left is not None:
@@ -1014,7 +1026,7 @@ class RouteMode:
     def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None) -> None:
         self._job_conf = conf
         self._job_unknown = unknown
-        self._job_out = RR.plan(direction, conf, parking, prm=_route_params(), unknown=unknown, anchor=anchor,
+        self._job_out = RR.plan(direction, conf, parking, prm=_prm_for(unknown), unknown=unknown, anchor=anchor,
                                 lock=lock, park_w=park_w, extra=extra)
 
     def _adopt(self, route, key, conf, unknown, empty, dm, shift: float = 0.0, hold: bool = False) -> None:
