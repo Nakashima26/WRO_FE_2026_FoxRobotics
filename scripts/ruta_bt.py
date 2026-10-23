@@ -25,6 +25,13 @@ odometría. --pared además lo corrige en el carro (bits, se suman):
   8 usar también el cuadro interior (sin él, solo las paredes exteriores)
   --pared 1 = solo posición con las exteriores   --pared 0 = solo registrar (default)
 
+PARÁMETROS SIN SUBIR EL SKETCH: --set clave=valor (se repite) cambia cualquier
+parámetro del ESP32 por nombre (la lista sale con PAR; queda en el log como
+"# par ..."). Por ejemplo:
+  --set encCurva=0.08 --set salidaPared=1 --set frenoAntes=25 --set paredKPos=0.2
+Al final se imprime una línea RESUMEN con lo que dicen las paredes (para comparar
+corridas).
+
 COORDENADAS (las de VueltaCalibracion): mm, origen en la esquina EXTERIOR de la
 pista detrás del carro, th en grados (0 = +x, crece a la izquierda). El punto
 del carro es el centro del EJE TRASERO. Antes de arrancar el script dice dónde
@@ -248,10 +255,11 @@ def radios(ruta, cerrada):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class Seguidor:
-    def __init__(self, ruta, paso, cerrada, lookahead, vueltas):
+    def __init__(self, ruta, paso, cerrada, lookahead, vueltas, freno_antes=25.0):
         self.X, self.Y = ruta[:, 0], ruta[:, 1]
         self.n, self.paso, self.cerrada = len(ruta), paso, cerrada
         self.lookahead, self.vueltas = lookahead, vueltas
+        self.antes = int(round(freno_antes / paso))   # frenoAntes del sketch: frena antes de la meta
         self.i, self.progreso = -1, 0
 
     def idx(self, i):
@@ -313,7 +321,9 @@ class Seguidor:
         return (tx * (y - ay) - ty * (x - ax)) / d
 
     def terminada(self):
-        return self.progreso >= self.vueltas * self.n if self.cerrada else self.i >= self.n - 1
+        if self.cerrada:
+            return self.progreso >= self.vueltas * self.n - self.antes
+        return self.i >= self.n - 1 - self.antes
 
 
 def servo_para_rueda(rueda):
@@ -340,7 +350,8 @@ def pwm_para(rueda, t_ms, pwm, pwm_curva):
 def simular(ruta, paso, cerrada, salida, a):
     """Bicicleta cinemática en el eje trasero, con el retraso del servo, los
     topes medidos y servo en grados enteros. Devuelve (filas, motivo)."""
-    seg = Seguidor(ruta, paso, cerrada, a.lookahead, a.vueltas)
+    seg = Seguidor(ruta, paso, cerrada, a.lookahead, a.vueltas,
+                   float(sets_de(a).get("frenoAntes", 25.0)))
     x, y, th = salida
     if not seg.cercano(x, y, th):
         return np.zeros((0, 8)), "la salida no va en el sentido de la ruta"
@@ -435,7 +446,29 @@ def leer_tof(ruta_log):
     return T
 
 
-def pared_vs_odometria(P, T, mapa, centro):
+def sets_de(a):
+    """--set clave=valor -> {clave: valor}."""
+    d = {}
+    for kv in getattr(a, "set", None) or []:
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            d[k.strip()] = v.strip()
+    return d
+
+
+def tofs_de(par):
+    """Montajes de los ToF con los parámetros del carro (# par del log) si los cambiaron."""
+    t = {k: list(v) for k, v in TOFS.items()}
+    for sen, clave in (("F", "tofFAdelante"), ("L", "tofLAdelante"), ("R", "tofRAdelante")):
+        if clave in par:
+            t[sen][0] = float(par[clave])
+    for sen, clave in (("L", "tofLIzq"), ("R", "tofRIzq")):
+        if clave in par:
+            t[sen][1] = float(par[clave])
+    return t
+
+
+def pared_vs_odometria(P, T, mapa, centro, tofs=None):
     """Las mismas reglas que corregirConPared(): por cada lectura lateral útil en
     recta, e = cuánto más lejos de la pared está el carro de lo que cree (mm,
     perpendicular) y el error lateral contra la ruta que tendría si la pared tiene
@@ -455,7 +488,7 @@ def pared_vs_odometria(P, T, mapa, centro):
         x, y, th, lat = (P[i - 1, k] + f * (P[i, k] - P[i - 1, k]) for k in (1, 2, 3, 5))
         if abs(((th + 45) % 90) - 45) > PARED_RECTA_DEG or abs(P[i, 6] - centro) > rueda_max_servo:
             continue
-        adel, izq, ang = TOFS[sen]
+        adel, izq, ang = (tofs or TOFS)[sen]
         h = math.radians(th)
         ox = x + adel * math.cos(h) - izq * math.sin(h)
         oy = y + adel * math.sin(h) + izq * math.cos(h)
@@ -481,6 +514,28 @@ def pared_vs_odometria(P, T, mapa, centro):
         n_izq = -nx * math.sin(h) + ny * math.cos(h)
         out.append((t, 0 if sen == "L" else 1, e, x + e * nx, y + e * ny, lat + e * n_izq))
     return np.array(out) if out else np.zeros((0, 6))
+
+
+def linea_resumen(P, W, meta, T):
+    """Una línea para comparar corridas: lo que dicen las paredes exteriores (ToF R
+    en antihorario, L en horario) y el resto de lo importante."""
+    n = {s_: sum(1 for z in T if z[1] == s_) for s_ in ("F", "L", "R")}
+    partes = [f"t={P[-1, 0] / 1000:.1f}s" if len(P) else "t=?"]
+    if len(P):
+        partes.append(f"odo_rms={np.sqrt(np.mean(P[:, 5] ** 2)):.0f}")
+    for sen, nom in ((0, "L"), (1, "R")):
+        m = W[:, 1] == sen if len(W) else np.zeros(0, bool)
+        if m.sum() >= 5:
+            lat = W[m, 5]
+            ult = lat[-min(8, len(lat)):]
+            partes.append(f"{nom}_rms={np.sqrt(np.mean(lat ** 2)):.0f} {nom}_media={lat.mean():+.0f} "
+                          f"{nom}_fin={ult.mean():+.0f}")
+        else:
+            partes.append(f"{nom}=sin_datos")
+    if "fin" in meta:
+        partes.append("fin=" + ",".join(f"{v:.0f}" for v in meta["fin"]))
+    partes.append(f"tof=F{n['F']}/L{n['L']}/R{n['R']}")
+    return "RESUMEN " + " ".join(partes)
 
 
 def resumen_pared(W, P):
@@ -626,6 +681,9 @@ def leer_log(ruta_log):
                     meta["kd_carro"] = linea.split("kd=")[1].split()[0]
                 if "pared=" in linea:
                     meta["pared_carro"] = linea.split("pared=")[1].split()[0]
+            elif linea.startswith("# par ") or linea.startswith("# set # par "):
+                k, _, v = linea.split("# par ", 1)[1].partition("=")
+                meta.setdefault("par", {})[k.strip()] = v.strip()
             elif linea.startswith("# fin x="):
                 c = linea[6:].split()
                 meta["fin"] = tuple(float(kv.split("=")[1]) for kv in c[:3])   # x, y, th ya parado
@@ -708,7 +766,7 @@ def encabezado_log(a, ruta, paso, cerrada, salida, titulo, tipo):
     txt = (f"# PC tipo={tipo} cerrada={int(cerrada)} paso={paso:.3f} vueltas={a.vueltas} "
            f"salida={salida[0]:.0f},{salida[1]:.0f},{salida[2]:.1f} pwm={a.pwm} pwm_curva={a.pwm_curva} "
            f"lookahead={a.lookahead:.0f} centro={CENTRO_SERVO} kd={getattr(a, 'kd', None) or 0} "
-           f"pared={getattr(a, 'pared', 0)} enc_curva={getattr(a, 'enc_curva', 0.15)} "
+           f"pared={getattr(a, 'pared', 0)} set={';'.join(getattr(a, 'set', None) or [])} enc_curva={getattr(a, 'enc_curva', 0.15)} "
            f"bno_escala={getattr(a, 'bno_escala', 0.996)} anticipo={getattr(a, 'anticipo', 0.0)} mapa={','.join(f'{v:.0f}' for r in mapa_de(a) for v in r)}\n"
            f"# PC titulo {titulo}\n")
     return txt + "".join(f"R,{px:.1f},{py:.1f}\n" for px, py in ruta)
@@ -784,6 +842,15 @@ def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
         if not carro.esperar("# salida", desde=desde):
             print("El ESP32 no confirmó la salida (RTS).")
             return nombre
+        for clave, valor in sets_de(a).items():
+            desde = len(carro.lineas)
+            carro.mandar(f"SET,{clave},{valor}\n")
+            r = carro.esperar("# set", "# SET:", desde=desde, timeout=3)
+            if not r or r.startswith("# SET:"):
+                print(f"El ESP32 no aceptó {clave}={valor}" + ("" if r else " (¿sketch viejo, sin SET?)"))
+                return nombre
+        carro.mandar("PAR\n")      # todos los parámetros quedan en el log
+        time.sleep(0.5)
 
         print("\n" + "=" * 70)
         print(f"Pon el centro del EJE TRASERO en x={salida[0]:.0f} mm, y={salida[1]:.0f} mm, "
@@ -849,6 +916,8 @@ def main():
         p.add_argument("--enc-curva", type=float, default=0.15,
                        help="el encoder cuenta de más con la rueda girada: fracción a tope (ajustado 2026-10-23: 0.15)")
         p.add_argument("--bno-escala", type=float, default=0.996, help="grados reales por grado del BNO (ajustado: 0.996)")
+        p.add_argument("--set", action="append", metavar="CLAVE=VALOR",
+                       help="cambia un parámetro del ESP32 por nombre (se repite; la lista: PAR)")
         p.add_argument("--anticipo", type=float, default=0.0,
                        help="s que el pure pursuit se adelanta al servo (0 = apagado; en simulación 0.04 ayudó)")
         p.add_argument("--interior", type=float,
@@ -903,6 +972,7 @@ def main():
     p = sub.add_parser("ver", help="vuelve a graficar un log de ruta_bt")
     p.add_argument("log")
     p.add_argument("--no-mostrar", action="store_true")
+    p.add_argument("--sin-grafica", action="store_true", help="solo las tablas y el RESUMEN")
     a = ap.parse_args()
 
     if a.tipo == "ver":
@@ -926,11 +996,14 @@ def main():
         if "mapa" in meta:
             v = [float(z) for z in meta["mapa"].split(",")]
             mapa = (tuple(v[:4]), tuple(v[4:8]))
-        W = pared_vs_odometria(real, leer_tof(a.log), mapa, CENTRO_SERVO)
+        T = leer_tof(a.log)
+        W = pared_vs_odometria(real, T, mapa, CENTRO_SERVO, tofs_de(meta.get("par", {})))
         for linea in resumen_pared(W, real):
             print(linea)
-        graficar(ruta, cerrada, (sx, sy, sth), sim, real, titulo,
-                 os.path.splitext(a.log)[0] + ".png", not a.no_mostrar, mapa=mapa, pared=W)
+        print(linea_resumen(real, W, meta, T))
+        if not a.sin_grafica:
+            graficar(ruta, cerrada, (sx, sy, sth), sim, real, titulo,
+                     os.path.splitext(a.log)[0] + ".png", not a.no_mostrar, mapa=mapa, pared=W)
         return
 
     if a.centro is not None:
@@ -972,9 +1045,11 @@ def main():
         print(f"Ya parado (con lo que rodó al frenar) el carro cree estar en x={fx:.0f} y={fy:.0f} th={fth:.1f}.")
         print("Mide dónde quedó DE VERDAD el eje trasero: la diferencia es error de odometría (encoder/BNO), "
               "no del seguidor.")
-    W = pared_vs_odometria(real, leer_tof(nombre), mapa_de(a), CENTRO_SERVO)
+    T = leer_tof(nombre)
+    W = pared_vs_odometria(real, T, mapa_de(a), CENTRO_SERVO, tofs_de(meta.get("par", {})))
     for linea in resumen_pared(W, real):
         print(linea)
+    print(linea_resumen(real, W, meta, T))
     graficar(ruta, cerrada, salida, sim, real, titulo, os.path.splitext(nombre)[0] + ".png", not a.no_mostrar,
              mapa=mapa_de(a), pared=W)
 

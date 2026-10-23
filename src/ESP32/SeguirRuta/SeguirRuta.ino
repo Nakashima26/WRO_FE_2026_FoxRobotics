@@ -31,7 +31,16 @@
  *                          la derecha; sin RTS sale del 1er punto viendo al 2º)
  *   RTM,x0,y0,x1,y1,ix0,iy0,ix1,iy1
  *                          paredes de la pista (mm): cuadro exterior e interior
+ *   SET,clave,valor[,clave,valor...]
+ *                          cambia parámetros por nombre (lista abajo, o manda PAR)
+ *   PAR                    imprime todos los parámetros (# par clave=valor)
  *   g -> arrancar   x -> parar   (sueltos, sin Enter)
+ *
+ * PRUEBAS SIN SUBIR EL SKETCH: todo lo que se ajusta en las pruebas está en la tabla
+ * `parametros` (SET / PAR). Para dar vueltas seguidas sin tocar el carro:
+ *   frenoAntes   la vuelta frena esto antes de la meta (mm) para pararse en la salida
+ *   salidaPared  1 = al arrancar corrige la posición con la pared exterior (promedio de
+ *                los ToF laterales parado), así no hay que ponerlo a mano cada vez
  *
  * LOG (por USB y Bluetooth, BT_NOMBRE):
  *   # ...                               configuración, avisos, resumen
@@ -83,31 +92,37 @@ float lookaheadMm      = 200.0f;   // RUTA_LOOKAHEAD_MM; RTS lo cambia
 float kdGiro = 0.04f;
 const unsigned long VEL_MS = 20;   // ventana para medir velocidad y giro
 // Ventana del punto más cercano: de 5 puntos atrás a esto adelante.
-const float VENTANA_MM = 600.0f;
+float VENTANA_MM = 600.0f;
 
 // Rueda -> servo, medido en el tapete a PWM 150 (2026-10-22, radio R en el eje
 // trasero, rueda equivalente = atan(batalla / R)):
 //   der: servo 16 / 8 / 4 / 1   -> 34 / 39 / 41 / 43°  => ~1.78 servo por grado
 //   izq: servo 140 / 144 / 148  -> 36 / 39 / 40°       => ~1.75
 // Más allá de RUEDA_MAX_* el servo ya no cierra más el radio.
-const float SERVO_POR_RUEDA_IZQ = 1.75f;
-const float SERVO_POR_RUEDA_DER = 1.78f;
-const float RUEDA_MAX_IZQ = 40.0f;
-const float RUEDA_MAX_DER = 42.5f;
+float SERVO_POR_RUEDA_IZQ = 1.75f;
+float SERVO_POR_RUEDA_DER = 1.78f;
+float RUEDA_MAX_IZQ = 40.0f;
+float RUEDA_MAX_DER = 42.5f;
 
 // ── Velocidad ────────────────────────────────────────────────────────────────
 int   pwmCrucero = 150;   // RTS lo cambia. Medido: PWM 180 ≈ 540 mm/s en recta
 int   pwmCurva   = 120;   // con la rueda a >= RUEDA_CURVA_MAX (menos arrastre = encoder más exacto)
-const float RUEDA_CURVA_MIN = 10.0f;   // de aquí a RUEDA_CURVA_MAX baja de pwmCrucero a pwmCurva
-const float RUEDA_CURVA_MAX = 30.0f;
-const int   PWM_ARRANQUE = 90;
-const unsigned long RAMPA_MS = 500;
+float RUEDA_CURVA_MIN = 10.0f;   // de aquí a RUEDA_CURVA_MAX baja de pwmCrucero a pwmCurva
+float RUEDA_CURVA_MAX = 30.0f;
+int   PWM_ARRANQUE = 90;
+int   RAMPA_MS = 500;
 
 // ── Seguridad ────────────────────────────────────────────────────────────────
-const float LAT_MAX_MM        = 400.0f;
+float LAT_MAX_MM        = 400.0f;
 const unsigned long TIMEOUT_MS = 120000;
 const int   FRENO_FRONTAL_MM  = 120;      // ToF frontal con status 0 a menos de esto
 const unsigned long FRENO_QUIETO_MS = 200;   // al terminar: el encoder sin moverse esto = ya se paró
+// La vuelta frena esto antes de la meta: frenando a 255 rueda ~25 mm, y sin esto
+// cada corrida empezaba 2-3 cm más adelante que la anterior (SET frenoAntes).
+float frenoAntesMm = 25.0f;
+// 1 = al arrancar, la posición lateral se toma de la pared exterior (promedio de los
+// ToF laterales con el carro parado) en vez de confiar en que lo pusieron exacto.
+int   salidaPared = 0;
 
 // ── Servo (convención de RondaAbierta: servo = centro + X, X > 0 = izquierda) ──
 // Centro: el servo con el que va derecho. 2026-10-23: en las rectas de SeguirRuta el
@@ -119,18 +134,18 @@ const int SERVO_MAX   = 156;
 
 // ── Paredes (ver PAREDES arriba) ─────────────────────────────────────────────
 int   paredModo = 0;                      // RTS lo cambia (ruta_bt.py --pared)
-const float PARED_K_POS        = 0.15f;   // fracción de la diferencia que se corrige por lectura (~20 Hz)
-const float PARED_PASO_MAX_MM  = 10.0f;   // corrección máxima de posición por lectura
-const float PARED_GATE_MM      = 120.0f;  // más diferencia que esto: no era esa pared (señal, esquina, cono)
-const float PARED_INC_MAX_DEG  = 20.0f;   // ángulo máximo entre el rayo y la perpendicular a la pared
-const float PARED_RECTA_DEG    = 8.0f;    // en recta: rumbo a menos de esto de un múltiplo de 90
-const float PARED_RUEDA_MAX    = 12.0f;   // ... y la rueda del pure pursuit a menos de esto
-const float PARED_K_RUMBO      = 0.5f;    // fracción del error de rumbo que se corrige
-const float PARED_RUMBO_MAX    = 3.0f;    // ° máximo por corrección
-const float PARED_RUMBO_LARGO  = 300.0f;  // mm de pared que se juntan para estimar el rumbo
-const int   PARED_RUMBO_N      = 8;       // ... y lecturas mínimas
-const float CONO_MEDIO_DEG     = 7.5f;    // ROI 8 ≈ 15° de cono
-const float FRONTAL_CORR_MM    = 30.0f;   // el frontal lee de más (RondaAbierta CORR_FRONTAL_MM, status 0)
+float PARED_K_POS        = 0.15f;   // fracción de la diferencia que se corrige por lectura (~20 Hz)
+float PARED_PASO_MAX_MM  = 10.0f;   // corrección máxima de posición por lectura
+float PARED_GATE_MM      = 120.0f;  // más diferencia que esto: no era esa pared (señal, esquina, cono)
+float PARED_INC_MAX_DEG  = 20.0f;   // ángulo máximo entre el rayo y la perpendicular a la pared
+float PARED_RECTA_DEG    = 8.0f;    // en recta: rumbo a menos de esto de un múltiplo de 90
+float PARED_RUEDA_MAX    = 12.0f;   // ... y la rueda del pure pursuit a menos de esto
+float PARED_K_RUMBO      = 0.5f;    // fracción del error de rumbo que se corrige
+float PARED_RUMBO_MAX    = 3.0f;    // ° máximo por corrección
+float PARED_RUMBO_LARGO  = 300.0f;  // mm de pared que se juntan para estimar el rumbo
+int   PARED_RUMBO_N      = 8;       // ... y lecturas mínimas
+float CONO_MEDIO_DEG     = 7.5f;    // ROI 8 ≈ 15° de cono
+float FRONTAL_CORR_MM    = 30.0f;   // el frontal lee de más (RondaAbierta CORR_FRONTAL_MM, status 0)
 // Mapa: cuadro exterior e interior (x0, y0, x1, y1). RTM lo cambia (la lona del
 // 2026-10-23 mide 2975, no 3000).
 float mapaExt[4] = {0, 0, 3000, 3000};
@@ -149,7 +164,7 @@ const int RVC_RX = 25;
 const int XSHUT_TRAS = 4;      // trasero: apagado (todos nacen en 0x29)
 
 // ── Encoder (de VueltaCalibracion) ───────────────────────────────────────────
-const float MM_POR_CUENTA = 1.0f / 5.45f;   // medido 2026-10-19 (4031 cuentas en 740 mm)
+float CUENTAS_POR_MM = 5.45f;   // medido 2026-10-19 (4031 cuentas en 740 mm)
 const int   SIGNO_ENC     = -1;             // adelante cuenta negativo
 
 const int   BNO_SIGNO  = -1;     // yaw del BNO crece a la derecha; th crece a la izquierda
@@ -201,6 +216,8 @@ struct Tof {
   uint8_t  st;
   unsigned long msDato;
   long     usadas;                    // lecturas que sí corrigieron la posición
+  float    mmProm;                    // promedio parado (salidaPared)
+  int      nProm;
   // Rumbo contra la pared (corregirConPared): sumas de la recta s -> D
   int      rSeg;
   int      rN;
@@ -215,6 +232,7 @@ const int N_TOF = sizeof(tofs) / sizeof(tofs[0]);
 Tof& tofF = tofs[0];
 float ruedaUltima = 0;                // rueda del pure pursuit (para saber si va en recta)
 float rumboCorregido = 0;             // ° sumados a th0 por las paredes en esta corrida
+
 
 // BNO
 uint8_t  bnoBuf[19];
@@ -252,6 +270,35 @@ unsigned long tArranque = 0, tPose = 0;
 int   servoActual = -1, pwmActual = 0;
 float latMaxAbs = 0, latSuma2 = 0;
 long  latN = 0;
+
+// Parámetros que SET cambia por nombre y PAR lista: con esto las pruebas no
+// necesitan subir el sketch (ruta_bt.py --set clave=valor).
+struct Parametro { const char* nombre; float* f; int* i; };
+Parametro parametros[] = {
+  {"pwm", nullptr, &pwmCrucero},          {"pwmCurva", nullptr, &pwmCurva},
+  {"vueltas", nullptr, &vueltas},         {"lookahead", &lookaheadMm, nullptr},
+  {"centro", nullptr, &centroServo},      {"kd", &kdGiro, nullptr},
+  {"anticipo", &anticipoS, nullptr},      {"ventana", &VENTANA_MM, nullptr},
+  {"encCurva", &encCurva, nullptr},       {"bnoEscala", &bnoEscala, nullptr},
+  {"cuentasPorMm", &CUENTAS_POR_MM, nullptr},
+  {"servoPorRuedaIzq", &SERVO_POR_RUEDA_IZQ, nullptr}, {"servoPorRuedaDer", &SERVO_POR_RUEDA_DER, nullptr},
+  {"ruedaMaxIzq", &RUEDA_MAX_IZQ, nullptr},  {"ruedaMaxDer", &RUEDA_MAX_DER, nullptr},
+  {"ruedaCurvaMin", &RUEDA_CURVA_MIN, nullptr}, {"ruedaCurvaMax", &RUEDA_CURVA_MAX, nullptr},
+  {"pwmArranque", nullptr, &PWM_ARRANQUE}, {"rampaMs", nullptr, &RAMPA_MS},
+  {"latMax", &LAT_MAX_MM, nullptr},       {"frenoAntes", &frenoAntesMm, nullptr},
+  {"salidaPared", nullptr, &salidaPared}, {"pared", nullptr, &paredModo},
+  {"paredKPos", &PARED_K_POS, nullptr},   {"paredPasoMax", &PARED_PASO_MAX_MM, nullptr},
+  {"paredGate", &PARED_GATE_MM, nullptr}, {"paredIncMax", &PARED_INC_MAX_DEG, nullptr},
+  {"paredRectaDeg", &PARED_RECTA_DEG, nullptr}, {"paredRuedaMax", &PARED_RUEDA_MAX, nullptr},
+  {"paredKRumbo", &PARED_K_RUMBO, nullptr}, {"paredRumboMax", &PARED_RUMBO_MAX, nullptr},
+  {"paredRumboLargo", &PARED_RUMBO_LARGO, nullptr}, {"paredRumboN", nullptr, &PARED_RUMBO_N},
+  {"conoMedio", &CONO_MEDIO_DEG, nullptr}, {"frontalCorr", &FRONTAL_CORR_MM, nullptr},
+  {"tofFAdelante", &tofs[0].adelante, nullptr},
+  {"tofLAdelante", &tofs[1].adelante, nullptr}, {"tofLIzq", &tofs[1].izquierda, nullptr},
+  {"tofRAdelante", &tofs[2].adelante, nullptr}, {"tofRIzq", &tofs[2].izquierda, nullptr},
+  {"tofLMax", nullptr, &tofs[1].maxMm},  {"tofRMax", nullptr, &tofs[2].maxMm},
+};
+const int N_PARAMETROS = sizeof(parametros) / sizeof(parametros[0]);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Actuadores
@@ -347,7 +394,7 @@ bool iniciarPcnt() {
 float distanciaMm() {
   int v = 0;
   pcnt_unit_get_count(pcnt, &v);
-  return SIGNO_ENC * v * MM_POR_CUENTA;
+  return SIGNO_ENC * v / CUENTAS_POR_MM;
 }
 
 bool arrancarTof(Tof& t) {
@@ -375,7 +422,15 @@ void leerTofs() {
     t.mm = r.range_mm;
     t.st = r.range_status;
     t.msDato = millis();
-    if (fase != CORRIENDO) continue;
+    if (fase != CORRIENDO) {
+      // Parado: promedio de las lecturas buenas para salidaPared.
+      bool buena = t.largo ? t.st == 0 : (t.st == 0 || t.st == 2 || t.st == 7);
+      if (buena && t.mm > 40 && t.mm < t.maxMm) {
+        t.mmProm = t.nProm == 0 ? t.mm : 0.8f * t.mmProm + 0.2f * t.mm;
+        t.nProm++;
+      }
+      continue;
+    }
     Log.printf("T,%lu,%s,%u,%u,%.3f,%.3f\n", millis() - tArranque, t.nombre, (unsigned)t.mm,
                (unsigned)t.st, r.peak_signal_count_rate_MCPS, r.ambient_count_rate_MCPS);
     corregirConPared(t);
@@ -457,45 +512,55 @@ float rayoMapa(float ox, float oy, float dx, float dy, int& seg, float& u) {
   return best;
 }
 
-// Una lectura nueva de un ToF contra el mapa (ver PAREDES arriba).
+// Una lectura `medido` (mm, ya corregida) del ToF t contra el mapa, con la pose que
+// cree el carro. true si sirve: el cono entero cae en una sola pared con poco ángulo,
+// la diferencia es razonable y la pared es exterior (o interior con el bit 8).
+// e = cuánto más lejos de la pared está el carro de lo que cree (mm, perpendicular);
+// (nx, ny) = perpendicular a la pared apuntando hacia el carro.
+bool diferenciaPared(Tof& t, float medido, float& e, float& nx, float& ny, int& seg, float& cosInc) {
+  float th = thActual();
+  float h = th * DEG_TO_RAD, ch = cosf(h), sh = sinf(h);
+  float ox = x + t.adelante * ch - t.izquierda * sh;
+  float oy = y + t.adelante * sh + t.izquierda * ch;
+  float hr = (th + t.angulo) * DEG_TO_RAD, dx = cosf(hr), dy = sinf(hr);
+  float u = 0;
+  seg = -1;
+  float esperado = rayoMapa(ox, oy, dx, dy, seg, u);
+  if (esperado < 0) return false;
+  float ax, ay, bx, by;
+  segmentoMapa(seg, ax, ay, bx, by);
+  float largo = hypotf(bx - ax, by - ay);
+  nx = -(by - ay) / largo;
+  ny = (bx - ax) / largo;
+  if ((ox - ax) * nx + (oy - ay) * ny < 0) { nx = -nx; ny = -ny; }
+  cosInc = -(dx * nx + dy * ny);
+  if (cosInc < cosf(PARED_INC_MAX_DEG * DEG_TO_RAD)) return false;
+  // Todo el cono en la misma pared: lejos de sus orillas (esquinas, huecos).
+  float margen = esperado * tanf(CONO_MEDIO_DEG * DEG_TO_RAD) / cosInc + 30.0f;
+  if (u * largo < margen || (1 - u) * largo < margen) return false;
+  e = (medido - esperado) * cosInc;
+  if (fabsf(e) > PARED_GATE_MM) return false;
+  if (seg >= 4 && !(paredModo & 8)) return false;   // pared interior: solo con el bit 8
+  return true;
+}
+
+// Una lectura nueva de un ToF durante la corrida (ver PAREDES arriba).
 void corregirConPared(Tof& t) {
   bool lateral = !t.largo;
   int bitPos = lateral ? 1 : 4;
   bool quierePos = paredModo & bitPos, quiereRumbo = lateral && (paredModo & 2);
   if (!quierePos && !quiereRumbo) return;
-  if (millis() - tArranque < RAMPA_MS) return;
+  if (millis() - tArranque < (unsigned long)RAMPA_MS) return;
   bool stOk = lateral ? (t.st == 0 || t.st == 2 || t.st == 7) : t.st == 0;
   if (!stOk || t.mm < 40 || t.mm > t.maxMm) return;
   float th = thActual();
   if (fabsf(normaliza(th - 90.0f * lroundf(th / 90.0f))) > PARED_RECTA_DEG
       || fabsf(ruedaUltima) > PARED_RUEDA_MAX) { t.rN = 0; return; }
 
-  // Dónde está el sensor y hacia dónde ve, según la pose que cree el carro.
-  float h = th * DEG_TO_RAD, ch = cosf(h), sh = sinf(h);
-  float ox = x + t.adelante * ch - t.izquierda * sh;
-  float oy = y + t.adelante * sh + t.izquierda * ch;
-  float hr = (th + t.angulo) * DEG_TO_RAD, dx = cosf(hr), dy = sinf(hr);
-  int seg = -1;
-  float u = 0;
-  float esperado = rayoMapa(ox, oy, dx, dy, seg, u);
-  if (esperado < 0) return;
-
-  // Perpendicular a la pared, apuntando hacia el sensor.
-  float ax, ay, bx, by;
-  segmentoMapa(seg, ax, ay, bx, by);
-  float largo = hypotf(bx - ax, by - ay);
-  float nx = -(by - ay) / largo, ny = (bx - ax) / largo;
-  if ((ox - ax) * nx + (oy - ay) * ny < 0) { nx = -nx; ny = -ny; }
-  float cosInc = -(dx * nx + dy * ny);
-  if (cosInc < cosf(PARED_INC_MAX_DEG * DEG_TO_RAD)) return;
-  // Todo el cono en la misma pared: lejos de sus orillas (esquinas, huecos).
-  float margen = esperado * tanf(CONO_MEDIO_DEG * DEG_TO_RAD) / cosInc + 30.0f;
-  if (u * largo < margen || (1 - u) * largo < margen) return;
-
   float medido = t.mm - (lateral ? 0.0f : FRONTAL_CORR_MM);
-  float e = (medido - esperado) * cosInc;   // + = el carro está más lejos de la pared de lo que cree
-  if (fabsf(e) > PARED_GATE_MM) return;
-  if (seg >= 4 && !(paredModo & 8)) return;   // pared interior: solo con el bit 8
+  float e, nx, ny, cosInc;
+  int seg;
+  if (!diferenciaPared(t, medido, e, nx, ny, seg, cosInc)) return;
 
   if (quierePos) {
     float paso = constrain(PARED_K_POS * e, -PARED_PASO_MAX_MM, PARED_PASO_MAX_MM);
@@ -509,6 +574,7 @@ void corregirConPared(Tof& t) {
     // verdad se acerca o aleja de la pared. Lo que debería cambiar según el rumbo
     // creído es n·t. La diferencia, entre n·(perpendicular a t), es el error de rumbo.
     // Con lo medido (no con e) para que las correcciones de posición no la ensucien.
+    float h = th * DEG_TO_RAD, ch = cosf(h), sh = sinf(h);
     float s = distanciaMm() - dist0;
     if (seg != t.rSeg || t.rN == 0 || s - t.rSUlt > 200.0f) {
       t.rSeg = seg;
@@ -534,6 +600,26 @@ void corregirConPared(Tof& t) {
       t.rN = 0;   // ventana nueva: el rumbo ya cambió
     }
   }
+}
+
+// salidaPared: con el carro parado en la salida, la posición lateral sale de la pared
+// EXTERIOR (promedio de cada ToF lateral) en vez de suponer que lo pusieron exacto.
+void acomodarSalida() {
+  float sx = 0, sy = 0;
+  int n = 0;
+  for (int i = 0; i < N_TOF; i++) {
+    Tof& t = tofs[i];
+    if (t.largo || !t.ok || t.nProm < 5 || millis() - t.msDato > 300) continue;
+    float e, nx, ny, cosInc;
+    int seg;
+    if (!diferenciaPared(t, t.mmProm, e, nx, ny, seg, cosInc) || seg >= 4) continue;
+    sx += e * nx;
+    sy += e * ny;
+    n++;
+    Log.printf("# salida por pared: ToF %s %.0f mm -> %+.0f mm\n", t.nombre, t.mmProm, e);
+  }
+  if (n) { x += sx / n; y += sy / n; }
+  else Log.println("# salida por pared: ninguna lectura exterior buena, se usa la de RTS");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -628,17 +714,54 @@ float errorLateral() {
 }
 
 bool rutaTerminada() {
-  return rutaCerrada ? progreso >= (long)vueltas * rutaN : rutaI >= rutaN - 1;
+  long antes = lroundf(frenoAntesMm / rutaPaso);   // frena antes para pararse en la meta
+  return rutaCerrada ? progreso >= (long)vueltas * rutaN - antes : rutaI >= rutaN - 1 - antes;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Comandos
 // ═══════════════════════════════════════════════════════════════════════════════
 
+Parametro* buscarParametro(const char* nombre) {
+  for (int i = 0; i < N_PARAMETROS; i++)
+    if (strcmp(parametros[i].nombre, nombre) == 0) return &parametros[i];
+  return nullptr;
+}
+
+void imprimirParametro(const Parametro& q) {
+  if (q.f) Log.printf("# par %s=%g\n", q.nombre, *q.f);
+  else     Log.printf("# par %s=%d\n", q.nombre, *q.i);
+}
+
+// SET,clave,valor[,clave,valor...]
+void setParametros(char* p) {
+  while (*p) {
+    char* coma = strchr(p, ',');
+    if (!coma) break;
+    *coma = '\0';
+    char* valor = coma + 1;
+    char* sig = strchr(valor, ',');
+    if (sig) *sig = '\0';
+    Parametro* q = buscarParametro(p);
+    if (!q) {
+      Log.printf("# SET: no existe '%s' (manda PAR para ver la lista)\n", p);
+    } else {
+      if (q->f) *q->f = atof(valor);
+      else      *q->i = (int)lroundf(atof(valor));
+      Log.print("# set ");
+      imprimirParametro(*q);
+    }
+    if (!sig) break;
+    p = sig + 1;
+  }
+}
+
 void procesarLinea(char* s) {
   while (*s == ' ') s++;
-  bool esRuta = strncmp(s, "RT", 2) == 0;
+  bool esRuta = strncmp(s, "RT", 2) == 0 || strncmp(s, "SET,", 4) == 0;
   if (esRuta && fase == CORRIENDO) { Log.println("# ignorado: el carro está corriendo"); return; }
+  if (strncmp(s, "SET,", 4) == 0) { setParametros(s + 4); return; }
+  if (strcmp(s, "PAR") == 0) { for (int i = 0; i < N_PARAMETROS; i++) imprimirParametro(parametros[i]); return; }
 
   if (strncmp(s, "RTB,", 4) == 0) {
     int n = 0, cerr = 1;
@@ -748,6 +871,7 @@ void arrancar() {
   rumboCorregido = 0;
   ruedaUltima = 0;
   for (int i = 0; i < N_TOF; i++) { tofs[i].usadas = 0; tofs[i].rN = 0; tofs[i].rSeg = -1; }
+  if (salidaPared) acomodarSalida();
   if (!buscarCercano()) {
     Log.println("# la salida no va en el sentido de ningún tramo de la ruta: revisa RTS (th)");
     return;
@@ -781,6 +905,7 @@ void terminar(const char* motivo) {
     if (distanciaMm() != dUlt) { dUlt = distanciaMm(); tUlt = millis(); }
   }
   escribirServo(centroServo);
+  for (int i = 0; i < N_TOF; i++) tofs[i].nProm = 0;   // el promedio parado empieza de nuevo
   Log.printf("E,%lu,FIN %s\n", t, motivo);
   Log.printf("# fin x=%.0f y=%.0f th=%.1f i=%d recorrido=%.0f mm en %.1f s | frenando %.0f mm | lateral max %.0f mm rms %.0f mm\n",
              x, y, thActual(), rutaI, distanciaMm() - dist0, t / 1000.0f, hypotf(x - xFreno, y - yFreno),
@@ -823,7 +948,7 @@ void recorrido() {
   // Más lento con la rueda cerrada (la de la ruta: la corrección no debe mover el PWM); rampa al arrancar.
   float f = constrain((fabsf(ruedaRuta) - RUEDA_CURVA_MIN) / (RUEDA_CURVA_MAX - RUEDA_CURVA_MIN), 0.0f, 1.0f);
   int pwm = (int)lroundf(pwmCrucero + (pwmCurva - pwmCrucero) * f);
-  if (t < RAMPA_MS) pwm = min(pwm, (int)map(t, 0, RAMPA_MS, PWM_ARRANQUE, pwmCrucero));
+  if (t < (unsigned long)RAMPA_MS) pwm = min(pwm, (int)map(t, 0, RAMPA_MS, PWM_ARRANQUE, pwmCrucero));
   setMotor(pwm);
 
   if (t - tPose >= POSE_MS) {
