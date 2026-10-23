@@ -1101,6 +1101,16 @@ float               parkRectoMm               = 0.0f;   // largo de la fase 14 (
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
 PARK_AJ float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
 const int           PARK_PEGADO_CM            = 2;
+const int           PARK_F8_COLA_EXT_CM       = 5;
+const float         PARK_F8_YAWCORTE_HONDO    = 33.0f;
+const int           PARK_F8_HONDO_EXT_CM      = 5;
+const float         PARK_F8_ESQUINA_CM        = 2.5f;
+const float         PARK_F13_DIF_RAPIDO       = 20.0f;
+const int           PARK_F13_FRENO_PWM        = 180;
+const int           PARK_F11_COLA_MM          = 12;
+const long          PARK_F13_HONDO_CM         = 3;     // arco hondo (lateral <= esto en la fase 11): la fase 13 corta antes
+const float         PARK_F13_PEGADO_DIF       = 24.0f;
+const int           PARK_F13_PEGADO_CM        = 3;   // corte de lado de la fase 13 (el overshoot del freno final son ~8 mm)
 // 2026-10-04 (hw_nuevo, FOX_TOF): corte de seguridad para las reversas de
 // ENTRADA (fases 3/14/4/8) con el ToF trasero — "pegado" de atrás, igual que
 // PARK_PEGADO_CM pero del otro lado. Al cortar por esto van a la fase 9
@@ -1338,6 +1348,7 @@ const unsigned long PARK_ATORO_GRACIA_MS      = 350;    // sin vigilar al entrar
 bool          parkBuscando          = false;
 unsigned long parkBuscandoEntryMs   = 0;
 int           parkFase              = -1;
+long          parkExtMin11          = 99;   // lateral mínimo (cm) visto en la fase 11: dice qué tan hondo quedó el arco
 unsigned long parkFaseMs            = 0;
 bool          parkParedEsIzquierda  = false;
 // Ciclo adelante/atrás (fases 9/11 <-> 12/13) del paralelo: ver PARK_CICLOS_MAX.
@@ -6016,10 +6027,12 @@ void loop() {
         // No cortar antes de que pase el mínimo de la esquina delantera (~45°):
         // 36° izq / 30° der. Más temprano, la fase 11 cruza el carro.
         float yawCorte = (servoDesdePared == SERVO_MIN_DEG) ? 30.0f : 36.0f;
+        // Lateral ya a <=5 cm (el caso del freno de cola): el arco va hondo, abre la ventana de corte unos grados.
+        if (servoDesdePared == SERVO_MIN_DEG && extRaw > 0 && extRaw <= PARK_F8_HONDO_EXT_CM) yawCorte = PARK_F8_YAWCORTE_HONDO;
         if (!atrasPegado && distB_filtrada > 0.0f && difHeading <= yawCorte) {
           float yaw = difHeading * 0.0174533f;
           float esquinaCm = distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw);
-          if (esquinaCm <= 2.5f) atrasPegado = true;
+          if (esquinaCm <= PARK_F8_ESQUINA_CM) atrasPegado = true;
         }
         if (alineado || pegado || timeout || atorado || atrasPegado) {
           parkAtoroDisparo = atorado;
@@ -6030,12 +6043,13 @@ void loop() {
           // (ext<=5). Con ext 8-9 el corte es el yaw, no la pared: frenar
           // ahí deja el carro corto y la fase 13 pega en el poste.
           bool colaPared = atrasPegado && !alineado && !pegado
-                           && extRaw > 0 && extRaw <= 5;
+                           && extRaw > 0 && extRaw <= PARK_F8_COLA_EXT_CM;
           if (colaPared) {
             motorAdelante();
             escribirServo(centroServo);
             parkFase = 11;
             parkFrenoCola = true;
+            parkExtMin11 = 99;
             Serial.print("PARK fase 11: FRENO COLA (dif=");
             Serial.print(difHeading, 1);
             Serial.print(" distB="); Serial.print(distB_filtrada, 1);
@@ -6069,6 +6083,7 @@ void loop() {
           parkFaseMs = millis(); parkOdom0 = odomMm;
           parkColaMm = odomMm;
           parkFrenoCola = false;
+          parkExtMin11 = 99;
           Serial.println("PARK fase 11: ACOMODO ENFRENTE");
         }
         break;
@@ -6077,6 +6092,7 @@ void loop() {
       // ── Fase 11: ACOMODO ENFRENTE ──────────────────────────────────────
       if (parkFase == 11) {
         motorAdelante();
+        if (extRaw > 0 && extRaw < parkExtMin11) parkExtMin11 = extRaw;
         // El mínimo del odom es el fondo de la reversa. En cuanto vuelve a
         // subir, la velocidad cambió de signo: ruedas al centro y freno al
         // tope de agarre, si no la cola cierra los ~9 mm que quedan.
@@ -6095,7 +6111,7 @@ void loop() {
         bool timeout = (millis() - parkFaseMs >= PARK_FWD_MS);
         // 12 mm adelante de la cola ya despegan la pared; el freno del final
         // para el desliz que antes dejaba este corte en 5.1 mm.
-        bool colaYa = parkFrenoCola && !frenando && (odomMm - parkColaMm) >= 12;
+        bool colaYa = parkFrenoCola && !frenando && (odomMm - parkColaMm) >= PARK_F11_COLA_MM;
         if (dfTope || timeout || colaYa) {
           motorCoast();
           escribirServo(centroServo);
@@ -6108,7 +6124,7 @@ void loop() {
             parkFase   = 12;
             parkFaseMs = millis(); parkOdom0 = odomMm;
             Serial.print("PARK fase 12: COAST -> REV a 0 (dif=");
-            Serial.print(dif, 1); Serial.println(")");
+            Serial.print(dif, 1); Serial.print(" extmin="); Serial.print(parkExtMin11); Serial.println(")");
           }
         }
         break;
@@ -6161,7 +6177,7 @@ void loop() {
           if (odomMm < parkColaMm) parkColaMm = odomMm;
           motorAdelante();
           escribirServo(centroServo);
-          if (odomMm <= parkColaMm) setMotor(PARK_FRENO_COLA_PWM);
+          if (odomMm <= parkColaMm) setMotor(PARK_F13_FRENO_PWM);
           else finalizarPark("REV FINAL: freno desliz");
           break;
         }
@@ -6169,7 +6185,7 @@ void loop() {
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
         float dif      = fabs(anguloGyro - parkRumboRef);
         // PWM alto hasta el corte de 5° se pasa del poste; por encima de 20° el arco tiene aire.
-        int pwm13 = dif > 20.0f ? 130 : PARK_REV_PWM;
+        int pwm13 = dif > PARK_F13_DIF_RAPIDO ? 130 : PARK_REV_PWM;
         if (PARK_F13_RAMPA_MS < MOTOR_REV_RAMPA_MS) {
           unsigned long t13 = millis() - parkFaseMs;
           if (t13 < PARK_F13_RAMPA_MS)
@@ -6180,7 +6196,7 @@ void loop() {
         bool  alineado = (dif <= PARK_FINAL_TOL_DEG);          // ya derecho: no sigas
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
-        bool  pegado   = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
+        bool  pegado   = (extRaw > 0 && (extRaw <= PARK_PEGADO_CM || (extRaw <= PARK_F13_PEGADO_CM && dif <= PARK_F13_PEGADO_DIF && parkExtMin11 <= PARK_F13_HONDO_CM)));
         bool  atrasPegado = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
         bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
         if (frenteOk || alineado || pegado || atrasPegado || timeout) {
