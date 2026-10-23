@@ -45,6 +45,25 @@ _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
 _CLUSTER_GAP_MM = 150.0
 _FENCE_STEP_MM = 100.0
 
+def _pursuit_kappa(route, idx, lookahead_mm):
+    """|κ| del pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
+
+    Misma cuenta que rutaSteer del ESP: blanco a lookahead fijo, κ = 2·lateral/ld².
+    Un pico de κ más corto que el lookahead no lo pide el servo.
+    """
+    n = len(route.x)
+    step = route.length_mm / max(n, 1)
+    ahead = max(1, int(round(float(lookahead_mm) / max(step, 1e-9))))
+    j = np.asarray(idx, dtype=int) % n
+    q = (j + ahead) % n
+    h = np.radians(route.heading_deg[j])
+    dx = route.x[q] - route.x[j]
+    dy = route.y[q] - route.y[j]
+    fwd = dx * np.sin(h) + dy * np.cos(h)
+    right = dx * np.cos(h) - dy * np.sin(h)
+    return np.abs(2.0 * right / np.maximum(fwd * fwd + right * right, 1.0))
+
+
 def _prm_for(unknown):
     """Mapa completo: no comprar arco hasta 140 mm (arquea la recta hacia la pared).
 
@@ -670,7 +689,10 @@ class RouteMode:
             cap = int(C.ROUTE_PENDING_PWM)
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
-        prof = self._profile_pwm(self._sign_xy(conf, empty))
+        # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
+        tc = _ack_num(ack or "", "tc")
+        prof = self._profile_pwm(self._sign_xy(conf, empty),
+                                 lap2=tc is not None and 4 <= tc < 8)
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
@@ -753,7 +775,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None) -> int | None:
+    def _profile_pwm(self, signs=None, lap2=False) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -795,8 +817,11 @@ class RouteMode:
         i = max(self.follower.i, 0)
         # Anillo cerrado: índices módulo n. Ventana ±win para |κ| máximo móvil.
         idx = (i + np.arange(-win, m + win)) % n
-        kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
         j = idx[win:win + m]
+        if lap2:
+            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM))
+        else:
+            kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
         tight = getattr(C, "ROUTE_PROFILE_TIGHT_KAPPA", None)
