@@ -255,3 +255,4 @@ la anterior y las referencias (combo1).
   **1.25:1 mejor = ~36.0 s mediana (carrera_bench)**
 - **fase 13 frena la cola si corta de lado (9186ed4 + ea618fc, 2026-10-23):** margen, no tiempo. carrera_bench 72/72, 0 pared, una semilla +0.017 s. Grok contra mag8: 96/96, mediana 0, media −0.004 s, peor +0.11 s (n5 s16); pared mínima 4.2 → 6.8 mm.
 - **vuelta 1: suelta el tope CTE 110 en cuerdas largas (79cb052, 2026-10-23):** si el volante aguanta PWM 255. carrera_bench 72/72, 0 pared, mediana 0, colas −0.57 a −0.81 s (n2/n3 s24, n3 s21), peor +0.08 s. Grok contra mag9: 96/96, ninguna sube, media −0.04 s, pared mínima 6.77 mm.
+- **U adelantada condicional (1e2728c, 2026-10-23):** U a along 450 solo si min(distL,distR) ≥ 70 cm. carrera_bench 72/72, 0 pared, ninguna más lenta, media −0.03 s (mejor −0.47). Grok contra mag9: 96/96, ninguna más lenta, media −0.06 s (mejor −1.15), pared mínima 6.77 mm.
