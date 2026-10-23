@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
-from pure_pursuit.route_mode import RouteMode
+from pure_pursuit.route_mode import RouteMode, _grip_pwm, cte_urgent_holds
 from pure_pursuit.wro_field import SECTIONS_CW, SEATS
 
 
 def _all_but(sec, keep):
     return {(sec, s) for s in SEATS if s not in keep}
+
+
+def test_agarre_baja_el_tope_a_volante_cerrado():
+    """A tope el PWM cabe en 2400 mm/s²; casi recto no baja de 255."""
+    assert _grip_pwm(0.0) == 255
+    closed = _grip_pwm(40.1)
+    assert 110 < closed < _grip_pwm(15.0)
+
+
+def test_cte_cuerda_larga_suelta_el_tope():
+    """|cte| > 100 mm y la ruta dobla ≥ 25° a 500 mm, con holgura: no sostiene el 110."""
+    assert cte_urgent_holds(-200.0, 40.0, 200.0, 600.0, 100.0) is False
+    assert cte_urgent_holds(243.0, 5.0, 200.0, 600.0, 100.0) is True   # n3 s16, recta
+    assert cte_urgent_holds(-49.0, 16.0, 200.0, 600.0, 100.0) is True  # n1 s8
+    assert cte_urgent_holds(-200.0, 40.0, 30.0, 600.0, 100.0) is True
 
 
 def test_x_confirmada_deja_vacios_los_demas_de_la_recta():
