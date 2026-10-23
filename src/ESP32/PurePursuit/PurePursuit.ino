@@ -6093,12 +6093,9 @@ void loop() {
           Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" ext="); Serial.print(extRaw);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          // Ciclo adelante/atrás: si todavía no quedó derecho y no fue por
-          // "pegado" de lado, vuelve a la fase 9 para otra pasada en vez de
-          // terminar aquí, hasta PARK_CICLOS_MAX veces (ver constante).
-          // ATRAS PEGADO también cicla: la fase 9 va hacia ENFRENTE, que es
-          // justo alejarse de lo que tiene atrás (igual que en las fases 3/14/4/8).
-          if (!alineado && (!pegado || PARK_PEGADO_CICLA) && parkCiclos < PARK_CICLOS_MAX) {
+          // El tope de lado ya es un punto del cajón; la pasada siguiente solo
+          // cierra los últimos grados y vuelve a ver el poste. Atrás y timeout sí.
+          if (!alineado && !pegado && parkCiclos < PARK_CICLOS_MAX) {
             parkCiclos++;
             motorCoast(); escribirServo(centroServo);
             Serial.print("PARK ciclo "); Serial.print(parkCiclos);
