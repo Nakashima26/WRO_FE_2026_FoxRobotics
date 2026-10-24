@@ -50,7 +50,7 @@
  *                                PurePursuit (mpu.update x2 + 3 pings HC-SR04, l.3196
  *                                y l.3287-3302): min/media/p99/max en us por etapa.
  *   TOF <L|R|B|F> <SHORT|LONG> <budget_ms|DEF> <dur_ms> [period_ms]
- *                                tasa real, range_status y mm de un VL53L1X (XSHUT 25/4/5/15).
+ *                                tasa real, range_status y mm de un VL53L1X (XSHUT 15/5/4/0).
  *                                DEF = presupuesto por defecto de la libreria (50 ms);
  *                                20 SHORT vs DEF LONG reproduce el hallazgo de fox/tof-rate.
  *                                CSV i,t_ms,mm,status,dt_ms,sig_mcps + "# TOFSUM ...".
@@ -129,16 +129,18 @@ static bool mpuReady = false;
 #endif
 
 #ifndef CALIB_TOF
-#define CALIB_TOF 0          // comando TOF (VL53L1X de Pololu); -DCALIB_TOF=1 con la libreria instalada
+#define CALIB_TOF 1          // comando TOF (VL53L1X de Pololu, la misma de SeguirRuta); 0 si no está instalada
 #endif
 #if CALIB_TOF
 #include <Wire.h>
 #include <VL53L1X.h>
 static VL53L1X tofDev;
-#define TOF_XSHUT_L 25
-#define TOF_XSHUT_R 4
-#define TOF_XSHUT_B 5
-#define TOF_XSHUT_F 15
+// XSHUT del carro real (RondaAbierta / VueltaCalibracion / SeguirRuta, PCB RevB): frontal 0,
+// izquierdo 15, derecho 5, trasero 4. Antes decía L=25, que es el RX del BNO (2026-10-24).
+#define TOF_XSHUT_L 15
+#define TOF_XSHUT_R 5
+#define TOF_XSHUT_B 4
+#define TOF_XSHUT_F 0
 #endif
 
 // ── Pines (identicos a PurePursuit.ino) ───────────────────────────────────────
@@ -570,6 +572,7 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
   tofDev.setTimeout(500);
   if (!tofDev.init()) { IO.println("ERR TOF init fallo (cableado/XSHUT/direccion)"); return; }
   tofDev.setDistanceMode(shortMode ? VL53L1X::Short : VL53L1X::Long);
+  tofDev.setROISize(8, 8);   // como el carro (SeguirRuta / RondaAbierta): con 16 el lateral ve el piso
   if (!defBudget && !tofDev.setMeasurementTimingBudget((uint32_t)bud * 1000UL)) {
     IO.println("# aviso: presupuesto rechazado por la libreria");
   }
