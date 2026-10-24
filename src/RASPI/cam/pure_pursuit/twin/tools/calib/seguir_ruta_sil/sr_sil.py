@@ -97,6 +97,40 @@ def leer_log(f):
     return d
 
 
+def log_de_plan(csv, pwm, pwm_curva, vueltas, lookahead=275.0, kd=0.04, centro=75, paso=20.0):
+    """Lo que tendría el log de `ruta_bt.py archivo <csv> --cerrada --pared 0` antes de correr
+    (misma ruta remuestreada, misma salida y los mismos SET), para predecir con el gemelo."""
+    sys.path.insert(0, os.path.join(os.path.dirname(REPO), "WRO2026", "scripts"))
+    from ruta_bt import remuestrear
+    pts = [tuple(map(float, l.split(",")[:2])) for l in open(csv, encoding="utf-8")
+           if l[:1].isdigit() or l[:1] == "-"]
+    ruta, paso_r = remuestrear(pts, paso, True)
+    th = math.degrees(math.atan2(ruta[1, 1] - ruta[0, 1], ruta[1, 0] - ruta[0, 0]))
+    x0, y0 = ruta[0]
+    sal = (f"# salida x={x0:.0f} y={y0:.0f} th={th:.1f} pwm={pwm}/{pwm_curva} vueltas={vueltas} "
+           f"lookahead={lookahead:.0f} centro={centro} kd={kd:.3f} pared=0 encCurva=0.000 bnoEscala=1.0000 anticipo=0.000")
+    return {"R": ruta.tolist(), "P": np.zeros((0, 9)), "fin": None, "mapa": None,
+            "pc": {"paso": f"{paso_r:.3f}", "cerrada": "1"}, "salida": sal,
+            "start": f"# start x={x0:.0f} y={y0:.0f} th={th:.1f}",
+            "par": {"tofLIzq": "32.8", "tofRIzq": "-36.8", "salidaPared": "0", "paredKPos": "0.3", "paredPasoMax": "5"}}
+
+
+def predecir(d, salida, V, nombre):
+    fin = next((l for l in salida if l.startswith("# fin ")), "")
+    f = campos(fin)
+    P = np.array([[float(v) for v in l.split(",")[1:10]] for l in salida if l.startswith("P,")])
+    s0 = campos(d["salida"])
+    x, y, th = V[-1, 1], V[-1, 2], V[-1, 3]
+    # En el marco de la salida: adelante (+ = se pasó) y a la izquierda (+).
+    h = math.radians(s0["th"])
+    dx, dy = x - s0["x"], y - s0["y"]
+    adelante, izq = dx * math.cos(h) + dy * math.sin(h), -dx * math.sin(h) + dy * math.cos(h)
+    rumbo = ((th - s0["th"] + 180.0) % 360.0) - 180.0
+    print(f"  {nombre}: {P[-1, 0] / 1000:.2f} s, encoder {f.get('recorrido', 0):.0f} mm, lateral máx {re.search(r'lateral max (\d+)', fin).group(1)} mm"
+          f" | queda {adelante:+.0f} mm adelante, {izq:+.0f} mm a la izq, rumbo {rumbo:+.1f}° (de verdad)")
+    return adelante, izq, rumbo
+
+
 def campos(lin):
     return {k: float(v) for k, v in re.findall(r"(\w+)=(-?[\d.]+)", lin)}
 
@@ -234,7 +268,16 @@ def comparar(d, salida, V, nombre):
     ys = np.interp(t, P_sim[:, 0], P_sim[:, 2])
     dpos = np.hypot(xs - P[:, 1], ys - P[:, 2])
     print(f"  odometría carro vs gemelo al mismo tiempo: media {dpos.mean():.0f} mm, máx {dpos.max():.0f} mm")
-    # Por avance (para que el tiempo no cuente): servo en el mismo punto de la ruta.
+    for txt, Q in (("carro", P), ("gemelo", P_sim)):
+        c = np.abs(Q[:, 6] - float(campos(d["salida"])["centro"])) > 15
+        ds = np.abs(np.diff(Q[:, 6]))
+        print(f"  vibración del servo {txt:7s}: |Δservo| cada 20 ms {ds[c[1:]].mean():.2f} en curva, {ds[~c[1:]].mean():.2f} en recta")
+    s0 = campos(d["salida"])
+    h = math.radians(s0["th"])
+    dx, dy = V[-1, 1] - s0["x"], V[-1, 2] - s0["y"]
+    print(f"  gemelo de verdad respecto a la salida: {dx * math.cos(h) + dy * math.sin(h):+.0f} mm adelante, "
+          f"{-dx * math.sin(h) + dy * math.cos(h):+.0f} mm a la izq, rumbo {((V[-1, 3] - s0['th'] + 180) % 360) - 180:+.1f}°"
+          "  (compáralo con la cinta)")
     vx, vy, vth = V[-1, 1], V[-1, 2], V[-1, 3]
     print(f"  gemelo de verdad al final: x={vx:.0f} y={vy:.0f} th={vth:.1f}  (odometría {fs.get('x', 0):.0f}, "
           f"{fs.get('y', 0):.0f}: el encoder/BNO del gemelo se equivocó {math.hypot(vx - fs.get('x', 0), vy - fs.get('y', 0)):.0f} mm)")
@@ -265,9 +308,21 @@ def graficar(d, P_sim, V, png, titulo):
     print("  ->", png)
 
 
+def _escala_dir(p, f):
+    st = p.steering
+    st.table_right = tuple((u, w * f) for u, w in st.table_right)
+    st.table_left = tuple((u, w * f) for u, w in st.table_left)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("logs", nargs="+")
+    ap.add_argument("logs", nargs="*")
+    ap.add_argument("--ruta", help="CSV de puntos (cerrada): predice sin log real, como ruta_bt.py archivo --cerrada --pared 0")
+    ap.add_argument("--pwm", type=int, default=150)
+    ap.add_argument("--pwm-curva", type=int, default=150)
+    ap.add_argument("--vueltas", type=int, default=2)
+    ap.add_argument("--variaciones", action="store_true",
+                    help="con --ruta: también centro 74/76, motor ±3 %% y dirección ±3 %% (lo que puede cambiar entre corridas)")
     ap.add_argument("--ino", default=INO_DEFAULT)
     ap.add_argument("--png", help="carpeta o archivo para la gráfica")
     ap.add_argument("--set", action="append", default=[], help="clave=valor de SeguirRuta encima del log")
@@ -275,6 +330,28 @@ def main():
     a = ap.parse_args()
     dll = compilar(a.ino)
     sets = dict(kv.split("=", 1) for kv in a.set)
+    if a.ruta:
+        d = log_de_plan(a.ruta, a.pwm, a.pwm_curva, a.vueltas)
+        casos = [("nominal", TwinParams())]
+        if a.variaciones:
+            for nombre, f in (("centro 74", lambda p: setattr(p.steering, "servo_center_deg", 74.0)),
+                              ("centro 76", lambda p: setattr(p.steering, "servo_center_deg", 76.0)),
+                              ("motor -3 %", lambda p: setattr(p.motor, "k_mm_s_per_pwm", p.motor.k_mm_s_per_pwm * 0.97)),
+                              ("motor +3 %", lambda p: setattr(p.motor, "k_mm_s_per_pwm", p.motor.k_mm_s_per_pwm * 1.03)),
+                              ("dirección -3 %", lambda p: _escala_dir(p, 0.97)),
+                              ("dirección +3 %", lambda p: _escala_dir(p, 1.03))):
+                p = TwinParams()
+                f(p)
+                casos.append((nombre, p))
+        print(f"{os.path.basename(a.ruta)} a {a.pwm}/{a.pwm_curva}, {a.vueltas} vueltas")
+        for nombre, p in casos:
+            salida, V = correr(dll, d, p, sets, a.us_por_millis)
+            predecir(d, salida, V, nombre)
+            if a.png and nombre == "nominal":
+                P_sim = np.array([[float(v) for v in l.split(",")[1:10]] for l in salida if l.startswith("P,")])
+                d2 = dict(d, P=P_sim)
+                graficar(d2, P_sim, V, a.png, f"{os.path.basename(a.ruta)} {a.pwm}/{a.pwm_curva} (gemelo)")
+        return
     for f in a.logs:
         d = leer_log(f)
         nombre = os.path.basename(f)
