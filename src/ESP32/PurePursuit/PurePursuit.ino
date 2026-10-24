@@ -193,7 +193,7 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
-int centroServo    = 78;   // mitad de 1..156 (el 77 de p7_centro estaba mal medido; 2026-10-22)
+int centroServo    = 75;   // recto medido 2026-10-24 (rectas a PWM 150 llegando desde 55 y desde 95; SeguirRuta va derecho con 75). El 78 era la mitad de 1..156
 const int SERVO_MIN_DEG = 1;    // tope derecho medido 2026-10-22
 const int SERVO_MAX_DEG = 156;  // tope izquierdo medido 2026-10-22 (antes se trababa en 154)
 // Dirección medida 2026-10-22 en el tapete (twin/calib/medidas_20261022): grados de rueda
