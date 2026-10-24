@@ -40,3 +40,26 @@ velocidad real:
   hacia arriba el cono pasa por encima de la pared de 10 cm (a 80 cm leyó 1650–1856). El
   modelo 2D de `sensors.py` no tiene la altura de la pared: eso no está en el gemelo.
 - Las pruebas de una sola línea (escalones, freno, suelto, arcos, reversa) repetidas en el gemelo quedan a ~5 % del carro.
+
+## SeguirRuta en el gemelo (lazo cerrado)
+
+`tools/calib/seguir_ruta_sil/sr_sil.py` compila el `SeguirRuta.ino` de `parking` en la PC
+(zig) con imitaciones del hardware y el `Vehicle` de arriba como física, y le manda lo
+mismo que mandó `ruta_bt.py` en cada vuelta real (ruta, salida y todos los `# par` del log).
+Sensores ideales y sin ToF. 3 vueltas a 255/230, lookahead 275:
+
+| Vuelta | Tiempo carro / gemelo (s) | Encoder (mm) | Fin odometría (mm) | Lateral máx / rms (mm) | Servo medio |
+|---|---|---|---|---|---|
+| 125121 antihorario | 29.92 / 29.50 | 22417 / 22380 | 1504,506 / 1496,503 | 17/5 / 19/8 | 83.0 / 83.9 |
+| 125707 antihorario | 29.09 / 29.50 | 22407 / 22380 | 1503,509 / 1496,503 | 16/5 / 19/8 | 82.9 / 83.9 |
+| 130029 antihorario | 29.20 / 29.50 | 22405 / 22380 | 1498,506 / 1496,503 | 16/4 / 19/8 | 83.1 / 83.9 |
+| 132712 horario | 29.09 / 29.24 | 22315 / 22282 | 491,998 / 490,997 | 92/18 / 92/15 | 67.2 / 66.3 |
+| 133331 horario | 29.25 / 29.24 | 22319 / 22272 | 490,997 / 490,997 | 16/4 / 17/7 | 67.0 / 66.1 |
+
+- El tiempo del gemelo cae dentro de lo que varía el carro entre vueltas (29.1–29.9 s).
+- El gemelo pide ~1 unidad más de servo en las curvas (los dos lados) y baila un poco más
+  en las rectas (rms 7-8 contra 4-5 mm): sus ruedas giran ~10 % menos que las del carro
+  a 800 mm/s en curvas de R 300, aunque en los arcos a 150 dio lo contrario a la izquierda.
+- 132712: en el carro `salidaPared` vio una pared fantasma y corrió la salida 9 cm; el
+  gemelo arranca con la misma creencia y su carro "de verdad" termina a 93 mm de su
+  odometría, como lo que viste ("acabó más a la izquierda").
