@@ -141,9 +141,49 @@ All 3 laps CCW at 255/230 unless noted.
 | Turning radius at the rear axle (mat, PWM 150) | right 123 mm (servo 1), left 134 mm (servo 152) | CalibFox `steer --auto`, 3 repetitions |
 | Servo lag | ~0.12 s (first order) | Fitted to runs at 210/240/255 |
 | Speed | 805 mm/s straight, 776 mm/s in curves at 255 | Odometry, run 143417 |
-| Braking | 7–12 mm from PWM 150; 23–29 mm from 255 | `# fin ... frenando` |
+| Braking | 7–12 mm from PWM 150; 23–29 mm from 255 (encoder; the car slides 24–51 mm more from 255, see 7.1) | `# fin ... frenando` |
 | Lateral ToF (Short, ROI 8, 50 ms) | ±5 mm up to 60 cm on the black wall | Static test 2026-10-21 |
 | Mat | 2975 mm (one direction measured), corridor 991.7 mm | Tape |
+
+### 7.1 Car dynamics measurements (2026-10-24)
+
+CalibFox (`fox/perfil-isla`) over Bluetooth with `CPMM 5.45`, `MAXPWM 255`, driven by [`scripts/medir_bt.py`](../scripts/medir_bt.py). Battery 12.1 V at the start, 11.93 V after the laps. Logs in `logs_tof/` named `<test>_<volt>V_<date>_<time>.csv`; the real distance is the tape (`# cinta_cm`) or, where there was no tape yet, the front ToF before/after (±2 %).
+
+| Test | Runs | Result |
+|---|---|---|
+| 1. Step 0→255 | `freno255_*`, `suelto255_*` (5) | Steady 743–826 mm/s (one at 679 after three runs in a row: hot motor or battery sag). 63 % at 0.14–0.19 s, 90 % at 0.27–0.43 s, first movement after 11–21 ms |
+| 1. Step 0→150 | `freno150_*`, `suelto150_1` (3) | Steady 394–404 mm/s, 90 % at 0.34–0.41 s |
+| 2. Short brake from 255 | `freno255_1..3` | The encoder sees 13–23 mm after the cut; the car slides **24–51 mm more** with the wheels locked (≈5.5 m/s²) |
+| 2. Short brake from 150 | `freno150_1..2` | Stops in **6–7 mm**, no slide (tape 550 mm vs encoder 547 mm) |
+| 2. Coast from 255 / 150 | `suelto255_1..2`, `suelto150_1` | Rolls 113–123 mm / 31 mm: **almost constant 2.6–2.8 m/s²**, not exponential. Tape vs encoder −1, −7, −11 mm: no slip |
+| 3. Servo backlash | `servo_desde55_1..3`, `servo_desde95_1..2` | At servo 75, 1.35 m at PWM 150: coming from 55 the car curves −9.9…−12.8 °/m (wheel −1.1…−1.45°), from 95 +8.3…+9.7 °/m (+0.9…+1.1°). **Center 75 (±0.3), backlash ±1.5 servo units**; it also explains the 6–10° yaw at the end of the straight runs |
+| 4. Left/right arcs, PWM 150 | `arco_s60/45/1/90/105/156_*` | Right: 60 → R 737 mm (8.7°), 45 → R 345 (18.2°), 1 → R 120–123 (42.5°). Left: 90 → R 882 (7.3°), 105 → R 423 (15.0°): **the left turns ~15 % less** for the same command. 156: R 143–197 (slipping; taken as ~40°) |
+| 5. Grip at full right lock | `arco_s1_*`, `grip_s1_pwm180/210/255_1` | Yaw rate 136–160 / 202 / 237 / **230 °/s** at PWM 150 / 180 / 210 / 255, radius 121 → 126 → 133 → 171 mm. **Lateral limit ≈2.5–2.8 m/s²**; the laps at 255 need ~1.3–1.5 m/s² |
+| 6. Front ToF vs tape (Long, ROI 8, 50 ms, black wall) | `tofF_*` | 10 → 98 mm, 20 → 209, 40 → 420 (status 7), 80 → 850 (status 2). At 150 cm it saw the floor (358 mm) or nothing (2229 mm). **Very sensitive to pitch:** tilted up, the cone goes over the 10 cm wall (40 → 650, 80 → 1650–1856). Reliable to ~80 cm only when level |
+| 7. Reference laps, CCW, 255/230, no wall correction | `ruta_vuelta_*` 125121, 125707, 130029 | 29.9 (start placed early) / 29.1 / 29.2 s for 22.4 m; tracking 4–5 mm rms; braking 7–9 mm; ended at the start. Battery 11.94 → 11.93 V. No walls on the mat that day; right ToF dead in runs 2–3 |
+
+**Top speed.** At 255 the car runs ~800 mm/s on a straight. The N20 50:1 at 12 V (460 rpm no load) with the 1.25 stage and the 42.7 mm wheel gives ~823 mm/s, so the motor is at ~97 % of its no-load speed. More speed needs a different gear stage.
+
+### 7.2 Digital twin updated with these values
+
+`fox/perfil-isla`, `src/RASPI/cam/pure_pursuit/twin/` (`params.py`, `vehicle.py`, `sim.py`):
+
+| Twin parameter | Before | Now |
+|---|---|---|
+| Servo center | 78 (midpoint of 1..156) | 75 (measured straight) |
+| Steering | linear gain 0.552 right / 0.588 left | measured table per side (the left turns ~15 % less) + **backlash ±1.5** + **wheel lag 0.10 s** |
+| Speed | k 4.02, pwm0 42.1 (12.5 V) | k 3.82, pwm0 45.5 (12.0 V) |
+| Coast | exponential, τ 0.091 s | constant 2.7 m/s² |
+| Short brake | same as drive (τ 0.173 s, ~7 cm from 150) | 12 m/s²; above 550 mm/s the wheels lock: 5.5 m/s² and the encoder stops counting |
+
+Check: the commands (servo, PWM) of the three reference laps were replayed through the twin's vehicle model, in 0.5 s windows that start from the real speed:
+
+| | Heading error per 0.5 s (rms) | Total heading over 3 laps (real 1080°) | Distance (real 22.25–22.37 m) |
+|---|---|---|---|
+| Twin before | 10.0–10.6° | 777–833° | 23.3–23.7 m (+4.5 %) |
+| Twin now | **1.2–1.6°** | 1015–1075° | 22.24–22.58 m (−0.5…+1.5 %) |
+
+The lag (0.10 s) and a 7 % higher left gain than the slow arcs came from this fit; 0.06 or 0.14 s gave ~3.4°.
 
 ## 8. Open issues
 
@@ -164,3 +204,5 @@ All 3 laps CCW at 255/230 unless noted.
 | `ruta_vuelta_*` 142022–142917 | Anticipation (rejected), lookahead sweep |
 | `ruta_vuelta_*` 143324–150923 | Center 76, curves at 255, CW, wall correction at lookahead 275, fresh battery |
 | `ruta_obstaculos_*` 152412–152651 | Obstacle course, 3 runs |
+| `freno*`, `suelto*`, `servo_desde*`, `arco_*`, `grip_*`, `tofF_*` (2026-10-24) | Dynamics measurements, section 7.1 |
+| `ruta_vuelta_*` 20261024 125121–130029 | Reference laps for the twin (125915 aborted at 0.5 s: a person in front of the car) |
