@@ -63,3 +63,21 @@ Sensores ideales y sin ToF. 3 vueltas a 255/230, lookahead 275:
 - 132712: en el carro `salidaPared` vio una pared fantasma y corrió la salida 9 cm; el
   gemelo arranca con la misma creencia y su carro "de verdad" termina a 93 mm de su
   odometría, como lo que viste ("acabó más a la izquierda").
+
+### Ruta de prueba sin paredes (`scripts/rutas/prueba_gemelo.csv` de parking, 2 vueltas, 11.88 V)
+
+Sale y llega a (1000, 500); curvas izq R400/R300 y una der R300. Sin ToF en los dos.
+
+| Corrida | Tiempo carro / gemelo (s) | Encoder (mm) | Lateral máx / rms (mm) | Servo medio | |Δservo| curva |
+|---|---|---|---|---|---|
+| 145031 a 150/150 | 35.77 / 34.72 | 13624 / 13636 | 34/8 / 33/12 | 83.3 / 85.1 | 1.18 / 0.59 |
+| 145320 a 255/230 | 18.56 / 18.56 | 13714 / 13719 | 23/5 / 26/9 | 84.4 / 85.5 | 2.22 / 1.13 |
+| 145447 a 255/230 | 18.53 / 18.56 | 13717 / 13719 | 21/5 / 26/9 | 84.3 / 85.5 | 2.22 / 1.13 |
+| 145534 a 255/230 | 18.70 / 18.56 | 13709 / 13719 | 23/6 / 26/9 | 84.3 / 85.5 | 2.33 / 1.13 |
+
+- A 255 el tiempo del gemelo cae dentro de las 3 del carro (18.53–18.70). A 150 el carro fue 3 %
+  más lento (11.88 V; el gemelo con motor −3 % da 35.72 s).
+- El carro termina donde arrancó (el usuario a ojo; la cinta no se midió).
+- Lo que falta en el gemelo: ~1 unidad menos de servo en curvas y el ruido de los sensores (el
+  servo del carro vibra el doble; el del gemelo, con encoder y BNO perfectos, oscila más lento
+  y su lateral rms sale 9 contra 5 mm).
