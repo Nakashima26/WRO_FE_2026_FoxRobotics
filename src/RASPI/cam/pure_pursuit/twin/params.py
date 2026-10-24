@@ -65,7 +65,9 @@ class SteeringParams:
     # 2026-10-24 (logs_tof/servo_desde55/95_*, PWM 150, 1.35 m recto, BNO): llegando al 75 desde
     # 55 la rueda queda 1.1-1.45° a la der, desde 95 0.9-1.1° a la izq -> centro 75 (±0.3) y juego.
     # El 78 de antes era la mitad de 1..156, no el recto medido (SeguirRuta va derecho con 75).
-    servo_center_deg: float = 75.0
+    # 74.5: el ajuste a las 4 vueltas de referencia (3 antihorario + 1 horario) queda medio
+    # punto a la derecha del 75 de las rectas (dentro de su ±0.3 + el juego).
+    servo_center_deg: float = 74.5
     servo_min_deg: float = 1.0
     servo_max_deg: float = 156.0
     slew_deg_per_s: float = 600.0
@@ -83,16 +85,16 @@ class SteeringParams:
     #   tope der 1 -> 42.5° (R 120-123). 2026-10-22 tapete (medidas_20261022/rango_tapete_p150):
     #   der 16/8/4 -> R 166/142/130 mm, izq 140/144 -> R 153/140, 148..156 -> R 134-136.
     # La izquierda gira ~15 % menos que la derecha con el mismo comando (hasta ~30 unidades).
-    # Izquierda hasta 28.5: los arcos a PWM 150 (7.3/15.0°) ×1.07, lo que pide el ajuste a las
-    # vueltas a 255 (en curva a velocidad gira un poco más que en los arcos lentos).
+    # Izquierda hasta 28.5: los arcos a PWM 150 (7.3/15.0°) ×1.04, lo que pide el ajuste a las
+    # vueltas a 255 en los dos sentidos (la derecha queda como en los arcos).
     table_right: tuple[tuple[float, float], ...] = (
         (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (57.5, 34.2), (65.5, 38.5), (69.5, 40.7), (72.5, 42.6))
     table_left: tuple[tuple[float, float], ...] = (
-        (0.0, 0.0), (13.5, 7.8), (28.5, 16.05), (63.5, 36.4), (67.5, 38.9), (71.5, 39.9))
+        (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (63.5, 36.4), (67.5, 38.9), (71.5, 39.9))
 
     def __post_init__(self) -> None:
         _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
-        _prov("steering.servo_center_deg", "medido", "2026-10-24: 75 ±0.3 (rectas desde 55 y desde 95)")
+        _prov("steering.servo_center_deg", "medido", "2026-10-24: 75 ±0.3 en rectas; 74.5 del ajuste a 4 vueltas (antihorario y horario)")
         _prov("steering.lag_tau_s", "medido", "2026-10-24: ajuste a las vueltas de referencia (0.10 s)")
         _prov("steering.backlash_deg", "medido", "2026-10-24: ±1.5 unidades (rueda ±1.0-1.3° según de dónde llega)")
         _prov("steering.wheel_max_left/right_deg", "medido", "R min tapete 2026-10-22: izq 134-136 mm (148..156), der 123 mm (servo 1)")
@@ -107,7 +109,10 @@ class MotorParams:
     # (2026-10-21) era k 4.02, pwm0 42.1 (80→152, 120→315, 255→856 mm/s).
     k_mm_s_per_pwm: float = 3.82
     pwm0: float = 45.5
-    k_rev_mm_s_per_pwm: float = 4.07
+    # Reversa 2026-10-24 (logs_tof/rev_*, 11.93 V): 150 -> 321 mm/s, 255 -> 697-706 mm/s
+    # (adelante 400/800). Arranca más tarde: pwm0 propio.
+    k_rev_mm_s_per_pwm: float = 3.61
+    pwm0_rev: float | None = 61.0
     tau_drive_s: float = 0.173
     tau_coast_s: float = 0.091
     # Rodando suelto (A1=A2=LOW) la caja frena casi parejo, no exponencial: 2026-10-24 desde
@@ -124,6 +129,15 @@ class MotorParams:
     scrub_coeff: float = 0.12
     # Tope de aceleración por agarre; None = sin tope. 0.8·0.55·g (no medido; las llantas patinan ~1 cm al arrancar).
     a_max_mm_s2: float | None = 4316.0
+    # Reversa de golpe: las llantas patinan al arrancar (el carro jala con el peso adelante).
+    # 2026-10-24: 255 sin rampa -> encoder 661 mm, cinta 550 (11 cm que patinó); 150 -> 1.3 cm;
+    # con la rampa de 300 ms del .ino (MOTOR_REV_RAMPA_MS) -> nada. Arriba de este tope de
+    # aceleración el carro acelera al tope y la llanta sube sola con rev_spin_tau_s.
+    a_max_rev_mm_s2: float | None = 1200.0
+    rev_spin_tau_s: float = 0.06
+    # En reversa a tope el círculo sale más abierto (las delanteras derrapan de lado):
+    # 2026-10-24 PWM -150: servo 1 -> R 138 mm (adelante 120-123), 156 -> R 162 (adelante ~134-143).
+    reverse_wheel_scale: float = 0.90
     # Tope lateral medido (p8_curva_rapida): arriba de esto la curva se abre (subviraje); None = sin tope.
     # Der (servo 5/20) ~2610-2860, izq (servo 134) ~2400.
     a_lat_right_mm_s2: float | None = 2750.0
@@ -132,6 +146,7 @@ class MotorParams:
     def __post_init__(self) -> None:
         _prov("motor.k/pwm0", "medido", "2026-10-24 escalones 150/255 a 12.1-11.9 V (a 12.5 V: k 4.02, pwm0 42.1)")
         _prov("motor.coast_decel_mm_s2", "medido", "2026-10-24 suelto desde 255/150: 2.6-2.8 m/s² parejo")
+        _prov("motor.reversa", "medido", "2026-10-24: k_rev/pwm0_rev (150/255), patinado al arrancar (cinta), radios a tope en reversa")
         _prov("motor.brake_*", "medido", "2026-10-24 freno desde 150 (6-7 mm) y 255 (encoder 13-23 + patina 24-51 mm)")
         _prov("motor.tau_drive_s", "medido", "calib 2026-10-21 escalones 90/160/230")
         _prov("motor.tau_coast_s", "medido", "calib 2026-10-21 coast 120/230")

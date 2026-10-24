@@ -147,7 +147,10 @@ class Vehicle:
             if direction == 0:
                 v_target = 0.0
             else:
-                v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
+                if direction < 0 and mot.pwm0_rev is not None:
+                    v = mot.k_rev_mm_s_per_pwm * (pwm - mot.pwm0_rev)
+                else:
+                    v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
                 w_max = max_wheel_deg(st)
                 if w_max > 1e-6:
                     v *= 1.0 - mot.scrub_coeff * (abs(wheel) / w_max) ** 2
@@ -156,18 +159,29 @@ class Vehicle:
 
             tau = mot.tau_coast_s if direction == 0 else mot.tau_drive_s
             dv = (v_target - self.v) * (dt / tau)
-            amax = mot.a_max_mm_s2
+            amax = mot.a_max_rev_mm_s2 if direction < 0 and mot.a_max_rev_mm_s2 else mot.a_max_mm_s2
+            spinning = False
             if direction != 0 and amax:
                 lim = amax * dt
                 if dv > lim:
                     dv = lim
+                    spinning = direction < 0 and mot.a_max_rev_mm_s2 is not None
                 elif dv < -lim:
                     dv = -lim
+                    spinning = direction < 0 and mot.a_max_rev_mm_s2 is not None
             vel = self.v + dv
             self.v = vel
-            self.v_wheel = vel
+            if spinning:
+                # La llanta gira más rápido que lo que avanza el carro: el encoder cuenta de más.
+                self.v_wheel += (v_target - self.v_wheel) * min(1.0, dt / mot.rev_spin_tau_s)
+                if abs(self.v_wheel) < abs(vel):
+                    self.v_wheel = vel
+            else:
+                self.v_wheel = vel
             self.sliding = False
 
+        if vel < 0.0:
+            wheel *= mot.reverse_wheel_scale
         wh = _radians(wheel)
         if abs(wh) > 1e-9 and abs(veh.wheelbase_mm) > 1e-6:
             yaw_rate_rad = vel / veh.wheelbase_mm * _tan(wh)

@@ -111,12 +111,39 @@ def test_backlash_straight_depends_on_side(params):
         v.step(0.5, 75.0, 0, 0)
         assert signo * v.wheel_deg > 0.5
         assert abs(v.wheel_deg) < 1.6
-    assert st.servo_center_deg == 75.0
+    assert 74.0 <= st.servo_center_deg <= 75.5
+
+
+def _reverse(params, pwm_fn, run_s):
+    """Reversa desde parado con pwm_fn(t), luego freno. -> (mm real, mm encoder)."""
+    v = Vehicle(params, 0.0, 0.0, 0.0, servo_deg=75.0)
+    enc = 0.0
+    for k in range(int(run_s / 0.001)):
+        v.step(0.001, 75.0, pwm_fn(k * 0.001), -1)
+        enc += v.v_wheel * 0.001
+    for _ in range(2000):
+        v.step(0.001, 75.0, 0, -1)
+        enc += v.v_wheel * 0.001
+    return -v.y, -enc
+
+
+def test_reverse_launch_spins_without_ramp(params):
+    # 2026-10-24: -255 de golpe 1 s -> cinta 550, encoder 661; -150 1.5 s -> cinta 445, encoder 458.
+    real, enc = _reverse(params, lambda t: 255, 1.0)
+    assert 480.0 < real < 600.0 and 60.0 < enc - real < 170.0
+    real, enc = _reverse(params, lambda t: 150, 1.5)
+    assert 400.0 < real < 500.0 and enc - real < 30.0
+
+
+def test_reverse_ramp_does_not_spin(params):
+    # Rampa 55 -> 255 en 1 s: cinta ~330 mm = encoder 334.
+    real, enc = _reverse(params, lambda t: min(255.0, 55.0 + 200.0 * t), 1.0)
+    assert enc - real < 25.0
 
 
 def test_left_turns_less_than_right(params):
-    # 2026-10-24: con ±15 unidades, der 8.7°, izq 7.3°.
+    # 2026-10-24: con ±15 unidades, der 8.7°, izq 7.3° (arcos) / 7.6° (ajuste a las vueltas).
     st = params.steering
     der = wheel_deg_from_servo(st.servo_center_deg - 13.5, st)
     izq = -wheel_deg_from_servo(st.servo_center_deg + 13.5, st)
-    assert abs(der - 8.7) < 0.2 and abs(izq - 7.3) < 0.2
+    assert abs(der - 8.7) < 0.2 and 7.2 < izq < 7.8 and izq < der
