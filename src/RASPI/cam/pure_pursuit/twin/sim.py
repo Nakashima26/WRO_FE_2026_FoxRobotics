@@ -593,7 +593,9 @@ class Sim:
                 veh_substep(sub, servo_angle(), float(motor_pwm()), motor_dir())
                 last_ds = 0.0 + veh.v * sub
                 last_yaw_rate = -(veh.heading_deg - h0) / sub
-                enc_update(last_ds, wheel_deg_from_servo(veh.servo_deg, st_params), (veh.v - v0) / sub, w_max)
+                # El encoder cuenta la llanta: frenando con la llanta bloqueada no ve lo que patina.
+                enc_update(veh.v_wheel * sub, wheel_deg_from_servo(veh.wheel_lag_deg, st_params),
+                           (veh.v - v0) / sub, w_max)
                 t = int(sil_now_us()) / 1e6
                 hist_append((t, veh.x, veh.y, veh.heading_deg))
                 if t - last_coll_check >= _COLLISION_INTERVAL_S:

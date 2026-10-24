@@ -56,33 +56,70 @@ class SteeringParams:
     #   (la llanta de afuera ya no acompaña) -> tope ~39.9° (wheel_max_left_deg).
     # Las llantas abren ~53° a tope (llanta INTERIOR, a ojo); el equivalente bici que da el radio real
     # es 42.6° der / 39.9° izq. Con 53° bici el twin giraba en R ~85 mm.
-    gain_left: float = 52.94
-    gain_right: float = 49.71
+    # Pendiente lineal (°rueda por 90° de servo) para las herramientas que la usan; el
+    # modelo usa las tablas de abajo cuando existen.
+    gain_left: float = 46.2
+    gain_right: float = 57.0
     wheel_max_left_deg: float = 39.9    # bici a tope izq (R 134-136 mm de 148 a 156)
     wheel_max_right_deg: float = 42.6   # bici a tope der (R 123 mm en servo 1)
-    # Medido 2026-10-21 (p7_centro/p7_extremos): centro 77, rango útil 2..150 (en 154 la dirección se traba).
-    servo_center_deg: float = 78.0
+    # 2026-10-24 (logs_tof/servo_desde55/95_*, PWM 150, 1.35 m recto, BNO): llegando al 75 desde
+    # 55 la rueda queda 1.1-1.45° a la der, desde 95 0.9-1.1° a la izq -> centro 75 (±0.3) y juego.
+    # El 78 de antes era la mitad de 1..156, no el recto medido (SeguirRuta va derecho con 75).
+    servo_center_deg: float = 75.0
     servo_min_deg: float = 1.0
     servo_max_deg: float = 156.0
     slew_deg_per_s: float = 600.0
-    deadband_deg: float = 2.0   # calib 2026-10-21 p7_centro: ±2 de juego alrededor del centro
+    deadband_deg: float = 0.5   # zona muerta electrónica del servo; el juego mecánico va en backlash_deg
+    # Juego mecánico servo->ruedas (unidades de servo a cada lado): las llantas se quedan
+    # atrás del cuerno del servo hasta que el juego se cierra (histéresis).
+    backlash_deg: float = 1.5
+    # Retraso de primer orden de las ruedas detrás del servo (s); 0 = sin retraso.
+    # 2026-10-24: ajustado repitiendo los comandos de las 3 vueltas de referencia (rms del giro
+    # por ventana de 0.5 s: 8° sin retraso -> 1.4° con 0.10 s; 0.06 o 0.14 dan ~3.4°).
+    lag_tau_s: float = 0.10
+    # Radio medido -> rueda bici atan(113/R), contra unidades de servo desde el centro YA sin el
+    # juego (llegando desde el centro, la rueda va backlash_deg atrás del comando).
+    #   2026-10-24 arcos PWM 150 (logs_tof/arco_s*): der 60/45 -> 8.7/18.2°, izq 90/105 -> 7.3/15.0°,
+    #   tope der 1 -> 42.5° (R 120-123). 2026-10-22 tapete (medidas_20261022/rango_tapete_p150):
+    #   der 16/8/4 -> R 166/142/130 mm, izq 140/144 -> R 153/140, 148..156 -> R 134-136.
+    # La izquierda gira ~15 % menos que la derecha con el mismo comando (hasta ~30 unidades).
+    # Izquierda hasta 28.5: los arcos a PWM 150 (7.3/15.0°) ×1.07, lo que pide el ajuste a las
+    # vueltas a 255 (en curva a velocidad gira un poco más que en los arcos lentos).
+    table_right: tuple[tuple[float, float], ...] = (
+        (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (57.5, 34.2), (65.5, 38.5), (69.5, 40.7), (72.5, 42.6))
+    table_left: tuple[tuple[float, float], ...] = (
+        (0.0, 0.0), (13.5, 7.8), (28.5, 16.05), (63.5, 36.4), (67.5, 38.9), (71.5, 39.9))
 
     def __post_init__(self) -> None:
-        _prov("steering.gain_left/right", "medido", "radios en tapete 2026-10-22 (PWM 150): der 0.552, izq 0.588 °/°servo con centro 78")
+        _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
+        _prov("steering.servo_center_deg", "medido", "2026-10-24: 75 ±0.3 (rectas desde 55 y desde 95)")
+        _prov("steering.lag_tau_s", "medido", "2026-10-24: ajuste a las vueltas de referencia (0.10 s)")
+        _prov("steering.backlash_deg", "medido", "2026-10-24: ±1.5 unidades (rueda ±1.0-1.3° según de dónde llega)")
         _prov("steering.wheel_max_left/right_deg", "medido", "R min tapete 2026-10-22: izq 134-136 mm (148..156), der 123 mm (servo 1)")
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
-        _prov("steering.deadband_deg", "medido", "calib 2026-10-21: correcciones de 1-2 no mueven las llantas")
+        _prov("steering.deadband_deg", "supuesto", "zona muerta del servo; lo de 'correcciones de 1-2 no mueven las llantas' (2026-10-21) es el juego (backlash_deg)")
 
 
 @dataclass
 class MotorParams:
-    # Medido 2026-10-21 (calib/medidas_20261021, calib_fit_motor, 12.5 V, engrane 1.25):
-    # v = k·(PWM − pwm0) con R² 0.997 (80→152, 120→315, 255→856 mm/s).
-    k_mm_s_per_pwm: float = 4.02
-    pwm0: float = 42.1
+    # 2026-10-24 a 12.1-11.9 V (logs_tof/freno*/suelto*): 150 -> 394-404, 255 -> 789-826 mm/s
+    # (una de 679 con el motor caliente). Es la batería con la que se corre; a 12.5 V
+    # (2026-10-21) era k 4.02, pwm0 42.1 (80→152, 120→315, 255→856 mm/s).
+    k_mm_s_per_pwm: float = 3.82
+    pwm0: float = 45.5
     k_rev_mm_s_per_pwm: float = 4.07
     tau_drive_s: float = 0.173
     tau_coast_s: float = 0.091
+    # Rodando suelto (A1=A2=LOW) la caja frena casi parejo, no exponencial: 2026-10-24 desde
+    # 798/826 mm/s rueda 113/123 mm y desde 404 rueda 31 mm (cinta) -> 2.6-2.8 m/s². None = tau_coast_s.
+    coast_decel_mm_s2: float | None = 2700.0
+    # Freno en corto (A1/A2 en una dirección, PWM 0 = setMotor(0) del .ino). 2026-10-24:
+    # desde 400 mm/s para en 6-7 mm (cinta = encoder) -> ~12 m/s²; desde 790 las llantas se
+    # bloquean: el encoder ve 13-23 mm y el carro se resbala 24-51 mm más (ToF/cinta) -> ~5.5 m/s².
+    brake_decel_mm_s2: float = 12000.0
+    brake_lock_speed_mm_s: float = 550.0     # arriba de esto la llanta se bloquea y el carro patina
+    brake_slide_decel_mm_s2: float = 5500.0
+    brake_wheel_tau_s: float = 0.02          # la llanta bloqueada se para en ~v·tau (lo que cuenta el encoder)
     # p8_curva: PWM 160 a servo 15 (casi tope) −11%, a servo 40 −2%.
     scrub_coeff: float = 0.12
     # Tope de aceleración por agarre; None = sin tope. 0.8·0.55·g (no medido; las llantas patinan ~1 cm al arrancar).
@@ -93,7 +130,9 @@ class MotorParams:
     a_lat_left_mm_s2: float | None = 2400.0
 
     def __post_init__(self) -> None:
-        _prov("motor.k/pwm0", "medido", "calib 2026-10-21 rampas 20-255 (12.5 V)")
+        _prov("motor.k/pwm0", "medido", "2026-10-24 escalones 150/255 a 12.1-11.9 V (a 12.5 V: k 4.02, pwm0 42.1)")
+        _prov("motor.coast_decel_mm_s2", "medido", "2026-10-24 suelto desde 255/150: 2.6-2.8 m/s² parejo")
+        _prov("motor.brake_*", "medido", "2026-10-24 freno desde 150 (6-7 mm) y 255 (encoder 13-23 + patina 24-51 mm)")
         _prov("motor.tau_drive_s", "medido", "calib 2026-10-21 escalones 90/160/230")
         _prov("motor.tau_coast_s", "medido", "calib 2026-10-21 coast 120/230")
         _prov("motor.scrub_coeff", "medido", "calib 2026-10-21 p8_curva: −11% a servo 15, −2% a 40 (PWM 160)")
@@ -306,11 +345,26 @@ class TwinParams:
         return lines
 
 
+def table_wheel_deg(units: float, table: tuple[tuple[float, float], ...]) -> float:
+    """Interpolación lineal en la tabla (unidades de servo -> ° de rueda); se queda en el último valor."""
+    u0, w0 = table[0]
+    for u1, w1 in table[1:]:
+        if units <= u1:
+            return w0 + (w1 - w0) * (units - u0) / (u1 - u0)
+        u0, w0 = u1, w1
+    return w0
+
+
 def wheel_deg_from_servo(servo_deg: float, steering: SteeringParams) -> float:
-    """Rueda + = derecha; servo > 90 = izquierda (firmware)."""
+    """Rueda + = derecha; servo > 90 = izquierda (firmware). servo_deg = posición efectiva
+    de las ruedas (ya con el juego, ver Vehicle.wheel_servo_deg)."""
     delta = steering.servo_center_deg - servo_deg
     if delta >= 0.0:
+        if steering.table_right:
+            return min(table_wheel_deg(delta, steering.table_right), steering.wheel_max_right_deg)
         return min(delta * steering.gain_right / 90.0, steering.wheel_max_right_deg)
+    if steering.table_left:
+        return -min(table_wheel_deg(-delta, steering.table_left), steering.wheel_max_left_deg)
     return max(delta * steering.gain_left / 90.0, -steering.wheel_max_left_deg)
 
 

@@ -588,11 +588,11 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
     if (serialAbort()) { aborted = true; break; }
     if (tofDev.dataReady()) {
       uint16_t mm = tofDev.read(false);
-      uint8_t st = tofDev.rangingData.range_status;
+      uint8_t st = tofDev.ranging_data.range_status;
       unsigned long now = millis();
       char buf[80];
       snprintf(buf, sizeof(buf), "%d,%lu,%u,%u,%lu,%.2f", n, now - t0, (unsigned)mm, (unsigned)st,
-               now - tLast, (double)tofDev.rangingData.peak_signal_count_rate_MCPS);
+               now - tLast, (double)tofDev.ranging_data.peak_signal_count_rate_MCPS);
       IO.println(buf);
       tLast = now;
       n++;

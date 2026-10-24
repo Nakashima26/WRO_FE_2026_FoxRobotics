@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from .params import (
     TwinParams,
+    max_wheel_deg,
     wheel_deg_from_servo,
 )
 
@@ -26,10 +27,26 @@ class Vehicle:
     heading_deg: float
     v: float = 0.0
     servo_deg: float = 90.0
+    # Posición efectiva de las ruedas en unidades de servo: sigue al cuerno con juego
+    # (steering.backlash_deg). None = arranca igual que servo_deg.
+    wheel_servo_deg: float | None = None
+    # Velocidad de la llanta (lo que ve el encoder): igual a v salvo frenando con la llanta
+    # bloqueada, cuando el carro patina y la llanta ya está parada.
+    v_wheel: float = 0.0
+    sliding: bool = False
+    # wheel_servo_deg con el retraso de steering.lag_tau_s (lo que de verdad apuntan las ruedas).
+    wheel_lag_deg: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.wheel_servo_deg is None:
+            self.wheel_servo_deg = self.servo_deg
+        if self.wheel_lag_deg is None:
+            self.wheel_lag_deg = self.wheel_servo_deg
+        self.v_wheel = self.v
 
     @property
     def wheel_deg(self) -> float:
-        return wheel_deg_from_servo(self.servo_deg, self.params.steering)
+        return wheel_deg_from_servo(self.wheel_lag_deg, self.params.steering)
 
     def step(
         self,
@@ -89,38 +106,67 @@ class Vehicle:
                 servo = servo if servo > target else target
             self.servo_deg = servo
 
-        center = st.servo_center_deg
-        gl = st.gain_left
-        gr = st.gain_right
-        delta = center - servo
-        wheel = delta * gr / 90.0 if delta >= 0.0 else delta * gl / 90.0
-        if direction == 0:
-            v_target = 0.0
-        elif pwm <= mot.pwm0:
-            v_target = 0.0 if direction > 0 else -0.0
-        else:
-            v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
-            d = center - lo
-            w_min = d * gr / 90.0 if d >= 0.0 else d * gl / 90.0
-            d = center - hi
-            w_hi = d * gr / 90.0 if d >= 0.0 else d * gl / 90.0
-            w_max = max(abs(w_min), abs(w_hi))
-            if w_max > 1e-6:
-                v *= 1.0 - mot.scrub_coeff * (abs(wheel) / w_max) ** 2
-            v_ss = max(0.0, v)
-            v_target = v_ss if direction > 0 else -v_ss
+        # Juego: las ruedas no se mueven hasta que el cuerno se aleja más de backlash_deg.
+        eff = self.wheel_servo_deg
+        b = st.backlash_deg
+        if servo - eff > b:
+            eff = servo - b
+            self.wheel_servo_deg = eff
+        elif eff - servo > b:
+            eff = servo + b
+            self.wheel_servo_deg = eff
+        if st.lag_tau_s > 0.0:
+            eff = self.wheel_lag_deg + (eff - self.wheel_lag_deg) * min(1.0, dt / st.lag_tau_s)
+        self.wheel_lag_deg = eff
 
-        tau = mot.tau_coast_s if direction == 0 else mot.tau_drive_s
-        dv = (v_target - self.v) * (dt / tau)
-        amax = mot.a_max_mm_s2
-        if direction != 0 and amax:
-            lim = amax * dt
-            if dv > lim:
-                dv = lim
-            elif dv < -lim:
-                dv = -lim
-        vel = self.v + dv
-        self.v = vel
+        wheel = wheel_deg_from_servo(eff, st)
+        braking = direction != 0 and pwm <= mot.pwm0
+        if braking:
+            # Freno en corto: desaceleración casi constante; rápido, la llanta se bloquea y patina.
+            v0 = self.v
+            if not self.sliding and abs(v0) > mot.brake_lock_speed_mm_s:
+                self.sliding = True
+            dec = (mot.brake_slide_decel_mm_s2 if self.sliding else mot.brake_decel_mm_s2) * dt
+            vel = v0 - dec if v0 > dec else (v0 + dec if v0 < -dec else 0.0)
+            self.v = vel
+            if self.sliding:
+                self.v_wheel -= self.v_wheel * (dt / mot.brake_wheel_tau_s)
+                if abs(vel) < 1e-6:
+                    self.sliding = False
+                    self.v_wheel = 0.0
+            else:
+                self.v_wheel = vel
+        elif direction == 0 and mot.coast_decel_mm_s2:
+            dec = mot.coast_decel_mm_s2 * dt
+            v0 = self.v
+            vel = v0 - dec if v0 > dec else (v0 + dec if v0 < -dec else 0.0)
+            self.v = vel
+            self.v_wheel = vel
+            self.sliding = False
+        else:
+            if direction == 0:
+                v_target = 0.0
+            else:
+                v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
+                w_max = max_wheel_deg(st)
+                if w_max > 1e-6:
+                    v *= 1.0 - mot.scrub_coeff * (abs(wheel) / w_max) ** 2
+                v_ss = max(0.0, v)
+                v_target = v_ss if direction > 0 else -v_ss
+
+            tau = mot.tau_coast_s if direction == 0 else mot.tau_drive_s
+            dv = (v_target - self.v) * (dt / tau)
+            amax = mot.a_max_mm_s2
+            if direction != 0 and amax:
+                lim = amax * dt
+                if dv > lim:
+                    dv = lim
+                elif dv < -lim:
+                    dv = -lim
+            vel = self.v + dv
+            self.v = vel
+            self.v_wheel = vel
+            self.sliding = False
 
         wh = _radians(wheel)
         if abs(wh) > 1e-9 and abs(veh.wheelbase_mm) > 1e-6:
