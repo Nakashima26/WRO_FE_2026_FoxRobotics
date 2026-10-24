@@ -824,12 +824,19 @@ const bool INICIO_REVERSA              = false; // true = fases 4-8 de antes (re
 // Servo a tope ANTES de mover el carro: con la llanta interior a ~53° (R ~140 mm) el arco
 // necesita ~95 mm libres delante de la nariz; arrancar mientras el servo viaja (~73° a
 // ~600°/s) se come ese margen y la esquina delantera toca la madera de enfrente.
-const unsigned long INICIO_SERVO_ESPERA_MS = 150;
+const unsigned long INICIO_SERVO_ESPERA_MS = 300;
 // Aun así, con R ~140 mm la esquina delantera exterior toca la madera de enfrente a ~36° de
 // giro (por ~6 mm). A los INICIO_3P_ANG_DEG da una reversa corta con el servo al otro tope
 // (la nariz sigue entrando y la cola ya se alejó de la madera de atrás) y vuelve al arco.
 const float INICIO_3P_ANG_DEG          = 0.0f;   // 0 = sin corrección; con 53° reales sale directo (2026-10-22)
-const float INICIO_3P_REV_MM           = 15.0f;
+const float INICIO_3P_REV_MM           = 25.0f;
+// Salida a la IZQUIERDA (R 135 vs 123 a la derecha): en arco directo la esquina delantera derecha toca la madera de
+// enfrente a ~33° (el cajón deja ~83 mm de nariz y ~5 de cola). Siempre usa la corrección: avanza LENTO (INICIO_3P_PWM,
+// para poder frenar en pocos mm) hasta INICIO_3P_ANG_IZQ_DEG, reversa con el servo al otro tope (gira más a la izq con
+// la cola hacia el tapete, donde hay ~70 mm) y vuelve al arco. INICIO_3P_ESPERA2_MS: espera del servo al volver.
+const float INICIO_3P_ANG_IZQ_DEG      = 10.0f;
+const int   INICIO_3P_PWM              = 130;
+const unsigned long INICIO_3P_ESPERA2_MS = 250;
 const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
 const float INICIO_LAT_AFUERA_MM       = 200.0f; // desplazamiento lateral final, salida normal (centro a ~33 cm de la pared)
 const float INICIO_LAT_ADENTRO_MM      = 620.0f; // ídem con isal=2 (centro a ~75 cm: más allá de la fila interior a 60 cm)
@@ -3970,15 +3977,18 @@ void loop() {
 
       if (inicioFase == 1) {
         unsigned long tSw = millis() - inicioFaseMs;
-        int vel = tSw < INICIO_SERVO_ESPERA_MS ? 0
-                : rampaPWM(tSw - INICIO_SERVO_ESPERA_MS, INICIO_RAMP_MS, INICIO_PWM_MIN, inicioPwm());
+        bool lento3p = (!inicioGirarDer && INICIO_3P_ANG_IZQ_DEG > 0 && !inicio3pHecho && inicioPwm() > INICIO_3P_PWM);
+        unsigned long espera = inicio3pHecho ? INICIO_3P_ESPERA2_MS : INICIO_SERVO_ESPERA_MS;
+        int vel = tSw < espera ? 0
+                : rampaPWM(tSw - espera, INICIO_RAMP_MS, INICIO_PWM_MIN, lento3p ? INICIO_3P_PWM : inicioPwm());
         motorAdelante();
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         inicioMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
         bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_OVERSHOOT_DEG)));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
-        if (!swingListo && !inicio3pHecho && INICIO_3P_ANG_DEG > 0 && deltaIni >= INICIO_3P_ANG_DEG) {
+        float ang3p = inicioGirarDer ? INICIO_3P_ANG_DEG : INICIO_3P_ANG_IZQ_DEG;
+        if (!swingListo && !inicio3pHecho && ang3p > 0 && deltaIni >= ang3p) {
           inicio3pHecho   = true;
           inicioFase      = 11;
           inicioFaseMs    = millis();
