@@ -56,6 +56,10 @@ static void avanzar(uint64_t us) {
   }
 }
 
+int sr_tof_activos = 0;
+unsigned long sr_tof_bloqueo_us = 0;
+void sr_delay_us(unsigned long us) { avanzar(us); }
+
 unsigned long millis() { avanzar(us_por_millis); return (unsigned long)(now_us / 1000ULL); }
 unsigned long micros() { avanzar(us_por_millis); return (unsigned long)now_us; }
 void delay(unsigned long ms) { avanzar((uint64_t)ms * 1000ULL); }
@@ -80,13 +84,21 @@ int SrSerial::read() {
   rx[id_].pop_front();
   return b;
 }
+// Lo que tarda el Bluetooth por byte (SerialBT.write se bloquea con la cola llena).
+static uint64_t bt_us_por_byte = 0;
 size_t SrSerial::write(uint8_t c) {
   if (id_ == 0) tx_usb.push_back((char)c);
+  if (id_ == 2 && bt_us_por_byte) avanzar(bt_us_por_byte);
   return 1;
 }
 
 SR_API void sr_set_tick_cb(sr_tick_cb_t cb) { tick_cb = cb; }
 SR_API void sr_set_us_por_millis(uint64_t us) { us_por_millis = us; }
+SR_API void sr_set_tof(int activos, uint64_t bloqueo_us) {
+  sr_tof_activos = activos;
+  sr_tof_bloqueo_us = (unsigned long)bloqueo_us;
+}
+SR_API void sr_set_bt_us_por_byte(uint64_t us) { bt_us_por_byte = us; }
 SR_API void sr_setup() { setup(); }
 SR_API void sr_loop() { loop(); }
 SR_API uint64_t sr_now_us() { return now_us; }

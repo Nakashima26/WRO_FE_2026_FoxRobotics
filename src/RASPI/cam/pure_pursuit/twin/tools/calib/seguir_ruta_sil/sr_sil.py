@@ -6,10 +6,11 @@ y se compara lo que hizo el gemelo contra lo que hizo el carro.
   python twin/tools/calib/seguir_ruta_sil/sr_sil.py ../WRO2026/logs_tof/ruta_vuelta_20261024_130029.txt
       [--ino ../WRO2026/src/ESP32/SeguirRuta/SeguirRuta.ino] [--png salida.png] [--set clave=valor]
 
-Desde src/RASPI/cam. Sensores ideales: el encoder cuenta lo que gira la llanta en el
+Desde src/RASPI/cam. --loop-carro: el loop se detiene como en el carro (Bluetooth y ToF, ver
+LOOP_CARRO). Sensores ideales: el encoder cuenta lo que gira la llanta en el
 modelo (v_wheel: patina al arrancar en reversa y no cuenta lo que resbala frenando) y el
-BNO da el rumbo del modelo (escala medida 0.9998). Sin ToF: SeguirRuta corre como con
---pared 0. Si en la vuelta real salidaPared movió la salida, el firmware del gemelo arranca
+BNO da el rumbo del modelo (escala medida 0.9998). Los ToF no ven paredes (2000 mm, status 2):
+SeguirRuta corre como con --pared 0. Si en la vuelta real salidaPared movió la salida, el firmware del gemelo arranca
 creyendo esa misma salida ("# start" del log) y el carro del gemelo en la de RTS.
 Compila con zig (pip install ziglang) o FOX_CXX.
 """
@@ -36,6 +37,16 @@ INO_DEFAULT = os.path.join(os.path.dirname(REPO), "WRO2026", "src", "ESP32", "Se
 PWMA, A1, A2, SERVO_PIN = 23, 18, 19, 13
 SIGNO_ENC = -1
 _CARGADAS = []
+# Lo que detiene el loop en el carro: el log por Bluetooth (~2.5 KB/s, SerialBT.write se bloquea)
+# y cada lectura de ToF (F y L mandaban datos, 20 Hz cada uno, aunque no haya pared). Con
+# --loop-carro (LOOP_CARRO) el P del log sale cada 20 o ~40 ms como en el carro y el servo vibra
+# igual (ajustado con 4 logs del 2026-10-24), pero el gemelo va ~5 mm más por fuera en las curvas,
+# 1 % más lento y con 1 % más de encoder que el carro; sin eso (default) el loop corre a ~8 kHz,
+# el servo vibra la mitad y el tiempo, el encoder y la línea en curva cuadran mejor.
+TOF_ACTIVOS = 2
+TOF_BLOQUEO_US = 0
+BT_US_POR_BYTE = 0
+LOOP_CARRO = {"tof_bloqueo_us": 2000, "bt_us_por_byte": 400}
 
 
 def prototipos(ino):
@@ -157,7 +168,7 @@ def comandos(d, sets):
     return out, (s["x"], s["y"], s["th"])
 
 
-def correr(dll, d, params, sets, us_por_millis=25):
+def correr(dll, d, params, sets, us_por_millis=25, tof_activos=None, tof_bloqueo_us=None, bt_us_por_byte=None):
     # Una copia por corrida: el sketch tiene estado global y una DLL ya cargada no se reinicia.
     copia = dll.replace(".dll", f"_{os.getpid()}_{len(_CARGADAS)}.dll")
     shutil.copyfile(dll, copia)
@@ -168,6 +179,13 @@ def correr(dll, d, params, sets, us_por_millis=25):
     lib.sr_set_yaw.argtypes = [ctypes.c_float]
     lib.sr_set_us_por_millis.argtypes = [ctypes.c_uint64]
     lib.sr_set_us_por_millis(us_por_millis)
+    tof_activos = TOF_ACTIVOS if tof_activos is None else tof_activos
+    tof_bloqueo_us = TOF_BLOQUEO_US if tof_bloqueo_us is None else tof_bloqueo_us
+    bt_us_por_byte = BT_US_POR_BYTE if bt_us_por_byte is None else bt_us_por_byte
+    lib.sr_set_tof.argtypes = [ctypes.c_int, ctypes.c_uint64]
+    lib.sr_set_tof(tof_activos, tof_bloqueo_us)
+    lib.sr_set_bt_us_por_byte.argtypes = [ctypes.c_uint64]
+    lib.sr_set_bt_us_por_byte(bt_us_por_byte)
     cmds, (sx, sy, sth) = comandos(d, sets)
     centro = float(campos(d["salida"])["centro"])
     veh = Vehicle(params, sx, sy, 90.0 - sth, servo_deg=centro)
@@ -327,9 +345,14 @@ def main():
     ap.add_argument("--png", help="carpeta o archivo para la gráfica")
     ap.add_argument("--set", action="append", default=[], help="clave=valor de SeguirRuta encima del log")
     ap.add_argument("--us-por-millis", type=int, default=25)
+    ap.add_argument("--loop-carro", action="store_true",
+                    help="el loop se detiene por el log de Bluetooth y los ToF como en el carro (LOOP_CARRO)")
     a = ap.parse_args()
     dll = compilar(a.ino)
     sets = dict(kv.split("=", 1) for kv in a.set)
+    if a.loop_carro:
+        global TOF_BLOQUEO_US, BT_US_POR_BYTE
+        TOF_BLOQUEO_US, BT_US_POR_BYTE = LOOP_CARRO["tof_bloqueo_us"], LOOP_CARRO["bt_us_por_byte"]
     if a.ruta:
         d = log_de_plan(a.ruta, a.pwm, a.pwm_curva, a.vueltas)
         casos = [("nominal", TwinParams())]

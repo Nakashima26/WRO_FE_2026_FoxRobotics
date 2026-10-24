@@ -81,3 +81,17 @@ Sale y llega a (1000, 500); curvas izq R400/R300 y una der R300. Sin ToF en los 
 - Lo que falta en el gemelo: ~1 unidad menos de servo en curvas y el ruido de los sensores (el
   servo del carro vibra el doble; el del gemelo, con encoder y BNO perfectos, oscila más lento
   y su lateral rms sale 9 contra 5 mm).
+
+### Por qué el servo del carro vibra el doble (el log detiene el loop)
+
+En el carro el `P` del log sale cada 20 ms o cada 37–43 ms (84 % en la ruta de prueba a 255):
+el loop de SeguirRuta se queda parado 20–40 ms mientras manda el log por Bluetooth (P a 25-50 Hz
++ ~40 líneas T/s de los ToF F y L, que se leen y se mandan aunque `pared` sea 0). El servo se
+actualiza a ~25 Hz y a saltos. En `sr_sil.py --loop-carro`: 400 µs por byte de Bluetooth
+(~2.5 KB/s) + 2 ms por lectura de ToF (ajustado con 4 logs). Con eso el gemelo vibra como el
+carro (ruta de prueba 2.76/1.76 contra 2.22/1.69 |Δservo| en curva/recta), pero va ~5 mm más
+por fuera en las curvas, 1 % más lento y con 1 % más de encoder; sin eso cuadran mejor el
+tiempo, el encoder y la línea en curva. Queda apagado por omisión.
+
+Para el carro: mandar menos por Bluetooth mientras corre (sin líneas T con `pared` 0, P más
+corto o cada 40 ms) debería dejar el loop a cientos de Hz y el servo más suave.
