@@ -982,7 +982,10 @@ def subir_y_correr(a, ruta, paso, cerrada, salida, titulo, tipo):
             return nombre
         # Lo que quedó mejor el 2026-10-23 a 255 (lookahead 275): corrección de posición con la
         # pared exterior en pasos de hasta 5 mm (más fuerte hacía bailar al servo) y salida por pared.
-        sets = {"tofLIzq": TOFS["L"][1], "tofRIzq": TOFS["R"][1], "salidaPared": 1,
+        # Con --pared 0 (sin paredes en la pista) tampoco se acomoda la salida con el ToF: el
+        # 2026-10-24 sin paredes el L vio algo a 56 cm y movió la salida 9 cm.
+        sets = {"tofLIzq": TOFS["L"][1], "tofRIzq": TOFS["R"][1],
+                "salidaPared": 1 if getattr(a, "pared", 1) else 0,
                 "paredKPos": 0.3, "paredPasoMax": 5, **sets_de(a)}
         for clave, valor in sets.items():
             desde = len(carro.lineas)

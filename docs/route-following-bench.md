@@ -160,6 +160,9 @@ CalibFox (`fox/perfil-isla`) over Bluetooth with `CPMM 5.45`, `MAXPWM 255`, driv
 | 4. Left/right arcs, PWM 150 | `arco_s60/45/1/90/105/156_*` | Right: 60 → R 737 mm (8.7°), 45 → R 345 (18.2°), 1 → R 120–123 (42.5°). Left: 90 → R 882 (7.3°), 105 → R 423 (15.0°): **the left turns ~15 % less** for the same command. 156: R 143–197 (slipping; taken as ~40°) |
 | 5. Grip at full right lock | `arco_s1_*`, `grip_s1_pwm180/210/255_1` | Yaw rate 136–160 / 202 / 237 / **230 °/s** at PWM 150 / 180 / 210 / 255, radius 121 → 126 → 133 → 171 mm. **Lateral limit ≈2.5–2.8 m/s²**; the laps at 255 need ~1.3–1.5 m/s² |
 | 6. Front ToF vs tape (Long, ROI 8, 50 ms, black wall) | `tofF_*` | 10 → 98 mm, 20 → 209, 40 → 420 (status 7), 80 → 850 (status 2). At 150 cm it saw the floor (358 mm) or nothing (2229 mm). **Very sensitive to pitch:** tilted up, the cone goes over the 10 cm wall (40 → 650, 80 → 1650–1856). Reliable to ~80 cm only when level |
+| 8. Reverse | `rev_freno255_*`, `rev_freno150_1`, `rev_rampa255_*` | 255 → 697–706 mm/s, 150 → 321 mm/s (forward 800/400). **Full 255 from rest spins the wheels: encoder 661 mm, tape 550 (11 cm)**; 150 from rest 1.3 cm; with the 300 ms ramp of `PurePursuit.ino` (55→255) no spin (tape 8.5 / 33 cm vs encoder 9.2 / 33.4). Brake from 150: 6 mm |
+| 8. Reverse arcs at full lock, PWM 150 | `rev_arco_s1_1`, `rev_arco_s156_1` | Servo 1 → R 138 mm (forward 120–123), 156 → R 162: about 10 % wider than forward |
+| 7. CW laps (right turns), 255/230 | `ruta_vuelta_*` 132712, 133331 | 29.1 / 29.2 s; 132712 had the ToF start fix on with no walls (it saw something at 56 cm and shifted the start 9 cm); 133331 without it ended a little behind the start. `ruta_bt.py` now turns `salidaPared` off with `--pared 0` |
 | 7. Reference laps, CCW, 255/230, no wall correction | `ruta_vuelta_*` 125121, 125707, 130029 | 29.9 (start placed early) / 29.1 / 29.2 s for 22.4 m; tracking 4–5 mm rms; braking 7–9 mm; ended at the start. Battery 11.94 → 11.93 V. No walls on the mat that day; right ToF dead in runs 2–3 |
 
 **Top speed.** At 255 the car runs ~800 mm/s on a straight. The N20 50:1 at 12 V (460 rpm no load) with the 1.25 stage and the 42.7 mm wheel gives ~823 mm/s, so the motor is at ~97 % of its no-load speed. More speed needs a different gear stage.
@@ -175,6 +178,7 @@ CalibFox (`fox/perfil-isla`) over Bluetooth with `CPMM 5.45`, `MAXPWM 255`, driv
 | Speed | k 4.02, pwm0 42.1 (12.5 V) | k 3.82, pwm0 45.5 (12.0 V) |
 | Coast | exponential, τ 0.091 s | constant 2.7 m/s² |
 | Short brake | same as drive (τ 0.173 s, ~7 cm from 150) | 12 m/s²; above 550 mm/s the wheels lock: 5.5 m/s² and the encoder stops counting |
+| Reverse | same k as forward, no spin, same turning | k 3.61, pwm0 61; above 1.2 m/s² the wheels spin (the encoder over-counts); 10 % wider turns |
 
 Check: the commands (servo, PWM) of the three reference laps were replayed through the twin's vehicle model, in 0.5 s windows that start from the real speed:
 
@@ -183,7 +187,7 @@ Check: the commands (servo, PWM) of the three reference laps were replayed throu
 | Twin before | 10.0–10.6° | 777–833° | 23.3–23.7 m (+4.5 %) |
 | Twin now | **1.2–1.6°** | 1015–1075° | 22.24–22.58 m (−0.5…+1.5 %) |
 
-The lag (0.10 s) and a 7 % higher left gain than the slow arcs came from this fit; 0.06 or 0.14 s gave ~3.4°.
+The lag (0.10 s), a 4 % higher left gain than the slow arcs and the center 74.5 came from this fit over the 5 laps (3 CCW + 2 CW); 0.06 or 0.14 s gave ~3.4°. Each straight-line and arc test above, re-run on the twin with the same command, lands within ~5 % of the car (distance, speed, radius), including the reverse spin (twin 638 / 523 mm encoder / real vs 661 / 550).
 
 ## 8. Open issues
 
@@ -205,4 +209,5 @@ The lag (0.10 s) and a 7 % higher left gain than the slow arcs came from this fi
 | `ruta_vuelta_*` 143324–150923 | Center 76, curves at 255, CW, wall correction at lookahead 275, fresh battery |
 | `ruta_obstaculos_*` 152412–152651 | Obstacle course, 3 runs |
 | `freno*`, `suelto*`, `servo_desde*`, `arco_*`, `grip_*`, `tofF_*` (2026-10-24) | Dynamics measurements, section 7.1 |
-| `ruta_vuelta_*` 20261024 125121–130029 | Reference laps for the twin (125915 aborted at 0.5 s: a person in front of the car) |
+| `rev_*` (2026-10-24) | Reverse tests, section 7.1 |
+| `ruta_vuelta_*` 20261024 125121–133331 | Reference laps for the twin (132712, 133331 CW) (125915 aborted at 0.5 s: a person in front of the car) |

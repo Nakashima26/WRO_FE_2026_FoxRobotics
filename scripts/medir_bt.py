@@ -80,6 +80,8 @@ def resumen(D, cinta=None):
         return ["sin datos"]
     t, pwm, cnt, yaw = D[:, 0] / 1000, D[:, 1], D[:, 2], D[:, 6]
     x = cnt / CPMM                                   # mm
+    if pwm.min() < 0 and pwm.max() <= 0:             # reversa: todo en positivo para el resumen
+        x = -x
     v = np.gradient(x, t)                            # mm/s, más limpio que la columna v
     vs = np.convolve(v, np.ones(5) / 5, mode="same")
     on = np.abs(pwm) > 0
