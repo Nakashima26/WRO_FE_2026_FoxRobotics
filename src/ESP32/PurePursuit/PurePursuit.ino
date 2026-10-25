@@ -205,6 +205,7 @@ const float RUEDA_POR_TICK_IZQ = 0.588f;
 // Tope simétrico por si acaso (usuario 2026-10-22): R 134 mm a los dos lados = atan(113/134).
 // Debe coincidir con config.MAX_WHEEL_STEER_DEG y KAPPA_MAX de route_planner.py.
 const float RUEDA_TOPE_DEG     = 40.1f;
+const float RUTA_CENTRO_SERVO  = 74.5f;   // centro del ajuste a 5 vueltas (twin steering.servo_center_deg)
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -253,6 +254,7 @@ int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odomet
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
+const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
 const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
@@ -2980,9 +2982,21 @@ float rutaExtTapeteCm() {
 // Servo para un ángulo de rueda (+ = derecha), sin wallPanic. Acota a ±RUEDA_TOPE_DEG
 // (R 134 mm) y usa la ganancia de cada lado.
 int rutaServo(float ruedaDeg) {
+  // Tabla medida 2026-10-24 (twin/params.py table_right/left, arcos PWM 150): grados de rueda -> unidades
+  // de servo desde el centro (la lineal de 0.552/0.588 se queda corta 15 % a la derecha en curvas suaves).
+  static const float DER_W[] = {0.0f, 8.7f, 18.2f, 34.2f, 38.5f, 40.7f, 42.6f};
+  static const float DER_U[] = {0.0f, 13.5f, 28.5f, 57.5f, 65.5f, 69.5f, 72.5f};
+  static const float IZQ_W[] = {0.0f, 7.6f, 15.6f, 36.4f, 38.9f, 39.9f};
+  static const float IZQ_U[] = {0.0f, 13.5f, 28.5f, 63.5f, 67.5f, 71.5f};
   ruedaDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
-  float ticks = ruedaDeg >= 0.0f ? ruedaDeg / RUEDA_POR_TICK_DER : ruedaDeg / RUEDA_POR_TICK_IZQ;
-  return constrain(centroServo - (int)lroundf(ticks), SERVO_MIN_DEG, SERVO_MAX_DEG);
+  bool der = ruedaDeg >= 0.0f;
+  const float *W = der ? DER_W : IZQ_W, *U = der ? DER_U : IZQ_U;
+  int n = der ? 7 : 6;
+  float w = fabsf(ruedaDeg), u = U[n - 1];
+  for (int i = 1; i < n; i++) {
+    if (w <= W[i]) { u = U[i - 1] + (U[i] - U[i - 1]) * (w - W[i - 1]) / (W[i] - W[i - 1]); break; }
+  }
+  return constrain((int)lroundf(RUTA_CENTRO_SERVO + (der ? -u : u)), SERVO_MIN_DEG, SERVO_MAX_DEG);
 }
 
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
@@ -2992,6 +3006,23 @@ bool rutaSteer(float &ruedaDeg) {
   float x, y;
   rutaPoseTapete(x, y);
   float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
+  if (RUTA_LAG_S > 0.0f) {
+    // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
+    // carro estará cuando el comando haga efecto (velocidad y giro filtrados, arco a rumbo medio).
+    static unsigned long tPrev = 0;
+    static float odomPrev = 0.0f, yawPrev = 0.0f, vF = 0.0f, wF = 0.0f;
+    unsigned long nowMs = millis();
+    float dtS = (nowMs - tPrev) / 1000.0f;
+    if (tPrev != 0 && dtS > 0.002f && dtS < 0.2f) {
+      vF += ((odomMmF - odomPrev) / dtS - vF) * 0.3f;
+      wF += ((anguloTotal - yawPrev) / dtS - wF) * 0.3f;
+    }
+    tPrev = nowMs; odomPrev = odomMmF; yawPrev = anguloTotal;
+    float hm = h - 0.5f * wF * DEG_TO_RAD * RUTA_LAG_S;
+    x += vF * RUTA_LAG_S * sinf(hm);
+    y += vF * RUTA_LAG_S * cosf(hm);
+    h -= wF * DEG_TO_RAD * RUTA_LAG_S;
+  }
   float sh = sinf(h), ch = cosf(h);
   if (rutaI < 0 || rutaI >= rutaN) {
     // Primera vez: el punto más cercano que va para donde mira el carro.
