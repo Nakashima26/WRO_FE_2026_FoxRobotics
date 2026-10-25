@@ -627,6 +627,9 @@ class RouteMode:
 
         hug = None
         tcf = _ack_num(ack or "", "tc")
+        if tcf is not None:
+            self._tc_max = max(getattr(self, "_tc_max", 0), tcf)   # el ack no llega en todos los cuadros: la ruta del final no se apaga
+        tcf = getattr(self, "_tc_max", None)
         if (self.fixed and self.park_w is not None and tcf is not None
                 and tcf >= int(getattr(C, "ROUTE_FINAL_TC", 11)) and getattr(C, "ROUTE_FINAL_HUG", True)):
             # Final sin U: la ruta lleva al carro a la pared del cajón antes de la primera madera.
