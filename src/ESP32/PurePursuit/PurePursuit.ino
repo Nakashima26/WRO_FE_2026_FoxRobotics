@@ -1540,6 +1540,7 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 200.0f;  // w del eje trasero cuando el sonar empieza a ver la madera de adelante
 PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
 PARK_AJ float        PARK_PL_T1                  = 79.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
 PARK_AJ float        PARK_PL_T2                  = 29.0f;
@@ -6112,6 +6113,12 @@ void loop() {
         int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
         bool cerca = clr <= PARK_PL_M_MM && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
         parkPlanClrPrev = clr;
+        // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
+        if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= 50.0f && i >= 1) {
+          float yaw = th * 0.0174533f;
+          float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw));
+          if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
+        }
         if (i == 0)      { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
         else if (i == 1) { fin = th <= PARK_PL_T2; why = "T2"; }
         else if (i == 2) { fin = mm >= PARK_PL_C_MM; why = "MM"; }
