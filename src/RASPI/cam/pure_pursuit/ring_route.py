@@ -320,7 +320,7 @@ def _geom_kernel():
 def plan(direction: str, seats: dict, parking: str | None = None,
          prm: RouteParams | None = None, start_section: str | None = None,
          laps: int = 3, unknown=None, anchor=None, lock=None,
-         park_w: float | None = None, extra=None) -> Route:
+         park_w: float | None = None, extra=None, hug=None) -> Route:
     """seats: {(sección, asiento): "Red"|"Green"} en el marco del tapete.
 
     park_w: w0 del cajón en su recta (None = el del programa oficial).
@@ -328,6 +328,10 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     asientos (arranque ciego: la señal vista antes de saber dónde está el
     carro, o la fila interior de la recta del cajón como cerca). Con color
     llevan regla de lado; sin color, solo holgura.
+
+    hug: (d, a0, a1, peso) final sin vuelta en U: castigo por mm a estar lejos de d (distancia a la isla)
+    en las estaciones con along (0 = centro de la recta de salida) entre a0 y a1; lleva el carro a la
+    pared del cajón antes del escaneo. Las reglas de lado de las señales siguen duras.
 
     unknown: asientos todavía sin ver (vuelta 1): obstáculo sin lado de paso,
     la ruta no pasa por donde podría haber una señal.
@@ -472,6 +476,14 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                     _VIS_CACHE[vk] = (kv, vis)
                 kv, vis = _VIS_CACHE[vk]
                 bonus[kv] -= prm.w_visible * vis
+    if hug is not None:
+        d_h, a0, a1, w_h = hug
+        dsig = 4.0 * _SEC_SIGMA / n
+        k_par = (order.index(parking) if parking in order else 0) * (n // 4)   # estación donde empieza la recta del cajón
+        for k in range(n):
+            a = -0.5 * _LANE_MM + (((k - k_par + n // 2) % n) - n // 2) * dsig
+            if a0 <= a <= a1:
+                pen[k] += w_h * ((D[None, :] - d_h) / 100.0) ** 2
     allowed_d = np.ones((n, m), dtype=bool)
     for st, mask in side_rules:
         allowed_d[st] &= mask
@@ -585,15 +597,15 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         keys = sorted(lock, key=lambda k: (int(k) - min(lock)) % n)
         short = {k: lock[k] for k in keys[: len(keys) // 2]}
         return plan(direction, seats, parking, prm, start_section, laps, unknown, anchor, short or None,
-                    park_w=park_w, extra=extra)
+                    park_w=park_w, extra=extra, hug=hug)
     if not feasible and anchor is not None:
         # El ancla cae donde no cabe (p. ej. el carro pegado a algo): sin ancla.
         return plan(direction, seats, parking, prm, start_section, laps, unknown, None,
-                    park_w=park_w, extra=extra)
+                    park_w=park_w, extra=extra, hug=hug)
     if not feasible and unknown:
         # Lo desconocido tapa el paso: se planea solo con lo conocido.
         return plan(direction, seats, parking, prm, start_section, laps, None, None,
-                    park_w=park_w, extra=extra)
+                    park_w=park_w, extra=extra, hug=hug)
     return route
 
 

@@ -625,8 +625,16 @@ class RouteMode:
                 anchor_replan = True
             self._pre_key = extra_key
 
+        hug = None
+        tcf = _ack_num(ack or "", "tc")
+        if (self.fixed and self.park_w is not None and tcf is not None
+                and tcf >= int(getattr(C, "ROUTE_FINAL_TC", 11)) and getattr(C, "ROUTE_FINAL_HUG", True)):
+            # Final sin U: la ruta lleva al carro a la pared del cajón antes de la primera madera.
+            pk = _stall_far_along(dm.parking, dm.direction, self.park_w)
+            hug = (float(getattr(C, "ROUTE_FINAL_D_MM", 640.0)), pk - 304.0 - float(getattr(C, "ROUTE_FINAL_LEAD_MM", 1300.0)),
+                   pk, float(getattr(C, "ROUTE_FINAL_W", 20.0)))
         key = (dm.direction, dm.parking, self.park_w, self.shift,
-               tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key)
+               tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key, hug)
         if key != self.key and key != self._job_key:
             # Continuidad: la ruta nueva empata EXACTO con la anterior en las
             # estaciones de adelante del carro (por ahí va mientras sube al
@@ -642,7 +650,7 @@ class RouteMode:
                 nl = int(getattr(C, "ROUTE_LOCK_STATIONS", 7))
                 lock = {(k0 + j) % nst: float(self.route.d_stations[(k0 + j) % nst]) for j in range(nl)}
                 anchor = None
-            args = (dm.direction, plan_seats, dm.parking, plan_unknown, anchor, lock, self.park_w, extra)
+            args = (dm.direction, plan_seats, dm.parking, plan_unknown, anchor, lock, self.park_w, extra, hug)
             hold = anchor_replan and self.route is not None
             if getattr(C, "ROUTE_PLAN_ASYNC", False):
                 # Carro real: la DP tarda ~1-2 s en la Pi; corre aparte y el
@@ -660,12 +668,12 @@ class RouteMode:
                 if self._delay_left is None:
                     self._job_key = key
                     self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3]), unknown=args[3],
-                                                anchor=args[4], lock=args[5], park_w=args[6], extra=args[7]),
+                                                anchor=args[4], lock=args[5], park_w=args[6], extra=args[7], hug=args[8]),
                                         key, dict(plan_seats), list(plan_unknown), self.shift, hold)
                     self._delay_left = int(round(float(C.ROUTE_PLAN_DELAY_S) * float(getattr(C, "PI_FPS", 40.0))))
             else:
                 self._adopt(RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3]), unknown=args[3],
-                                    anchor=args[4], lock=args[5], park_w=args[6], extra=args[7]),
+                                    anchor=args[4], lock=args[5], park_w=args[6], extra=args[7], hug=args[8]),
                             key, plan_seats, plan_unknown, empty, dm, self.shift, hold)
         if self._delay_left is not None:
             self._delay_left -= 1
@@ -1133,11 +1141,11 @@ class RouteMode:
         ty = dm.pose_xy[1] - (p0x * fy + p0y * ly)
         return tx + px * fx + py * lx, ty + px * fy + py * ly, (th - yaw) % 360.0
 
-    def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None) -> None:
+    def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None, hug=None) -> None:
         self._job_conf = conf
         self._job_unknown = unknown
         self._job_out = RR.plan(direction, conf, parking, prm=_prm_for(unknown), unknown=unknown, anchor=anchor,
-                                lock=lock, park_w=park_w, extra=extra)
+                                lock=lock, park_w=park_w, extra=extra, hug=hug)
 
     def _adopt(self, route, key, conf, unknown, empty, dm, shift: float = 0.0, hold: bool = False) -> None:
         self.route = route
