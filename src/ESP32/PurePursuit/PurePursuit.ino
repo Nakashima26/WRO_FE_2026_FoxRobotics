@@ -1520,10 +1520,15 @@ PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeor
 // Final SIN vuelta en U: tras la vuelta 3 el carro sigue en el sentido de la marcha (la ruta de la Pi lo pega a
 // la pared del cajón) y arranca el escaneo PARK_SINU_ADELANTO_MM antes de la primera madera (along >= pka - largo del cajón - esto).
 const bool           PARK_SIN_U                  = true;
+PARK_AJ long         PARK_SINU_PKA_MIN_MM        = 100;   // cajon muy al inicio de la recta (pka menor): no hay linea de escaneo a tiempo, se hace la U
+bool                 parkDirecto                 = false; // true: estaciona de frente (sin U); false: tras la U
+bool sinUActivo() { return PARK_SIN_U && (isnan(rutaPka) || rutaPka >= (float)PARK_SINU_PKA_MIN_MM); }
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
 PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
 PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
 PARK_AJ long         PARK_SINU_B2_WIN_MM         = 130;
+PARK_AJ long         PARK_SINU_PRE_MM            = -560;  // con la cuenta en 11, along (centro de la recta = 0) desde el que ya se salio de la esquina 12
+PARK_AJ long         PARK_SINU_MIN_MM            = -2000;  // no entregar al seguidor de pared antes de pasar la senal de la entrada (T2 esta en -500)
 PARK_AJ long         PARK_SINU_LENTO_MM          = 250;   // zona lenta antes de la madera de adelante
 PARK_AJ int          PARK_SINU_PWM_B2            = 100;
 PARK_AJ float        PARK_SINU_TOL_CM            = 5.0f;
@@ -1534,9 +1539,12 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 200.0f;  // w del eje trasero cuando el sonar empieza a ver la madera de adelante
-PARK_AJ float        PARK_PL_M_MM                = 6.0f;   // un tramo termina si la huella queda a menos de esto de una madera
-PARK_AJ float        PARK_PL_T1                  = 80.0f;
-PARK_AJ float        PARK_PL_T2                  = 34.0f;
+PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_M_MM                = 3.0f;   // un tramo termina si la huella queda a menos de esto de una madera
+PARK_AJ float        PARK_PL_T1                  = 79.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
+PARK_AJ float        PARK_PL_T2                  = 32.0f;
+PARK_AJ float        PARK_PL_T1_POR_MM           = 0.33f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
+PARK_AJ float        PARK_PL_H_NOM               = 350.0f;
 PARK_AJ float        PARK_PL_T3                  = 25.0f;
 PARK_AJ float        PARK_PL_T4                  = 13.0f;
 PARK_AJ float        PARK_PL_T5                  = 2.0f;
@@ -1560,6 +1568,8 @@ PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la es
 PARK_AJ int          PARK_PL_FRENTE_CM           = 3;       // sonar frontal: corta el avance del zigzag
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
+bool                 parkSinULinea               = false;
+float                parkPlanT1                  = 80.0f;
 int                  parkPlanDir                 = -1;
 int                  parkPlanSrv                 = 75;
 float                parkPlanSgn                 = 1.0f;
@@ -2367,6 +2377,7 @@ bool paredCajonEsIzq(bool retorno) {
 }
 
 void resetParkScan() {
+  parkSinULinea = false;
   parkFase             = 0;
   parkFaseMs           = millis(); parkOdom0 = odomMm;
   parkEntryMs          = millis();
@@ -2518,6 +2529,7 @@ void iniciarEstacionandoRetorno() {
 // parkParedEsIzquierda ya fijada a la pared del regreso. Fases 24-25, no
 // pisan las 20-23 (media vuelta vieja).
 void iniciarEstacionandoParaleloUturn() {
+  parkDirecto = false;
   estado       = ESTACIONANDO;
   parkBuscando = false;
   parkParedEsIzquierda = paredCajonEsIzq(true);
@@ -2629,9 +2641,32 @@ void iniciarEstacionamiento(bool retorno) {
 // función corre antes, en el mismo frame, en la rama "ronda cerrada" de más
 // abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
 float alongSalidaMm();
-float rutaErrCarrilDeg(); float rutaExtTapeteCm();
+float rutaErrCarrilDeg(); float rutaExtTapeteCm(); void rutaPoseTapete(float &x, float &y); int seccionTapete(float x, float y);
+// Final sin U: dispara el escaneo del cajon (ver PARK_SINU_*). Corre en SIGUIENDO/CRUCERO desde que el carro sale de la
+// esquina 12 (la cuenta de giros llega ~0.5 s tarde y el cajon puede estar ya a la entrada de la recta).
+void vigilarSinU() {
+  if (!sinUActivo() || PARK_MODO == PARK_NINGUNO) return;
+  if (!(piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0)) return;
+  float x, y;
+  rutaPoseTapete(x, y);
+  float along = alongSalidaMm();
+  bool pre = (turnsCompleted == TURNS_PER_RACE - 1) && seccionTapete(x, y) == rutaSecSalida && along >= (float)PARK_SINU_PRE_MM;
+  if (!(parkUturnPendiente || pre)) return;
+  float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
+  if (along < alongIni || along < (float)PARK_SINU_MIN_MM) return;
+  // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
+  bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
+  if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
+  parkUturnPendiente = false;
+  parkDirecto = true;
+  turnsCompleted = TURNS_PER_RACE;
+  Serial.print("PARK sin U: along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
+  iniciarEstacionamiento(false);
+  anguloGyro = rutaErrCarrilDeg();   // 0 = paralelo al carril, como tras la U
+}
+
 void vigilarUturn(long distL, long distR, long distF) {
-  if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO) return;
+  if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO || sinUActivo()) return;
   // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
   // para esta U (que es la de la esquina 13, la siguiente).
   long recorrido = odomMm - parkUturnOdom0;
@@ -2653,18 +2688,6 @@ void vigilarUturn(long distL, long distR, long distF) {
   if (piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0) {
     bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
     float along = alongSalidaMm();
-    if (PARK_SIN_U) {
-      float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
-      if (along < alongIni) return;
-      // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
-      bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
-      if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
-      parkUturnPendiente = false;
-      Serial.print("PARK sin U: along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
-      iniciarEstacionamiento(false);
-      anguloGyro = rutaErrCarrilDeg();   // 0 = paralelo al carril, como tras la U
-      return;
-    }
     float umbralU = (float)PARK_UTURN_RUTA_ALONG_MM;
     if (PARK_UTURN_ADELANTO_MM > 0 && min(distL, distR) >= PARK_UTURN_ADELANTO_EXT_CM) umbralU = min(umbralU, (float)PARK_UTURN_ADELANTO_MM);   // hueco ya abierto: el radio de la U sale igual que a 500
     if (PARK_UTURN_RUTA_PKA_MM > 0 && !isnan(rutaPka)) umbralU = max(umbralU, rutaPka + (float)PARK_UTURN_RUTA_PKA_MM);   // la U no cae encima de la madera del cajón
@@ -3053,7 +3076,7 @@ float parkHPoseMm() {
   return 1500.0f - perp;
 }
 void parkPlanPose(float &w, float &h) {
-  w = PARK_PL_W_DET + (alongSalidaMm() - parkDetAlong);
+  w = (parkDirecto ? PARK_PL_W_DET : PARK_PL_W_DET_U) + (parkDirecto ? 1.0f : -1.0f) * (alongSalidaMm() - parkDetAlong);
   h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
 }
 static float parkPtSeg(float px, float py, float ax, float ay, float bx, float by) {
@@ -4344,6 +4367,8 @@ void loop() {
     }
 
     case SIGUIENDO: {
+      vigilarSinU();
+      if (estado != SIGUIENDO) break;
       if (parkUturnPendiente) {
         vigilarUturn(distL, distR, distF);
         if (estado != SIGUIENDO) break;
@@ -4574,6 +4599,8 @@ void loop() {
     // vuelve a SIGUIENDO para esquivarlo.
     // ═══════════════════════════════════════════════════════════════════════════
     case CRUCERO: {
+      vigilarSinU();
+      if (estado != CRUCERO) break;
       if (parkUturnPendiente) {
         vigilarUturn(distL, distR, distF);
         if (estado != CRUCERO) break;
@@ -5502,7 +5529,7 @@ void loop() {
 
         // Sin U: la primera madera se puede perder (la ruta llega a la pared tarde, p.ej. senal roja de entrada).
         // Una bajada confirmada justo donde la Pi dice que esta la madera de adelante ES el poste 2.
-        if (PARK_SIN_U && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
+        if (parkDirecto && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
             && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
           Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
           parkScanSubFase  = 2;
@@ -5666,7 +5693,14 @@ void loop() {
           float rumboObj  = parkRumboParalelo()
                             + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
           motorAdelante();
-          servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
+          // Sin U: mientras no este sobre la linea de escaneo sigue la ruta de la Pi (que rodea la senal de la entrada); despues, la pared.
+          float ruedaScan;
+          if (parkDirecto && !parkSinULinea && piRuta && rutaTfOk
+              && !(fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG))
+            parkSinULinea = !rutaSteer(ruedaScan) ? true : false;
+          else if (parkDirecto) parkSinULinea = true;
+          if (parkDirecto && !parkSinULinea) escribirServo(rutaServo(ruedaScan));
+          else servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
           // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
           // El PWM no cae en seco: tau de tracción ~0.17 s. 2 tau bastan para llegar
           // a la velocidad lenta; el piso PARK_SCAN_RAPIDO_MM sigue de tope.
@@ -5680,10 +5714,10 @@ void loop() {
           }
           bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0
                         && !isnan(rutaPka)
-                        && (PARK_SIN_U ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno);
+                        && (parkDirecto ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno);
           int pwmEsc = PARK_PUNTA_PWM;
           // Sin U: cerca de la madera de adelante, lento, para que el instante en que el sonar la ve fije bien la posicion (error ~ v * 50 ms).
-          if (PARK_SIN_U && !isnan(rutaPka) && !rapido && alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM - (float)PARK_SINU_LENTO_MM)
+          if (parkDirecto && !isnan(rutaPka) && !rapido && alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM - (float)PARK_SINU_LENTO_MM)
             pwmEsc = PARK_SINU_PWM_B2;
           setMotorTope(rapido ? (int)PARK_SCAN_RAPIDO_PWM : pwmEsc, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
@@ -6009,6 +6043,7 @@ void loop() {
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f;
+          parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
           Serial.print(" d="); Serial.print(parkBaseLlegada, 1); Serial.println(")");
@@ -6060,7 +6095,7 @@ void loop() {
         if (parkPlanDir > 0) motorAdelante(); else motorReversa();
         escribirServo(parkPlanSrv);
         int pwm = (parkPlanDir > 0) ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV;
-        if (parkPlanI == 0 && th < 0.4f * PARK_PL_T1) pwm = 130;
+        if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = 130;
         setMotor(pwm);
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
@@ -6071,7 +6106,7 @@ void loop() {
         unsigned long tseg = millis() - parkFaseMs;
         int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
         bool cerca = clr <= PARK_PL_M_MM;
-        if (i == 0)      { fin = th >= PARK_PL_T1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
+        if (i == 0)      { fin = th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
         else if (i == 1) { fin = th <= PARK_PL_T2; why = "T2"; }
         else if (i == 2) { fin = mm >= PARK_PL_C_MM; why = "MM"; }
         else if (i == 3) { fin = th <= PARK_PL_T3; why = "T3"; }

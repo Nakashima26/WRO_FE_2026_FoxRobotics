@@ -631,7 +631,8 @@ class RouteMode:
                 and tcf >= int(getattr(C, "ROUTE_FINAL_TC", 11)) and getattr(C, "ROUTE_FINAL_HUG", True)):
             # Final sin U: la ruta lleva al carro a la pared del cajón antes de la primera madera.
             pk = _stall_far_along(dm.parking, dm.direction, self.park_w)
-            hug = (float(getattr(C, "ROUTE_FINAL_D_MM", 640.0)), pk - 304.0 - float(getattr(C, "ROUTE_FINAL_LEAD_MM", 1300.0)),
+            if pk >= float(getattr(C, "ROUTE_FINAL_PKA_MIN", 100.0)):   # cajon muy al inicio: el firmware hace la U
+              hug = (float(getattr(C, "ROUTE_FINAL_D_MM", 640.0)), pk - 304.0 - float(getattr(C, "ROUTE_FINAL_LEAD_MM", 1300.0)),
                    pk, float(getattr(C, "ROUTE_FINAL_W", 20.0)))
         key = (dm.direction, dm.parking, self.park_w, self.shift,
                tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key, hug)
