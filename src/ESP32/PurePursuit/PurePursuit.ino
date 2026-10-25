@@ -1522,7 +1522,10 @@ PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeor
 const bool           PARK_SIN_U                  = true;
 PARK_AJ long         PARK_SINU_PKA_MIN_MM        = 100;   // cajon muy al inicio de la recta (pka menor): no hay linea de escaneo a tiempo, se hace la U
 bool                 parkDirecto                 = false; // true: estaciona de frente (sin U); false: tras la U
-bool sinUActivo() { return PARK_SIN_U && (isnan(rutaPka) || rutaPka >= (float)PARK_SINU_PKA_MIN_MM); }
+int                  parkSinUDec                 = 0;     // para pka < PKA_MIN: 0 sin decidir, 1 directo, 2 con U
+PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
+PARK_AJ long         PARK_SINU_DEC_MM            = -400;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
+bool sinUActivo() { return PARK_SIN_U && (isnan(rutaPka) || rutaPka >= (float)PARK_SINU_PKA_MIN_MM || parkSinUDec != 2); }
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
 PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
 PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
@@ -1571,7 +1574,7 @@ PARK_AJ float        PARK_PL_DF_MM               = 30.0f;   // zigzag: largo de 
 PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
-PARK_AJ int          PARK_PL_FRENTE_CM           = 3;       // sonar frontal: corta el avance del zigzag
+PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
 bool                 parkSinULinea               = false;
@@ -2652,13 +2655,22 @@ float rutaErrCarrilDeg(); float rutaExtTapeteCm(); void rutaPoseTapete(float &x,
 // Final sin U: dispara el escaneo del cajon (ver PARK_SINU_*). Corre en SIGUIENDO/CRUCERO desde que el carro sale de la
 // esquina 12 (la cuenta de giros llega ~0.5 s tarde y el cajon puede estar ya a la entrada de la recta).
 void vigilarSinU() {
-  if (!sinUActivo() || PARK_MODO == PARK_NINGUNO) return;
+  if (!sinUActivo() && parkSinUDec == 2) return;
+  if (PARK_MODO == PARK_NINGUNO || !PARK_SIN_U) return;
   if (!(piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0)) return;
   float x, y;
   rutaPoseTapete(x, y);
   float along = alongSalidaMm();
   bool pre = (turnsCompleted == TURNS_PER_RACE - 1) && seccionTapete(x, y) == rutaSecSalida && along >= (float)PARK_SINU_PRE_MM;
   if (!(parkUturnPendiente || pre)) return;
+  if (!isnan(rutaPka) && rutaPka < (float)PARK_SINU_PKA_MIN_MM && parkSinUDec == 0) {
+    // Cajon al inicio de la recta: directo solo si la ruta ya lo trae pegado a su pared (la senal de la entrada se paso por afuera).
+    if (along < (float)PARK_SINU_DEC_MM) return;
+    bool lin = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_DEC_ANG_DEG;
+    parkSinUDec = lin ? 1 : 2;
+    Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.println(along, 0);
+    if (!lin) return;
+  }
   float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
   if (along < alongIni || along < (float)PARK_SINU_MIN_MM) return;
   // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
