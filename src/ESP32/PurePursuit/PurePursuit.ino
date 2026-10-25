@@ -1540,9 +1540,13 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 200.0f;  // w del eje trasero cuando el sonar empieza a ver la madera de adelante
 PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
-PARK_AJ float        PARK_PL_M_MM                = 3.0f;   // un tramo termina si la huella queda a menos de esto de una madera
+PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
 PARK_AJ float        PARK_PL_T1                  = 79.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
-PARK_AJ float        PARK_PL_T2                  = 32.0f;
+PARK_AJ float        PARK_PL_T2                  = 29.0f;
+PARK_AJ float        PARK_PL_HEND                = 117.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
+PARK_AJ float        PARK_PL_RI                  = 150.0f;  // radio de la reversa INT (eje trasero)
+PARK_AJ float        PARK_PL_TA_MAX              = 92.0f;
+PARK_AJ float        PARK_PL_T2_PISO             = 12.0f;
 PARK_AJ float        PARK_PL_T1_POR_MM           = 0.33f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
 PARK_AJ float        PARK_PL_H_NOM               = 350.0f;
 PARK_AJ float        PARK_PL_T3                  = 25.0f;
@@ -1569,6 +1573,7 @@ PARK_AJ int          PARK_PL_FRENTE_CM           = 3;       // sonar frontal: co
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
 bool                 parkSinULinea               = false;
+float                parkPlanClrPrev             = 1e9f;
 float                parkPlanT1                  = 80.0f;
 int                  parkPlanDir                 = -1;
 int                  parkPlanSrv                 = 75;
@@ -6083,7 +6088,7 @@ void loop() {
           motorCoast();
           escribirServo(parkPlanSrv);
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
-            parkPlanMov = true; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
+            parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
             if (parkPlanDir > 0) motorAdelante(); else motorReversa();
             Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
             Serial.print(parkPlanDir > 0 ? " ADELANTE " : " REVERSA ");
@@ -6105,8 +6110,9 @@ void loop() {
         float mm = parkRecorridoMm();
         unsigned long tseg = millis() - parkFaseMs;
         int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
-        bool cerca = clr <= PARK_PL_M_MM;
-        if (i == 0)      { fin = th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
+        bool cerca = clr <= PARK_PL_M_MM && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
+        parkPlanClrPrev = clr;
+        if (i == 0)      { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
         else if (i == 1) { fin = th <= PARK_PL_T2; why = "T2"; }
         else if (i == 2) { fin = mm >= PARK_PL_C_MM; why = "MM"; }
         else if (i == 3) { fin = th <= PARK_PL_T3; why = "T3"; }
