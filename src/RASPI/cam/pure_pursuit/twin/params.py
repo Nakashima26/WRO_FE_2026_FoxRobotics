@@ -60,8 +60,8 @@ class SteeringParams:
     # modelo usa las tablas de abajo cuando existen.
     gain_left: float = 46.2
     gain_right: float = 57.0
-    wheel_max_left_deg: float = 39.9    # bici a tope izq (R 134-136 mm de 148 a 156)
-    wheel_max_right_deg: float = 42.6   # bici a tope der (R 123 mm en servo 1)
+    wheel_max_left_deg: float = 53.0    # bici a tope izq (R 134-136 mm de 148 a 156)
+    wheel_max_right_deg: float = 53.0   # bici a tope der (R 123 mm en servo 1)
     # 2026-10-24 (logs_tof/servo_desde55/95_*, PWM 150, 1.35 m recto, BNO): llegando al 75 desde
     # 55 la rueda queda 1.1-1.45° a la der, desde 95 0.9-1.1° a la izq -> centro 75 (±0.3) y juego.
     # El 78 de antes era la mitad de 1..156, no el recto medido (SeguirRuta va derecho con 75).
@@ -87,10 +87,13 @@ class SteeringParams:
     # La izquierda gira ~15 % menos que la derecha con el mismo comando (hasta ~30 unidades).
     # Izquierda hasta 28.5: los arcos a PWM 150 (7.3/15.0°) ×1.04, lo que pide el ajuste a las
     # vueltas a 255 en los dos sentidos (la derecha queda como en los arcos).
+    # 2026-10-27, usuario: el tope es 53° parejo en los dos lados (los 42.6/39.9 medidos se quedan cortos
+    # al salir del cajón en el carro real). Se conservan los arcos medidos hasta 28.5 unidades (curvas de
+    # las vueltas, validadas con las vueltas de referencia) y de ahí recta hasta 53° en el tope.
     table_right: tuple[tuple[float, float], ...] = (
-        (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (57.5, 34.2), (65.5, 38.5), (69.5, 40.7), (72.5, 42.6))
+        (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (72.5, 53.0))
     table_left: tuple[tuple[float, float], ...] = (
-        (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (63.5, 36.4), (67.5, 38.9), (71.5, 39.9))
+        (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (71.5, 53.0))
 
     def __post_init__(self) -> None:
         _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
