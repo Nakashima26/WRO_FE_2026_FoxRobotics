@@ -792,7 +792,7 @@ const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICI
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
 const int  INICIO_ADENTRO_OVERSHOOT_IZQ_DEG = 28; // salida IZQ con isal=2 (a 53 grados la inercia a la izquierda pasa mas: 16 choca la senal T1 en el 136)
 const int  INICIO_ADENTRO_OVERSHOOT_DEG = 8;  // ídem para el giro de 90° (isal=2): a mayor PWM la inercia pasa más de 90° y la contravuelta se come la fila de señales
-const int  INICIO_OVERSHOOT_DEG        = 10;    // corta el servo antes; la inercia completa (0 = sin corte)
+const int  INICIO_OVERSHOOT_DEG        = 15;    // corta el servo antes; la inercia completa (0 = sin corte)
 const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
                                                      //  ángulo — patina / topa la pared del cajón —
                                                      //  pasa a la fase 2 igual; la contravuelta y la
@@ -827,7 +827,7 @@ const bool INICIO_REVERSA              = false; // true = fases 4-8 de antes (re
 // Servo a tope ANTES de mover el carro: con la llanta interior a ~53° (R ~140 mm) el arco
 // necesita ~95 mm libres delante de la nariz; arrancar mientras el servo viaja (~73° a
 // ~600°/s) se come ese margen y la esquina delantera toca la madera de enfrente.
-const unsigned long INICIO_SERVO_ESPERA_MS = 300;
+const unsigned long INICIO_SERVO_ESPERA_MS = 100;
 // Aun así, con R ~140 mm la esquina delantera exterior toca la madera de enfrente a ~36° de
 // giro (por ~6 mm). A los INICIO_3P_ANG_DEG da una reversa corta con el servo al otro tope
 // (la nariz sigue entrando y la cola ya se alejó de la madera de atrás) y vuelve al arco.
@@ -849,8 +849,9 @@ const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
 const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
 const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
-const int  INICIO_CONTRA_FIN_DEG       = 26;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
+const int  INICIO_CONTRA_FIN_DEG       = 32;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
 const float INICIO_CONTRA_CIERRE_S     = 0.085f; // solo isal=2: |ω de cierre|×esto. La caja de 90° a PWM 180 se pasa de 0 y entra a la fila interior
+const int  INICIO_SETTLE_QUIETO_N      = 0;      // fase 6: samples quietos para cerrar la salida; 0 = entrega a SIGUIENDO al terminar la contravuelta (no tira la inercia)
 const bool INICIO_SETTLE_MOTOR         = false; // fase 6: true = sigue a INICIO_PWM con el servo al centro mientras se aquieta el giro (no pierde la inercia); false = coast
 
 
@@ -4449,7 +4450,7 @@ void loop() {
           if (rate < MANIOBRA_SETTLE_RATE_DPS) inicioSettleQuieto++;
           else                                 inicioSettleQuieto = 0;
         }
-        if (inicioSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N
+        if (inicioSettleQuieto >= INICIO_SETTLE_QUIETO_N
             || nowMs - inicioFaseMs >= MANIOBRA_SETTLE_TIMEOUT_MS) {
           finalizarInicio();
         }
