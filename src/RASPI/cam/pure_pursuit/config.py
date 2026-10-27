@@ -1337,6 +1337,7 @@ ROUTE_PROFILE_PWM0 = 25.0
 # Perfil v3 (None = igual que antes). MIN_PWM: piso real del perfil; las curvas cerradas
 # (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
 ROUTE_PROFILE_MIN_PWM = None
+ROUTE_L23_MIN_PWM = 255    # piso del perfil en las vueltas 2-3 (tc 4..11): sin frenar por curvatura (n1-3: vueltas 2+3 -0.41 s, pared min 11.8 mm); None = ROUTE_PROFILE_MIN_PWM
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
 ROUTE_PROFILE_SIGN_NEAR_MM = None

@@ -753,7 +753,7 @@ class RouteMode:
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
         tc = _ack_num(ack or "", "tc")
         prof = self._profile_pwm(self._sign_xy(conf, empty),
-                                 lap2=tc is not None and 4 <= tc < 8)
+                                 lap2=tc is not None and 4 <= tc < 8, l23=tc is not None and 4 <= tc < 12)
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
@@ -865,7 +865,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None, lap2=False) -> int | None:
+    def _profile_pwm(self, signs=None, lap2=False, l23=False) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -893,6 +893,8 @@ class RouteMode:
         v_max = K * (top - pwm0)
         # Perfil v3: piso real del perfil (MIN_PWM, sin pasar de la base). None: la base.
         mn = getattr(C, "ROUTE_PROFILE_MIN_PWM", None)
+        if l23 and getattr(C, "ROUTE_L23_MIN_PWM", None) is not None:
+            mn = C.ROUTE_L23_MIN_PWM        # vueltas 2-3: piso del perfil propio (la 1 y la U no cambian)
         floor = base if mn is None else min(int(mn), base)
         v_min = K * (floor - pwm0)
         tight_on = False
