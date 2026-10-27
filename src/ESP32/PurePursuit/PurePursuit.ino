@@ -790,8 +790,9 @@ const int  INICIO_PWM_SENAL            = 0;    // PWM si la Pi ve señal cerca d
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
+const int  INICIO_ADENTRO_OVERSHOOT_IZQ_DEG = 28; // salida IZQ con isal=2 (a 53 grados la inercia a la izquierda pasa mas: 16 choca la senal T1 en el 136)
 const int  INICIO_ADENTRO_OVERSHOOT_DEG = 8;  // ídem para el giro de 90° (isal=2): a mayor PWM la inercia pasa más de 90° y la contravuelta se come la fila de señales
-const int  INICIO_OVERSHOOT_DEG        = 8;    // corta el servo antes; la inercia completa (0 = sin corte)
+const int  INICIO_OVERSHOOT_DEG        = 10;    // corta el servo antes; la inercia completa (0 = sin corte)
 const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
                                                      //  ángulo — patina / topa la pared del cajón —
                                                      //  pasa a la fase 2 igual; la contravuelta y la
@@ -836,7 +837,7 @@ const float INICIO_3P_REV_MM           = 25.0f;
 // enfrente a ~33° (el cajón deja ~83 mm de nariz y ~5 de cola). Siempre usa la corrección: avanza LENTO (INICIO_3P_PWM,
 // para poder frenar en pocos mm) hasta INICIO_3P_ANG_IZQ_DEG, reversa con el servo al otro tope (gira más a la izq con
 // la cola hacia el tapete, donde hay ~70 mm) y vuelve al arco. INICIO_3P_ESPERA2_MS: espera del servo al volver.
-const float INICIO_3P_ANG_IZQ_DEG      = 10.0f;
+const float INICIO_3P_ANG_IZQ_DEG      = 0.0f;
 const int   INICIO_3P_PWM              = 130;
 const unsigned long INICIO_3P_ESPERA2_MS = 250;
 const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
@@ -848,7 +849,7 @@ const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
 const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
 const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
-const int  INICIO_CONTRA_FIN_DEG       = 6;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
+const int  INICIO_CONTRA_FIN_DEG       = 22;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
 const float INICIO_CONTRA_CIERRE_S     = 0.085f; // solo isal=2: |ω de cierre|×esto. La caja de 90° a PWM 180 se pasa de 0 y entra a la fila interior
 const bool INICIO_SETTLE_MOTOR         = false; // fase 6: true = sigue a INICIO_PWM con el servo al centro mientras se aquieta el giro (no pierde la inercia); false = coast
 
@@ -1548,13 +1549,19 @@ PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U 
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
-PARK_AJ float        PARK_PL_T1                  = 79.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
-PARK_AJ float        PARK_PL_T2                  = 29.0f;
-PARK_AJ float        PARK_PL_HEND                = 108.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
-PARK_AJ float        PARK_PL_RI                  = 150.0f;  // radio de la reversa INT (eje trasero)
+PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
+PARK_AJ float        PARK_PL_T2                  = 4.0f;
+PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
+PARK_AJ float        PARK_PL_WF                  = 50.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
+PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
+PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
+PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
+PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
+PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
+PARK_AJ float        PARK_PL_RI                  = 85.0f;  // radio de la reversa INT (eje trasero)
 PARK_AJ float        PARK_PL_TA_MAX              = 92.0f;
 PARK_AJ float        PARK_PL_T2_PISO             = 12.0f;
-PARK_AJ float        PARK_PL_T1_POR_MM           = 0.33f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
+PARK_AJ float        PARK_PL_T1_POR_MM           = 0.0f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
 PARK_AJ float        PARK_PL_H_NOM               = 350.0f;
 PARK_AJ float        PARK_PL_T3                  = 25.0f;
 PARK_AJ float        PARK_PL_T4                  = 13.0f;
@@ -3090,6 +3097,7 @@ float rutaExtTapeteCm() {
 // Marco canonico: w = mm a lo largo de la marcha desde la cara interior de la madera de atras (hueco 264, madera 2 en
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
+bool parkPlanRectaOn = false;
 float parkDetAlong = 0.0f, parkDetHPose = 0.0f, parkDetHSon = 350.0f;
 float parkHPoseMm() {
   float x, y;
@@ -3128,6 +3136,14 @@ float parkPlanHolgura(float w, float h, float thDeg) {
     }
   }
   return best;
+}
+
+// Angulo th1 del plan RECTA: arco EXT (radio RI) hasta th1, recta, arco INT de vuelta a 0; desde (w0,h0) llega a (wf,hf).
+float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float R) {
+  float dW = w0 - wf, dH = h0 - hf, t0 = th0Deg * DEG_TO_RAD, th = 1.05f;
+  for (int k = 0; k < 12; k++)
+    th = atan2f(dH - R * (cosf(t0) - cosf(th)) - R * (1.0f - cosf(th)), dW - R * (sinf(th) - sinf(t0)) - R * sinf(th));
+  return constrain(th * RAD_TO_DEG, 25.0f, 80.0f);
 }
 
 // Servo para un ángulo de rueda (+ = derecha), sin wallPanic. Acota a ±RUEDA_TOPE_DEG
@@ -4168,7 +4184,7 @@ void loop() {
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         inicioMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
-        bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_OVERSHOOT_DEG)));
+        bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? (inicioGirarDer ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_ADENTRO_OVERSHOOT_IZQ_DEG) : INICIO_OVERSHOOT_DEG)));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
         float ang3p = inicioGirarDer ? INICIO_3P_ANG_DEG : INICIO_3P_ANG_IZQ_DEG;
         if (!swingListo && !inicio3pHecho && ang3p > 0 && deltaIni >= ang3p) {
@@ -6065,8 +6081,8 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
-          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f;
-          parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), 68.0f, 95.0f);
+          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false;
+          parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
           Serial.print(" d="); Serial.print(parkBaseLlegada, 1); Serial.println(")");
@@ -6088,6 +6104,8 @@ void loop() {
       // 3 reversa INT hasta T3; 4 adelante EXT hasta T4; 5 reversa INT hasta T5; despues zigzag corto hasta |theta| <= TOK.
       if (parkFase == 40) {
         float th = -haciaPared * (anguloGyro - parkRumboRef);   // nariz hacia la isla (+)
+        // El rumbo de la pared medido con los sonares trae hasta ~10 grados de error; el del carril (pose del tapete) no.
+        if (PARK_PL_THLANE && piRuta && rutaTfOk && rutaSecSalida >= 0) th = direccionIzquierda ? rutaErrCarrilDeg() : -rutaErrCarrilDeg();
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
@@ -6106,6 +6124,13 @@ void loop() {
           motorCoast();
           escribirServo(parkPlanSrv);
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
+            if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
+              float w0, h0; parkPlanPose(w0, h0);
+              float t = parkPlanT1Solve(w0, h0, th, PARK_PL_WF, PARK_PL_HEND, PARK_PL_RI);
+              parkPlanT1 = max(t - PARK_PL_LEAD, 20.0f);
+              Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
+              Serial.print(" th1="); Serial.println(t, 1);
+            }
             parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
             if (parkPlanDir > 0) motorAdelante(); else motorReversa();
             Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
@@ -6116,7 +6141,7 @@ void loop() {
           break;
         }
         if (parkPlanDir > 0) motorAdelante(); else motorReversa();
-        escribirServo(parkPlanSrv);
+        escribirServo(parkPlanRectaOn ? centroServo : parkPlanSrv);
         int pwm = (parkPlanDir > 0) ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV;
         if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = 130;
         setMotor(pwm);
@@ -6124,6 +6149,9 @@ void loop() {
         float pw, ph;
         parkPlanPose(pw, ph);
         float clr = parkPlanHolgura(pw, ph, th);
+        { static unsigned long dbgMs = 0; if (millis() - dbgMs >= 100) { dbgMs = millis();
+            Serial.print("PLAN pose w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" th="); Serial.print(th, 1);
+            Serial.print(" clr="); Serial.print(clr, 0); Serial.print(" dB="); Serial.print(distB_filtrada, 1); Serial.print(" errC="); Serial.println(rutaErrCarrilDeg(), 1); } }
         bool fin = false; const char *why = "";
         float mm = parkRecorridoMm();
         unsigned long tseg = millis() - parkFaseMs;
@@ -6136,7 +6164,16 @@ void loop() {
           float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw));
           if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
         }
-        if (i == 0)      { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
+        if (i == 0 && PARK_PL_RECTA) {
+          if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
+          if (parkPlanRectaOn) {
+            float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
+            fin = ph <= thr; why = "RECTA";
+            if ((ph - thr) / max(sinf(th * 0.0174533f), 0.3f) > PARK_PL_RECTA_FRENA_MM) setMotor(PARK_PL_RECTA_PWM);
+          }
+          if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; }
+        }
+        else if (i == 0) { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
         else if (i == 1) { fin = th <= PARK_PL_T2; why = "T2"; }
         else if (i == 2) { fin = mm >= PARK_PL_C_MM; why = "MM"; }
         else if (i == 3) { fin = th <= PARK_PL_T3; why = "T3"; }
@@ -6153,14 +6190,14 @@ void loop() {
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
         if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
-        if (!fin && tseg >= 2500) { fin = true; why = "TIMEOUT"; }
+        if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
           Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);
           Serial.print(") th="); Serial.print(th, 1); Serial.print(" max="); Serial.print(parkPlanThMax, 1);
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
           Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
             finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");
