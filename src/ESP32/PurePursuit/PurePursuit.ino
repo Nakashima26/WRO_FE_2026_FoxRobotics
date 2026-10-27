@@ -5733,8 +5733,9 @@ void loop() {
             // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
             if (parkDetPorPose && parkIgnOk && PARK_PL_ANCLA_IGN > 0 && parkDetAlong - parkIgnAlong >= 0.0f && parkDetAlong - parkIgnAlong <= (float)PARK_PL_ANCLA_IGN) parkDetAlong = 0.5f * (parkDetAlong + parkIgnAlong);   // punto medio: la bajada ignorada adelanta (nariz inclinada), la confirmada atrasa
             parkDetPorPose = false; parkIgnOk = false;
-            parkDetHSon  = parkBase * 10.0f + 68.0f;
             parkDetTh = isnan(parkThCarril()) ? 0.0f : constrain(parkThCarril(), -25.0f, 25.0f);
+            // altura del eje por el sonar (va 68 mm al costado y 64 adelante del eje, el haz sale inclinado theta)
+            { float tr = PARK_PL_TILT ? parkDetTh * 0.0174533f : 0.0f; parkDetHSon = (parkBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr); }
             Serial.print("PARK anclaje along="); Serial.print(parkDetAlong, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
             Serial.print(" h="); Serial.println(parkDetHSon, 0);
             Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
@@ -6240,9 +6241,6 @@ void loop() {
         float pw, ph;
         parkPlanPose(pw, ph);
         float clr = parkPlanHolgura(pw, ph, th);
-        { static unsigned long dbgMs = 0; if (millis() - dbgMs >= 100) { dbgMs = millis();
-            Serial.print("PLAN pose w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" th="); Serial.print(th, 1);
-            Serial.print(" clr="); Serial.print(clr, 0); Serial.print(" dB="); Serial.print(distB_filtrada, 1); Serial.print(" errC="); Serial.println(rutaErrCarrilDeg(), 1); } }
         bool fin = false; const char *why = "";
         float mm = parkRecorridoMm();
         unsigned long tseg = millis() - parkFaseMs;
