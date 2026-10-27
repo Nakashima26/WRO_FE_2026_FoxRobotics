@@ -1526,6 +1526,7 @@ bool                 parkDirecto                 = false; // true: estaciona de 
 float                parkRevBase                 = 0.0f;   // pared (cm) vista por el sonar durante la reversa-S
 int                  parkRevDrop                 = 0;
 bool                 parkRevAnc                  = false;  // ya se ancla w con la madera de adelante vista por el sonar
+bool                 parkRevModo                 = false;  // el plan arranca desde la reversa en S
 bool                 parkRevDir                  = false;  // el cajon al inicio se resuelve con reversa en S (sin U)
 int                  parkSinUDec                 = 0;     // para pka < PKA_MIN: 0 sin decidir, 1 directo, 2 con U
 PARK_AJ float        PARK_SINU_DEC_TOL_CM        = 12.0f;
@@ -1561,6 +1562,7 @@ PARK_AJ float        PARK_PL_WF_U                = 39.0f;   // igual que WF tras
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
+PARK_AJ int          PARK_PL_TILT_H              = 0;       // 1 = la altura del eje por sonar del escaneo normal usa la inclinacion (empeoro n1 s11 y n3 s20)
 PARK_AJ int          PARK_PL_TILT                = 1;       // 1 = corrige el anclaje de w por la inclinacion de la nariz al detectar el poste 2
 PARK_AJ int          PARK_REV_DIR                = 1;       // 1 = cajon al inicio y el carro va por adentro (iba a hacer U): sigue recto, pasa el cajon y entra de reversa en S sin U
 PARK_AJ float        PARK_REV_W_TOMA             = 150.0f;  // toma el mando de la Pi con el eje trasero en este w (marco del plan; 264 = cara de la madera de adelante)
@@ -1568,6 +1570,7 @@ PARK_AJ float        PARK_REV_TH1                = 60.0f;   // angulo de la rect
 PARK_AJ float        PARK_REV_KH                 = 0.06f;   // grados de rumbo hacia la pared por mm de h sobre PARK_REV_H0
 PARK_AJ float        PARK_REV_CAIDA_CM           = 8.0f;
 PARK_AJ float        PARK_REV_HMAX               = 720.0f;  // mm de la pared al tomar el mando; mas lejos hace la U
+PARK_AJ float        PARK_REV_DWF                = -8.0f;    // se suma a WF en el plan que viene de la reversa en S
 PARK_AJ float        PARK_REV_H0                 = 400.0f;
 PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
@@ -2694,7 +2697,7 @@ void vigilarSinU() {
     parkDetAlong = rutaPka - 64.0f;                        // w = 200 en pka - 64 (marco del plan); pka sale de la Pi
     parkDetHPose = parkHPoseMm(); parkDetHSon = parkDetHPose; parkDetTh = 0.0f;
     parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;
-    parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false;
+    parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevModo = true;
     motorAdelante();
     Serial.print("PARK REV: sigo recto, pka="); Serial.print(rutaPka, 0); Serial.print(" along="); Serial.print(along, 0);
     Serial.print(" h="); Serial.println(parkDetHSon, 0);
@@ -5735,7 +5738,7 @@ void loop() {
             parkDetPorPose = false; parkIgnOk = false;
             parkDetTh = isnan(parkThCarril()) ? 0.0f : constrain(parkThCarril(), -25.0f, 25.0f);
             // altura del eje por el sonar (va 68 mm al costado y 64 adelante del eje, el haz sale inclinado theta)
-            { float tr = PARK_PL_TILT ? parkDetTh * 0.0174533f : 0.0f; parkDetHSon = (parkBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr); }
+            { float tr = PARK_PL_TILT_H ? parkDetTh * 0.0174533f : 0.0f; parkDetHSon = (parkBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr); }
             Serial.print("PARK anclaje along="); Serial.print(parkDetAlong, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
             Serial.print(" h="); Serial.println(parkDetHSon, 0);
             Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
@@ -6218,7 +6221,7 @@ void loop() {
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
             if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
-              float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
+              float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - PARK_PL_LEAD, 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
