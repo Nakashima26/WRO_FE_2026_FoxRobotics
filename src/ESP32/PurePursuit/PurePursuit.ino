@@ -1553,6 +1553,7 @@ PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la lle
 PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
 PARK_AJ float        PARK_PL_WF                  = 44.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
+PARK_AJ float        PARK_PL_WF_U                = 36.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
@@ -6113,7 +6114,11 @@ void loop() {
       if (parkFase == 40) {
         float th = -haciaPared * (anguloGyro - parkRumboRef);   // nariz hacia la isla (+)
         // El rumbo de la pared medido con los sonares trae hasta ~10 grados de error; el del carril (pose del tapete) no.
-        if (PARK_PL_THLANE && piRuta && rutaTfOk && rutaSecSalida >= 0) th = direccionIzquierda ? rutaErrCarrilDeg() : -rutaErrCarrilDeg();
+        if (PARK_PL_THLANE && piRuta && rutaTfOk && rutaSecSalida >= 0) {
+          float e = rutaErrCarrilDeg();                         // + = nariz a la izquierda del carril
+          if (!parkDirecto) { e -= 180.0f; if (e < -180.0f) e += 360.0f; }   // tras la U va en sentido contrario y la pared queda al otro lado
+          th = (direccionIzquierda == parkDirecto) ? e : -e;
+        }
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
@@ -6134,7 +6139,7 @@ void loop() {
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
             if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
-              float t = parkPlanT1Solve(w0, h0, th, PARK_PL_WF, PARK_PL_HEND, PARK_PL_RI);
+              float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - PARK_PL_LEAD, 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
