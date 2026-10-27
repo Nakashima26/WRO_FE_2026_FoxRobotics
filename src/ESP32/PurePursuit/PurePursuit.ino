@@ -1552,8 +1552,9 @@ PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina s
 PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
 PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
-PARK_AJ float        PARK_PL_WF                  = 50.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
+PARK_AJ float        PARK_PL_WF                  = 44.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
+PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
 PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
 PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
@@ -3098,6 +3099,8 @@ float rutaExtTapeteCm() {
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
 bool parkPlanRectaOn = false;
+bool parkDetPorPose = false, parkIgnOk = false;
+float parkIgnAlong = 0.0f;
 float parkDetAlong = 0.0f, parkDetHPose = 0.0f, parkDetHSon = 350.0f;
 float parkHPoseMm() {
   float x, y;
@@ -5571,6 +5574,7 @@ void loop() {
         if (parkDirecto && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
             && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
           Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
+          parkDetPorPose = true;
           parkScanSubFase  = 2;
           parkHuecoEntryMs = millis();
           parkPoste1Ms     = 0;
@@ -5578,6 +5582,7 @@ void loop() {
         // ── Subfase 0: Buscando Poste 1 ──
         if (parkScanSubFase == 0) {
           if (bajada && !armada && parkCaidaCnt == PARK_CAIDA_N) {
+            parkIgnAlong = alongSalidaMm(); parkIgnOk = true;
             Serial.print("PARK: bajada IGNORADA (no armada: base=");
             Serial.print(baseLista ? 1 : 0);
             Serial.print(" rosa="); Serial.print(parkRosaVisto ? 1 : 0);
@@ -5677,6 +5682,9 @@ void loop() {
             // real. El rumbo paralelo medido es la referencia correcta.
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
             parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
+            // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
+            if (parkDetPorPose && parkIgnOk && PARK_PL_ANCLA_IGN > 0 && parkDetAlong - parkIgnAlong >= 0.0f && parkDetAlong - parkIgnAlong <= (float)PARK_PL_ANCLA_IGN) parkDetAlong = 0.5f * (parkDetAlong + parkIgnAlong);   // punto medio: la bajada ignorada adelanta (nariz inclinada), la confirmada atrasa
+            parkDetPorPose = false; parkIgnOk = false;
             parkDetHSon  = parkBase * 10.0f + 68.0f;
             Serial.print("PARK anclaje along="); Serial.print(parkDetAlong, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
             Serial.print(" h="); Serial.println(parkDetHSon, 0);
