@@ -574,6 +574,12 @@ class RouteMode:
                 # se come el tramo (n3 s23). Si el pico ya pesa, se espera al sonar
                 # (n3 s24: la línea a n=8 iba 32 mm corrida).
                 delta = float(np.median(self._line_d))
+            edge = getattr(C, "ROUTE_FIX_EDGE_MM", None)
+            if (delta is not None and edge is not None and len(self._line_d) < int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
+                    and (delta - (PARK_W_MIN - self.fix.w0_guess) < float(edge)
+                         or (PARK_W_MAX - self.fix.w0_guess) - delta < float(edge))):
+                # Pico pegado al extremo del rango y sin la línea: una señal en la pared supuesta (s894: -691, verdad -299).
+                delta = None
             forced = False
             if delta is None and self._past_straight(dm, pose):
                 # Sin pico al final de la recta: la media (sin lecturas que

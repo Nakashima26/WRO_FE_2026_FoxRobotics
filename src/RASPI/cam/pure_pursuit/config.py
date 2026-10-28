@@ -1382,6 +1382,8 @@ ROUTE_PROFILE_A_LAT_TIGHT_MM_S2 = 1500.0
 # Si no hay peligro, el tope es ROUTE_CTE_PWM (poner 255 para no frenar).
 ROUTE_CTE_URGENT_MM = None
 ROUTE_CTE_URGENT_PWM = 120
+# Arranque ciego: un pico a menos de esto (mm) del extremo del rango de δ, sin votos de la línea, no fija el avance. None = apagado.
+ROUTE_FIX_EDGE_MM = None
 ROUTE_CTE_HORIZON_MM = 600.0
 # Subida de ruta: con ROUTE_UPLOAD_SLOW se frena mientras la ruta nueva sube al ESP (el ESP
 # sigue la anterior). Con DIFF_MM se frena solo si la ruta nueva se aparta más de DIFF_MM de la
