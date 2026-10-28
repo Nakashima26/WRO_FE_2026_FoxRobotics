@@ -1572,13 +1572,16 @@ PARK_AJ float        PARK_REV_W_TOMA             = 150.0f;  // toma el mando de 
 PARK_AJ float        PARK_REV_TH1                = 60.0f;   // angulo de la recta de la reversa: fija en que w para (mas h = mas lejos)
 PARK_AJ float        PARK_REV_KH                 = 0.06f;   // grados de rumbo hacia la pared por mm de h sobre PARK_REV_H0
 PARK_AJ float        PARK_REV_CAIDA_CM           = 8.0f;
-PARK_AJ float        PARK_REV_HMAX               = 720.0f;  // mm de la pared al tomar el mando; mas lejos hace la U
+PARK_AJ float        PARK_REV_HMAX               = 950.0f;  // mm de la pared al tomar el mando; mas lejos hace la U
 PARK_AJ float        PARK_REV_DWF                = -8.0f;    // se suma a WF en el plan que viene de la reversa en S
 PARK_AJ float        PARK_REV_SIN_ANCLA_MM       = 120.0f;  // sin ver la madera de ida sigue avanzando esto mas y luego la busca retrocediendo
 PARK_AJ int          PARK_REV_BUSCA_PWM          = 90;
 PARK_AJ float        PARK_REV_BUSCA_W_MIN        = 60.0f;   // w mas atras al que se busca la madera retrocediendo
 PARK_AJ float        PARK_REV_BACK_DW            = 28.0f;    // correccion de w del ancla hecha retrocediendo
 PARK_AJ int          PARK_REV_SOLO_ATRAS         = 0;       // prueba: ignora la madera vista de ida y siempre la busca retrocediendo
+PARK_AJ float        PARK_REV_ALTA_H             = 520.0f;  // desde mas lejos de la pared que esto la recta es larga y la inercia del volante pasa mas
+PARK_AJ float        PARK_REV_LEAD_ALTA          = 18.0f;   // LEAD en ese caso (ventana 17-19 en s22)
+PARK_AJ float        PARK_REV_EXT_CM             = 66.0f;   // al iniciar el escaneo, si el carro esta mas lejos de la pared que esto y fuera de la linea, reversa en S
 PARK_AJ float        PARK_REV_H0                 = 400.0f;
 PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
@@ -2749,6 +2752,8 @@ void vigilarSinU() {
   // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
   bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
   if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
+  // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
+  if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
   parkUturnPendiente = false;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
@@ -6287,7 +6292,7 @@ void loop() {
             if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
               float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
-              parkPlanT1 = max(t - PARK_PL_LEAD, 20.0f);
+              parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
             }
