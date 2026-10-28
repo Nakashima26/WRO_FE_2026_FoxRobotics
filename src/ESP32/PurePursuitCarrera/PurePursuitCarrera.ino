@@ -1582,11 +1582,14 @@ PARK_AJ float        PARK_REV_DWF                = -8.0f;    // se suma a WF en 
 PARK_AJ float        PARK_REV_SIN_ANCLA_MM       = 120.0f;  // sin ver la madera de ida sigue avanzando esto mas y luego la busca retrocediendo
 PARK_AJ int          PARK_REV_BUSCA_PWM          = 90;
 PARK_AJ float        PARK_REV_BUSCA_W_MIN        = 60.0f;   // w mas atras al que se busca la madera retrocediendo
-PARK_AJ float        PARK_REV_BACK_DW            = 28.0f;    // correccion de w del ancla hecha retrocediendo
+PARK_AJ float        PARK_REV_B0                 = 34.6f;   // correccion de w del ancla hecha retrocediendo: B0 + B1*(h-350) + B2*(h-200)*tan(theta)
+PARK_AJ float        PARK_REV_B1                 = 0.362f;
+PARK_AJ float        PARK_REV_B2                 = 0.816f;
 PARK_AJ int          PARK_REV_SOLO_ATRAS         = 0;       // prueba: ignora la madera vista de ida y siempre la busca retrocediendo
 PARK_AJ float        PARK_REV_ALTA_H             = 520.0f;  // desde mas lejos de la pared que esto la recta es larga y la inercia del volante pasa mas
 PARK_AJ float        PARK_REV_LEAD_ALTA          = 18.0f;   // LEAD en ese caso (ventana 17-19 en s22)
 PARK_AJ float        PARK_REV_EXT_CM             = 66.0f;   // al iniciar el escaneo, si el carro esta mas lejos de la pared que esto y fuera de la linea, reversa en S
+PARK_AJ float        PARK_REV_DF_CM              = 25.0f;   // el sonar frontal ve algo (senal) a menos de esto: para de avanzar
 PARK_AJ float        PARK_REV_H0                 = 400.0f;
 PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
@@ -6176,12 +6179,9 @@ void loop() {
         // La madera de adelante es una bajada del sonar de pared (pka de la Pi trae +-30 mm; el sonar +-5 con la correccion de inclinacion).
         float pw, ph; parkPlanPose(pw, ph);
         if (!parkRevAnc && !PARK_REV_SOLO_ATRAS && extRaw > 2 && extRaw < 150) {
-          float esperada = (ph - 68.0f) / 10.0f;          // cm a la pared segun la pose
-          if ((float)extRaw >= esperada - 6.0f) {          // pared
-            parkRevBase = parkRevBase <= 0.0f ? (float)extRaw : parkRevBase + 0.5f * ((float)extRaw - parkRevBase);
-            parkRevDrop = 0;
-          } else if ((float)extRaw < esperada - PARK_REV_CAIDA_CM) {   // madera
-            if (parkRevBase <= 0.0f) { parkRevCaeAU("primera lectura ya es madera"); break; }
+          // bajada del sonar de pared respecto a las lecturas anteriores (no se usa la pared esperada por la pose: trae decenas de mm de error)
+          if (parkRevBase <= 0.0f) parkRevBase = (float)extRaw;
+          if ((float)extRaw < parkRevBase - PARK_REV_CAIDA_CM) {
             if (++parkRevDrop >= 2) {
               parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
               float t = parkThCarril(); parkDetTh = isnan(t) ? 0.0f : constrain(t, -25.0f, 25.0f);
@@ -6192,7 +6192,7 @@ void loop() {
               Serial.print("PARK REV: madera de adelante por sonar along="); Serial.print(parkDetAlong, 0); Serial.print(" ext="); Serial.print(extRaw); Serial.print(" base="); Serial.println(parkRevBase, 0);
               parkPlanPose(pw, ph);
             }
-          }
+          } else { parkRevDrop = 0; parkRevBase += 0.5f * ((float)extRaw - parkRevBase); }
         }
         // rumbo hacia la pared proporcional a la altura que falta (th negativo = nariz a la pared); anguloGyro: + = izquierda
         float thCmd = -constrain(PARK_REV_KH * (ph - PARK_REV_H0), 0.0f, 20.0f);
@@ -6201,8 +6201,9 @@ void loop() {
         // para donde la recta a PARK_REV_TH1 (arco EXT + recta + arco INT) llega a (WF, HEND): w = WF + R(2 sin t) + (h-HEND-2R(1-cos t))/tan t
         float t1 = PARK_REV_TH1 * 0.0174533f;
         float wStop = PARK_PL_WF + 2.0f * PARK_PL_RI * sinf(t1) + max(ph - PARK_PL_HEND - 2.0f * PARK_PL_RI * (1.0f - cosf(t1)), 0.0f) / tanf(t1);
-        if (!parkRevAnc && (pw >= wStop + PARK_REV_SIN_ANCLA_MM || millis() - parkFaseMs > 6000)) { parkRevCaeAU("sin ver la madera"); break; }
-        if (parkRevAnc && (pw >= wStop || millis() - parkFaseMs > 6000)) {
+        bool senalAdelante = distF_filtrada > 0 && distF_filtrada <= PARK_REV_DF_CM && fabsf(parkThCarril()) <= 12.0f && millis() - parkFaseMs > 300;   // la senal de la entrada del cuadrante esta delante del cajon
+        if (!parkRevAnc && (pw >= wStop + PARK_REV_SIN_ANCLA_MM || senalAdelante || millis() - parkFaseMs > 6000)) { parkRevCaeAU(senalAdelante ? "senal adelante" : "sin ver la madera"); break; }
+        if (parkRevAnc && (pw >= wStop || senalAdelante || millis() - parkFaseMs > 6000)) {
           Serial.print("PARK REV fin avance w="); Serial.print(pw, 0); Serial.print(" h="); Serial.println(ph, 0);
           motorCoast(); escribirServo(centroServo);
           parkFase = 2; parkFaseMs = millis(); parkOdom0 = odomMm;
@@ -6233,9 +6234,10 @@ void loop() {
             float baseCm = parkRevBase > 0.0f ? parkRevBase : esperada;
             parkDetHPose = parkHPoseMm(); parkDetHSon = (baseCm * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr);
             // en reversa la deteccion adelanta hacia atras: el cono suma en vez de restar (parkPlanPose resta CONO*(h-350) siempre)
-            float wNom = (borde == 1 ? 220.0f : 200.0f) + PARK_REV_BACK_DW + 2.0f * PARK_PL_CONO * (parkDetHSon - 350.0f);
+            float wNom = (borde == 1 ? 220.0f : 200.0f) + PARK_REV_B0 + PARK_REV_B1 * (parkDetHSon - 350.0f) + PARK_REV_B2 * (parkDetHSon - 200.0f) * tanf(parkDetTh * 0.0174533f)
+                          + PARK_PL_CONO * (parkDetHSon - 350.0f);   // el cono de ida no aplica al reves: se cancela lo que resta parkPlanPose; B0 B1 B2 ajustados con 33 corridas (rmse 3.3 mm)
             parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET);
-            Serial.print("PARK REV: madera de adelante por sonar (reversa) borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
+            Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
             parkRevAnc = true;
             parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;   // con el ancla, de nuevo hacia adelante hasta el w de parada
             motorAdelante();
