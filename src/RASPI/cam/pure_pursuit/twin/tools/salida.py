@@ -103,7 +103,7 @@ def run_one(scn: str, out: Path, extra: dict) -> None:
     else:
         parts = scn.split(":")
         seed = 1; fld_fix = build_field(parts[0], int(parts[1]), parts[2] if len(parts) > 2 else "N")
-        S.randomize = lambda _seed, start="cajon": fld_fix
+        S.randomize = lambda _seed, start="cajon", park_pos=None: fld_fix
 
     dbg = open(out / "fw_debug.log", "w", encoding="utf-8")
     _orig = F.FirmwareSIL.pop_debug

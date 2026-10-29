@@ -60,8 +60,8 @@ class SteeringParams:
     # modelo usa las tablas de abajo cuando existen.
     gain_left: float = 46.2
     gain_right: float = 57.0
-    wheel_max_left_deg: float = 53.0    # bici a tope izq (R 134-136 mm de 148 a 156)
-    wheel_max_right_deg: float = 53.0   # bici a tope der (R 123 mm en servo 1)
+    wheel_max_left_deg: float = 40.1    # bici a tope izq (medido Erick, R 134) (R 134-136 mm de 148 a 156)
+    wheel_max_right_deg: float = 42.5   # bici a tope der (medido, R 123) (R 123 mm en servo 1)
     # 2026-10-24 (logs_tof/servo_desde55/95_*, PWM 150, 1.35 m recto, BNO): llegando al 75 desde
     # 55 la rueda queda 1.1-1.45° a la der, desde 95 0.9-1.1° a la izq -> centro 75 (±0.3) y juego.
     # El 78 de antes era la mitad de 1..156, no el recto medido (SeguirRuta va derecho con 75).
