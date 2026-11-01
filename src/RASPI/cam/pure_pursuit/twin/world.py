@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .. import config as _C
 from ..wro_field import INNER_HALF_MM, OUTER_HALF_MM, SIGN_MM
 
 if TYPE_CHECKING:
@@ -46,17 +47,14 @@ def body_corners(
     width_mm: float,
     rear_overhang_mm: float,
 ) -> np.ndarray:
-    """Esquinas mundo (4,2) en orden cerrado."""
+    """Contorno mundo (N,2) en orden cerrado: rectángulo con la nariz angosta del CAD v2."""
     y0 = -rear_overhang_mm
     y1 = y0 + length_mm
     half_w = width_mm / 2.0
+    yw = min(y1, _C.BODY_WIDE_END_MM)
+    nw = min(half_w, _C.NOSE_HALF_WIDTH_MM)
     local = np.array(
-        [
-            [-half_w, y0],
-            [half_w, y0],
-            [half_w, y1],
-            [-half_w, y1],
-        ],
+        [[-half_w, y0], [half_w, y0], [half_w, yw], [nw, yw], [nw, y1], [-nw, y1], [-nw, yw], [-half_w, yw]],
         dtype=np.float64,
     )
     h = math.radians(heading_deg)

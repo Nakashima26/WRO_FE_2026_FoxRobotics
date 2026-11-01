@@ -80,6 +80,10 @@ ROBOT_WIDTH_MM       = 125.0    # medido 2026-10-22 en el carro (CAD decía 132)
 WHEELBASE_MM         = 113.0    # CAD: 112.85 (el .ino también usa 113)
 REAR_OVERHANG_MM     = 21.8     # CAD (borde de llanta trasera)
 FRONT_OVERHANG_MM    = 41.2     # 176 − 113 − 21.8 (medido 2026-10-22; lo que sobra va adelante)
+# Contorno visto desde arriba (GLB v2): ancho completo hasta 138 mm del eje trasero; de ahí a la
+# punta solo salen el soporte del ultrasónico (±22.5, hasta 148) y la cámara (±18, hasta 154.2).
+BODY_WIDE_END_MM     = 138.0
+NOSE_HALF_WIDTH_MM   = 22.5
 TRACK_MM             = 110.0    # CAD: entre centros de llantas traseras (±55; llanta de 22 mm)
 WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
 # Dirección v2 (README §2.4, piñón de 19 dientes, CAD): a tope de servo la rueda
