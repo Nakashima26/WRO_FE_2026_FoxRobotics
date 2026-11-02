@@ -204,7 +204,7 @@ const float RUEDA_POR_TICK_DER = 0.552f;
 const float RUEDA_POR_TICK_IZQ = 0.588f;
 // Tope simétrico por si acaso (usuario 2026-10-22): R 134 mm a los dos lados = atan(113/134).
 // Debe coincidir con config.MAX_WHEEL_STEER_DEG y KAPPA_MAX de route_planner.py.
-const float RUEDA_TOPE_DEG     = 53.0f;
+const float RUEDA_TOPE_DEG     = 42.5f;   // der 42.5 (R 123) / izq 40.1 (R 134): la tabla de rutaServo satura en su ultimo punto
 const float RUTA_CENTRO_SERVO  = 74.5f;   // centro del ajuste a 5 vueltas (twin steering.servo_center_deg)
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
@@ -3236,10 +3236,10 @@ float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, floa
 int rutaServo(float ruedaDeg) {
   // Tabla medida 2026-10-24 (twin/params.py table_right/left, arcos PWM 150): grados de rueda -> unidades
   // de servo desde el centro (la lineal de 0.552/0.588 se queda corta 15 % a la derecha en curvas suaves).
-  // 2026-10-27: tope 53° parejo (usuario), igual que twin/params.py.
-  static const float DER_W[] = {0.0f, 8.7f, 18.2f, 53.0f};
+  // Tope medido (der 42.5 en servo 1, izq 40.1 en 156), igual que twin/params.py.
+  static const float DER_W[] = {0.0f, 8.7f, 18.2f, 42.5f};
   static const float DER_U[] = {0.0f, 13.5f, 28.5f, 72.5f};
-  static const float IZQ_W[] = {0.0f, 7.6f, 15.6f, 53.0f};
+  static const float IZQ_W[] = {0.0f, 7.6f, 15.6f, 40.1f};
   static const float IZQ_U[] = {0.0f, 13.5f, 28.5f, 71.5f};
   ruedaDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
   bool der = ruedaDeg >= 0.0f;
