@@ -1,6 +1,6 @@
 """Scratch: ¿quedó el carro dentro del cajón? Pose final del trace vs barreras."""
 import csv, math, sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 from pure_pursuit.wro_field import _barrier_corners
 for d in sys.argv[1:]:
     try:
