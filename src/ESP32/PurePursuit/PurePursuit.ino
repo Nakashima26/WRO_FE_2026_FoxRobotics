@@ -1073,7 +1073,7 @@ const bool          PARK_RECTO_ENABLED        = true;
 // Ojo: las corridas 1014/1016 daban 24.7 y ~31 — hay dispersión porque la
 // contravuelta se corta en distintos ángulos. 30 es el mejor ajuste con lo que
 // hay hoy, no un número cerrado.
-PARK_AJ float         PARK_RADIO_CM             = 14.0f;
+PARK_AJ float         PARK_RADIO_CM             = 22.0f;
 // Distancia final a la pared exterior que se busca (misma lectura que parkBase).
 // 7 cm es lo que midió la corrida buena (21:38).
 PARK_AJ float         PARK_FINAL_CM             = 0.0f;
@@ -1100,7 +1100,7 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 const bool          PARK_POR_ENCODER          = true;
 PARK_AJ float         PARK_POSTE2_MM            = 80.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
-PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14; 2026-10-22: 100 -> 110. Con hueco 264 y U a 200, 100 deja la semilla 18 a 8 mm de la madera de enfrente; 120 choca en los dos postes; 110 termina 24/24
+PARK_AJ float         PARK_RECTO_MAX_MM         = 85.0f;  // menos recto con el radio medido de 134 mm
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
 const float         PARK_WIGGLE_INT_MM        = 0.0f;
 const float         PARK_WIGGLE_EXT_MM        = 0.0f;
@@ -1467,7 +1467,7 @@ const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el a
 // 40 -> 28 (barrido en el twin, 37 seeds con U: el margen a la lata del cuadrante inicial tras la U
 // sube de ~52/107 a ~149/190 mm CW/CCW y la U termina a ~180 mm de la pared exterior). Con ext <= 35 cm
 // al arrancar la U el radio ya es el mínimo y este valor no actúa. Del lado exterior no hay latas.
-PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 44;     // reescalado de R~85 a R=134 mm
 // Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
 // a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
 PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 0;
@@ -1557,13 +1557,13 @@ PARK_AJ float        PARK_PL_W_DET               = 200.0f;  // w del eje trasero
 PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
-PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
+PARK_AJ float        PARK_PL_LEAD                = 17.0f;  // inercia observada con el radio medido
+PARK_AJ float        PARK_PL_M_MM                = 40.0f;  // envolvente real + frenado entre dos muestras del SIL
 PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
 PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
 PARK_AJ float        PARK_PL_WF                  = 47.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
 PARK_AJ float        PARK_PL_WF_U                = 39.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
-PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
 PARK_AJ int          PARK_PL_TILT_H              = 0;       // 1 = la altura del eje por sonar del escaneo normal usa la inclinacion (empeoro n1 s11 y n3 s20)
@@ -1578,9 +1578,9 @@ PARK_AJ float        PARK_REV_DWF                = -8.0f;    // se suma a WF en 
 PARK_AJ float        PARK_REV_SIN_ANCLA_MM       = 120.0f;  // sin ver la madera de ida sigue avanzando esto mas y luego la busca retrocediendo
 PARK_AJ int          PARK_REV_BUSCA_PWM          = 90;
 PARK_AJ float        PARK_REV_BUSCA_W_MIN        = 60.0f;   // w mas atras al que se busca la madera retrocediendo
-PARK_AJ float        PARK_REV_B0                 = 34.6f;   // correccion de w del ancla hecha retrocediendo: B0 + B1*(h-350) + B2*(h-200)*tan(theta)
-PARK_AJ float        PARK_REV_B1                 = 0.362f;
-PARK_AJ float        PARK_REV_B2                 = 0.816f;
+PARK_AJ float        PARK_REV_B0                 = -13.0f;  // ancla reversa recalculada en el marco del cajon medido
+PARK_AJ float        PARK_REV_B1                 = 0.570f;
+PARK_AJ float        PARK_REV_B2                 = 1.284f;
 PARK_AJ int          PARK_REV_SOLO_ATRAS         = 0;       // prueba: ignora la madera vista de ida y siempre la busca retrocediendo
 PARK_AJ float        PARK_REV_ALTA_H             = 520.0f;  // desde mas lejos de la pared que esto la recta es larga y la inercia del volante pasa mas
 PARK_AJ float        PARK_REV_LEAD_ALTA          = 18.0f;   // LEAD en ese caso (ventana 17-19 en s22)
@@ -1591,8 +1591,9 @@ PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
 PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
 PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
-PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
-PARK_AJ float        PARK_PL_RI                  = 85.0f;  // radio de la reversa INT (eje trasero)
+PARK_AJ int          PARK_PL_RECTA               = 1;       // arco EXT + recta + arco INT
+PARK_AJ float        PARK_PL_R_IZQ               = 134.0f;   // radios medidos al centro del eje trasero
+PARK_AJ float        PARK_PL_R_DER               = 123.0f;
 PARK_AJ float        PARK_PL_TA_MAX              = 92.0f;
 PARK_AJ float        PARK_PL_T2_PISO             = 12.0f;
 PARK_AJ float        PARK_PL_T1_POR_MM           = 0.0f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
@@ -2480,6 +2481,8 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
+  SIL_AJ(PARK_REV_B0); SIL_AJ(PARK_REV_B1); SIL_AJ(PARK_REV_B2);
+  SIL_AJ(PARK_PL_LEAD); SIL_AJ(PARK_PL_M_MM); SIL_AJ(PARK_PL_R_IZQ); SIL_AJ(PARK_PL_R_DER);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
   SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
@@ -3204,13 +3207,16 @@ static float parkPtSeg(float px, float py, float ax, float ay, float bx, float b
 // Holgura minima (mm) de la huella del carro a las dos maderas (negativa = dentro) para el eje trasero en (w, h, th).
 float parkPlanHolgura(float w, float h, float thDeg) {
   float c = cosf(thDeg * 0.0174533f), s = sinf(thDeg * 0.0174533f);
-  const float A[4] = {154.2f, 154.2f, -21.8f, -21.8f}, B[4] = {62.5f, -62.5f, -62.5f, 62.5f};
-  float px[4], py[4];
-  for (int k = 0; k < 4; k++) { px[k] = w + A[k] * c - B[k] * s; py[k] = h + A[k] * s + B[k] * c; }
+  // CAD v2: ancho completo solo hasta A=138; nariz del soporte ±22.5 hasta A=154.2.
+  const int NP = 8;
+  const float A[NP] = {-21.8f, -21.8f, 138.0f, 138.0f, 154.2f, 154.2f, 138.0f, 138.0f};
+  const float B[NP] = {-62.5f, 62.5f, 62.5f, 22.5f, 22.5f, -22.5f, -22.5f, -62.5f};
+  float px[NP], py[NP];
+  for (int k = 0; k < NP; k++) { px[k] = w + A[k] * c - B[k] * s; py[k] = h + A[k] * s + B[k] * c; }
   const float R[2][2] = {{-20.0f, 0.0f}, {264.0f, 284.0f}};   // [w0, w1] de cada madera, h de 0 a 200
   float best = 1e9f;
   for (int r = 0; r < 2; r++) {
-    for (int k = 0; k < 4; k++) {   // esquinas del carro a la madera
+    for (int k = 0; k < NP; k++) {   // vertices del carro a la madera
       float dx = max(max(R[r][0] - px[k], px[k] - R[r][1]), 0.0f), dy = max(py[k] - 200.0f, 0.0f);
       float d = sqrtf(dx * dx + dy * dy);
       if (dx == 0.0f && dy == 0.0f) d = -1.0f;
@@ -3218,17 +3224,21 @@ float parkPlanHolgura(float w, float h, float thDeg) {
     }
     for (int t = 0; t < 2; t++) {   // puntas de la madera a los lados del carro
       float tx = R[r][t], ty = 200.0f;
-      for (int k = 0; k < 4; k++) best = min(best, parkPtSeg(tx, ty, px[k], py[k], px[(k + 1) % 4], py[(k + 1) % 4]));
+      for (int k = 0; k < NP; k++) best = min(best, parkPtSeg(tx, ty, px[k], py[k], px[(k + 1) % NP], py[(k + 1) % NP]));
     }
   }
   return best;
 }
 
-// Angulo th1 del plan RECTA: arco EXT (radio RI) hasta th1, recta, arco INT de vuelta a 0; desde (w0,h0) llega a (wf,hf).
-float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float R) {
+float parkPlanRadioExt() { return parkParedEsIzquierda ? PARK_PL_R_IZQ : PARK_PL_R_DER; }
+float parkPlanRadioInt() { return parkParedEsIzquierda ? PARK_PL_R_DER : PARK_PL_R_IZQ; }
+
+// Angulo th1: arco EXT (Rext), recta y arco INT (Rint) de vuelta a 0.
+float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float Rext, float Rint) {
   float dW = w0 - wf, dH = h0 - hf, t0 = th0Deg * DEG_TO_RAD, th = 1.05f;
   for (int k = 0; k < 12; k++)
-    th = atan2f(dH - R * (cosf(t0) - cosf(th)) - R * (1.0f - cosf(th)), dW - R * (sinf(th) - sinf(t0)) - R * sinf(th));
+    th = atan2f(dH - Rext * (cosf(t0) - cosf(th)) - Rint * (1.0f - cosf(th)),
+                dW - Rext * (sinf(th) - sinf(t0)) - Rint * sinf(th));
   return constrain(th * RAD_TO_DEG, 25.0f, 80.0f);
 }
 
@@ -5357,7 +5367,7 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // rutaServo satura cada lado en su tope medido
           parkServoU = rutaServo(uturnIzqP ? -delta : delta);
           Serial.print("PARK U servo="); Serial.print(parkServoU);
           Serial.print(" ext="); Serial.println(extAhoraP);
@@ -6196,7 +6206,8 @@ void loop() {
         setMotor(PARK_REV_AVANCE_PWM);
         // para donde la recta a PARK_REV_TH1 (arco EXT + recta + arco INT) llega a (WF, HEND): w = WF + R(2 sin t) + (h-HEND-2R(1-cos t))/tan t
         float t1 = PARK_REV_TH1 * 0.0174533f;
-        float wStop = PARK_PL_WF + 2.0f * PARK_PL_RI * sinf(t1) + max(ph - PARK_PL_HEND - 2.0f * PARK_PL_RI * (1.0f - cosf(t1)), 0.0f) / tanf(t1);
+        float rsum = parkPlanRadioExt() + parkPlanRadioInt();
+        float wStop = PARK_PL_WF + rsum * sinf(t1) + max(ph - PARK_PL_HEND - rsum * (1.0f - cosf(t1)), 0.0f) / tanf(t1);
         bool senalAdelante = distF_filtrada > 0 && distF_filtrada <= PARK_REV_DF_CM && fabsf(parkThCarril()) <= 12.0f && millis() - parkFaseMs > 300;   // la senal de la entrada del cuadrante esta delante del cajon
         if (!parkRevAnc && (pw >= wStop + PARK_REV_SIN_ANCLA_MM || senalAdelante || millis() - parkFaseMs > 6000)) { parkRevCaeAU(senalAdelante ? "senal adelante" : "sin ver la madera"); break; }
         if (parkRevAnc && (pw >= wStop || senalAdelante || millis() - parkFaseMs > 6000)) {
@@ -6294,7 +6305,8 @@ void loop() {
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
             if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
-              float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
+              float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U,
+                                        PARK_PL_HEND, parkPlanRadioExt(), parkPlanRadioInt());
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
@@ -6317,11 +6329,14 @@ void loop() {
         float pw, ph;
         parkPlanPose(pw, ph);
         float clr = parkPlanHolgura(pw, ph, th);
+        // La pose de carril puede diferir ~9° del rumbo real: protege ambas esquinas con esa envolvente.
+        clr = min(clr, min(parkPlanHolgura(pw, ph, th - 10.0f), parkPlanHolgura(pw, ph, th + 10.0f)));
         bool fin = false; const char *why = "";
         float mm = parkRecorridoMm();
         unsigned long tseg = millis() - parkFaseMs;
         int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
-        bool cerca = clr <= PARK_PL_M_MM && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
+        float margenPlan = PARK_PL_M_MM + (parkRevModo ? 16.0f : 0.0f); // ancla lejana + distancia de frenado del zigzag
+        bool cerca = clr <= margenPlan && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
         parkPlanClrPrev = clr;
         // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
         if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
@@ -6332,13 +6347,13 @@ void loop() {
         if (i == 0 && PARK_PL_RECTA) {
           if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
           if (parkPlanRectaOn) {
-            float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
+            float thr = PARK_PL_HEND + parkPlanRadioInt() * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
             fin = ph <= thr; why = "RECTA";
             if ((ph - thr) / max(sinf(th * 0.0174533f), 0.3f) > PARK_PL_RECTA_FRENA_MM) setMotor(PARK_PL_RECTA_PWM);
           }
           if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; }
         }
-        else if (i == 0) { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
+        else if (i == 0) { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + parkPlanRadioInt() * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
         else if (i == 1) { fin = th <= PARK_PL_T2; why = "T2"; }
         else if (i == 2) { fin = mm >= PARK_PL_C_MM; why = "MM"; }
         else if (i == 3) { fin = th <= PARK_PL_T3; why = "T3"; }
@@ -6354,7 +6369,7 @@ void loop() {
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
-        if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
+        if (!fin && cerca) { fin = true; why = "HOLGURA"; }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
           Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);
@@ -6362,7 +6377,8 @@ void loop() {
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
           Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          bool saltoIntSeguro = (parkPlanI == 0 && (!strcmp(why, "HOLGURA") || !strcmp(why, "ATRAS")));
+          parkPlanRectaOn = false; parkPlanI += saltoIntSeguro ? 2 : 1; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
             finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");
@@ -7037,7 +7053,7 @@ void loop() {
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
-          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // rutaServo satura cada lado en su tope medido
           puntaServoU = rutaServo(uturnIzq ? -delta : delta);
           Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
           Serial.print(" ext="); Serial.println(extAhora);
