@@ -117,7 +117,7 @@ def _prm_for(unknown):
     if not unknown:
         prm.soft_clear_mm = 100.0
         # Mapa completo (vueltas 2-3): afinables aparte de la vuelta 1.
-        for k, a in (("ROUTE_FULL_SOFT_CLEAR_MM", "soft_clear_mm"), ("ROUTE_FULL_HARD_CLEAR_MM", "hard_clear_mm"),
+        for k, a in (("ROUTE_FULL_SOFT_CLEAR_MM", "tight_soft_mm"), ("ROUTE_FULL_HARD_CLEAR_MM", "tight_hard_mm"),
                      ("ROUTE_FULL_W_KAPPA", "w_kappa"), ("ROUTE_FULL_R_MIN_MM", "r_min_mm"),
                      ("ROUTE_FULL_W_CLEAR", "w_clear")):
             if getattr(C, k, None) is not None:
