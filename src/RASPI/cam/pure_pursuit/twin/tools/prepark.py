@@ -62,6 +62,10 @@ def run_one(args):
         r = sim.run()
     finally:
         dbg.close()
+    (d / "field.txt").write_text(
+        f"dir={field.direction} parking={field.parking_section} parkw=1000 "
+        f"start=({field.start_x:.0f},{field.start_y:.0f},{field.start_heading})\n",
+        encoding="utf-8")
     keys = sorted({k for row in r.trace for k in row})
     with open(d / "trace.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=keys)
