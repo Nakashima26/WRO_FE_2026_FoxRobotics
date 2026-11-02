@@ -91,9 +91,9 @@ class SteeringParams:
     # al salir del cajón en el carro real). Se conservan los arcos medidos hasta 28.5 unidades (curvas de
     # las vueltas, validadas con las vueltas de referencia) y de ahí recta hasta 53° en el tope.
     table_right: tuple[tuple[float, float], ...] = (
-        (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (72.5, 53.0))
+        (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (72.5, 42.5))
     table_left: tuple[tuple[float, float], ...] = (
-        (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (71.5, 53.0))
+        (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (71.5, 40.1))
 
     def __post_init__(self) -> None:
         _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
