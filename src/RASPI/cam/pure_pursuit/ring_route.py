@@ -67,6 +67,8 @@ class RouteParams:
     d_step: float = 20.0
     hard_clear_mm: float = 55.0     # holgura mínima de la huella (duro)
     soft_clear_mm: float = 140.0    # debajo de esto se castiga
+    tight_hard_mm: float | None = None   # mapa completo: holgura dura/blanda fuera del tramo del cajón
+    tight_soft_mm: float | None = None
     r_min_mm: float = 170.0         # radio mínimo (duro), eje trasero
     w_len: float = 1.0              # costo por mm recorrido
     w_kappa: float = 3.0e4          # por mm · κ² (4e5 abría las esquinas: 38/42 limpias vs 42/42)
@@ -440,9 +442,17 @@ def plan(direction: str, seats: dict, parking: str | None = None,
         if len(ks) == 0:
             continue
         clear[ks] = np.minimum(clear[ks], dsg)
-    bad = clear < prm.hard_clear_mm
+    hard = np.full((n, 1, 1), prm.hard_clear_mm)
+    soft = np.full((n, 1, 1), prm.soft_clear_mm)
+    if prm.tight_hard_mm is not None and parking in order:
+        # Estaciones del tramo al cajón (la recta del cajón y la anterior) quedan con la holgura de antes.
+        k_p = order.index(parking) * (n // 4)
+        free = ((np.arange(n) - k_p + n // 4) % n) >= (n // 2)
+        hard[free] = prm.tight_hard_mm
+        soft[free] = prm.tight_soft_mm
+    bad = clear < hard
     bonus = np.zeros((n, m, m))
-    pen = prm.w_clear * np.clip((prm.soft_clear_mm - clear) / prm.soft_clear_mm, 0.0, None) ** 2
+    pen = prm.w_clear * np.clip((soft - clear) / soft, 0.0, None) ** 2
     if prm.w_unknown_near > 0.0:
         T = np.roll(O, -1, axis=0) - np.roll(O, 1, axis=0)
         T /= np.maximum(np.linalg.norm(T, axis=1, keepdims=True), 1e-9)
