@@ -253,6 +253,7 @@ float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
+const float RUTA_LOOKAHEAD_V1_MM = 160.0f;  // vuelta 1 (tc<4): con R 134 el seguimiento a 240 mm corta las esquinas hacia las señales
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
@@ -3301,7 +3302,7 @@ bool rutaSteer(float &ruedaDeg) {
     }
     rutaI = besti;
   }
-  int j = (rutaI + (int)(RUTA_LOOKAHEAD_MM / rutaPaso + 0.5f)) % rutaN;
+  int j = (rutaI + (int)(((turnsCompleted < 4) ? RUTA_LOOKAHEAD_V1_MM : RUTA_LOOKAHEAD_MM) / rutaPaso + 0.5f)) % rutaN;
   float dx = rutaX[j] - x, dy = rutaY[j] - y;
   float fwd = dx * sh + dy * ch;
   float right = dx * ch - dy * sh;
