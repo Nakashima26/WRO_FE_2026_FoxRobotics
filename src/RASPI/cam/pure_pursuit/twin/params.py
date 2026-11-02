@@ -89,7 +89,7 @@ class SteeringParams:
     # vueltas a 255 en los dos sentidos (la derecha queda como en los arcos).
     # 2026-10-27, usuario: el tope es 53° parejo en los dos lados (los 42.6/39.9 medidos se quedan cortos
     # al salir del cajón en el carro real). Se conservan los arcos medidos hasta 28.5 unidades (curvas de
-    # las vueltas, validadas con las vueltas de referencia) y de ahí recta hasta 53° en el tope.
+    # las vueltas, validadas con las vueltas de referencia) y de ahí recta hasta el tope medido (der 42.5 / izq 40.1; servo 140 -> 36.4° como en medidas_20261022).
     table_right: tuple[tuple[float, float], ...] = (
         (0.0, 0.0), (13.5, 8.7), (28.5, 18.2), (72.5, 42.5))
     table_left: tuple[tuple[float, float], ...] = (
