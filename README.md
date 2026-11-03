@@ -480,8 +480,8 @@ The **BNO085** is a 9-axis sensor (gyroscope, accelerometer and magnetometer) th
 |---|---|---|---|---|
 | Front | Front bumper | Distance to the wall ahead: corner approach and the forward/reverse maneuver choice | GPIO 0 | 0x30 |
 | Left | Left side | Distance to the side wall | GPIO 15 | 0x31 |
-| Right | Right side | Distance to the side wall | GPIO 5 | 0x32 |
-| Rear | Rear bumper | Reverse maneuvers: leaving the lot, reverse pivots and parking, which are blind today | GPIO 4 | 0x33 |
+| Right | Right side | Distance to the side wall | GPIO 4 | 0x32 |
+| Rear | Rear bumper | Reverse maneuvers: leaving the lot, reverse pivots and parking, which are blind today | GPIO 5 | 0x33 |
 
 All four share the I²C bus (SDA 21, SCL 22) and all start at the same factory address (0x29). At boot the ESP32 holds every sensor off with its XSHUT pin, then turns them on one by one and gives each a new address. Test sketches: [`TofTest4`](src/ESP32/TofTest4/TofTest4.ino) (4 sensors), [`TofId`](src/ESP32/TofId/TofId.ino) (tells an L0X from an L1X).
 

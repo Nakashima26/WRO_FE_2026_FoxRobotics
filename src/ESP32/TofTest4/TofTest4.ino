@@ -5,8 +5,8 @@
  * PINES (todos: VIN=3.3V, GND, SDA=21, SCL=22):
  *   Frontal    XSHUT = GPIO 0   -> 0x30
  *   Izquierdo  XSHUT = GPIO 15  -> 0x31
- *   Derecho    XSHUT = GPIO 5   -> 0x32
- *   Trasero    XSHUT = GPIO 4   -> 0x33
+ *   Derecho    XSHUT = GPIO 4   -> 0x32
+ *   Trasero    XSHUT = GPIO 5   -> 0x33
  *
  * Orden de arranque: todos nacen en 0x29. Se apagan los 4 con XSHUT en bajo
  * y se prenden uno por uno, asignándole a cada uno su dirección.
@@ -15,7 +15,7 @@
 #include <Wire.h>
 #include <VL53L1X.h>
 
-const int XSHUT_TRAS = 4;    // -1 = sin XSHUT (siempre encendido)
+const int XSHUT_TRAS = 5;    // -1 = sin XSHUT (siempre encendido)
 
 struct Tof {
   const char* nombre;
@@ -29,7 +29,7 @@ Tof tofs[] = {
   {"TRAS", XSHUT_TRAS, 0x33},
   {"FREN", 0,          0x30},
   {"IZQ",  15,         0x31},
-  {"DER",  5,          0x32},
+  {"DER",  4,          0x32},
 };
 const int N = sizeof(tofs) / sizeof(tofs[0]);
 

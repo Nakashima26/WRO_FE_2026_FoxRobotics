@@ -5,8 +5,8 @@
  * ToF (todos: VIN=3.3V, GND, SDA=21, SCL=22):
  *   Frontal    XSHUT = GPIO 0   -> 0x30
  *   Izquierdo  XSHUT = GPIO 15  -> 0x31
- *   Derecho    XSHUT = GPIO 5   -> 0x32
- *   Trasero    XSHUT = GPIO 4   -> 0x33
+ *   Derecho    XSHUT = GPIO 4   -> 0x32
+ *   Trasero    XSHUT = GPIO 5   -> 0x33
  *
  * BNO085 en UART-RVC:
  *   VIN=3.3V, GND, PS0=3.3V, PS1=GND, SDA -> GPIO 25
@@ -39,8 +39,8 @@ struct Tof {
 Tof tofs[] = {
   {"FREN", 0,  0x30},
   {"IZQ",  15, 0x31},
-  {"DER",  5,  0x32},
-  {"TRAS", 4,  0x33},
+  {"DER",  4,  0x32},
+  {"TRAS", 5,  0x33},
 };
 const int N = sizeof(tofs) / sizeof(tofs[0]);
 
