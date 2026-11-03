@@ -27,8 +27,8 @@
  *   Driver TB6612: PWMA=23, AIN1=18, AIN2=19
  *   Servo:         GPIO 13 (1 = todo a la derecha, 156 = todo a la izquierda, centro 77)
  *   ToF (VIN=3.3V, GND, SDA=21, SCL=22):
- *     Frontal XSHUT=0 -> 0x30 | Izquierdo XSHUT=15 -> 0x31 | Derecho XSHUT=5 -> 0x32
- *     Trasero XSHUT=4 se deja apagado.
+ *     Frontal XSHUT=0 -> 0x30 | Izquierdo XSHUT=15 -> 0x31 | Derecho XSHUT=4 -> 0x32
+ *     Trasero XSHUT=5 se deja apagado.
  *   BNO085 (UART-RVC): VIN=3.3V, GND, PS0=3.3V, PS1=GND, SDA -> GPIO 25
  *
  * Convenciones (las de PurePursuit.ino): servo = centroServo + X, X > 0 =
@@ -218,7 +218,7 @@ const int SERVO_PIN = 13;
 const int freqServo = 50;
 const int resServo  = 16;
 const int RVC_RX    = 25;
-const int XSHUT_TRAS = 4;
+const int XSHUT_TRAS = 5;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tipos y estado (antes de cualquier función: el IDE declara las funciones arriba)
@@ -244,7 +244,7 @@ struct Tof {
 Tof tofs[] = {
   {"FREN", 0,  0x30},
   {"IZQ",  15, 0x31},
-  {"DER",  5,  0x32},
+  {"DER",  4,  0x32},
 };
 const int N_TOF = sizeof(tofs) / sizeof(tofs[0]);
 Tof& tofF = tofs[0];

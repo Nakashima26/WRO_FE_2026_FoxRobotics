@@ -310,8 +310,8 @@ On startup, the IMU averages multiple readings while the robot is stationary to 
 |---|---|---|---|---|
 | Front | Front bumper | Distance to the wall ahead (corner trigger, approach speed) without side-wall phantoms | GPIO 0 | 0x30 |
 | Left | Left side | Distance to the side wall | GPIO 15 | 0x31 |
-| Right | Right side | Distance to the side wall | GPIO 5 | 0x32 |
-| Rear | Rear bumper | Reverse maneuvers: leaving the parking lot, reverse pivots and parking, which are blind today | GPIO 4 | 0x33 |
+| Right | Right side | Distance to the side wall | GPIO 4 | 0x32 |
+| Rear | Rear bumper | Reverse maneuvers: leaving the parking lot, reverse pivots and parking, which are blind today | GPIO 5 | 0x33 |
 
 All four share the I²C bus (SDA 21, SCL 22). They all start at the same factory address (0x29), so at boot the ESP32 holds every sensor off with its XSHUT pin, then powers them one by one and gives each a new address. They run in long-distance mode with a 50 ms timing budget. Test sketches are in `src/ESP32/TofTest4/` (4 sensors), `src/ESP32/TofId/` (tells an L0X from an L1X) and `src/ESP32/TofBnoTest/`. The last one also reads a **BNO085** IMU in UART-RVC mode, which we are evaluating as a replacement for the MPU-6050 (on-chip sensor fusion, less heading drift).
 

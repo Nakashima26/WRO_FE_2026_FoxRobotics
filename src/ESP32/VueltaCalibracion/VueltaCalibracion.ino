@@ -43,7 +43,7 @@
  * COMANDOS (USB o BT): g -> arrancar   x -> parar
  *
  * PINES: los de RondaAbierta (TB6612 23/18/19, servo 13, ToF SDA 21 SCL 22
- * con XSHUT 0/15/5, trasero XSHUT 4 apagado, BNO RVC -> 25) y el encoder de
+ * con XSHUT 0/15/4, trasero XSHUT 5 apagado, BNO RVC -> 25) y el encoder de
  * RectanguloTest (A -> 34, B -> 36, pull-ups a 3.3 V).
  * Librería: "VL53L1X" de Pololu.
  */
@@ -107,7 +107,7 @@ const int freqMotor = 1000, resMotor = 8;
 const int SERVO_PIN = 13, freqServo = 50, resServo = 16;
 const int ENC_A = 34, ENC_B = 36;
 const int RVC_RX = 25;
-const int XSHUT_TRAS = 4;
+const int XSHUT_TRAS = 5;
 
 // ── Encoder (PCNT, de RectanguloTest) ────────────────────────────────────────
 const float DIAMETRO_MM        = 42.7f;

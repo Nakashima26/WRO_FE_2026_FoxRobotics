@@ -71,8 +71,8 @@
  * avanza, por timeout, o si el ToF frontal (si está) ve algo a < FRENO_FRONTAL_MM.
  *
  * PINES: los de VueltaCalibracion (TB6612 23/18/19, servo 13, encoder A 34 /
- * B 36, BNO RVC -> 25, ToF SDA 21 SCL 22 con XSHUT frontal 0 / izq 15 / der 5,
- * trasero XSHUT 4 apagado).
+ * B 36, BNO RVC -> 25, ToF SDA 21 SCL 22 con XSHUT frontal 0 / izq 15 / der 4,
+ * trasero XSHUT 5 apagado).
  * Librería: "VL53L1X" de Pololu.
  */
 
@@ -175,7 +175,7 @@ const int freqMotor = 1000, resMotor = 8;
 const int SERVO_PIN = 13, freqServo = 50, resServo = 16;
 const int ENC_A = 34, ENC_B = 36;
 const int RVC_RX = 25;
-const int XSHUT_TRAS = 4;      // trasero: apagado (todos nacen en 0x29)
+const int XSHUT_TRAS = 5;      // trasero: apagado (todos nacen en 0x29)
 
 // ── Encoder (de VueltaCalibracion) ───────────────────────────────────────────
 float CUENTAS_POR_MM = 5.45f;   // medido 2026-10-19 (4031 cuentas en 740 mm)
