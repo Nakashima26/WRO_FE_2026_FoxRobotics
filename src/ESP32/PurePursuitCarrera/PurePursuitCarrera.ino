@@ -82,8 +82,8 @@ MPU6050 mpu(Wire);
 // pinout probado en TofBnoTest/TofTest4 (v2). GPIO0 y GPIO15 son pines de strapping del ESP32: el módulo no debe forzarlos a nivel que cambie el arranque
 #define TOF_XSHUT_F 0
 #define TOF_XSHUT_L 15
-#define TOF_XSHUT_R 5
-#define TOF_XSHUT_B 4
+#define TOF_XSHUT_R 4
+#define TOF_XSHUT_B 5
 #endif
 #define TOF_N 4   // 0=L 1=R 2=trasero 3=frontal (mismo orden en el ACK y en el SIL)
 
