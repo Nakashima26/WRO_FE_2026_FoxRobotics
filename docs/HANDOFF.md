@@ -104,7 +104,7 @@ y el rosa simulado cae de 0.29 a 0.25. `hw_nuevo` usa `PARK_PINK_RATIO_MIN=0.20`
 aceptada en `paridad.py`); `config.py` sigue en 0.28 para calibrar en el carro con `pick_color.py`.
 
 **Firmware v2** (`PurePursuit.ino`; NO compilado para ESP32: no hay toolchain; verificado solo el SIL)
-- Pinout de los sketches probados del usuario: ToF XSHUT F=0, L=15, R=5, B=4 (GPIO 0/15 son strapping); BNO085
+- Pinout de los sketches probados del usuario: ToF XSHUT F=0, L=15, R=4, B=5 (GPIO 0/15 son strapping); BNO085
   UART-RVC en GPIO25 (Serial1 RX). Antes el firmware tenía L=25/R=4/B=5/F=15 (chocaba con el BNO en 25).
 - `FOX_ENCODER`, `FOX_TOF`, `FOX_BNO` por defecto 1 fuera del SIL (en SIL siguen 0; el twin pasa sus defines).
 - BNO: `leerBNO()` acumula el delta de yaw de CADA paquete (100 Hz; el loop tarda >10 ms). `BNO_YAW_SIGN=1.0`:

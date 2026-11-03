@@ -50,7 +50,7 @@
  *                                PurePursuit (mpu.update x2 + 3 pings HC-SR04, l.3196
  *                                y l.3287-3302): min/media/p99/max en us por etapa.
  *   TOF <L|R|B|F> <SHORT|LONG> <budget_ms|DEF> <dur_ms> [period_ms]
- *                                tasa real, range_status y mm de un VL53L1X (XSHUT 15/5/4/0).
+ *                                tasa real, range_status y mm de un VL53L1X (XSHUT 15/4/5/0).
  *                                DEF = presupuesto por defecto de la libreria (50 ms);
  *                                20 SHORT vs DEF LONG reproduce el hallazgo de fox/tof-rate.
  *                                CSV i,t_ms,mm,status,dt_ms,sig_mcps + "# TOFSUM ...".
@@ -136,10 +136,10 @@ static bool mpuReady = false;
 #include <VL53L1X.h>
 static VL53L1X tofDev;
 // XSHUT del carro real (RondaAbierta / VueltaCalibracion / SeguirRuta, PCB RevB): frontal 0,
-// izquierdo 15, derecho 5, trasero 4. Antes decía L=25, que es el RX del BNO (2026-10-24).
+// izquierdo 15, derecho 4, trasero 5. Antes decía L=25, que es el RX del BNO (2026-10-24).
 #define TOF_XSHUT_L 15
-#define TOF_XSHUT_R 5
-#define TOF_XSHUT_B 4
+#define TOF_XSHUT_R 4
+#define TOF_XSHUT_B 5
 #define TOF_XSHUT_F 0
 #endif
 
