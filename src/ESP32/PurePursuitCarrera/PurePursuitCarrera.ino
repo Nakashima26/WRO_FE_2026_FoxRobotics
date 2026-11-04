@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + b125_parkk4.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -36,8 +36,19 @@
 #define ECHO_R      35
 
 #define PWMA        23
+// MOTOR_INVERTIDO (solo carro real): la PCB RevB cablea AIN1=IO19 y AIN2=IO18, al revés que
+// los jumpers con los que se probaron RondaAbierta/RectaBnoTest (A1=18, A2=19). Si con la PCB el
+// carro arranca en reversa, poner 1 (o voltear el conector del motor). El SIL lee 18/19 fijos.
+#ifndef MOTOR_INVERTIDO
+#define MOTOR_INVERTIDO 0
+#endif
+#if MOTOR_INVERTIDO && !defined(FOX_SIL)
+#define A1          19
+#define A2          18
+#else
 #define A1          18
 #define A2          19
+#endif
 #define SERVO_PIN   13
 #define TRIG_F      14   // HC-SR04 frontal (ronda de obstáculos: CRUCERO/MANIOBRA)
 #define ECHO_F      33
@@ -71,10 +82,17 @@ MPU6050 mpu(Wire);
 #endif
 
 #if FOX_ENCODER && !defined(FOX_SIL)
-// Encoder de cuadratura del N20 (hardware nuevo). 34/39 son solo-entrada y SIN
-// pull-up interno: el encoder debe traer pull-ups (o ponerlos en la PCB).
+// Encoder Hall 12 CPR del N20 RobotShop 50:1 (carro v2). A = azul -> GPIO34, B = morado -> GPIO36
+// (SENSOR_VP, igual que EncoderTest/RectaBnoTest y la PCB RevB). 34/36 son solo-entrada y SIN
+// pull-up interno: van con pull-ups externos a 3.3 V (PCB: 4k7). Se cuenta con el PCNT (hardware):
+// la ISR perdía ~25 % de las cuentas en el piso con el motor jalando (RectaBnoTest, 2026-10-14).
+#include "driver/pulse_cnt.h"
 #define ENC_PIN_A   34
-#define ENC_PIN_B   39
+#define ENC_PIN_B   36
+// Con azul->34 y morado->36, adelante cuenta NEGATIVO (RectaBnoTest). Si odomMm baja al avanzar, cambiar.
+#ifndef ENC_SIGNO
+#define ENC_SIGNO   -1
+#endif
 #endif
 
 #if FOX_TOF && !defined(FOX_SIL)
@@ -90,8 +108,9 @@ MPU6050 mpu(Wire);
 #if FOX_BNO && !defined(FOX_SIL)
 // BNO085 en modo UART-RVC: TX del BNO -> GPIO25 (Serial1 RX). Paquetes de 19 bytes a 115200.
 const int BNO_RX_PIN = 25;
-// VERIFICAR: girar el carro a la derecha a mano; anguloGyro debe subir igual que con el MPU6050; si baja, poner -1.0f
-const float BNO_YAW_SIGN = 1.0f;
+// El yaw del BNO crece a la DERECHA y anguloGyro crece a la IZQUIERDA: -1 (verificado en el piso
+// con RondaAbierta, BNO_SIGNO = -1, y RectanguloTest, YAW_DERECHA = +1).
+const float BNO_YAW_SIGN = -1.0f;
 float bnoYaw=0, bnoYawPrev=0;
 bool bnoYawValid=false, bnoYawPrevValid=false;
 uint32_t bnoLastMs=0, bnoPrevMs=0;
@@ -198,9 +217,11 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
-int centroServo    = 90;
-const int SERVO_MIN_DEG = 19;   // 90 - 71: tope derecho (cremallera v2, README 2.4)
-const int SERVO_MAX_DEG = 161;  // 90 + 71: tope izquierdo
+// Carro v2 real: centro 75 (medido con ServoCentro), topes mecánicos ~0 (der) y ~156 (izq).
+// Se conserva el ±71 del modelo (twin/params.py SteeringParams usa los mismos 75/4/146).
+int centroServo    = 75;
+const int SERVO_MIN_DEG = 1;    // tope mecánico derecho del carro
+const int SERVO_MAX_DEG = 156;  // tope mecánico izquierdo del carro
 // Dirección v2 (README §2.4): 44.54° de rueda equivalente (modelo bicicleta) a ±71° de
 // servo = 0.627°/tick, o sea 43.91° a 70 ticks (la fórmula de las U usa `delta / 43.91 * 70`).
 // Debe coincidir con config.MAX_WHEEL_STEER_DEG * 70 / SERVO_FULL_LOCK_CMD_DEG.
@@ -360,21 +381,46 @@ float odomYawPrevDeg = 0.0f;
 float odomVfilt = 0.0f;
 int   pwmActual = 0;
 #if FOX_ENCODER
-volatile int32_t encCount = 0;
 int32_t encCountPrev = 0;
 #if !defined(FOX_SIL)
-portMUX_TYPE encMux = portMUX_INITIALIZER_UNLOCKED;
-static volatile uint8_t encPrevAB = 0;
-static const int8_t encTrans[16] = {
-  0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
-};
-void IRAM_ATTR encIsr() {
-  uint8_t a = digitalRead(ENC_PIN_A) ? 1 : 0;
-  uint8_t b = digitalRead(ENC_PIN_B) ? 1 : 0;
-  uint8_t ab = (a << 1) | b;
-  int8_t d = encTrans[(encPrevAB << 2) | ab];
-  encPrevAB = ab;
-  if (d) encCount += d;
+// PCNT x4 con filtro de glitches de 1 us (misma configuración que RectaBnoTest, probada en el piso).
+// accum_count + watch points en los límites: el conteo no se desborda a los ±30000.
+pcnt_unit_handle_t encPcnt = NULL;
+bool iniciarEncoder() {
+  pcnt_unit_config_t ucfg = {};
+  ucfg.low_limit  = -30000;
+  ucfg.high_limit =  30000;
+  ucfg.flags.accum_count = 1;
+  if (pcnt_new_unit(&ucfg, &encPcnt) != ESP_OK) return false;
+  pcnt_glitch_filter_config_t fcfg = {};
+  fcfg.max_glitch_ns = 1000;
+  pcnt_unit_set_glitch_filter(encPcnt, &fcfg);
+  pcnt_chan_config_t cfgA = {};
+  cfgA.edge_gpio_num  = ENC_PIN_A;
+  cfgA.level_gpio_num = ENC_PIN_B;
+  pcnt_channel_handle_t chA;
+  pcnt_new_channel(encPcnt, &cfgA, &chA);
+  pcnt_chan_config_t cfgB = {};
+  cfgB.edge_gpio_num  = ENC_PIN_B;
+  cfgB.level_gpio_num = ENC_PIN_A;
+  pcnt_channel_handle_t chB;
+  pcnt_new_channel(encPcnt, &cfgB, &chB);
+  pcnt_channel_set_edge_action(chA, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE);
+  pcnt_channel_set_level_action(chA, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_channel_set_edge_action(chB, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE);
+  pcnt_channel_set_level_action(chB, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_unit_add_watch_point(encPcnt, ucfg.high_limit);
+  pcnt_unit_add_watch_point(encPcnt, ucfg.low_limit);
+  pcnt_unit_enable(encPcnt);
+  pcnt_unit_clear_count(encPcnt);
+  pcnt_unit_start(encPcnt);
+  return true;
+}
+// Cuentas con el signo del carro: adelante = positivo (ENC_SIGNO corrige el cableado).
+int32_t leerEncoder() {
+  int v = 0;
+  if (encPcnt) pcnt_unit_get_count(encPcnt, &v);
+  return ENC_SIGNO * (int32_t)v;
 }
 #endif
 #endif
@@ -518,7 +564,7 @@ const float GIRO_PI_CUENTA_DEG   = 70.0f;
 const float ODOM_PWM_K           = 3.5f;
 const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
-const float ENC_CUENTAS_POR_MM   = 20.73f;   // 7*4*50*2/(PI*43), recalibrar en pista
+const float ENC_CUENTAS_POR_MM   = 8.946f;   // 12 CPR: 3*4*50*2 = 1200 por vuelta / (PI*42.7 mm) — rueda medida 2026-10-08; recalibrar en pista
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -1731,7 +1777,7 @@ float distB_filtrada = -1;
 // Actuadores
 // ═══════════════════════════════════════════════════════════════════════════════
 
-int ultimoServo = 90;   // último ángulo escrito al servo — para debug en el ACK
+int ultimoServo = 75;   // último ángulo escrito al servo — para debug en el ACK
 
 void escribirServo(int angulo) {
   angulo = constrain(angulo, 0, 180);
@@ -1948,11 +1994,9 @@ void actualizarOdometria() {
 #if defined(FOX_SIL)
   cnt = sil_encoder_count();
 #else
-  portENTER_CRITICAL(&encMux);
-  cnt = encCount;
-  portEXIT_CRITICAL(&encMux);
+  cnt = leerEncoder();
 #endif
-  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/20.73 = 0.0482 mm/cuenta.
+  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/8.946 = 0.112 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
   encCountPrev = cnt;
 #else
@@ -2011,9 +2055,12 @@ void actualizarOdometria() {
 const bool TOF_LAT_TRAS_SHORT      = true;   // false = todos en Long como antes
 const uint16_t TOF_LAT_TRAS_MS     = 20;     // presupuesto = periodo, modo Short
 const uint16_t TOF_FRENTE_MS       = 33;     // presupuesto = periodo, modo Long
+// ROI de los laterales en SPADs (4-16; 16 = cono completo ~27°). Con 16 los laterales veían el piso
+// cuando se acaba la pared (~60 cm en vez de "sin pared"); 8 corrió limpio en RondaAbierta (2026-10-14).
+const uint8_t  TOF_LAT_ROI         = 8;
 
 static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
-                      bool corto) {
+                      bool corto, uint8_t roi = 16) {
   digitalWrite(xshut, HIGH);
   delay(10);
   dev.setTimeout(500);
@@ -2022,6 +2069,7 @@ static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
   const bool usaShort = corto && TOF_LAT_TRAS_SHORT;
   const uint16_t ms = usaShort ? TOF_LAT_TRAS_MS : (corto ? 33 : TOF_FRENTE_MS);
   dev.setDistanceMode(usaShort ? VL53L1X::Short : VL53L1X::Long);
+  if (roi < 16) dev.setROISize(roi, roi);
   if (!dev.setMeasurementTimingBudget((uint32_t)ms * 1000UL)) {
     Serial.print("ToF "); Serial.print(nombre); Serial.println(" presupuesto rechazado");
   }
@@ -2035,8 +2083,8 @@ void initToF() {
   delay(10);
   // Si uno falla se sigue con los demás (antes un fallo dejaba a los siguientes
   // en reset); el que falló queda en -1.
-  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L", true);
-  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true);
+  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L", true, TOF_LAT_ROI);
+  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true, TOF_LAT_ROI);
   initUnToF(tofB, TOF_XSHUT_B, 0x32, "B", true);
   initUnToF(tofF, TOF_XSHUT_F, 0x33, "F", false);
 }
@@ -3634,9 +3682,8 @@ void setup() {
 #if FOX_ENCODER && !defined(FOX_SIL)
   pinMode(ENC_PIN_A, INPUT);
   pinMode(ENC_PIN_B, INPUT);
-  encPrevAB = ((digitalRead(ENC_PIN_A) ? 1 : 0) << 1) | (digitalRead(ENC_PIN_B) ? 1 : 0);
-  attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), encIsr, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_PIN_B), encIsr, CHANGE);
+  if (!iniciarEncoder()) Serial.println("ENCODER: PCNT no arrancó (odometría en 0)");
+  encCountPrev = leerEncoder();
 #endif
 #if FOX_ENCODER && defined(FOX_SIL)
   encCountPrev = sil_encoder_count();

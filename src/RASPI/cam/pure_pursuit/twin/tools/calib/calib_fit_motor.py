@@ -34,7 +34,7 @@ try:
 except ImportError:  # script
     import calib_common as cc  # type: ignore
 
-NOMINAL_CPMM = 20.73   # PurePursuit.ino l.434 (7 PPR x4 x50 x2 / (pi*43)); ver nota de CPR en la hoja
+NOMINAL_CPMM = 8.946   # ENC_CUENTAS_POR_MM del .ino: 12 CPR -> 3*4*50*2 = 1200 / (pi*42.7)
 
 
 # ── encoder ───────────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ def fit_coast(run: cc.Run, cpmm: float) -> dict | None:
 
 # ── direccion twin (para el scrub) ────────────────────────────────────────────
 class _Steer:
-    def __init__(self, gain_l: float, gain_r: float, c: float = 90.0, wmax: float = 44.54):
+    def __init__(self, gain_l: float, gain_r: float, c: float = 75.0, wmax: float = 44.54):
         self.gl, self.gr, self.c, self.wmax = gain_l, gain_r, c, wmax
 
     def wheel(self, servo: float) -> float:
@@ -190,7 +190,7 @@ def load_steer(steer_json: Path | None) -> _Steer:
         gl, gr = j["gain_left_per90"], j["gain_right_per90"]
         wm = j.get("wheel_max_deg", None)
         st = _Steer(gl, gr)
-        st.wmax = wm or max(abs(st.wheel(30)), abs(st.wheel(160)))
+        st.wmax = wm or max(abs(st.wheel(4)), abs(st.wheel(146)))
         return st
     try:
         from pure_pursuit.twin.params import SteeringParams, max_wheel_deg, wheel_deg_from_servo
@@ -201,7 +201,7 @@ def load_steer(steer_json: Path | None) -> _Steer:
         return st
     except Exception:  # noqa: BLE001
         st = _Steer(56.46, 56.46)
-        st.wmax = max(abs(st.wheel(30)), abs(st.wheel(160)))
+        st.wmax = max(abs(st.wheel(4)), abs(st.wheel(146)))
         return st
 
 
@@ -218,11 +218,11 @@ def fit_scrub(lock_runs: list[cc.Run], cpmm: float, line: dict | None, steer: _S
         return None
     straight = {}
     for m in meas:
-        if abs(m["servo"] - 90.0) <= 2.0:
+        if abs(m["servo"] - 75.0) <= 2.0:
             straight.setdefault(m["pwm"], []).append(m["v"])
     est = []
     for m in meas:
-        if abs(m["servo"] - 90.0) <= 2.0:
+        if abs(m["servo"] - 75.0) <= 2.0:
             continue
         w = abs(steer.wheel(m["servo"]))
         frac = w / steer.wmax
@@ -285,7 +285,7 @@ def fit_all(d: Path, cpmm_override: float | None = None, steer_json: Path | None
             res["warnings"].append(f"dispersion de counts_per_mm {100 * enc['std'] / enc['mean']:.1f} % (> 1 %): medir con regla mejor")
     else:
         cpmm = NOMINAL_CPMM
-        res["counts_per_mm_source"] = "NOMINAL 20.73 (sin enc_runs.csv): k y tau quedan escalados por cpmm_real/20.73"
+        res["counts_per_mm_source"] = "NOMINAL 8.946 (sin enc_runs.csv): k y tau quedan escalados por cpmm_real/8.946"
         res["warnings"].append("sin enc_runs.csv: las velocidades usan el cpmm nominal, no medido")
     res["counts_per_mm"] = cpmm
 

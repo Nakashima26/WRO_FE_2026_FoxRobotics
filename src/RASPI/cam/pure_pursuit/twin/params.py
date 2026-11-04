@@ -32,11 +32,11 @@ class VehicleParams:
     wheel_diameter_mm: float = C.WHEEL_DIAMETER_MM
 
     def __post_init__(self) -> None:
-        _prov("vehicle.length_mm", "medido", "180 mm, confirmado por usuario (aprox) — config.py")
-        _prov("vehicle.width_mm", "medido", "130 mm, confirmado por usuario (aprox) — config.py")
+        _prov("vehicle.length_mm", "medido", "176 mm, medido en el carro 2026-10-22 — config.py")
+        _prov("vehicle.width_mm", "medido", "125 mm, medido en el carro 2026-10-22 — config.py")
         _prov("vehicle.wheelbase_mm", "medido", "batalla 113 mm, confirmada por usuario — config.py")
         _prov("vehicle.rear_overhang_mm", "supuesto", "derivado (180-113)/2, pendiente medir")
-        _prov("vehicle.front_overhang_mm", "supuesto", "derivado (180-113)/2, pendiente medir")
+        _prov("vehicle.front_overhang_mm", "medido", "176 − 113 − 21.8 = 41.2 mm (2026-10-22) — config.py")
         _prov("vehicle.track_mm", "supuesto", "solo dibujo; no entra al modelo bicicleta")
         _prov("vehicle.wheel_diameter_mm", "medido", "README llanta 43 mm")
 
@@ -45,12 +45,13 @@ class VehicleParams:
 class SteeringParams:
     # Grados de rueda (equivalente bicicleta) por 90° de comando de servo. v2: la
     # cremallera da ~44.5° equivalente a ±71° de comando (README §2.4), igual a los
-    # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 19..161 (±71°).
+    # dos lados (mismo piñón). Topes del .ino = SERVO_MIN_DEG/SERVO_MAX_DEG = 1..156 (topes
+    # mecánicos del carro v2; centro 75 medido con ServoCentro).
     gain_left: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
     gain_right: float = C.MAX_WHEEL_STEER_DEG * 90.0 / C.SERVO_FULL_LOCK_CMD_DEG
-    servo_center_deg: float = 90.0
-    servo_min_deg: float = 19.0
-    servo_max_deg: float = 161.0
+    servo_center_deg: float = 75.0
+    servo_min_deg: float = 1.0
+    servo_max_deg: float = 156.0
     slew_deg_per_s: float = 600.0
     deadband_deg: float = 0.5
 
@@ -60,8 +61,8 @@ class SteeringParams:
             "supuesto",
             "README v2 §2.4 (CAD): 53.1° int./37.0° ext. a ±71° de servo → 44.5° equivalente "
             "bicicleta (config.MAX_WHEEL_STEER_DEG). Lineal en el comando (en realidad la "
-            "cremallera es algo no lineal). Topes 19/161 = ±71° (cremallera v2, README §2.4); "
-            "firmware y twin igualados en 19..161",
+            "cremallera es algo no lineal). Centro 75 medido (ServoCentro); topes 1/156 = topes mecánicos "
+            "del carro (usuario 2026-10-22); firmware y twin igualados en 1..156",
         )
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "micro-juego mecánico")
@@ -111,7 +112,7 @@ def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
 
 @dataclass
 class EncoderParams:
-    counts_per_mm: float = 20.7
+    counts_per_mm: float = 8.946
     slip_bias_sigma: float = 0.01
     slip_c_acc: float = 2e-5
     slip_c_acc_cap: float = 0.05
@@ -121,8 +122,8 @@ class EncoderParams:
         _prov(
             "encoder.counts_per_mm",
             "supuesto",
-            "7 PPR×4 (cuadratura x4)×50 (N20)×2 (LEGO) / (π×43) = 20.73 cuentas/mm "
-            "(0.0482 mm/cuenta) — encoder del hardware nuevo; recalibrar en pista",
+            "12 CPR (3 pulsos/canal)×4×50 (N20 RobotShop)×2 (engranes) / (π×42.7) = 8.946 cuentas/mm "
+            "(0.112 mm/cuenta); rueda 42.7 mm medida (50 cm → 50.4); recalibrar en pista",
         )
         _prov("encoder.slip_*", "supuesto", "deriva multiplicativa por acel/scrub")
 

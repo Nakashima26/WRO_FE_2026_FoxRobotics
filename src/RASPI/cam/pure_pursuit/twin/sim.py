@@ -485,6 +485,7 @@ class Sim:
             field.start_x,
             field.start_y,
             field.start_heading,
+            servo_deg=self.params.steering.servo_center_deg,
         )
         enc = Encoder(self.params.encoder, rng)
         gyro = Gyro(self.params.gyro, rng)

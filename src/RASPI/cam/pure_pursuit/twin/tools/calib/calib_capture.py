@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+# Centro del servo del carro v2 (ServoCentro); topes 4..146 = 75 ± 71 (PurePursuit.ino).
+SERVO_CENTRO = 75
+
 try:
     from . import calib_common as cc
 except ImportError:  # ejecutado como script
@@ -198,7 +201,7 @@ class Session:
                 self.pause("Pon el carro con espacio para circular", prompt)
                 rep = self.link.command(cmd, ms / 1000 + 8)
                 out.append(self.save(f"lock_p{pwm:03d}_s{s:03d}_r{r:02d}", rep, cmd))
-        self.link.command("SERVO 90", 3)
+        self.link.command(f"SERVO {SERVO_CENTRO}", 3)
         return out
 
     # (b) encoder --------------------------------------------------------------
@@ -249,7 +252,7 @@ class Session:
                     if val:
                         w.writerow([s, float(val), r, ""])
                         f.flush()
-        self.link.command("SERVO 90", 3)
+        self.link.command(f"SERVO {SERVO_CENTRO}", 3)
         return p
 
     # (d) loop ---------------------------------------------------------------------
@@ -308,14 +311,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--brake", action="store_true")
     s = sub.add_parser("lock", help="velocidad con volante fijo (scrub)")
     s.add_argument("--pwm", type=int, default=100)
-    s.add_argument("--servos", default="90,50,30")
+    s.add_argument("--servos", default="75,35,15")
     s.add_argument("--reps", type=int, default=3)
     s.add_argument("--ms", type=int, default=2500)
     s = sub.add_parser("enc", help="cuentas/mm empujando a mano")
     s.add_argument("--dist", type=float, default=1000.0)
     s.add_argument("--reps", type=int, default=5)
     s = sub.add_parser("steer", help="radio de giro a varios comandos de servo")
-    s.add_argument("--servos", default="60,70,80,100,110,120,130,150")
+    s.add_argument("--servos", default="4,35,55,65,85,95,115,146")
     s.add_argument("--reps", type=int, default=2)
     s.add_argument("--pwm", type=int, default=70)
     s.add_argument("--ms", type=int, default=4000)

@@ -6,21 +6,25 @@
  * src/RASPI/cam/pure_pursuit/twin/tools/calib/calib_capture.py (o cualquier
  * terminal serie).
  *
- * PINES (copiados de PurePursuit.ino l.31-55, no cambian):
- *   Motor TB6612FNG : PWMA=23 (LEDC 1 kHz, 8 bits), A1=18, A2=19
+ * PINES (carro v2, iguales a PurePursuit.ino, RondaAbierta y la PCB RevB):
+ *   Motor TB6612FNG : PWMA=23 (LEDC 1 kHz, 8 bits), A1=18, A2=19 (-DMOTOR_INVERTIDO=1 los cambia:
+ *                     la PCB RevB cablea AIN1=IO19/AIN2=IO18)
  *                     adelante = A1 HIGH / A2 LOW ; reversa = A1 LOW / A2 HIGH
  *                     coast = A1 LOW / A2 LOW ; freno = pines de direccion + PWM 0
- *   Servo SG90      : SERVO_PIN=13 (LEDC 50 Hz, 16 bits, 500..2500 us <-> 0..180 deg)
- *   Encoder cuadratura: ENC_A=34, ENC_B=39 (solo-entrada, SIN pull-up interno:
- *                     el modulo del encoder debe traer pull-ups)
+ *   Servo           : SERVO_PIN=13 (LEDC 50 Hz, 16 bits, 500..2500 us <-> 0..180 deg);
+ *                     centro 75, topes mecanicos ~0 (der) y ~156 (izq) -> SERVO acepta 2..154
+ *   Encoder 12 CPR  : ENC_A=34 (azul), ENC_B=36 (morado), pull-ups externos a 3.3 V.
+ *                     Cuenta el PCNT (hardware, filtro 1 us); la ISR queda solo para enc_err.
+ *                     Adelante = + (ENC_SIGNO = -1 corrige el cableado, como RectaBnoTest)
  *   HC-SR04 izq/der/frontal: TRIG/ECHO = 27/32, 26/35, 14/33
- *   MPU-6050        : I2C por defecto (SDA=21, SCL=22), libreria MPU6050_tockn
+ *   ToF VL53L1X     : XSHUT F=0, L=15, R=4, B=5 (TofBnoTest/RondaAbierta), I2C 21/22
+ *   BNO085          : no se usa aqui (UART-RVC en GPIO25; el v2 no tiene MPU-6050)
  *
  * COMPILAR (misma configuracion que PurePursuit, ver src/README.md):
  *   arduino-cli core install esp32:esp32          (arduino-esp32 >= 3.0: usa ledcAttach)
- *   arduino-cli lib  install "MPU6050_tockn"      (solo si CALIB_MPU=1, por defecto si)
+ *   arduino-cli lib  install "MPU6050_tockn"      (solo si -DCALIB_MPU=1; por defecto no: el v2 no tiene MPU)
  *   arduino-cli compile --fqbn esp32:esp32:esp32 src/ESP32/CalibFox/CalibFox.ino
- *   Sin MPU: -DCALIB_MPU=0 (quita la libreria y el I2C; LOOPTIME omite el mpu).
+ *   Sin MPU (defecto en v2): LOOPTIME omite el mpu.
  *
  * COMANDOS (una linea, mayusculas o minusculas; respuesta final "OK ..." o "ERR ...";
  * las lineas que empiezan con '#' son comentarios, el resto de las filas es CSV):
@@ -40,8 +44,8 @@
  *                                es decir cuentas perdidas)
  *   ENCLOG <ms>                  motor APAGADO: registra CSV mientras empujas el carro
  *                                a mano (p. ej. 1 m con regla -> counts_per_mm)
- *   CPMM <valor>                 cuentas/mm usado para la columna v_mm_s (def. 20.73)
- *   SERVO <deg>                  escribe el servo (15..165; igual mapeo que el .ino)
+ *   CPMM <valor>                 cuentas/mm usado para la columna v_mm_s (def. 8.946)
+ *   SERVO <deg>                  escribe el servo (2..154; igual mapeo que el .ino; centro 75)
  *   SERVOOFF                     quita los pulsos del servo (se puede mover a mano)
  *   PERIOD <ms>                  periodo de muestreo del CSV (def. 10, 2..1000)
  *   MAXPWM <v>                   tope de |PWM| (def. 200, max 255)
@@ -50,7 +54,7 @@
  *                                PurePursuit (mpu.update x2 + 3 pings HC-SR04, l.3196
  *                                y l.3287-3302): min/media/p99/max en us por etapa.
  *   TOF <L|R|B|F> <SHORT|LONG> <budget_ms|DEF> <dur_ms> [period_ms]
- *                                tasa real, range_status y mm de un VL53L1X (XSHUT 25/4/5/15).
+ *                                tasa real, range_status y mm de un VL53L1X (XSHUT L15/R4/B5/F0).
  *                                DEF = presupuesto por defecto de la libreria (50 ms);
  *                                20 SHORT vs DEF LONG reproduce el hallazgo de fox/tof-rate.
  *                                CSV i,t_ms,mm,status,dt_ms,sig_mcps + "# TOFSUM ...".
@@ -83,7 +87,7 @@
 #include <stdlib.h>
 
 #ifndef CALIB_MPU
-#define CALIB_MPU 1
+#define CALIB_MPU 0          // el carro v2 trae BNO085, no MPU-6050
 #endif
 
 #if CALIB_MPU
@@ -100,10 +104,10 @@ static bool mpuReady = false;
 #include <Wire.h>
 #include <VL53L1X.h>
 static VL53L1X tofDev;
-#define TOF_XSHUT_L 25
+#define TOF_XSHUT_L 15
 #define TOF_XSHUT_R 4
 #define TOF_XSHUT_B 5
-#define TOF_XSHUT_F 15
+#define TOF_XSHUT_F 0
 #endif
 
 // ── Pines (identicos a PurePursuit.ino) ───────────────────────────────────────
@@ -114,11 +118,23 @@ static VL53L1X tofDev;
 #define TRIG_F      14
 #define ECHO_F      33
 #define PWMA        23
+#ifndef MOTOR_INVERTIDO
+#define MOTOR_INVERTIDO 0    // 1 con la PCB RevB si el carro sale en reversa (AIN1=IO19, AIN2=IO18)
+#endif
+#if MOTOR_INVERTIDO
+#define A1          19
+#define A2          18
+#else
 #define A1          18
 #define A2          19
+#endif
 #define SERVO_PIN   13
 #define ENC_PIN_A   34
-#define ENC_PIN_B   39
+#define ENC_PIN_B   36
+#ifndef ENC_SIGNO
+#define ENC_SIGNO   -1       // azul->34, morado->36: adelante cuenta negativo en crudo
+#endif
+#include "driver/pulse_cnt.h"
 
 // ── PWM (identico a PurePursuit.ino l.95-98) ──────────────────────────────────
 static const int freqServo = 50;
@@ -129,21 +145,22 @@ static const int resMotor  = 8;
 // ── Parametros de la herramienta ──────────────────────────────────────────────
 static const unsigned long FRENO_MS      = 300;     // = MANIOBRA_FRENO_MS del .ino
 static const unsigned long RUN_HARD_MAX_MS = 20000;
-static const int   SERVO_MIN_SAFE = 15;
-static const int   SERVO_MAX_SAFE = 165;
+static const int   SERVO_MIN_SAFE = 2;     // topes mecanicos del v2 ~0 / ~156 (RectaBnoTest usa 2..154)
+static const int   SERVO_MAX_SAFE = 154;
+static const int   SERVO_CENTRO   = 75;    // medido con ServoCentro
 static const unsigned long PING_TIMEOUT_US = 7000;   // = pulseIn del .ino l.2579
 static const int   LT_MAX = 1000;                    // muestras max de LOOPTIME
 
-static float         cpmm        = 20.73f;           // ENC_CUENTAS_POR_MM del .ino l.434
+static float         cpmm        = 8.946f;           // ENC_CUENTAS_POR_MM del .ino: 1200 / (pi*42.7)
 static unsigned long periodMs    = 10;
 static int           maxPwm      = 200;
-static int           servoDeg    = 90;
+static int           servoDeg    = SERVO_CENTRO;
 static bool          servoActive = false;
 static int           motorDir    = 0;                // +1 adelante, -1 reversa, 0 coast
 static unsigned long lastCoastMs = 0;
 static int           lastRunDir  = 0;
 
-// ── Encoder (misma tabla/ISR que PurePursuit.ino l.279-295, + contador de saltos) ─
+// ── Encoder: PCNT para las cuentas (como PurePursuit.ino); la ISR solo cuenta saltos (enc_err) ─
 static volatile int32_t encCount = 0;
 static volatile uint32_t encErr  = 0;
 static volatile uint8_t encPrevAB = 0;
@@ -162,11 +179,42 @@ void IRAM_ATTR encIsr() {
   if (d) encCount += d;
 }
 
+static pcnt_unit_handle_t encPcnt = NULL;
+static bool initPcnt() {
+  pcnt_unit_config_t ucfg = {};
+  ucfg.low_limit  = -30000;
+  ucfg.high_limit =  30000;
+  ucfg.flags.accum_count = 1;
+  if (pcnt_new_unit(&ucfg, &encPcnt) != ESP_OK) return false;
+  pcnt_glitch_filter_config_t fcfg = {};
+  fcfg.max_glitch_ns = 1000;
+  pcnt_unit_set_glitch_filter(encPcnt, &fcfg);
+  pcnt_chan_config_t cfgA = {};
+  cfgA.edge_gpio_num  = ENC_PIN_A;
+  cfgA.level_gpio_num = ENC_PIN_B;
+  pcnt_channel_handle_t chA;
+  pcnt_new_channel(encPcnt, &cfgA, &chA);
+  pcnt_chan_config_t cfgB = {};
+  cfgB.edge_gpio_num  = ENC_PIN_B;
+  cfgB.level_gpio_num = ENC_PIN_A;
+  pcnt_channel_handle_t chB;
+  pcnt_new_channel(encPcnt, &cfgB, &chB);
+  pcnt_channel_set_edge_action(chA, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE);
+  pcnt_channel_set_level_action(chA, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_channel_set_edge_action(chB, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE);
+  pcnt_channel_set_level_action(chB, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_unit_add_watch_point(encPcnt, ucfg.high_limit);
+  pcnt_unit_add_watch_point(encPcnt, ucfg.low_limit);
+  pcnt_unit_enable(encPcnt);
+  pcnt_unit_clear_count(encPcnt);
+  pcnt_unit_start(encPcnt);
+  return true;
+}
+
 static int32_t readEnc() {
-  portENTER_CRITICAL(&encMux);
-  int32_t c = encCount;
-  portEXIT_CRITICAL(&encMux);
-  return c;
+  int v = 0;
+  if (encPcnt) pcnt_unit_get_count(encPcnt, &v);
+  return ENC_SIGNO * (int32_t)v;
 }
 
 static uint32_t readEncErr() {
@@ -177,6 +225,7 @@ static uint32_t readEncErr() {
 }
 
 static void zeroEnc() {
+  if (encPcnt) pcnt_unit_clear_count(encPcnt);
   portENTER_CRITICAL(&encMux);
   encCount = 0;
   encErr   = 0;
@@ -493,8 +542,9 @@ static void doTof(char *sensor, char *mode, char *budget, long durMs, long perio
 // ── Comandos ──────────────────────────────────────────────────────────────────
 static void printInfo() {
   Serial.println("# CalibFox v1");
-  Serial.println("# pines: PWMA=23 A1=18 A2=19 SERVO=13 ENC_A=34 ENC_B=39 "
-                 "TRIG/ECHO L=27/32 R=26/35 F=14/33");
+  Serial.print("# pines: PWMA=23 A1="); Serial.print(A1); Serial.print(" A2="); Serial.print(A2);
+  Serial.println(" SERVO=13 (centro 75) ENC_A=34 ENC_B=36 (PCNT) "
+                 "TRIG/ECHO L=27/32 R=26/35 F=14/33 XSHUT L=15 R=4 B=5 F=0");
   Serial.print("# cpmm="); Serial.print(cpmm, 3);
   Serial.print(" period_ms="); Serial.print(periodMs);
   Serial.print(" maxpwm="); Serial.print(maxPwm);
@@ -559,7 +609,7 @@ static void handleLine(char *line) {
   }
   if (!strcmp(cmd, "SERVO")) {
     long v; if (!getInt(ctx, v)) { Serial.println("ERR SERVO deg"); return; }
-    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { Serial.println("ERR SERVO fuera de 15..165"); return; }
+    if (v < SERVO_MIN_SAFE || v > SERVO_MAX_SAFE) { Serial.println("ERR SERVO fuera de 2..154"); return; }
     servoWrite((int)v); Serial.println("OK SERVO"); return;
   }
   if (!strcmp(cmd, "SERVOOFF")) { ledcWrite(SERVO_PIN, 0); servoActive = false; Serial.println("OK SERVOOFF"); return; }
@@ -604,7 +654,7 @@ static void handleLine(char *line) {
     if (!getInt(ctx, v) || !getInt(ctx, ms)) { Serial.println("ERR PWM v ms [servo]"); return; }
     if (v < -255 || v > 255) { Serial.println("ERR PWM -255..255"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { Serial.println("ERR servo 15..165"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { Serial.println("ERR servo 2..154"); return; }
       servoWrite((int)sv);
       delay(400);   // que el servo llegue antes de arrancar
     }
@@ -626,7 +676,7 @@ static void handleLine(char *line) {
     unsigned long total = (unsigned long)(nSteps * hold);
     if (total > RUN_HARD_MAX_MS) { Serial.println("ERR RAMP > 20 s: menos escalones o hold menor"); return; }
     if (getInt(ctx, sv)) {
-      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { Serial.println("ERR servo 15..165"); return; }
+      if (sv < SERVO_MIN_SAFE || sv > SERVO_MAX_SAFE) { Serial.println("ERR servo 2..154"); return; }
       servoWrite((int)sv); delay(400);
     }
     Profile p = {PM_STAIRS, (int)a, (int)b, (int)st, (unsigned long)hold, total, total, false};
@@ -671,8 +721,11 @@ void setup() {
 #endif
   pwmWrite(0);
   motorCoast();
-  servoWrite(90);
+  servoWrite(SERVO_CENTRO);
 
+  // PCNT primero: su configuracion de pines apaga las interrupciones GPIO y
+  // attachInterrupt de abajo las vuelve a prender (igual que RectaBnoTest).
+  if (!initPcnt()) Serial.println("# ERROR: PCNT no arranco (sin cuentas de encoder)");
   pinMode(ENC_PIN_A, INPUT);
   pinMode(ENC_PIN_B, INPUT);
   encPrevAB = ((digitalRead(ENC_PIN_A) ? 1 : 0) << 1) | (digitalRead(ENC_PIN_B) ? 1 : 0);
