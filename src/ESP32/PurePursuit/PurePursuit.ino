@@ -559,7 +559,7 @@ const float GIRO_PI_CUENTA_DEG   = 0.0f;
 const float ODOM_PWM_K           = 3.5f;
 const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
-const float ENC_CUENTAS_POR_MM   = 8.946f;   // 12 CPR: 3*4*50*2 = 1200 por vuelta / (PI*42.7 mm) — rueda medida 2026-10-08; recalibrar en pista
+const float ENC_CUENTAS_POR_MM   = 5.45f;    // 5.45 c/mm medido en el carro 2026-10-19 (4031 cuentas en 740 mm; SeguirRuta, odometría <1 cm/2 m). El 8.946 teórico (1200/(PI*42.7)) era ~64 % de más
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -1991,7 +1991,7 @@ void actualizarOdometria() {
 #else
   cnt = leerEncoder();
 #endif
-  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/8.946 = 0.112 mm/cuenta.
+  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/5.45 = 0.183 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
   encCountPrev = cnt;
 #else

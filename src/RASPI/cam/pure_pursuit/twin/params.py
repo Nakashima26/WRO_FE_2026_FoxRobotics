@@ -112,7 +112,7 @@ def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
 
 @dataclass
 class EncoderParams:
-    counts_per_mm: float = 8.946
+    counts_per_mm: float = 5.45
     slip_bias_sigma: float = 0.01
     slip_c_acc: float = 2e-5
     slip_c_acc_cap: float = 0.05
@@ -121,9 +121,9 @@ class EncoderParams:
     def __post_init__(self) -> None:
         _prov(
             "encoder.counts_per_mm",
-            "supuesto",
-            "12 CPR (3 pulsos/canal)×4×50 (N20 RobotShop)×2 (engranes) / (π×42.7) = 8.946 cuentas/mm "
-            "(0.112 mm/cuenta); rueda 42.7 mm medida (50 cm → 50.4); recalibrar en pista",
+            "medido",
+            "5.45 c/mm medido en el carro 2026-10-19 (4031 cuentas en 740 mm; SeguirRuta, odometría <1 cm/2 m); "
+            "el teórico 1200/(π×42.7) = 8.946 no se cumple en el carro",
         )
         _prov("encoder.slip_*", "supuesto", "deriva multiplicativa por acel/scrub")
 

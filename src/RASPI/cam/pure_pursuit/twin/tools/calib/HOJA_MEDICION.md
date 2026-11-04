@@ -33,7 +33,7 @@ Total ≈ 2 h 10 min sin imprevistos.
 - Marca en el suelo dos líneas a **1000 mm** exactos (cinta métrica, no a ojo). Alinear el centro de la huella de una rueda motriz con la 1ª.
 - El script pide empujar el carro a mano en línea recta hasta la 2ª marca (sin patinar), luego devolverlo a la 1ª.
 - Anotar: cuentas ida: ____ ____ ____ ____ ____ | neto al volver: ____ (debe ser ~0; si no, se pierden cuentas) | `enc_err`: ____
-- Valor del firmware: 8.946 cuentas/mm = 12 CPR (3 pulsos/canal) x4 x50 x2 / (pi*42.7). Si el carro avanza y las cuentas salen negativas, cambiar `ENC_SIGNO` en el .ino. calib_fit_motor avisa si lo medido difiere mas de 10 % de 8.946.
+- Valor del firmware: 5.45 cuentas/mm, medido en el carro 2026-10-19 (4031 cuentas en 740 mm). El teórico 12 CPR x4 x50 x2 / (pi*42.7) = 8.946 NO se cumple. Si el carro avanza y las cuentas salen negativas, cambiar `ENC_SIGNO` en el .ino. calib_fit_motor avisa si lo medido difiere mas de 10 % de 5.45.
 - Criterio de calidad: dispersión < 1 %. Las cuentas son del PCNT; `enc_err` (de la ISR) es solo diagnóstico de flancos (pull-ups en GPIO34/36, ruido del motor).
 
 ## 2-3. Velocidad vs PWM y zona muerta

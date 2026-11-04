@@ -34,7 +34,7 @@ try:
 except ImportError:  # script
     import calib_common as cc  # type: ignore
 
-NOMINAL_CPMM = 8.946   # ENC_CUENTAS_POR_MM del .ino: 12 CPR -> 3*4*50*2 = 1200 / (pi*42.7)
+NOMINAL_CPMM = 5.45    # ENC_CUENTAS_POR_MM del .ino, medido en el carro 2026-10-19
 
 
 # ── encoder ───────────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ def fit_all(d: Path, cpmm_override: float | None = None, steer_json: Path | None
             res["warnings"].append(f"dispersion de counts_per_mm {100 * enc['std'] / enc['mean']:.1f} % (> 1 %): medir con regla mejor")
     else:
         cpmm = NOMINAL_CPMM
-        res["counts_per_mm_source"] = "NOMINAL 8.946 (sin enc_runs.csv): k y tau quedan escalados por cpmm_real/8.946"
+        res["counts_per_mm_source"] = "NOMINAL 5.45 (sin enc_runs.csv): k y tau quedan escalados por cpmm_real/5.45"
         res["warnings"].append("sin enc_runs.csv: las velocidades usan el cpmm nominal, no medido")
     res["counts_per_mm"] = cpmm
 

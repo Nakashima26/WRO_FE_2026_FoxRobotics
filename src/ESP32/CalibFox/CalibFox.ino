@@ -44,7 +44,7 @@
  *                                es decir cuentas perdidas)
  *   ENCLOG <ms>                  motor APAGADO: registra CSV mientras empujas el carro
  *                                a mano (p. ej. 1 m con regla -> counts_per_mm)
- *   CPMM <valor>                 cuentas/mm usado para la columna v_mm_s (def. 8.946)
+ *   CPMM <valor>                 cuentas/mm usado para la columna v_mm_s (def. 5.45)
  *   SERVO <deg>                  escribe el servo (2..154; igual mapeo que el .ino; centro 75)
  *   SERVOOFF                     quita los pulsos del servo (se puede mover a mano)
  *   PERIOD <ms>                  periodo de muestreo del CSV (def. 10, 2..1000)
@@ -151,7 +151,7 @@ static const int   SERVO_CENTRO   = 75;    // medido con ServoCentro
 static const unsigned long PING_TIMEOUT_US = 7000;   // = pulseIn del .ino l.2579
 static const int   LT_MAX = 1000;                    // muestras max de LOOPTIME
 
-static float         cpmm        = 8.946f;           // ENC_CUENTAS_POR_MM del .ino: 1200 / (pi*42.7)
+static float         cpmm        = 5.45f;            // ENC_CUENTAS_POR_MM del .ino (medido 2026-10-19)
 static unsigned long periodMs    = 10;
 static int           maxPwm      = 200;
 static int           servoDeg    = SERVO_CENTRO;
