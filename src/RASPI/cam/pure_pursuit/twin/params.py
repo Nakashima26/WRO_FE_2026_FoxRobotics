@@ -224,9 +224,10 @@ class ToFParams:
 class CameraParams:
     width: int = 640
     height: int = 480
-    # Lente NoIR ancho del carro (README), no el pinhole que el PnP inventaba (~73°).
-    hfov_deg: float = 120.0
-    # Soporte fijo de la foto: el lente mira para adelante, ~45° bajo el horizonte.
+    # Pinhole equivalente del lente del carro nuevo, ajustado por PnP a bev_calib.npz
+    # (2026-11-04, error 3.2 px). El "120°" del README es el lente con distorsión.
+    hfov_deg: float = getattr(C, "CAMERA_HFOV_DEG", 74.0)
+    # Montaje medido (config.py): ~25° bajo el horizonte.
     tilt_deg: float = C.CAMERA_TILT_DEG
     # Lente por encima del techo. 90 + 7 mm: la LiPo 3S (~24 mm acostada)
     # reemplaza a la Pi 4 (~17 mm) en el centro. No está medido con regla.

@@ -98,14 +98,15 @@ MAX_WHEEL_STEER_DEG  = round(float(np.degrees(np.arctan(
 # OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo maneja otra tarea,
 # no se cambia aquí.
 # Cámara (NoIR ancho)
-CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
-# SUPUESTOS NO MEDIDOS. Son los valores anteriores del twin (no hay medición ni calibración
-# detrás). El origen del nodo CameraFrnt del CAD v2 (GLB) da fwd 134 / altura 85, pero no es
-# el centro óptico (la caja llega a 105). Con 134/85 el rosa del twin bajó de 0.29 a 0.22-0.27 y
-# rompió la salida del cajón, pero eso no prueba que 140/97 sea lo correcto. Pendiente: sacar la
-# pose real de la homografía de bev_calib.npz o medirla.
-CAMERA_HEIGHT_MM     = 97.0
-CAMERA_FWD_MM        = 140.0
+# Pose de la cámara del carro nuevo, sacada por PnP de bev_calib.npz (calibrada 2026-11-04 con
+# 7 cruces en el piso; twin/calib/bev_marcas_carro_nuevo_20261104.png). Pinhole equivalente de
+# 74° (error 3.2 px; el lente real tiene distorsión de barril). La inclinación sale 25-31° con
+# cualquier FOV supuesto: el 45° de antes NO era el montaje real. Antes: 45° / 97 / 140 (supuestos).
+# En el twin (ruta_perfil, 21 seeds) da 18/21 igual que la cámara vieja, 1.7 s más rápido.
+CAMERA_TILT_DEG      = 24.8
+CAMERA_HEIGHT_MM     = 95.0
+CAMERA_FWD_MM        = 152.0
+CAMERA_HFOV_DEG      = 74.0     # pinhole equivalente (el twin lo usa en CameraParams)
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
 # Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
 # El CAD solo trae el ToF izquierdo (x −35.2…−27.7, fwd 100.6…120.6); el derecho se
@@ -129,9 +130,9 @@ VEHICLE_DIMS_PROVENANCE = {
     "TRACK_MM": "CAD v2 (GLB)",
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
     "MAX_WHEEL_STEER_DEG": "derivado del README v2 §2.4: 53.1° int. / T=60 / L=113 → equivalente bicicleta",
-    "CAMERA_TILT_DEG": "confirmado por usuario",
-    "CAMERA_HEIGHT_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 85 en el origen del nodo, no el centro óptico)",
-    "CAMERA_FWD_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 134 en el origen del nodo)",
+    "CAMERA_TILT_DEG": "PnP de bev_calib.npz del carro nuevo (2026-11-04)",
+    "CAMERA_HEIGHT_MM": "PnP de bev_calib.npz del carro nuevo (2026-11-04)",
+    "CAMERA_FWD_MM": "PnP de bev_calib.npz del carro nuevo (2026-11-04)",
     "SENSOR_MOUNTS": "CAD v2 (GLB); tof_right supuesto espejo del izquierdo",
     "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
 }
