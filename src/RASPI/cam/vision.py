@@ -52,13 +52,14 @@ def open_camera(cam_index=0, undistort=True):
     else:
         # Color: el lente gran angular no tiene filtro IR -> imagen rojiza y aro
         # MAGENTA en las orillas (ver camera_tuning/README.md). Pi 5 (ISP PiSP):
-        # tuning propio imx219_noir_wro_pi5.json + ganancias <1.10,1.51>
+        # tuning propio imx219_noir_wro_pi5.json + ganancias <1.10,1.37>
+        # (1.51 -> 1.37 el 2026-11-04 en la pista: el piso blanco salía B/G 1.16, ahora 1.06)
         # (calibrado 2026-10-07). Pi 4 (ISP VC4): <1.2,1.5> con el tuning del sistema.
         tuning_pi5 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "camera_tuning", "imx219_noir_wro_pi5.json")
         if os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp") and os.path.exists(tuning_pi5):
             os.environ.setdefault("LIBCAMERA_RPI_TUNING_FILE", tuning_pi5)
-            gains = "<1.10,1.51>"
+            gains = "<1.10,1.37>"
         else:
             gains = "<1.2,1.5>"
         # 40 fps = máximo del modo 1640x1232 del IMX219 (el modo de 3280x2464 solo da
@@ -135,9 +136,23 @@ def open_camera(cam_index=0, undistort=True):
 # pared; orillas1005 (luz de siempre) idéntico.
 #
 # Competition green RGB(68,214,44) → HSV≈(56, 203, 214)
+#
+# 2026-11-04, Pi 5 (ISP PiSP + imx219_noir_wro_pi5.json, ganancias <1.10,1.37>):
+# el rojo sale más pálido y rosado que en la Pi 4 y los filtros de arriba lo
+# tiraban entero (0 detecciones a 50 cm). Medido en la pista, misma imagen
+# (p5-p95 de px; mediana entre paréntesis):
+#   rojo 50 cm      H 170-177  S 107-167 (144-158)  G/R (0.38-0.44)  B/R (0.47-0.54)
+#   pared rosa      H 139      S 109-118            G/R 0.67         B/R 1.19
+#   cinta naranja   H 0-10     S 50-109  (61-75)    G/R (0.76-0.78)  B/R (0.71-0.78)
+#   verde           H 70-73    S 118-134            G/R 1.95
+# En la Pi 5 la pared rosa ya no cae en la banda del rojo (H 139) y la cinta se
+# separa por G/R y S. Valores de la Pi 5: S >= 110, RED_GR_MAX 0.60, RED_BR_MAX 0.70.
+# La Pi 4 conserva los suyos.
+PI5_CAMARA = os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp")
+_RED_S_MIN = (110, 110) if PI5_CAMARA else (150, 170)
 COLOR_RANGES = {
-    "Red": [(np.array([0, 150, 40]), np.array([5, 255, 200])),
-            (np.array([168, 170, 40]), np.array([179, 255, 235]))],
+    "Red": [(np.array([0, _RED_S_MIN[0], 40]), np.array([5, 255, 200])),
+            (np.array([168, _RED_S_MIN[1], 40]), np.array([179, 255, 235]))],
     "Green": [(np.array([30, 35, 25]), np.array([85, 255, 255]))],
 }
 
@@ -157,7 +172,7 @@ class Vision:
     # magenta del estacionamiento 0.45-0.60 (es rosa: mucho azul). A
     # diferencia del piso de H que se usaba antes, esta razón NO se mueve con
     # la temperatura de color de la sede — las dos se escalan parejo.
-    RED_BR_MAX = 0.42
+    RED_BR_MAX = 0.70 if PI5_CAMARA else 0.42   # Pi 5: ver COLOR_RANGES (2026-11-04)
 
     # 2026-09-22 (orillas1190, luz fuerte): falsos en cada vuelta, separados
     # por razones que no se mueven con la luz. Medido re-pasando vision sobre
@@ -168,7 +183,7 @@ class Vision:
     #     37-44 (la banda Green acepta S>=35); cono verde real S 120-160.
     #     Piso 70.
     # 0 conos reales perdidos en las 6 runs; en 1005/1064/1150 casi no rechaza.
-    RED_GR_MAX = 0.28
+    RED_GR_MAX = 0.60 if PI5_CAMARA else 0.28   # Pi 5: ver COLOR_RANGES (2026-11-04)
     GREEN_S_MIN_MED = 70
 
     def process_color(self, frame, mask, color_name, bgr=None, hsv=None):

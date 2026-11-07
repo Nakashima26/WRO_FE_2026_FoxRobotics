@@ -8,6 +8,8 @@ Dos modos:
      Página con sliders de ganancia roja/azul, botón "balancear con la hoja"
      (pon una hoja blanca en el recuadro) y comparación de tuning normal/noir.
        ~/FoxRobotics/.venv/bin/python -m pure_pursuit.cam_web            (desde src/RASPI/cam)
+     Sin argumentos usa la misma configuración que la carrera (vision.py): en la
+     Pi 5, camera_tuning/imx219_noir_wro_pi5.json + ganancias <1.10,1.37>.
        ~/FoxRobotics/.venv/bin/python -m pure_pursuit.cam_web --tuning noir
 
   2) HUD de carrera (--hud): NO toca la cámara. Transmite /tmp/wro_cam_frame.jpg,
@@ -315,10 +317,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--hud", action="store_true", help="transmitir el HUD de wro-runtime (no abre la cámara)")
-    ap.add_argument("--tuning", default="normal",
-                    help="normal | noir | ruta a un .json propio (p. ej. ../camera_tuning/imx219_noir_wro_pi5.json)")
-    ap.add_argument("--r", type=float, default=1.2, help="ganancia roja inicial (la de vision.py)")
-    ap.add_argument("--b", type=float, default=1.5, help="ganancia azul inicial (la de vision.py)")
+    # Default = lo mismo que vision.open_camera: en la Pi 5 el tuning calibrado WRO
+    # (sin aro magenta, lente sin filtro IR) + <1.10,1.37>; en la Pi 4 el del sistema + <1.2,1.5>.
+    pi5 = os.path.isdir(TUNING_DIR) and os.path.exists(WRO_TUNING)
+    ap.add_argument("--tuning", default=WRO_TUNING if pi5 else "normal",
+                    help="normal | noir | ruta a un .json propio (default en Pi 5: camera_tuning/imx219_noir_wro_pi5.json)")
+    ap.add_argument("--r", type=float, default=1.10 if pi5 else 1.2, help="ganancia roja inicial (la de vision.py)")
+    ap.add_argument("--b", type=float, default=1.37 if pi5 else 1.5, help="ganancia azul inicial (la de vision.py)")
     a = ap.parse_args()
     src = HudSource(HUD_PATH) if a.hud else Cam(a.tuning, a.r, a.b)
     srv = ThreadingHTTPServer(("0.0.0.0", a.port), make_handler(src, a.hud))
