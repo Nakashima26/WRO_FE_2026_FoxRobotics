@@ -12,6 +12,7 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+.venv-sim/
 
 # GitHub token (NUNCA subir el token real)
 deploy/.github-token
@@ -49,3 +50,4 @@ build/
 
 # KiCad lock files (exist only while a project is open)
 *.lck
+src/RASPI/cam/runs/

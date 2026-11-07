@@ -1,0 +1,55 @@
+{
+  "created": "2026-10-21T12:25:07",
+  "vbat_V": 12.5,
+  "note": "",
+  "files": [
+    {
+      "file": "ramp_fwd_r01.csv",
+      "cmd": "RAMP 150 255 35 500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "ramp_rev_r01.csv",
+      "cmd": "RAMP -150 -255 -35 500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "ramp_fwd_r02.csv",
+      "cmd": "RAMP 150 255 35 500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "ramp_rev_r02.csv",
+      "cmd": "RAMP -150 -255 -35 500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "ramp_fwd_r03.csv",
+      "cmd": "RAMP 150 255 35 500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "ramp_rev_r03.csv",
+      "cmd": "RAMP -150 -255 -35 500",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

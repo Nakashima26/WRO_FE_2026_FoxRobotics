@@ -5,7 +5,7 @@ Hardware:
   Cámara  : Raspberry Pi Camera v2  (FOV ~62°, resolución proceso 640×480)
   Motor   : N20 DC 50:1 + etapa LEGO 2:1  → ratio total 100:1
   Servo   : SG90  (centro = 80°, límite mecánico ±35° efectivo en rueda)
-  Chassis : 210×140×80 mm  |  batalla ~100 mm (estimado)
+  Chassis : 180×130 mm  |  batalla 113 mm
   ESP32   : recibe protocolo V2 por UART Serial2 (RX=17, TX=16) @ 115200
   Pi GPIO : LED en 27, botón arranque en 17
 
@@ -13,20 +13,132 @@ Ajusta primero CALIB_REAL_MM para que coincida con tu montaje de cámara,
 luego corre calibrate.py para generar bev_calib.npz.
 """
 
+import os
 import numpy as np
 from pathlib import Path
 
+# ─── Frecuencia del pipeline ─────────────────────────────────────────────────
+# Las ventanas de tiempo en FRAMES, los pasos por frame (slew, decay) y las EMA
+# por frame se afinaron a ~14 fps (Pi 4). PI_FPS = fps reales del pipeline; con
+# PI_FPS == FPS_NOMINAL fr()/per_frame()/ema_per_frame() devuelven el valor tal
+# cual. Pi 5 (~28 fps): subir PI_FPS y las ventanas conservan su duración.
+FPS_NOMINAL = 14.0
+# Cámara a 40 fps (vision.open_camera). Si el pipeline completo (visión + BEV + ...)
+# no alcanza 40 en la Pi, exporta FOX_PI_FPS=<fps reales> (el log imprime fps=...).
+PI_FPS = float(os.environ.get("FOX_PI_FPS", "40"))
+
+
+def fr(n):
+    """Cuenta de frames afinada a FPS_NOMINAL -> misma duración a PI_FPS."""
+    if n <= 0 or PI_FPS == FPS_NOMINAL:
+        return n
+    return max(1, int(round(n * PI_FPS / FPS_NOMINAL)))
+
+
+def per_frame(x):
+    """Paso por frame (grados/frame, conf/frame) -> mismo ritmo por segundo."""
+    return x if PI_FPS == FPS_NOMINAL else x * FPS_NOMINAL / PI_FPS
+
+
+def ema_per_frame(a):
+    """Peso de EMA aplicado una vez por frame -> misma constante de tiempo."""
+    if PI_FPS == FPS_NOMINAL or not 0.0 < a < 1.0:
+        return a
+    return 1.0 - (1.0 - a) ** (FPS_NOMINAL / PI_FPS)
+
 # ─── Rutas ────────────────────────────────────────────────────────────────────
 CALIB_FILE = Path(__file__).parent / "bev_calib.npz"
+# Lente (calib_lente.py): K/dist/newK. vision.open_camera la aplica sola si existe.
+LENS_CALIB_FILE = Path(__file__).parent / "lens_calib.npz"
 
 # ─── BEV — imagen de salida ───────────────────────────────────────────────────
 BEV_W      = 400          # píxeles de ancho
 BEV_H      = 400          # píxeles de alto
 MM_PER_PX  = 2.0          # escala: 1px = 2 mm  →  400px = 800 mm de cobertura
 
-# Posición del robot en la imagen BEV (eje trasero, centro horizontal)
+# Posición del robot en la imagen BEV (centro horizontal). Es el origen de
+# CALIB_REAL_MM, que se mide desde el EJE DELANTERO: el eje trasero queda
+# BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM más atrás, fuera de la imagen.
 ROBOT_BEV_X = BEV_W // 2   # 200
 ROBOT_BEV_Y = BEV_H - 20   # 380
+# OJO: el comentario original decía "= batalla", pero la batalla es 113 mm
+# (WHEELBASE_MM) y twin/camera.py pone el eje delantero a WHEELBASE_MM. Se
+# deja 100 hasta medir; pendiente medir/decidir.
+BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM = 100.0
+
+# ─── GEOMETRÍA DEL VEHÍCULO — FUENTE ÚNICA ─────────────────────────────────────
+# Todo lo que necesite medidas del carro las lee de aquí: track_map, digital_map,
+# wro_field, map_view y el twin (twin/params.py). Va en config.py porque la Pi
+# NO puede importar twin/ y el twin sí puede importar config.
+# Marco: mm desde el EJE TRASERO; right + = derecha; fwd + = adelante;
+# dir 0 = adelante, +90 = derecha, 180 = atrás, 270 (= -90) = izquierda.
+# Fuente: GLB del CAD v2 (VehicleDirTest_V2.glb, SolidWorks, 2026-10-09), cajas
+# alineadas al eje; el eje trasero es el origen. Atrás: borde de la llanta trasera
+# (−21.8); adelante: cara del ultrasónico frontal (147.6; el chasis base acaba en 127.9).
+ROBOT_LENGTH_MM      = 176.0    # medido 2026-10-22 en el carro (CAD decía 169.4); −21.8 … 154.2
+ROBOT_WIDTH_MM       = 125.0    # medido 2026-10-22 en el carro (CAD decía 132)
+WHEELBASE_MM         = 113.0    # CAD: 112.85 (el .ino también usa 113)
+REAR_OVERHANG_MM     = 21.8     # CAD (borde de llanta trasera)
+FRONT_OVERHANG_MM    = 41.2     # 176 − 113 − 21.8 (medido 2026-10-22; lo que sobra va adelante)
+TRACK_MM             = 110.0    # CAD: entre centros de llantas traseras (±55; llanta de 22 mm)
+WHEEL_DIAMETER_MM    = 43.0     # README (LEGO 4184286 / 6182551)
+# Dirección v2 (README §2.4, piñón de 19 dientes, CAD): a tope de servo la rueda
+# INTERIOR gira 53.1° y la EXTERIOR 37.0° (Ackermann ~106%). La dirección del carro
+# (cremallera) mueve ambas ruedas; el modelo bicicleta del twin necesita UN ángulo
+# equivalente: el que da el mismo radio al centro del eje trasero,
+#   R = L/tan(δ_int) + T/2  (T = distancia entre pivotes, 60 mm)  →  δ_eq = atan(L/R).
+# Con L=113: R ≈ 114.8 mm, δ_eq ≈ 44.5°. (El 46.32° anterior era del CAD viejo.)
+KINGPIN_TRACK_MM         = 60.0   # README v2 §2.4 (SolidWorks)
+WHEEL_INNER_FULL_LOCK_DEG = 53.1  # README v2 §2.4 (medido en el ensamble CAD)
+WHEEL_OUTER_FULL_LOCK_DEG = 37.0  # README v2 §2.4
+# Comando de servo (° desde el centro) con el que se logra ese tope: recorrido de la
+# cremallera medido en el CAD (±71°, no el ±90° nominal).
+# Medido 2026-10-22 en el tapete (twin/calib/medidas_20261022): R mínimo 123 mm der / 134 izq.
+# Por si acaso se toma 134 a los DOS lados (usuario): atan(113/134) = 40.1°, que el ESP
+# alcanza a ~73 ticks der (0.552°/tick) y ~68 izq (0.588°/tick); 70 = promedio para la Pi.
+# Debe coincidir con RUEDA_TOPE_DEG de PurePursuit.ino y KAPPA_MAX de route_planner.py.
+SERVO_FULL_LOCK_CMD_DEG   = 70.0
+MAX_WHEEL_STEER_DEG  = 40.1   # bici a tope, R 134 mm (CAD decía 44.54 con la interior a 53.1°)
+# OJO: MAX_STEER_DEG (pure pursuit) = 60 no coincide con esto; lo maneja otra tarea,
+# no se cambia aquí.
+# Cámara (NoIR ancho)
+CAMERA_TILT_DEG      = 45.0     # confirmado por usuario
+# SUPUESTOS NO MEDIDOS. Son los valores anteriores del twin (no hay medición ni calibración
+# detrás). El origen del nodo CameraFrnt del CAD v2 (GLB) da fwd 134 / altura 85, pero no es
+# el centro óptico (la caja llega a 105). Con 134/85 el rosa del twin bajó de 0.29 a 0.22-0.27 y
+# rompió la salida del cajón, pero eso no prueba que 140/97 sea lo correcto. Pendiente: sacar la
+# pose real de la homografía de bev_calib.npz o medirla.
+CAMERA_HEIGHT_MM     = 97.0
+CAMERA_FWD_MM        = 140.0
+CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
+# Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
+# El CAD solo trae el ToF izquierdo (x −35.2…−27.7, fwd 100.6…120.6); el derecho se
+# supone espejo. Los ToF laterales y el ultrasónico lateral quedan en fwd distinto.
+SENSOR_MOUNTS = {
+    "us_left":   (-63.5,  56.3, 270.0),
+    "us_right":  ( 63.5,  56.3,  90.0),
+    "us_front":  (  0.0, 147.6,   0.0),
+    "tof_left":  (-35.2, 110.6, 270.0),
+    "tof_right": ( 35.2, 110.6,  90.0),
+    "tof_rear":  (  0.0, -19.6, 180.0),
+    "tof_front": (  0.0, 141.4,   0.0),
+}
+# Procedencia, para el twin (describe()) y para quien mida.
+VEHICLE_DIMS_PROVENANCE = {
+    "ROBOT_LENGTH_MM": "medido en el carro impreso 2026-10-22",
+    "ROBOT_WIDTH_MM": "medido en el carro impreso 2026-10-22",
+    "WHEELBASE_MM": "CAD v2 (GLB, 112.85)",
+    "REAR_OVERHANG_MM": "CAD v2 (GLB)",
+    "FRONT_OVERHANG_MM": "largo medido 2026-10-22 − batalla − voladizo trasero",
+    "TRACK_MM": "CAD v2 (GLB)",
+    "WHEEL_DIAMETER_MM": "README llanta 43 mm",
+    "MAX_WHEEL_STEER_DEG": "medido 2026-10-22: R 134 mm (tope izq en tapete) a los dos lados",
+    "CAMERA_TILT_DEG": "confirmado por usuario",
+    "CAMERA_HEIGHT_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 85 en el origen del nodo, no el centro óptico)",
+    "CAMERA_FWD_MM": "supuesto, no medido (valor previo del twin; CAD v2 da 134 en el origen del nodo)",
+    "SENSOR_MOUNTS": "CAD v2 (GLB); tof_right supuesto espejo del izquierdo",
+    "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
+}
 
 # ─── Puntos de calibración en el suelo (mm, relativo a eje delantero del robot) ──
 # x_mm: lateral  (+ = derecha del robot)
@@ -194,7 +306,7 @@ OBSTACLE_CASUAL_MM = 300.0   # >= esto: reacción suave (gain STEER_DIST_GAIN_MI
 
 # ─── Pure Pursuit ─────────────────────────────────────────────────────────────
 LOOKAHEAD_PX   = 100.0    # distancia look-ahead en px BEV  (= 160 mm)
-WHEELBASE_PX   = 50.0    # batalla del vehículo en px BEV   (= 100 mm)
+WHEELBASE_PX   = WHEELBASE_MM / MM_PER_PX   # batalla en px BEV (113 mm -> 56.5)
 MAX_STEER_DEG  = 60.0    # límite mecánico del servo en grados
 MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 
@@ -204,6 +316,9 @@ MIN_PATH_PTS   = 4       # puntos mínimos de path para considerar PP válido
 # suficiente para esquivar sin dar el volantazo. En grados de steer (pre-norm).
 # 2026-08-28: bajado 12->6 al pasar el pipeline de ~7fps a ~14fps (mismo °/s).
 PP_STEER_SLEW_DEG = 6.0
+# 0 = apagado. En recta sin lata cerca, tope de |steer| para no seguir el
+# zigzag del path. Lo prende el preset del twin; el carro real queda en 0.
+PP_OPEN_STEER_CAP_DEG = 0.0
 
 # Lookahead variable — derivado de la escala de urgencia
 # NOTA: 45 px saturaba el steer al tope mecánico (obs=±1.0) en cada esquiva
@@ -625,7 +740,7 @@ MIDTURN_SIDE_DEADBAND_PX  = 24.0   # |bev_x - eje| bajo esto -> lado '?' (indeci
 # CLEAR_PX = medio ancho del chasis + inflado de la lata. Si el centro de la
 # lata está a >= esto del eje de avance, el borde del carro libra el borde
 # inflado de la lata yendo recto.
-ROBOT_HALF_WIDTH_PX      = round(140.0 / 2.0 / MM_PER_PX)        # chasis 140mm -> 35 px
+ROBOT_HALF_WIDTH_PX      = round(ROBOT_WIDTH_MM / 2.0 / MM_PER_PX)  # carro 125 mm
 OBS_MEM_GEOM_CLEAR_PX    = ROBOT_HALF_WIDTH_PX + OBS_INFLATE_R   # 35 + 36 = 71 px
 # ── Perillas de AJUSTE FINO (mover solo estas en pista) ─────────────────────
 # AHEAD_MARGIN_PX: cuánto puede seguir ADELANTE la lata (marco actual) y aún
@@ -742,6 +857,72 @@ TURN_TIMEOUT_S = 3.0
 # Un objeto rojo/verde detectado en la imagen de cámara CRUDA (no en BEV) que
 # todavía no proyecta dentro del rango calibrado.  Se usa SOLO para empezar a
 # centrar el steer con anticipación.
+# Lata que la cámara sigue viendo pero cuyo pie cae fuera de los 400 px.
+# No entra a la memoria ni al filtro de la naranja: solo abre la línea hacia
+# el lado de paso mientras el bbox siga ahí. El horizonte (>2.2 m o >1.4 m
+# de lado) no cuenta.
+FAR_LINE_SHIFT_PX    = 56      # tope del desplazamiento, = inflado de la lata
+FAR_LINE_RAMP_PX     = 250.0   # abre la línea arriba; no llega al lookahead (20 cm)
+FAR_LINE_MIN_FWD_MM  = 200.0
+FAR_LINE_MAX_FWD_MM  = 2200.0
+FAR_LINE_MAX_LAT_MM  = 1400.0
+
+# Mapa digital: asientos vacíos, cajón conocido, altura por sonar frontal
+# y ToF trasero. La cámara solo vota el asiento. El volante lo usa si
+# DIGITAL_MAP_STEER está prendido.
+DIGITAL_MAP_STEER = False
+# Ruta de una vuelta calculada UNA vez con route_planner (mínimo tiempo con
+# curvatura, pilares por color, paredes) en vez de rearmar _build_line en cada
+# frame. Solo tiene efecto con el mapa digital (y DIGITAL_MAP_STEER para que
+# mande el volante). Apagado: comportamiento idéntico al anterior.
+ROUTE_PLANNER = False
+# Backend de ROUTE_PLANNER: "qp" = route_planner.plan_lap (default),
+# "joint" = racing_line_astar.plan_lap_joint (DP en el anillo).
+RACING_LINE = "qp"
+# Esquina open/closed/island con mapa conocido (corner_planner). On también
+# si DIGITAL_MAP_SEED_CONFIRMED (freeze twin). Rojo → closed/island, nunca open.
+CORNER_PLANNER = False
+# Twin / pruebas: sembrar DigitalMap.confirmed con todas las latas del Field
+# al armar (mapa ya conocido = vueltas 2–3). El carro real no lo usa.
+DIGITAL_MAP_SEED_CONFIRMED = False
+# Twin: al llegar a este tc, sembrar confirmed desde el Field, congelar votos
+# y (si ROUTE_PLANNER) forzar replan. 0 = off. Típico 4 = tras 1ª vuelta.
+DIGITAL_MAP_FREEZE_AT_TC = 0
+# Desde este conteo de giros las señales confirmadas no cambian de asiento; None = como antes.
+DIGITAL_MAP_FREEZE_TC = None
+# Recta del cajón = marco del mapa (convención, no dato del campo: el tapete es
+# simétrico a 90°). El carro real no tiene de dónde leerla y no la necesita.
+DIGITAL_MAP_PARKING = "W"
+# Sentido de carrera del mapa. None = lo decide el ESP (dir= del ACK, fijado
+# una vez; runtime_nuevo._update_digital). "CW"/"CCW" lo fuerza desde el
+# arranque (solo pruebas; el twin inyecta la verdad salvo DIGITAL_MAP_INJECT_TRUTH=0).
+# Ojo: CORNER_TURN_DIR_OVERRIDE manda sobre el dir= del ESP.
+DIGITAL_MAP_DIRECTION = None
+# Con DIGITAL_MAP_STEER: aguanta el giro rápido (prio=1) hasta que el sonar
+# frontal lea esto (cm), para que el arco salga al centro del carril de la
+# recta siguiente y no pegado a la isla. No aplica si la primera lata de la
+# recta siguiente se pasa por dentro (ahí conviene girar temprano). 0 = off.
+DIGITAL_MAP_TURN_HOLD_CM = 0.0
+DIGITAL_MAP_TURN_HOLD_INNER_CM = 0.0   # ídem si la 1a lata siguiente va por dentro
+# Recta del cajón: el hueco magenta en la pared exterior hace que el paso por
+# fuera (verde) + hold normal lleguen pegados a la esquina → MANIOBRA en
+# reversa. 0 = mismo hold que el resto; >0 = soltar el giro antes (cm de dF).
+DIGITAL_MAP_TURN_HOLD_PARK_CM = 0.0
+# Tope del lado exterior (verde) en la recta del cajón, mm de shift. 0 = sin tope.
+DIGITAL_MAP_PARK_OUTER_MAX_MM = 0.0
+# Tras freeze (mapa conocido): tope del knee al verde en esquinas, mm.
+# Sin esto la 2ª vuelta abre hasta la pared exterior. 0 = sin tope.
+DIGITAL_MAP_KNOWN_OUTER_CAP_MM = 140.0
+# Verde en la boca de la recta siguiente y el giro sigue bloqueado con el
+# frontal ya por debajo de esto (cm): la esquina la dobla la línea del mapa
+# (prio=1) y el ESP la cuenta por el gyro (GIRO_PI_CUENTA_DEG). 0 = off.
+DIGITAL_MAP_PP_TURN_CM = 0.0
+# Corrige la pose del mapa con los sonares (L/R contra la pared exterior y la
+# isla, frontal contra la pared del fondo). Ver digital_map._wall_fix.
+DIGITAL_MAP_WALL_FIX = False
+DIGITAL_MAP_WALL_YAW = True    # con WALL_FIX: también el rumbo por la pendiente de la pared
+DIGITAL_MAP_ORANGE_BEHIND_MM = None   # p. ej. 1500: cinta vista con along < esto = la esquina de atrás, se ignora
+
 FAR_HINT_ENABLED     = True
 FAR_HINT_MIN_AREA_PX = 1200    # área mínima del bbox en cámara para confiar (ruido/falsos positivos)
 FAR_HINT_MAX_STEER   = 12.0     # grados máx que puede aportar el hint (<< MAX_STEER_DEG)
@@ -1069,6 +1250,197 @@ LINE_CLASSIFY_FRAMES_FIRST     = 4
 # Cuando pp=1:  ESP32 usa ppSteerGain=60  →  obs=steer_deg/60
 # Cuando pp=0:  ESP32 usa visionSteerGain=80  (comportamiento V1 actual)
 PP_STEER_GAIN     = MAX_STEER_DEG   # 60.0
+# Grados de servo por grado de rueda. El PP calcula ángulo de RUEDA y el ESP lo
+# escribe como SERVO 1:1, pero en el carro v2 71° de servo = 44.54° de rueda
+# (0.627 rueda/servo): el carro gira ~63 % de lo que pide el PP. 1.0 = sin
+# corregir (como siempre); SERVO_FULL_LOCK_CMD_DEG / MAX_WHEEL_STEER_DEG = 1.594.
+PP_SERVO_PER_WHEEL = 1.0
+
+# ─── Modo ruta (ring_route) ───────────────────────────────────────────────────
+# Con el mapa de señales completo (las 4 rectas), la vuelta se planea una vez
+# como curva en mm y se sigue con pure pursuit sobre la pose por odometría
+# (prio=1: el ESP aplica el steer sin gyro-hold ni PID de pared).
+ROUTE_FOLLOW = False
+ROUTE_LOOKAHEAD_MM = 200.0
+# Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
+ROUTE_W_KAPPA = 3.0e4
+ROUTE_FAST_PLAN = True  # planificador más barato, misma ruta bit a bit que False: DP nativa con G/MASK transpuestos, malla en caché, madera del cajón solo en poses cercanas, lock infactible descartado sin DP (los reintentos reusan el cálculo siempre)
+ROUTE_WARM_PLAN = False  # al crear RouteMode, llena las cachés de la DP de CW y CCW (el primer plan tarda ~2 s en la Pi 5)
+ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10: diagonales más rectas, ~5x más lento)
+# Frames que se adelanta la pose de odometría (llega atrasada por el UART).
+# 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
+ROUTE_PREDICT_FRAMES = 0.0
+# El ESP sigue la ruta él mismo (RTB/RTP/RTE + rt=1,rtx,rty,rth en el V2), con
+# su odometría a la velocidad del loop. False: el steer lo calcula la Pi.
+ROUTE_ON_ESP = True
+# Localización EKF (localizer.py): odometría + distancias contra el mapa conocido.
+ROUTE_LOCALIZER = True
+# Vuelta 1 en modo ruta (mapa incompleto, route_mode.py): asientos sin ver =
+# obstáculos sin lado; vacío tras ROUTE_EMPTY_FRAMES frames a buena vista
+# (ROUTE_VIEW_*); frena si el próximo sin resolver está cerca sobre la ruta.
+ROUTE_LAP1 = True
+ROUTE_EMPTY_FRAMES = 16
+ROUTE_VIEW_HALF_DEG = 45.0
+ROUTE_VIEW_MAX_MM = 550.0
+# Planificador (ring_route.RouteParams): premio por estación que ve un asiento sin ver y castigo por pasar lejos de él
+ROUTE_W_VISIBLE = 60.0
+ROUTE_W_UNKNOWN_NEAR = 1.5
+ROUTE_STOP_MM = 750.0
+ROUTE_SLOWDOWN_MM = 1300.0
+ROUTE_SLOW_PWM = 100
+ROUTE_BLIND_PWM = None   # tope antes de fijar el avance del cajón (arranque ciego); None = ROUTE_SLOW_PWM
+ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
+# Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
+# (dentro de ROUTE_SLOWDOWN_MM). None = apagado.
+ROUTE_UNSEEN_WALL_PWM = None
+ROUTE_CTE_PWM = None     # tope lejos de la ruta (None = ROUTE_SLOW_PWM)
+ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_PWM)
+# Tope de PWM en la vuelta 1 mientras quede algún asiento sin resolver.
+ROUTE_LAP1_PWM = 120
+# Aplica las reglas de la recta también con el color provisional: un replan por señal en vez de dos.
+ROUTE_PROV_RULES = False
+ROUTE_LAP1_OPEN = False   # vuelta 1: sin asiento sin ver a < ROUTE_SLOWDOWN_MM adelante, sin el tope ROUTE_LAP1_PWM
+# Vuelta 1: cerca de un asiento sin ver, en vez del escalón a ROUTE_UNSEEN_PWM dentro de
+# ROUTE_SLOWDOWN_MM, rampa física: llegar a ROUTE_UNSEEN_PWM a esta distancia (mm) del asiento
+# frenando con ROUTE_PROFILE_A_BRAKE_MM_S2 y latencia ROUTE_PROFILE_LATENCY_S. None = escalón.
+ROUTE_UNSEEN_RAMP_MM = None
+# Medición (seat_roi.py): registra [ROI] por asiento de frente a la cámara. Solo log.
+SEAT_ROI_LOG = False
+SEAT_ROI_MIN_FRAC = 0.25   # fracción mínima de píxeles de un color en la ROI para decidir color
+SEAT_ROI_MAX_MM = 3500.0   # distancia máxima cámara -> asiento a medir
+SEAT_COL_MARGIN_MM = 80.0  # margen de la ventana de columna (dos asientos del mismo w)
+SEAT_COL_MIN_FRAC = 0.3    # fracción del área de una señal que tiene que cubrir el color en la columna
+SEAT_ROI_DUMP_DIR = None   # carpeta para volcar frames con las ventanas (diagnóstico)
+# Usa la clasificación por columna en la ruta (route_mode._col_gate): Empty -> asientos vacíos;
+# Red/Green -> color provisional, sin frenar por esos asientos. False: sin cambio.
+ROUTE_SEAT_ROI = False
+SEAT_ROI_USE_MAX_MM = 1800.0   # distancia máxima a la columna para usar su clasificación
+SEAT_ROI_FRAMES = 3            # frames seguidos con la misma clase (y gates) para decidir
+SEAT_ROI_MAX_YAW = 1.0         # |yaw| máx del carro (grados/frame) para usar la clasificación
+SEAT_ROI_MAX_BEARING = 40.0    # |rumbo| máx a la columna (grados) para usar la clasificación
+# Usar también el color de la columna (provisional, sin frenar por ella). Sin la fila
+# exacta la ruta se corregía tarde a toda velocidad (seeds 20/36): solo vacíos por defecto.
+SEAT_ROI_COLOR = False
+# Perfil de velocidad por curvatura (route_mode._profile_pwm): rápido en las
+# rectas y frena antes de cada curva según su κ. False: sin cambio.
+ROUTE_PROFILE = False                 # perfil de velocidad por curvatura (rectas rápidas)
+ROUTE_PROFILE_BASE_PWM = 155          # piso: velocidad de curva de hoy
+ROUTE_PROFILE_MAX_PWM = 255           # techo en recta
+ROUTE_PROFILE_A_LAT_MM_S2 = 1500.0    # aceleración lateral máxima
+ROUTE_PROFILE_A_BRAKE_MM_S2 = 600.0   # desaceleración disponible para frenar antes de una curva
+ROUTE_PROFILE_LATENCY_S = 0.25        # adelanto por latencia Pi->ESP->motor
+ROUTE_PROFILE_HORIZON_MM = 1500.0     # cuánto mirar hacia adelante
+ROUTE_PROFILE_KAPPA_WIN = 5           # muestras (20 mm c/u, route_planner out_ds_mm) para el máximo móvil de |kappa|
+# Cerca de una señal o asiento sin resolver (a menos de esto, mm) la ruta va a la velocidad base:
+# el carro llega a la señal a velocidad base.
+ROUTE_PROFILE_SIGN_MM = 300.0
+ROUTE_PROFILE_K_MM_S_PER_PWM = 3.5    # modelo v = K*(PWM-PWM0) (twin/params.py MotorParams)
+ROUTE_PROFILE_PWM0 = 25.0
+# Perfil v3 (None = igual que antes). MIN_PWM: piso real del perfil; las curvas cerradas
+# (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
+ROUTE_PROFILE_MIN_PWM = None
+ROUTE_L23_MIN_PWM = 255    # piso del perfil en las vueltas 2-3 (tc 4..11): sin frenar por curvatura (n1-3: vueltas 2+3 -0.41 s, pared min 11.8 mm); None = ROUTE_PROFILE_MIN_PWM
+# Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
+# es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
+ROUTE_PROFILE_SIGN_NEAR_MM = None
+# Paso muy justo a una señal (ruta a centro < NEAR_MM): rampa de MIN_PWM a TIGHT_PWM en TIGHT_MM (centro a centro). None = apagado
+ROUTE_PROFILE_SIGN_TIGHT_MM = None
+ROUTE_PROFILE_SIGN_TIGHT_PWM = 110
+# Perfil: frenar también cerca de las 4 esquinas de la isla (±INNER_HALF_MM, ±INNER_HALF_MM).
+# None = apagado. Rampa de v_min (dist <= ISLAND_NEAR_MM) a la base (dist >= ISLAND_MM),
+# igual que con las señales. Distancia medida desde la muestra de la ruta a la esquina.
+ROUTE_PROFILE_ISLAND_MM = None
+ROUTE_PROFILE_ISLAND_NEAR_MM = 200.0
+# Perfil: compensación del retraso del motor al frenar (feedforward). None = apagado.
+# Si la velocidad permitida la fija una frenada por delante (no la curva donde está
+# el carro), se pide v_permitida - BRAKE_FF_S * A_BRAKE (el motor sigue la rampa con
+# retraso tau ~ 0.25 s) y el piso baja a ROUTE_PROFILE_BRAKE_FLOOR_PWM.
+ROUTE_PROFILE_BRAKE_FF_S = None
+ROUTE_PROFILE_BRAKE_FLOOR_PWM = 60
+# Arranque ciego (start_fix): cada lectura de sonar pesa min(1, avance/STEP) en el
+# histograma, con el avance en mm de odometría desde el frame anterior usado. Con el
+# carro casi quieto el sonar repite la misma lectura y contarla N veces fijaba un δ
+# falso con masa 0.97 (semilla 8: 9 lecturas iguales, δ=700 con la verdad en 290).
+# None = como antes (cada frame pesa 1).
+ROUTE_FIX_STEP_MM = None
+# Arranque forzado: δ del cajón = mediana de lo que dice la línea naranja (recta del BEV en la columna central) si hay ≥ ROUTE_FIX_LINE_MIN lecturas; None = solo sonar
+ROUTE_FIX_LINE = None
+ROUTE_FIX_LINE_MIN = 3
+# Fijado por masa (no forzado) solo si cuadra con la mediana de la línea naranja (si hay ≥ ROUTE_FIX_LINE_MIN lecturas): |δ − mediana| ≤ esto; None = sin chequeo
+ROUTE_FIX_LINE_TOL_MM = None
+# Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
+ROUTE_FIX_LINE_LAG_FRAMES = 5
+# Localizer: una lectura de distancia que salta más que esto respecto a la anterior del mismo sensor se ignora (eco de transición señal->pared, semilla 32); None = apagado.
+LOC_SENSOR_JUMP_MM = 100.0
+# Perfil: aceleración lateral menor en curvas muy cerradas (|κ| > TIGHT_KAPPA, 1/mm).
+# Con radio < lookahead (200 mm) el pure pursuit corta hacia adentro (esquinas de la
+# isla, semilla 3). None = apagado (todas las curvas con A_LAT_MM_S2).
+ROUTE_PROFILE_TIGHT_KAPPA = None
+ROUTE_PROFILE_A_LAT_TIGHT_MM_S2 = 1500.0
+# Freno por urgencia al salirse de la ruta. None = apagado (solo ROUTE_CTE_PWM).
+# Con |cte| > ROUTE_CTE_SLOW_MM se proyecta la ruta de adelante (ROUTE_CTE_HORIZON_MM)
+# corrida el mismo cte: si en algún punto queda a menos de URGENT_MM de la isla, una
+# señal posible o la pared, y más cerca que la ruta misma, el tope es URGENT_PWM.
+# Si no hay peligro, el tope es ROUTE_CTE_PWM (poner 255 para no frenar).
+ROUTE_CTE_URGENT_MM = None
+ROUTE_CTE_URGENT_PWM = 120
+# Arranque ciego: un pico a menos de esto (mm) del extremo del rango de δ, sin votos de la línea, no fija el avance. None = apagado.
+ROUTE_FIX_EDGE_MM = None
+ROUTE_CTE_HORIZON_MM = 600.0
+# Subida de ruta: con ROUTE_UPLOAD_SLOW se frena mientras la ruta nueva sube al ESP (el ESP
+# sigue la anterior). Con DIFF_MM se frena solo si la ruta nueva se aparta más de DIFF_MM de la
+# que tiene el ESP en los próximos HORIZON_MM delante del carro. None: siempre (como antes).
+ROUTE_UPLOAD_DIFF_MM = None
+ROUTE_UPLOAD_STEP_MM = 40.0   # separación de puntos de la ruta subida al ESP (más = menos líneas RTP = subida más corta)
+ROUTE_UPLOAD_LINES = 1        # líneas de subida de ruta por frame (>1 necesita baud > 115200 en Pi y ESP)
+ROUTE_UPLOAD_HORIZON_MM = 700.0
+# Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
+ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
+ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm
+ROUTE_W_CLEAR = 8.0          # RouteParams.w_clear
+# El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
+ROUTE_TIME_COST = False
+# Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
+# El twin lo deja en False para que cada corrida sea reproducible.
+ROUTE_PLAN_ASYNC = False
+# Llena las cachés de la DP al crear RouteMode (antes de armar), ambas direcciones. False: sin cambio.
+ROUTE_WARM = False
+# Twin: retraso (s) entre que se pide un plan y que se adopta, como la DP en la Pi 5 (~1 s).
+# Se cuenta en frames de la Pi (PI_FPS). None: al instante (como antes). Solo sin ROUTE_PLAN_ASYNC.
+ROUTE_PLAN_DELAY_S = None
+# Tope de PWM mientras hay un plan en curso (hilo de ROUTE_PLAN_ASYNC o ROUTE_PLAN_DELAY_S):
+# la ruta vieja puede pasar por la señal recién vista. None = sin tope.
+ROUTE_PENDING_PWM = None
+# Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
+ROUTE_LOCK_STATIONS = 7
+# Segundos que el prefijo fijo se adelanta (a la velocidad del tope actual) por lo que tarda el plan. None = desde el carro.
+ROUTE_LOCK_LEAD_S = None
+# Tras subir una ruta nueva al ESP (RTE): tope de PWM durante ROUTE_SWAP_FRAMES frames. None = sin tope.
+ROUTE_SWAP_PWM = None
+ROUTE_SWAP_FRAMES = 0
+ROUTE_SWAP_NEW_ONLY = False  # True: el tope solo si esa ruta incorporó una señal nueva (o cambió de color)
+ROUTE_SWAP_DIFF_MM = None   # None: siempre; mm: solo si la ruta nueva se aparta tanto de la del ESP (horizonte ROUTE_UPLOAD_HORIZON_MM)
+# Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.
+# False: no se baja (el ESP sigue la anterior hasta el RTE); el ALTO (cap 0) se queda.
+ROUTE_UPLOAD_SLOW = True
+# Mientras sube una ruta que cambia (ver ROUTE_UPLOAD_DIFF_MM), el ESP gira con el obs de la Pi
+# (ruta nueva) en vez de su ruta vieja (ps=1 en el V2) y no se aplica ROUTE_UPLOAD_PWM. False: sin cambio.
+ROUTE_UPLOAD_PI_STEER = False
+# Error lateral (mm, odometría) arriba del cual se baja a ROUTE_SLOW_PWM.
+ROUTE_CTE_SLOW_MM = 40.0
+# Frames máximos detenido esperando ver un asiento (luego sigue lento).
+ROUTE_STOP_MAX_FRAMES = 80
+# Votos de color con los que un asiento sin confirmar ya cuenta como señal provisional.
+ROUTE_PROVISIONAL_VOTES = 2
+# Arranque ciego (start_fix.py): el cajón puede estar en cualquier punto de la
+# recta de salida (pegado a la pared exterior). Se arranca suponiéndolo lo más
+# atrás posible y el avance se fija con los sonares (pared del fondo a ≤119 cm).
+# Lo que ve la cámara antes se guarda y se vota ya con la pose corregida.
+ROUTE_START_BLIND = True
+# Convergencia: masa del histograma en ±ROUTE_FIX_WIN_MM y lecturas informativas mínimas.
+ROUTE_FIX_MASS = 0.97
+ROUTE_FIX_WIN_MM = 20.0
+ROUTE_FIX_MIN_INFORM = 4
 
 # 2026-08-28: Excepción "interior pass". Cuando el obstáculo se esquiva hacia
 # el mismo lado que la pista va a girar, la Pi mandaba intr=1 y el ESP32 dejaba
@@ -1153,7 +1525,7 @@ CORR_LIMIT_PX    = 160.0
 # ─── Cámara / captura ─────────────────────────────────────────────────────────
 CAM_INDEX      = 1
 SERIAL_PORT    = "/dev/ttyS0"
-BAUDRATE       = 115200
+BAUDRATE       = 115200  # = PI_BAUD del ESP; 921600 rinde ~1.8 s/ronda en el twin
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
 
@@ -1176,3 +1548,30 @@ CAM_BLACK_FRAMES    = 15     # desarmado: frames negros seguidos -> cámara caí
 CAM_REOPEN_WAIT_S   = 4.0    # espera tras soltar la cámara antes de reabrir (igual que stop + sleep 4 + start)
 CAM_REOPEN_JOIN_S   = 35.0   # espera a que el hilo salga de un cap.read() colgado (~30 s); si no, el
                              # proceso sale con código 3 y systemd (Restart=always) lo relanza
+
+# ─── Aviso de esquina al ESP32 (es= en el V2) — solo lo usa GIRO_RAPIDO ──────
+# La naranja vista hace poco = la esquina existe aunque un cono de la recta que
+# sigue tape el sonar del lado del giro. El momento del giro lo sigue poniendo
+# el frontal del ESP (ventana GR_FRONT_CM). En horario la naranja pasa bajo el
+# carro ~35 cm antes del disparo; en antihorario sigue enfrente al disparar.
+CORNER_HINT_TO_ESP = False   # False: el V2 sale igual que siempre
+CORNER_HINT_NEAR_Y = 120.0   # px BEV: naranja a menos de ~520 mm del eje delantero
+CORNER_HINT_HOLD_S = 1.5
+
+# ─── Mapa de pista (track_map / map_view) — runtime_nuevo.py ─────────────────
+# SHADOW: odometría + localizer + SignMap + log [MAP] + panel HUD; sin tocar V2 ni control.
+# ENABLED: además inyecta señales en BEV, gr/gf al V2, opc. classify/pasado.
+TRACK_MAP_SHADOW = True
+TRACK_MAP_ENABLED = False
+MAP_VIEW_IN_HUD = True
+TRACK_MAP_CLASSIFY = False
+TRACK_MAP_PASADO = False
+GR_PI_LAP1 = 0
+GR_GF_DEFAULT_CM = 50
+GR_GF_INNER_CM = 60
+GR_GF_OUTER_CM = 35
+# Centro del cajón en coords app (w); x_campo sur ≈ 1500 - w
+PARK_LOT_CENTER_W_MM = 1177.0
+MAP_OBS_DEDUP_PX = 60.0
+MAP_YAW_RATE_SKIP_DEG_S = 120.0
+MAP_LOG_COST_EVERY_N = 60

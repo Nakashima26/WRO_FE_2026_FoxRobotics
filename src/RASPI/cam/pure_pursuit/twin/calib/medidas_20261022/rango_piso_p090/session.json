@@ -1,0 +1,223 @@
+{
+  "created": "2026-10-22T12:48:54",
+  "vbat_V": null,
+  "note": "rango util 1..156",
+  "files": [
+    {
+      "file": "lock_p090_s001_r01.csv",
+      "cmd": "PWM 90 6000 1",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s001_r02.csv",
+      "cmd": "PWM 90 6000 1",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s001_r03.csv",
+      "cmd": "PWM 90 6000 1",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s004_r01.csv",
+      "cmd": "PWM 90 6000 4",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s004_r02.csv",
+      "cmd": "PWM 90 6000 4",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s004_r03.csv",
+      "cmd": "PWM 90 6000 4",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s008_r01.csv",
+      "cmd": "PWM 90 6000 8",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s008_r02.csv",
+      "cmd": "PWM 90 6000 8",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s008_r03.csv",
+      "cmd": "PWM 90 6000 8",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s016_r01.csv",
+      "cmd": "PWM 90 6000 16",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s016_r02.csv",
+      "cmd": "PWM 90 6000 16",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s016_r03.csv",
+      "cmd": "PWM 90 6000 16",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s140_r01.csv",
+      "cmd": "PWM 90 6000 140",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s140_r02.csv",
+      "cmd": "PWM 90 6000 140",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s140_r03.csv",
+      "cmd": "PWM 90 6000 140",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s144_r01.csv",
+      "cmd": "PWM 90 6000 144",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s144_r02.csv",
+      "cmd": "PWM 90 6000 144",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s144_r03.csv",
+      "cmd": "PWM 90 6000 144",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s148_r01.csv",
+      "cmd": "PWM 90 6000 148",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s148_r02.csv",
+      "cmd": "PWM 90 6000 148",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s148_r03.csv",
+      "cmd": "PWM 90 6000 148",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s152_r01.csv",
+      "cmd": "PWM 90 6000 152",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s152_r02.csv",
+      "cmd": "PWM 90 6000 152",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s152_r03.csv",
+      "cmd": "PWM 90 6000 152",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s156_r01.csv",
+      "cmd": "PWM 90 6000 156",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s156_r02.csv",
+      "cmd": "PWM 90 6000 156",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p090_s156_r03.csv",
+      "cmd": "PWM 90 6000 156",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

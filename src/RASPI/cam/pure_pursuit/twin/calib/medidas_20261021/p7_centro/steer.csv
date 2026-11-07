@@ -1,0 +1,4 @@
+servo_deg,radius_mm,rep,note
+75,16694.4,1,"auto enc+BNO: avance 994 mm, giro +3.4 grados  (giro corto < 20 grados: poco preciso, alarga --ms)"
+77,26362.6,1,"auto enc+BNO: avance 1026 mm, giro +2.2 grados  (giro corto < 20 grados: poco preciso, alarga --ms)"
+79,26349.7,1,"auto enc+BNO: avance 1007 mm, giro +2.2 grados  (giro corto < 20 grados: poco preciso, alarga --ms)"

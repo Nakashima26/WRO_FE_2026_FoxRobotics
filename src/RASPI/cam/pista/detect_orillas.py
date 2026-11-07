@@ -23,7 +23,8 @@ WINDOW_NAME = "Pista"
 
 cv2.setUseOptimized(True)
 cpu_count = os.cpu_count() or 1
-cv2.setNumThreads(min(4, cpu_count))
+fox_cv_threads = int(os.environ.get("FOX_CV_THREADS", str(min(4, cpu_count))))
+cv2.setNumThreads(fox_cv_threads)
 
 
 def open_camera(cam_index: int):

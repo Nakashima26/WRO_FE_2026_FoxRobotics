@@ -5,11 +5,24 @@ Carga la homografía desde bev_calib.npz (generado con calibrate.py).
 Si el archivo no existe, is_calibrated = False y el runtime usa fallback PID.
 """
 
+import os
+
 import cv2
 import numpy as np
 from pathlib import Path
 
 from . import config as C
+
+
+def _lens_sig() -> str:
+    """Sig de la calibración de lente activa ("" si no hay). Mismo archivo que vision.open_camera."""
+    path = os.environ.get("FOX_LENS_CALIB", str(C.LENS_CALIB_FILE))
+    if path in ("", "0") or not os.path.exists(path):
+        return ""
+    try:
+        return str(np.load(path)["sig"])
+    except Exception:   # npz roto: vision tampoco endereza, así que "" cuadra con lo que ve la cámara
+        return ""
 
 
 class BEVTransformer:
@@ -39,6 +52,10 @@ class BEVTransformer:
         data = np.load(str(path))
         self.H     = data["H"].astype(np.float64)
         self.H_inv = data["H_inv"].astype(np.float64)
+        lens_guardado = str(data["lens_sig"]) if "lens_sig" in data else ""
+        if lens_guardado != _lens_sig():
+            print("[BEV] AVISO: bev_calib.npz se hizo con otra calibracion de lente (o sin ella). "
+                  "Rehaz python -m pure_pursuit.calibrate.", flush=True)
         if "reproj_err_px" in data:
             self.last_reproj_err_px = float(data["reproj_err_px"])
             print(f"[BEV] Calibración cargada desde {path} "
@@ -93,7 +110,7 @@ class BEVTransformer:
 
         path = Path(calib_path) if calib_path else C.CALIB_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(str(path), H=H, H_inv=H_inv, reproj_err_px=mean_err)
+        np.savez(str(path), H=H, H_inv=H_inv, reproj_err_px=mean_err, lens_sig=_lens_sig())
         self.H     = H
         self.H_inv = H_inv
         self.last_reproj_err_px = mean_err

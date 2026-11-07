@@ -23,9 +23,6 @@
  */
 
 #include <Wire.h>
-#include <MPU6050_tockn.h>
-
-MPU6050 mpu(Wire);
 
 // ── Pines ─────────────────────────────────────────────────────────────────────
 #define TRIG_L      27
@@ -40,6 +37,66 @@ MPU6050 mpu(Wire);
 #define TRIG_F      14   // HC-SR04 frontal (ronda de obstáculos: CRUCERO/MANIOBRA)
 #define ECHO_F      33
 
+#if defined(FOX_SIL)
+#ifndef FOX_ENCODER
+#define FOX_ENCODER 0
+#endif
+#ifndef FOX_TOF
+#define FOX_TOF 0
+#endif
+#ifndef FOX_BNO
+#define FOX_BNO 0
+#endif
+#else
+// carro v2: encoder, 4 ToF y BNO085 por defecto; compilar con -DFOX_ENCODER=0 etc. para el carro viejo
+#ifndef FOX_ENCODER
+#define FOX_ENCODER 1
+#endif
+#ifndef FOX_TOF
+#define FOX_TOF 1
+#endif
+#ifndef FOX_BNO
+#define FOX_BNO 1
+#endif
+#endif
+
+#if !FOX_BNO || defined(FOX_SIL)
+#include <MPU6050_tockn.h>
+MPU6050 mpu(Wire);
+#endif
+
+#if FOX_ENCODER && !defined(FOX_SIL)
+// Encoder de cuadratura del N20 (hardware nuevo). 34/36 son solo-entrada y SIN
+// pull-up interno: el encoder debe traer pull-ups (o ponerlos en la PCB).
+#define ENC_PIN_A   34
+#define ENC_PIN_B   36   // morado (CalibFox / EncoderTest de parking)
+#endif
+
+#if FOX_TOF && !defined(FOX_SIL)
+#include <VL53L1X.h>
+// pinout probado en TofBnoTest/TofTest4 (v2). GPIO0 y GPIO15 son pines de strapping del ESP32: el módulo no debe forzarlos a nivel que cambie el arranque
+#define TOF_XSHUT_F 0
+#define TOF_XSHUT_L 15
+#define TOF_XSHUT_R 4
+#define TOF_XSHUT_B 5
+#endif
+#define TOF_N 4   // 0=L 1=R 2=trasero 3=frontal (mismo orden en el ACK y en el SIL)
+
+#if FOX_BNO && !defined(FOX_SIL)
+// BNO085 en modo UART-RVC: TX del BNO -> GPIO25 (Serial1 RX). Paquetes de 19 bytes a 115200.
+const int BNO_RX_PIN = 25;
+// VERIFICAR: girar el carro a la derecha a mano; anguloGyro debe subir igual que con el MPU6050; si baja, poner -1.0f
+const float BNO_YAW_SIGN = 1.0f;
+float bnoYaw=0, bnoYawPrev=0;
+bool bnoYawValid=false, bnoYawPrevValid=false;
+uint32_t bnoLastMs=0, bnoPrevMs=0;
+float bnoDeltaAcc=0;        // grados de yaw acumulados desde el último actualizarGyro()
+uint32_t bnoDtAccMs=0;      // ms que cubren esos grados
+uint8_t bnoBuf[19];
+int bnoN=0;
+uint32_t bnoMalos=0;
+#endif
+
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
 const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
@@ -51,11 +108,17 @@ const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 
 //   PARK_NINGUNO  : tras la última vuelta, TERMINANDO (avanza un poco y frena)
 //   PARK_PUNTA    : de punta, 7 pts  (estado ESTACIONANDO_PUNTA)
 //   PARK_PARALELO : paralelo, 10 pts (estado ESTACIONANDO)
-// PARK_MEDIA_VUELTA aplica a los dos modos:
+//   PARK_PARALELO_REV : paralelo en reversa de un solo tramo (T15b2, estado
+//                   ESTACIONANDO, mismas fases 0/1 de escaneo; desde ahí fases
+//                   30+): swing a 90° hacia la pared, recto opcional al fondo
+//                   (ToF trasero), swing a 180° hacia la pared (queda paralelo
+//                   mirando al revés del sentido de marcha) y pasadas
+//                   adelante/atrás para enderezar contra rumboRef+180.
+// PARK_MEDIA_VUELTA aplica a los tres modos:
 //   true  = sigue hasta la MANIOBRA 13, media vuelta y estaciona REGRESANDO
 //   false = estaciona de frente justo tras el giro 12
-enum ModoPark { PARK_NINGUNO, PARK_PUNTA, PARK_PARALELO };
-const ModoPark PARK_MODO         = PARK_PUNTA;
+enum ModoPark { PARK_NINGUNO, PARK_PUNTA, PARK_PARALELO, PARK_PARALELO_REV };
+const ModoPark PARK_MODO         = PARK_PARALELO;
 const bool     PARK_MEDIA_VUELTA = true;
 
 
@@ -119,6 +182,7 @@ unsigned long lastGyroTime = 0;
 
 // ── Giroscopio ────────────────────────────────────────────────────────────────
 float anguloGyro    = 0;
+float anguloTotal   = 0;      // yaw continuo (misma integración que anguloGyro, sin reset)
 float anguloObjetivo = 0;
 // Velocidad de giro filtrada (°/s, mismo signo que anguloGyro). La usa el gate
 // del re-referenciado de CRUCERO para no adoptar como "recto" un chasis que
@@ -129,7 +193,19 @@ unsigned int  rerefCount  = 0;   // diagnóstico: veces que el re-referenciado S
 
 // ── Control ───────────────────────────────────────────────────────────────────
 int velocidadMotor = 160;
-int centroServo    = 90;
+int centroServo    = 75;   // recto medido 2026-10-24 (rectas a PWM 150 llegando desde 55 y desde 95; SeguirRuta va derecho con 75). El 78 era la mitad de 1..156
+const int SERVO_MIN_DEG = 1;    // tope derecho medido 2026-10-22
+const int SERVO_MAX_DEG = 156;  // tope izquierdo medido 2026-10-22 (antes se trababa en 154)
+// Dirección medida 2026-10-22 en el tapete (twin/calib/medidas_20261022): grados de rueda
+// equivalente (bicicleta, atan(113/R)) por tick de servo desde el centro, uno por lado.
+// Der lineal hasta el tope (servo 1 -> R 123 mm); izq lineal hasta 144 y de 148 a 156 se
+// queda en R ~134 (la llanta de afuera ya no acompaña).
+const float RUEDA_POR_TICK_DER = 0.552f;
+const float RUEDA_POR_TICK_IZQ = 0.588f;
+// Tope simétrico por si acaso (usuario 2026-10-22): R 134 mm a los dos lados = atan(113/134).
+// Debe coincidir con config.MAX_WHEEL_STEER_DEG y KAPPA_MAX de route_planner.py.
+const float RUEDA_TOPE_DEG     = 53.0f;
+const float RUTA_CENTRO_SERVO  = 74.5f;   // centro del ajuste a 5 vueltas (twin steering.servo_center_deg)
 
 // ── Integración Pi → ESP32 ───────────────────────────────────────────────────
 float obsBiasNorm  = 0.0;     // obs  [-1, 1] del mensaje V2
@@ -137,6 +213,50 @@ int   turnHint     = 0;       // turn {-1, 0, +1}
 bool  piPriority   = false;   // prio=1: obstáculo activo en Pi
 int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
+// ACK de un V2 que ya quedó viejo (hay otra línea de la Pi esperando): 0 = se
+// manda siempre (como antes); 1 = se salta solo en ESTACIONANDO/ESTACIONANDO_PUNTA
+// (el ACK largo del parking satura el UART y el loop se iba a >1 s); 2 = siempre.
+// La Pi usa el último ACK, así que saltar los viejos no le quita información.
+const int ACK_SALTA_VIEJOS = 0;
+// Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
+// Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (antes). 2026-10-16: 100 (prepark motor físico 0/100 -> 100/100 junto con LOG_MIN_MS y PARK_ANG_IN_DEG 70 / PARK_POSTE2_MM 60; ver docs/HANDOFF_PARKING.md).
+const int ACK_E_MIN_MS = 100;
+unsigned long ackEUltimoMs = 0;
+// Log periódico (~170 B por loop = ~15 ms a 115200) frena el loop al estacionar; mínimo de ms entre logs SOLO en ESTACIONANDO/ESTACIONANDO_PUNTA. 0 = cada loop (antes).
+const int LOG_MIN_MS = 100;
+unsigned long logUltimoMs = 0;
+bool logEsteLoop = true;
+
+// ── Modo RUTA: la Pi sube la vuelta como puntos en mm del tapete y el ESP la
+// sigue con pure pursuit sobre su propia odometría (encoder + IMU), a la
+// velocidad del loop y sin el atraso del UART. Mensajes de la Pi:
+//   RTB,n,paso      empieza una ruta de n puntos separados `paso` mm (cerrada)
+//   RTP,i,x,y,x,y…  puntos desde el índice i (enteros, mm)
+//   RTE,n           fin: la ruta queda activa si llegaron los n puntos
+// y en cada V2: rt=1 (seguirla) y rtx,rty,rth = odometría -> tapete
+// (mundo = (rtx,rty) + px·F + py·L con F = (sin rth, cos rth),
+// L = (-cos rth, sin rth); rumbo = rth - anguloTotal, 0 = +y, 90 = +x).
+const int   RUTA_MAX = 640;
+float rutaX[RUTA_MAX], rutaY[RUTA_MAX];
+float rutaXb[RUTA_MAX], rutaYb[RUTA_MAX];   // carga en curso (se copia en RTE)
+int   rutaVel     = -1;      // rv= : PWM máximo pedido por la Pi (-1 = sin tope)
+int   rutaN       = 0;       // puntos de la ruta activa (0 = sin ruta)
+int   rutaCarga   = 0;       // puntos anunciados en RTB (carga en curso)
+int   rutaRecib   = 0;       // puntos recibidos de la carga en curso
+float rutaPaso    = 20.0f;   // mm entre puntos
+int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
+bool  piRuta      = false;   // rt=1
+bool  piSteerPi   = false;   // ps=1: mientras sube la ruta, girar con obs de la Pi (ruta nueva) en vez de la ruta vieja
+float piWheelDeg  = 0.0f;    // pw=: rueda de la Pi con la ruta nueva (+ = derecha), la usa ps=1
+bool  rutaTfOk    = false;
+float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
+int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
+float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
+const float RUTA_LOOKAHEAD_MM   = 200.0f;
+const float RUTA_BATALLA_MM     = 113.0f;
+const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
+// 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
+const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
@@ -156,6 +276,10 @@ int   piPark       = 0;       // park=N: etapa del cajón vista por la Pi en la 
                                // final (0 nada | 1 magenta ADELANTE | 2 magenta ya
                                // salió del campo de visión = lo estamos pasando /
                                // pasamos). Solo tiene sentido con parkBuscando.
+int   piGr           = 0;     // gr=1: Pi autoriza giro rápido (GIRO_RAPIDO_MODO==2)
+int   piGf           = 0;     // gf=<cm>: umbral frontal del giro rápido (>0 override)
+int   piGv           = 0;     // gv=1: verde adelante y cerca (abrir el arco)
+bool  piEsquina      = false; // es=1: la cámara vio la naranja hace poco (la esquina existe)
 
 unsigned long lastPiMsgMs = 0;
 const unsigned long piTimeoutMs = 800;  // ms sin mensaje → fallback
@@ -220,8 +344,54 @@ bool marchaIniciada = false;
 // ESTACIONANDO_PUNTA: PARK_MODO = PARK_PUNTA. Tras el giro 12 (o la 13)
 // sigue la pared exterior SIN visión y, al bajar el ultrasónico exterior por el
 // 1er poste magenta, gira 90° y mete la trompa al lote (parcial). Ver su bloque.
-enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
+enum Estado { SIGUIENDO, RECUPERANDO, GIRANDO, CRUCERO, MANIOBRA, GIRO_RAPIDO, TERMINANDO, INICIO, ESTACIONANDO, ESTACIONANDO_PUNTA };
 Estado estado = SIGUIENDO;
+
+// Odometría ESP (marco de arranque: x adelante, y izquierda, mm)
+long  odomMm   = 0;
+long  poseX    = 0;
+long  poseY    = 0;
+// Acumuladores en float (camino FOX_ENCODER): redondear ds*cos/ds*sin en cada tick (~5 mm) tiraba el
+// desplazamiento lateral (|ds*sin| < 0.5 -> 0) y sesgaba odomMm. Los long de
+// arriba son solo lroundf() de estos (lo que sale en el ACK y usa el parking).
+float odomMmF  = 0.0f;
+float poseXf   = 0.0f;
+float poseYf   = 0.0f;
+float odomYawPrevDeg = 0.0f;
+float odomVfilt = 0.0f;
+int   pwmActual = 0;
+#if FOX_ENCODER
+volatile int32_t encCount = 0;
+int32_t encCountPrev = 0;
+#if !defined(FOX_SIL)
+portMUX_TYPE encMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint8_t encPrevAB = 0;
+static const int8_t encTrans[16] = {
+  0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
+};
+void IRAM_ATTR encIsr() {
+  uint8_t a = digitalRead(ENC_PIN_A) ? 1 : 0;
+  uint8_t b = digitalRead(ENC_PIN_B) ? 1 : 0;
+  uint8_t ab = (a << 1) | b;
+  int8_t d = encTrans[(encPrevAB << 2) | ab];
+  encPrevAB = ab;
+  if (d) encCount -= d;   // azul->34, morado->36: la tabla cuenta adelante negativo (EncoderTest/VueltaCalibracion SIGNO -1)
+}
+#endif
+#endif
+#if FOX_TOF
+int tofMm[TOF_N] = {-1, -1, -1, -1};   // 0=L 1=R 2=trasero 3=frontal
+#if !defined(FOX_SIL)
+VL53L1X tofL, tofR, tofB, tofF;
+#endif
+#endif
+
+// GIRO_RAPIDO — estado interno
+float grObjetivo = 0.0f;
+float grIncl     = 0.0f;
+int   grHold     = 0;
+unsigned long grEntryMs = 0;
+bool  maniobraGirarDerGr = false;   // latcheado al entrar (misma lógica que decidirManiobra)
 
 // ── Giro por tramos (ronda de obstáculos) ────────────────────────────────────
 const int  FRONT_TURN_FWD_CM = 75;     // CRUCERO -> MANIOBRA si la maniobra será FORWARD
@@ -337,6 +507,53 @@ const int CRUCERO_FRONT_DEBOUNCE = 5;  // lecturas consecutivas de dF<=30/70 (so
 const int CRUCERO_PARED_DEBOUNCE = 3;  // ídem, cuando SÍ hay lateral abierta confirmando
 const int CRUCERO_MUY_CERCA_DEBOUNCE = 2; // ídem, cuando dF ya <= FRONT_TURN_REV_CM (pegado a la pared de
                                           // frente): confirma en 2 lecturas para disparar cerca de 25 cm
+
+// ── GIRO_RAPIDO (alternativa a MANIOBRA por tramos) ───────────────────────────
+const int GIRO_RAPIDO_MODO       = 0;    // 0=off 1=siempre 2=solo si Pi manda gr=1
+// Asientos (wro_field.SEATS): tres filas a lo largo de la recta, en ±500 y 0 mm
+// del centro. La pared del fondo está a 1500 mm, así que la última fila —la
+// última donde puede haber una lata— queda a 100 cm. Se giran 5 cm después,
+// para alcanzar a esquivar esa lata, sin esperar la naranja.
+const int GR_ULTIMA_FILA_CM      = 100;
+const int GR_MARGEN_ESQUIVA_CM   = 5;
+const int GR_FRONT_CM            = GR_ULTIMA_FILA_CM - GR_MARGEN_ESQUIVA_CM; // 95
+// Más adentro de esto el arco saldría pegado a la pared: se hace MANIOBRA.
+const int GR_VENTANA_CM          = 55;   // dispara entre 40 y 95 cm
+const int GR_MIN_FRONT_CM        = 20;
+// |anguloGyro| bajo el cual la recta ya está tomada (se zerea al cerrar el giro).
+const float GR_RECTO_DEG         = 12.0f;
+// Desde que TERMINA un giro (lastTurnTime en completarTurnoObstaculos).
+// Sin esto, al salir todavía ves la pared de la esquina y disparas otra.
+const unsigned long GR_GAP_MS    = 4000;
+// Modo RUTA (rt=1): la cuenta GIRO PI usa su propio gap. Una esquina de la ruta dura ~3.3 s y
+// el residual se guarda entero (ver completarTurnoObstaculos), así que no hay doble cuenta.
+const unsigned long GR_GAP_RUTA_MS = 1000;
+// es=1 de la Pi cuenta como evidencia lateral de esquina (un cono de la recta que
+// sigue suele tapar el sonar del lado del giro) mientras el V2 sea reciente.
+const unsigned long GR_PI_ESQUINA_MS = 300;
+const float GR_EXT_TARGET_CM     = 25.0f;
+const float GR_KP                = 2.5f;
+const float GR_KD                = 0.12f;
+const int GR_PWM                 = 115;
+const int GR_PWM_FIN             = 100;
+const float GR_TOL_DEG           = 5.0f;
+const int GR_HOLD_N              = 3;
+const unsigned long GR_TIMEOUT_MS = 2500;
+// Verde se pasa por la izquierda. En un giro a la derecha el tope (servo 30)
+// mete el arco por dentro de esa lata. Mientras gv=1, no cerrar más que esto.
+const int GR_VERDE_ABRE          = 32;
+const int GR_ABORT_CM            = 12;
+// Giro hecho por la Pi (la línea del mapa dobla sola con prio=1, p. ej. verde
+// en la boca de la recta siguiente: hay que girar tarde, por debajo de la
+// ventana del giro rápido). En SIGUIENDO con prio, si el gyro ya rotó esto hacia
+// el lado de la pista, se cuenta como esquina. 0 = off (carro real).
+const float GIRO_PI_CUENTA_DEG   = 0.0f;
+
+// ── Odometría (Pi) ────────────────────────────────────────────────────────────
+const float ODOM_PWM_K           = 3.5f;
+const int   ODOM_PWM_0           = 25;
+const float ODOM_TAU_S           = 0.25f;
+const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
 
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
@@ -491,6 +708,7 @@ unsigned long ultimoObstaculoMs = 0;   // millis del último V2 con piPriority |
 unsigned long cruceroEntryMs = 0;
 bool cruceroCerca      = false;        // en CRUCERO: true = cerca de la pared -> pura gyro+wall (sin visión)
 int  contadorFront     = 0;            // debounce del sensor frontal
+int  contadorGrFront   = 0;            // debounce giro rápido (umbral GR)
 bool maniobraDecidida  = false;
 bool maniobraGirarDer  = false;
 bool maniobraReversa   = false;
@@ -604,16 +822,22 @@ const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_G
 // más corto (la pared) fija a la vez el lado de salida Y la dirección de giro de
 // toda la pista (se latchea como hace GIRANDO en la 1ª esquina).
 // TODOS estos números son de ARRANQUE — hay que tunearlos en el tapete.
-const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra
+const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra (ruta: 195 por config; ver inicioMotor)
+const int  INICIO_PWM_SENAL            = 0;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
-const int  INICIO_OVERSHOOT_DEG        = 8;    // corta el servo antes; la inercia completa (0 = sin corte)
+const int  INICIO_ADENTRO_OVERSHOOT_IZQ_DEG = 28; // salida IZQ con isal=2 (a 53 grados la inercia a la izquierda pasa mas: 16 choca la senal T1 en el 136)
+const int  INICIO_ADENTRO_OVERSHOOT_DEG = 8;  // ídem para el giro de 90° (isal=2): a mayor PWM la inercia pasa más de 90° y la contravuelta se come la fila de señales
+const int  INICIO_OVERSHOOT_DEG        = 15;    // corta el servo antes; la inercia completa (0 = sin corte)
 const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
                                                      //  ángulo — patina / topa la pared del cajón —
                                                      //  pasa a la fase 2 igual; la contravuelta y la
                                                      //  reversa terminan de cuadrar lo que haya)
-const unsigned long INICIO_MID_MS      = 1;  // fase 2: tramo recto entre los dos giros
+const unsigned long INICIO_MID_MS      = 700; // fase 2: sale del cajón antes de la contravuelta.
+                                              //  Con batalla 113 mm y rueda a ~44.5° (equiv.) el arco de la fase 1
+                                              //  termina con la nariz todavía en la punta de la madera;
+                                              //  ~700 ms recto la pasan. Con 1 ms la reversa se mete en ella.
 const int  INICIO_CONTRA_CORRIGE_DEG   = 25;   // fase 3: la contravuelta hacia ADELANTE solo corrige estos grados
                                               //  (medidos desde el pico de la fase 1); lo que falte lo
                                               //  cuadra la reversa con heading-hold (fase 5)
@@ -629,14 +853,62 @@ const unsigned long INICIO_REV_RECTO_MIN_MS = 500; // fase 8: reversa recta mín
 const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
                                               // (si el cajón deja lectura ambigua, no se arriesga el
                                               //  latch global: la 1ª esquina real decide como siempre)
+// Arranque nuevo (2026-10): el carro sale con el costado al ras de la PUNTA de las
+// maderas (borde interior del cajón), no pegado a la pared exterior. La reversa
+// "colchón" lo metía detrás de la fila T2 (el rojo T2 en CW ya no se podía pasar
+// por la derecha); ahora la "S" termina por distancia lateral (odometría) y no
+// retrocede. La Pi manda isal= con el lado de paso de la 1ª señal adelante
+// (salida_cajon.py): 2 = ADENTRO (cruzar al carril interior: rojo en CW / verde en
+// CCW) -> la S se abre a ~90° (una "caja") hasta pasar la fila interior.
+const bool INICIO_REVERSA              = false; // true = fases 4-8 de antes (reversa colchón)
+// Servo a tope ANTES de mover el carro: con la llanta interior a ~53° (R ~140 mm) el arco
+// necesita ~95 mm libres delante de la nariz; arrancar mientras el servo viaja (~73° a
+// ~600°/s) se come ese margen y la esquina delantera toca la madera de enfrente.
+const unsigned long INICIO_SERVO_ESPERA_MS = 100;
+// Aun así, con R ~140 mm la esquina delantera exterior toca la madera de enfrente a ~36° de
+// giro (por ~6 mm). A los INICIO_3P_ANG_DEG da una reversa corta con el servo al otro tope
+// (la nariz sigue entrando y la cola ya se alejó de la madera de atrás) y vuelve al arco.
+const float INICIO_3P_ANG_DEG          = 0.0f;   // 0 = sin corrección; con 53° reales sale directo (2026-10-22)
+const float INICIO_3P_REV_MM           = 25.0f;
+// Salida a la IZQUIERDA (R 135 vs 123 a la derecha): en arco directo la esquina delantera derecha toca la madera de
+// enfrente a ~33° (el cajón deja ~83 mm de nariz y ~5 de cola). Siempre usa la corrección: avanza LENTO (INICIO_3P_PWM,
+// para poder frenar en pocos mm) hasta INICIO_3P_ANG_IZQ_DEG, reversa con el servo al otro tope (gira más a la izq con
+// la cola hacia el tapete, donde hay ~70 mm) y vuelve al arco. INICIO_3P_ESPERA2_MS: espera del servo al volver.
+const float INICIO_3P_ANG_IZQ_DEG      = 0.0f;
+const int   INICIO_3P_PWM              = 130;
+const unsigned long INICIO_3P_ESPERA2_MS = 250;
+const int  INICIO_ANG_ADENTRO_DEG      = 90;   // fase 1 con isal=2: nariz perpendicular a la recta
+const float INICIO_LAT_AFUERA_MM       = 200.0f; // desplazamiento lateral final, salida normal (centro a ~33 cm de la pared)
+const float INICIO_LAT_ADENTRO_MM      = 620.0f; // ídem con isal=2 (centro a ~75 cm: más allá de la fila interior a 60 cm)
+const float INICIO_R_CONTRA_MM         = 130.0f; // radio efectivo de la contravuelta (predice el lateral que falta)
+const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto (red de seguridad)
+const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
+const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
+const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
+const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
+const int  INICIO_CONTRA_FIN_DEG       = 32;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
+const float INICIO_CONTRA_CIERRE_S     = 0.085f; // solo isal=2: |ω de cierre|×esto. La caja de 90° a PWM 180 se pasa de 0 y entra a la fila interior
+const int  INICIO_SETTLE_QUIETO_N      = 0;      // fase 6: samples quietos para cerrar la salida; 0 = entrega a SIGUIENDO al terminar la contravuelta (no tira la inercia)
+const bool INICIO_SETTLE_MOTOR         = false; // fase 6: true = sigue a INICIO_PWM con el servo al centro mientras se aquieta el giro (no pierde la inercia); false = coast
 
 
 // Estado interno de INICIO
 bool inicioEvaluado = false;   // one-shot: ¿ya se decidió si entrar a INICIO?
+unsigned long inicioFinMs = 0; // cierre de INICIO; 0 = no hubo salida de cajón
+const unsigned long INICIO_HOLGURA_GIRO_MS = 2500; // no disparar GIRO_RAPIDO pegado al cajón
 int  inicioFase     = -1;      // -1 init | 1 swing | 2 recto | 3 contra | 4 coast | 5 reversa-corrige | 7 pausa | 8 reversa recta | 6 settle
 bool inicioGirarDer = false;   // lado de salida del cajón (servo full hacia ahí en la fase 1)
 unsigned long inicioRevMs = 0; // inicio de la reversa (fase 5): base del presupuesto INICIO_REV_MS
 float inicioAngPico = 0.0f;    // máx |anguloGyro| alcanzado en las fases 1-3 (ref. de la contravuelta)
+int   piSalida      = 0;       // isal= de la Pi: 0 sin dato | 1 afuera | 2 adentro (sticky, ver arriba)
+bool  piSenalSalida = false;   // isen= de la Pi: señal a <~1.3 m adelante del cajón (sticky)
+// Salida rápida solo sin señal cerca de la salida; con señal, el PWM de siempre.
+int inicioPwm() { return (piSenalSalida && INICIO_PWM_SENAL > 0) ? INICIO_PWM_SENAL : INICIO_PWM; }
+void setMotorTope(int velocidad, int tope);
+void inicioMotor(int v) { setMotorTope(v, 255); }   // la salida no se recorta a MOTOR_MAX (155 en ruta): recta/arcos pueden ir más rápido
+bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
+bool  inicio3pHecho = false;   // la reversa de corrección (fase 11) solo una vez
+float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
 float         inicioSettleAngPrev = 0.0f;   // anguloGyro en el último sample de la fase 6
 unsigned long inicioSettleSampMs  = 0;
@@ -657,6 +929,13 @@ int           inicioSettleQuieto  = 0;
 //   9, 11 : coast y acomodo hacia adelante hasta PARK_CENTER_HI_CM
 //   12,13 : reversa final opcional (PARK_REV_FINAL)
 //   10    : prueba a mano (PARK_TEST_MANO)
+// PARK_AJ: en el carro es `const`; en el twin (SIL) son variables para que el
+// harness de estacionamiento (twin/tools/prepark.py --par) las barra sin recompilar.
+#if defined(FOX_SIL)
+#define PARK_AJ
+#else
+#define PARK_AJ const
+#endif
 // Pruebas de estacionamiento (valen para el PARK_MODO elegido arriba):
 const bool          PARK_TEST_DIRECTO        = false; // (solo paralelo) inicia INMEDIATO en reversa (pon el carro AL LADO del cajón)
 const bool          PARK_TEST_RECTA_COMPLETA = false; // true = inicia en recta final (pon el carro AL INICIO de la recta)
@@ -682,21 +961,21 @@ const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
 const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
-const int           PARK_ANG_IN_DEG          = 60;    // tope del ángulo de entrada (ver PARK_RADIO_CM)
-const int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
+PARK_AJ int           PARK_ANG_IN_DEG          = 70;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66; 2026-10-16: 63 -> 70 con motor físico (docs/HANDOFF_PARKING.md)
+PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
 // La inercia de la reversa a tope vale ~9°, no 3. Con 3 la maniobra entregaba
 // 24-29 cm de corrimiento cuando sólo cabían 18-19 -> el carro se encajaba en la
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
-const int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
+PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
 const int           PARK_REV_PWM             = 85;    // PWM de marcha atrás — suave para control preciso
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
 
 // Paralelo 10 pts — scan poste1/hueco/poste2 + maniobra en reversa (wiggle)
-const float         PARK_PARED_CM             = 28.0f;
+PARK_AJ float         PARK_PARED_CM             = 28.0f;
 const float         PARK_KPOS                 = 0.5f;
 const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
@@ -830,11 +1109,11 @@ const bool          PARK_RECTO_ENABLED        = true;
 // Ojo: las corridas 1014/1016 daban 24.7 y ~31 — hay dispersión porque la
 // contravuelta se corta en distintos ángulos. 30 es el mejor ajuste con lo que
 // hay hoy, no un número cerrado.
-const float         PARK_RADIO_CM             = 25.0f;
+PARK_AJ float         PARK_RADIO_CM             = 14.0f;
 // Distancia final a la pared exterior que se busca (misma lectura que parkBase).
 // 7 cm es lo que midió la corrida buena (21:38).
-const float         PARK_FINAL_CM             = 7.0f;
-const float         PARK_RECTO_D0_CM          = PARK_FINAL_CM + PARK_RADIO_CM;
+PARK_AJ float         PARK_FINAL_CM             = 0.0f;
+PARK_AJ float         PARK_RECTO_D0_CM          = PARK_FINAL_CM + PARK_RADIO_CM;
 // 2026-09-15: ya NO hace falta medirlo a mano. Ajustando final = pnb - 2R(1-cos a)
 // a los 4 intentos de la noche sale R = 23.6 / 24.9 / 27.0 / 25.0 cm (media 25.1),
 // y con la fase 4 girando a ~49 deg/s => v = R*w = 25.1 * 0.86 = 21.6 cm/s.
@@ -849,9 +1128,94 @@ const unsigned long PARK_RECTO_MAX_MS         = 500;
 // Eran ciegos, ~8 cm de reversa en total, y el usuario no los quiere.
 const unsigned long PARK_WIGGLE_INT_MS        = 0;      // reversa con volante al lado contrario
 const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante hacia la pared
+// ── Fases por DISTANCIA de encoder (T15b, ruta A; solo con FOX_ENCODER) ─────
+// Mismas fases y mismos ángulos que arriba: lo que era TIEMPO (avance tras el
+// poste 2, reversa recta de la fase 14, hold/meneo de las fases 4-6) ahora son
+// mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
+// arriba quedan para el carro sin encoder y como timeouts de seguridad.
+const bool          PARK_POR_ENCODER          = true;
+PARK_AJ float         PARK_POSTE2_MM            = 80.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
+const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
+PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14; 2026-10-22: 100 -> 110. Con hueco 264 y U a 200, 100 deja la semilla 18 a 8 mm de la madera de enfrente; 120 choca en los dos postes; 110 termina 24/24
+const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
+const float         PARK_WIGGLE_INT_MM        = 0.0f;
+const float         PARK_WIGGLE_EXT_MM        = 0.0f;
+const unsigned long PARK_FASE_DIST_TIMEOUT_MS = 3000;   // si el encoder no avanza (atorado)
+long                parkOdom0                 = 0;      // odomMm al entrar a la fase
+long                parkColaMm               = 0;      // odom más atrás en el freno de la fase 11
+bool                parkFrenoCola            = false;  // solo si el lateral ya está a ≤5 cm
+bool                parkFrenoFin             = false;  // freno del desliz al cortar la fase 13 guiñada
+float               parkRectoMm               = 0.0f;   // largo de la fase 14 (encoder)
 const unsigned long PARK_CONTRA_TIMEOUT_MS    = 2500;
-const float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
+PARK_AJ float         PARK_ENDEREZA_TOL_DEG     = 24.0f;
 const int           PARK_PEGADO_CM            = 2;
+// 2026-10-04 (hw_nuevo, FOX_TOF): corte de seguridad para las reversas de
+// ENTRADA (fases 3/14/4/8) con el ToF trasero — "pegado" de atrás, igual que
+// PARK_PEGADO_CM pero del otro lado. Al cortar por esto van a la fase 9
+// (acomodo ENFRENTE) en vez de seguir con la maniobra de entrada, y la fase
+// 13 (reversa de acomodo final) también lo usa junto con el corte por dF que
+// ya tenía (ver PARK_CICLOS_MAX: ahí decide si vuelve a corregir o termina).
+// Inerte sin FOX_TOF: distB_filtrada se queda en -1 y esto nunca da true.
+PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta la contravuelta (fase 8) como el plan del mapa
+// Corte trasero SOLO de la fase 13 (reversa de acomodo final). Separado de
+// PARK_ATRAS_MIN_CM porque esa reversa termina más pegada: la maniobra
+// planeada con el mapa (runs/geo2.py) corta la contravuelta con ToF atrás ~6 cm
+// y endereza en la fase 13 hasta ~2.5 cm. Con un solo umbral la fase 13 se
+// cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
+PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
+
+// T15b2 (t15b2_esquina13, "patrón 3"): fase 8 (FULL INTERNO) corta por
+// PARK_ATRAS_MIN_CM con el carro todavía girando fuerte (medido: ~80 deg/s,
+// seed 2 trace.csv 90.024-90.111: Ang 39.07 -> 32.22 en 87ms) y 25-30 grados
+// lejos de parkRumboRef; la fase 9 centra el servo de inmediato y la inercia
+// angular sigue sola ~100ms, barriendo la esquina delantera contra el cajón
+// antes de llegar a la fase 11 (seeds 2/14/20 del tag: el log se corta justo
+// ahí). Se probaron dos arreglos, los dos descartados:
+//   - Subir PARK_ATRAS_MIN_CM (cortar antes): prepark.py --solo-cajon
+//     98 -> 78/100 (sesión previa).
+//   - Fase intermedia de contra-volante para frenar el giro antes de
+//     entregar a la fase 9 (PARK_GIRO_FRENO_DPS): bajaba el gyroRate
+//     (57.4 -> 17.3 deg/s en CW_c25_p2) pero los ~74ms extra de frenado, con
+//     el carro todavía reverseando por inercia, lo acercan más al fondo del
+//     cajón. prepark.py --solo-cajon 98 -> 94/100 — revertido.
+// El límite real parece ser el colchón trasero (distB al cortar, ~5-6cm)
+// contra el swing completo, no solo la velocidad angular con que se corta.
+
+// ── PARK_PARALELO_REV (T15b2): un solo tramo en reversa ─────────────────────
+// Reutiliza la fase 0/1 del paralelo (escaneo, postes, parkRumboRef). Al
+// terminar la fase 1 (si PARK_MODO == PARK_PARALELO_REV) pasa a las fases
+// 30+ en vez de a la 2:
+//   30 ajuste en mm tras el poste 2 (puede ser negativo = retroceder)
+//   31 coast (MANIOBRA_FRENO_MS)
+//   32 (A) REV SWING FULL EXTERNO hasta 90° de parkRumboRef
+//   33 (B) REV recta (servo centro) hasta distB_filtrada <= PARK_REV_B_CM
+//   34 (C) REV SWING FULL EXTERNO hasta 180° de parkRumboRef
+//   35 coast -> 36 ADELANTE acomodo (rumbo = parkRumboRef+180) -> 37 coast ->
+//   38 REV final de enderezado, cicla a la 35 hasta PARK_REV_CICLOS_MAX.
+// Mismo patrón de seguridad que las fases 3/14/4/8: si distB_filtrada se pega
+// MUCHO durante el swing A o C, salta a la 35 (pasadas) en vez de seguir
+// metiendo la cola contra el fondo del cajón. OJO: NO reutiliza
+// PARK_ATRAS_MIN_CM (6 cm) — con el carro girando 90-180° el ToF trasero deja
+// de apuntar al fondo bastante antes de llegar ahí (apunta de refilón a la
+// pared/poste lateral) y 6 cm disparaba el corte casi al arrancar el swing
+// (medido: swing cortado en pleno giro, nunca llega ni a la fase B). Un
+// umbral propio y más chico es el "de verdad ya va a topar", no "se acercó".
+PARK_AJ float         PARK_REV_ATRAS_MIN_CM     = 2.0f;   // corte de seguridad propio de los swings A/C (ver nota arriba)
+PARK_AJ float         PARK_REV_AJUSTE_MM        = 0.0f;   // avance(+)/retroceso(-) tras poste 2, antes del swing A
+const unsigned long PARK_REV_AJUSTE_MAX_MS    = 1200;    // tope de seguridad de la fase 30 (sin encoder o atorado)
+PARK_AJ float         PARK_REV_SWING_OVERSHOOT_DEG = 9.0f; // corte anticipado de los swings A y C (igual idea que PARK_OVERSHOOT_DEG)
+PARK_AJ float         PARK_REV_B_CM             = 0.0f;   // objetivo de distB_filtrada al fondo del cajón al cerrar la fase B (0 = sin tramo recto)
+// t15b2: 150mm (sin ToF) deja la fase B comerse casi todo el margen al fondo
+// antes del swing C -> "ATRAS PEGADO" casi de inmediato; 30mm (barrido Mac,
+// --solo-cajon) sube fuera<=5 de 0/100 a 69/100 (sigue sin limpiar el cajón).
+PARK_AJ float         PARK_REV_B_MAX_MM         = 30.0f;  // tope de la fase B si no hay ToF trasero o no llega al objetivo
+const unsigned long PARK_REV_B_MAX_MS         = 1200;    // tope de tiempo de la fase B
+PARK_AJ float         PARK_REV_FINAL_TOL_DEG    = 3.0f;    // ±2-3° de parkRumboRef+180 para terminar (fases 36/38)
+PARK_AJ int           PARK_REV_CENTER_HI_CM     = 5;       // corte de la fase 36 (ACOMODO ADELANTE) por distF_filtrada
+const unsigned long PARK_REV_FWD_MS           = 1200;    // tope de tiempo de la fase 36
+PARK_AJ int           PARK_PR_FINAL_DF_CM       = 100;     // corte por distF_filtrada de la fase 38 (100 = sin efecto, como el paralelo)
+const int           PARK_REV_CICLOS_MAX       = 3;       // tope de ciclos 35<->38 (igual idea que PARK_CICLOS_MAX)
+
 // 2026-09-16: 650 -> 2000. La fase 11 YA cortaba por distancia (dF <=
 // PARK_CENTER_HI_CM), pero el reloj siempre ganaba: en la run 1014 salió por
 // timeout con dF todavía en 8 cm, dejando al carro 15.9° chueco. Ahora manda la
@@ -862,7 +1226,7 @@ const int           PARK_PEGADO_CM            = 2;
 // con el corte ahora en 6 cm le toca la mitad de ese recorrido. 1200 deja ~2x de
 // margen sin convertir un eco perdido en 40 cm de embestida contra el poste.
 const unsigned long PARK_FWD_MS               = 1200;
-const float         PARK_FINAL_TOL_DEG        = 5.0f;
+PARK_AJ float         PARK_FINAL_TOL_DEG        = 5.0f;
 // Reversa final de enderezado DESPUÉS del acomodo hacia adelante (fases 12 y 13).
 // 2026-09-15: false = al terminar la fase 11 se acaba la maniobra ahí mismo. Con
 // true vuelve a reversear hasta quedar a PARK_FINAL_TOL_DEG, que es lo que estaba
@@ -874,10 +1238,18 @@ const float         PARK_FINAL_TOL_DEG        = 5.0f;
 const bool          PARK_REV_FINAL            = true;
 // dF al que se detiene la reversa de acomodo final. Cada cm extra vale ~2.3° de
 // enderezado, y también ~1 cm menos de aire con la pared TRASERA (sin sensor).
-const int           PARK_REV_FINAL_DF_CM      = 8;
+PARK_AJ int           PARK_REV_FINAL_DF_CM      = 100;  // 2026-10-04: 8 -> 100 = sin corte por dF; corta alineado / PARK_ATRAS_FINAL_CM
 // Tope de seguridad. De dF~3 a dF=8 son ~5 cm = ~250 ms; 900 deja 3x de margen
 // sin convertir un eco perdido en una embestida a ciegas contra la pared trasera.
 const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
+// 2026-10-04 (hw_nuevo, FOX_TOF): ciclo adelante/atrás (fase 9/11 <-> 12/13)
+// mientras el rumbo siga a más de PARK_FINAL_TOL_DEG, hasta PARK_CICLOS_MAX
+// repeticiones. Antes la fase 13 reverseaba UNA sola vez y terminaba aunque
+// no hubiera alcanzado PARK_FINAL_TOL_DEG (sea por dF, por tope de la pared
+// lateral o por timeout); ahora, si quedan ciclos, en vez de terminar vuelve
+// a la fase 9 (acomodo ENFRENTE) para otra pasada. "pegado" (lado) sigue
+// terminando directo, por seguridad.
+const int           PARK_CICLOS_MAX           = 3;
 // Distancia a la pared/poste de ENFRENTE a la que se detiene el avance final.
 // 2026-09-16 (run 1016): con 3 el corte por distancia SÍ funcionó — la traza va
 // dF = 9,8,6,5,4,3 y ahí dispara — pero entre la granularidad del sonar y el
@@ -886,7 +1258,7 @@ const unsigned long PARK_REV_FINAL_TIMEOUT_MS = 900;
 // centrado de diseño (5 cm al frente, ~6 atrás).
 // De paso 6 cm está lejos del piso de ~2 cm del HC-SR04, donde las lecturas se
 // caen a 0 y el corte por distancia no dispararía.
-const int           PARK_CENTER_HI_CM         = 6;
+PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (plan del mapa: ToF frente ~45 mm)
 // La fase 11 es la que fija la POSICIÓN LONGITUDINAL final: avanza hasta que el
 // frontal baje de PARK_CENTER_HI_CM y ahí se planta. Medido en 1154 vs 1155: el
 // frontal NUNCA llegó a <=6 en ninguna muestra del ACK y aun así las dos fases
@@ -902,6 +1274,17 @@ const int           PARK_CENTER_HI_CM         = 6;
 // PARA REVERTIR: PARK_CENTER_DEB = 1.
 const int           PARK_CENTER_DEB           = 3;
 const int           PARK_CENTER_PWM_PAR       = 75;
+// Fase 8 corta ~30° con ~180 mm/s de reversa y la cola a ~9 mm de la pared.
+// PWM 80 frena a ~1900 mm/s² y se come el hueco (para en ~7 mm). A 180 el
+// objetivo ya pega con a_max (~4300 mm/s²): v²/2a ≈ 4 mm, la cola no cierra.
+const int           PARK_FRENO_COLA_PWM       = 180;
+// Fase 3: el carro ya viene rodando (~300 mm/s), no hay fricción de arranque que
+// proteger; la rampa de reversa de setMotor() (300 ms) solo retrasa el frenado.
+// Frena la cola al terminar la fase 13 en cualquier corte (no solo pegado de lado): el coast deja ~10 mm de desliz contra el poste.
+const bool          PARK_FRENO_FIN_TODO       = true;
+const int           PARK_F12_FRENO_PWM        = 70;    // >0: fase 12 frena con reversa suave en vez de coast (el coast deja ~10 mm hacia el poste); 0 = coast
+const unsigned long PARK_F3_RAMPA_MS          = 50;
+const unsigned long PARK_F13_RAMPA_MS         = 300;   // ídem fase 13 (sale de un coast de 47 ms, ya con la inercia del acomodo)
 
 // ── Referencia de rumbo MEDIDA CONTRA LA PARED (2026-09-17) ─────────────────
 // El 0 del gyro con el que llega el tramo final NO es paralelo a la pared del
@@ -1005,9 +1388,13 @@ unsigned long parkBuscandoEntryMs   = 0;
 int           parkFase              = -1;
 unsigned long parkFaseMs            = 0;
 bool          parkParedEsIzquierda  = false;
+// Ciclo adelante/atrás (fases 9/11 <-> 12/13) del paralelo: ver PARK_CICLOS_MAX.
+int           parkCiclos            = 0;
 
 unsigned long parkEntryMs           = 0;
 int           parkScanSubFase       = 0;
+bool          parkBajadaPre         = false;  // poste 1 confirmado antes de PARK_ARMADO_MS
+unsigned long parkBajadaPreMs       = 0;
 float         parkBase              = 0.0f;
 int           parkBaseN             = 0;
 int           parkCaidaCnt          = 0;
@@ -1035,6 +1422,7 @@ int           parkTrimUpd           = 0;
 long          parkTrimD[PARK_TRIM_N];
 float         parkTrimA[PARK_TRIM_N];
 unsigned long parkTrimT[PARK_TRIM_N];
+float         parkTrimV[PARK_TRIM_N];   // cm/s comandados en cada muestra de la ventana
 int           parkTrimN             = 0;
 int           parkTrimIdx           = 0;
 float         parkRumboRef          = 0.0f;
@@ -1045,6 +1433,7 @@ float         parkBaseLlegada       = 0.0f; // parkBase latcheada al parar junto
 unsigned long parkRectoMs           = 0;    // duración calculada del tramo recto de la fase 14
 float         parkAngObjetivo       = (float)PARK_ANG_IN_DEG; // ángulo de entrada calculado para esta llegada
 float         parkRumboGiro0        = 0.0f;
+int           parkServoU            = 0;    // servo latcheado de la U de 180° (PARK_PARALELO_USA_UTURN, fase 24)
 int           parkSettleQuieto      = 0;
 unsigned long parkSettleSampMs      = 0;
 unsigned long parkLogMs             = 0;
@@ -1103,9 +1492,195 @@ bool          cajonParedDetectada    = false;
 const int           PARK_RETORNO_PWM           = 95;
 const int           PARK_RETORNO_PWM_MIN       = 80;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
-const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // avance recto ANTES de la media vuelta: más = termina más lejos
-                                                         // de la pared del lote (0 = gira desde parado como antes)
-const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes de 90; la inercia completa
+const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // solo el estacionamiento en paralelo
+const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes del ángulo; la inercia completa
+// Tras la vuelta 12: U de 180° en la recta, no la reversa de la media vuelta.
+// Se gira hacia la pared exterior que ya va al lado. Hacia el otro lado el
+// arco (2 radios) cae dentro de la isla. La naranja solo dice "esta es la
+// esquina": si todavía hay lata, se sigue esquivando. El frontal es el tope.
+const int           PARK_UTURN_DEG             = 170;    // 180 menos el overshoot
+const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el arco roza la pared
+// 40 -> 28 (barrido en el twin, 37 seeds con U: el margen a la lata del cuadrante inicial tras la U
+// sube de ~52/107 a ~149/190 mm CW/CCW y la U termina a ~180 mm de la pared exterior). Con ext <= 35 cm
+// al arrancar la U el radio ya es el mínimo y este valor no actúa. Del lado exterior no hay latas.
+PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
+// Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
+// a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
+PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 0;
+PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
+PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
+// Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
+// estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
+PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
+PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 0;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
+PARK_AJ long         PARK_PEGADO_CICLA          = 0;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
+PARK_AJ long         PARK_UTURN_TOPE            = 0;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
+PARK_AJ long         PARK_SCAN_TOPE             = 0;   // tope PWM propio del escaneo rápido; 0 = MOTOR_MAX
+// PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
+PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 160;
+PARK_AJ long         PARK_UTURN_PWM             = 160;
+// Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
+// madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
+PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 200;
+PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 400;
+const int           PARK_UTURN_DF_FORZAR_CM    = 26;
+// T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
+// esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
+// mitad de la recta. Antes, vigilarUturn() disparaba por un umbral fijo de
+// `recorrido` (odómetro desde la vuelta 12): PARK_UTURN_RECORRIDO_MM=1000 para
+// CW y PARK_UTURN_RECORRIDO_CCW_MM=650 para CCW (el mismo umbral en los dos
+// sentidos caía DENTRO de la franja del cajón en CCW — ver el diagnóstico de
+// "patrón 1" en twin_plan.md). Las dos constantes quedan sin efecto: ya no
+// hay umbral de recorrido que ajustar por sentido porque el disparo ahora
+// usa la MISMA señal que detectarEsquina() usa para las otras 12 esquinas de
+// la carrera (pared de enfrente cerca + un lateral que se abre, ver
+// vigilarUturn()), que por construcción solo arma cerca de la esquina real
+// — sea cual sea el sentido. PARK_UTURN_ARRANQUE_MM se deja como piso de
+// seguridad: nada más saliendo de la esquina 12 el lateral puede leer
+// "abierto" un instante por la geometría de esa esquina misma.
+PARK_AJ long         PARK_UTURN_ARRANQUE_MM      = 300;
+// Espera extra (mm de odómetro, avanzando recto) entre que la esquina 13 queda
+// detectada y que arranca la U de 180°. 0 = comportamiento anterior (arranca en
+// cuanto se detecta). El disparo por frontal muy cerca (PARK_UTURN_DF_FORZAR_CM)
+// ignora la espera. Se barre con prepark.py --par PARK_UTURN_ESPERA_MM=...
+PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
+// Modo RUTA: la U de 180 se dispara por la pose del tapete (rtx/rty de la Pi), no
+// por el detector de esquina (en la ruta el carro no va recto y los ToF ven señales:
+// disparaba a mitad de la recta). >0 = mm a lo largo de la sección de salida desde
+// su centro, en el sentido de la marcha (la isla termina en 500). 0 = como antes.
+// > 0 también habilita estacionar en modo ruta (la U ignora prio=1 de la ruta). Apagado por defecto: el modo ruta es solo 3 vueltas.
+PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 0;
+PARK_AJ long         PARK_UTURN_ADELANTO_MM      = 450;  // U adelantada: desde este along (< PARK_UTURN_RUTA_ALONG_MM) dispara si AMBOS sonares ya ven hueco >= ADELANTO_EXT_CM (la isla ya terminó); 0 = apagado
+PARK_AJ long         PARK_UTURN_ADELANTO_EXT_CM  = 70;
+PARK_AJ long         PARK_UTURN_RUTA_PKA_MM      = 0;   // piso extra de la U en ruta: along >= pka + esto (madera del cajón más adelante, pka= de la Pi); 0 = apagado
+// Modo RUTA: además del along, la U espera a que el carro vaya casi recto al carril (|anguloGyro| <= esto); si dispara
+// girado (esquivando) el ToF no ve la pared y el radio sale mal. 0 = sin compuerta.
+PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeoró (U tarde o nunca: ruta 28 -> 20/41)
+// Final SIN vuelta en U: tras la vuelta 3 el carro sigue en el sentido de la marcha (la ruta de la Pi lo pega a
+// la pared del cajón) y arranca el escaneo PARK_SINU_ADELANTO_MM antes de la primera madera (along >= pka - largo del cajón - esto).
+const bool           PARK_SIN_U                  = true;
+PARK_AJ long         PARK_SINU_PKA_MIN_MM        = 100;   // cajon muy al inicio de la recta (pka menor): no hay linea de escaneo a tiempo, se hace la U
+bool                 parkDirecto                 = false; // true: estaciona de frente (sin U); false: tras la U
+float                parkRevGyroOff              = 0.0f;   // anguloGyro - error de carril al tomar el mando (para volver a la U)
+float                parkRevBase                 = 0.0f;   // pared (cm) vista por el sonar durante la reversa-S
+int                  parkRevDrop                 = 0;
+bool                 parkRevAnc                  = false;
+bool                 parkRevEnMadera             = false;  // al empezar a retroceder el sonar ya ve madera  // ya se ancla w con la madera de adelante vista por el sonar
+bool                 parkRevModo                 = false;  // el plan arranca desde la reversa en S
+bool                 parkRevDir                  = false;  // el cajon al inicio se resuelve con reversa en S (sin U)
+int                  parkSinUDec                 = 0;     // para pka < PKA_MIN: 0 sin decidir, 1 directo, 2 con U
+PARK_AJ float        PARK_SINU_DEC_TOL_CM        = 12.0f;
+PARK_AJ long         PARK_SINU_CORRE_MM          = 200;
+PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
+PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
+bool sinUActivo() { return PARK_SIN_U && (isnan(rutaPka) || rutaPka >= (float)PARK_SINU_PKA_MIN_MM || parkSinUDec != 2); }
+PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
+PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
+PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
+PARK_AJ long         PARK_SINU_B2_WIN_MM         = 130;
+PARK_AJ long         PARK_SINU_PRE_MM            = -560;  // con la cuenta en 11, along (centro de la recta = 0) desde el que ya se salio de la esquina 12
+PARK_AJ long         PARK_SINU_MIN_MM            = -2000;  // no entregar al seguidor de pared antes de pasar la senal de la entrada (T2 esta en -500)
+PARK_AJ long         PARK_SINU_LENTO_MM          = 250;   // zona lenta antes de la madera de adelante
+PARK_AJ int          PARK_SINU_PWM_B2            = 100;
+PARK_AJ float        PARK_SINU_TOL_CM            = 5.0f;
+PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
+// Plan de entrada al cajon por segmentos (fase 40), derivado de una busqueda de trayectorias con el modelo calibrado
+// (radios de reversa 156 izq / 145 der, adelante 135 / 125; nariz 154.2, cola 21.8, ancho 125, hueco 264):
+//   1 reversa EXT hasta T1 (nariz alta, ~75), 2 reversa INT hasta T2 (~24), 3 adelante EXT hasta T3 (~12), 4 reversa INT hasta ~0.
+// theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
+const bool           PARK_PLAN_ON                = true;
+PARK_AJ float        PARK_PL_W_DET               = 200.0f;  // w del eje trasero cuando el sonar empieza a ver la madera de adelante
+PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
+PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
+PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
+PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
+PARK_AJ float        PARK_PL_T2                  = 4.0f;
+PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
+PARK_AJ float        PARK_PL_WF                  = 47.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
+PARK_AJ float        PARK_PL_WF_U                = 39.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
+PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
+PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
+PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
+PARK_AJ int          PARK_PL_TILT_H              = 0;       // 1 = la altura del eje por sonar del escaneo normal usa la inclinacion (empeoro n1 s11 y n3 s20)
+PARK_AJ int          PARK_PL_TILT                = 1;       // 1 = corrige el anclaje de w por la inclinacion de la nariz al detectar el poste 2
+PARK_AJ int          PARK_REV_DIR                = 1;       // 1 = cajon al inicio y el carro va por adentro (iba a hacer U): sigue recto, pasa el cajon y entra de reversa en S sin U
+PARK_AJ float        PARK_REV_W_TOMA             = 150.0f;  // toma el mando de la Pi con el eje trasero en este w (marco del plan; 264 = cara de la madera de adelante)
+PARK_AJ float        PARK_REV_TH1                = 60.0f;   // angulo de la recta de la reversa: fija en que w para (mas h = mas lejos)
+PARK_AJ float        PARK_REV_KH                 = 0.06f;   // grados de rumbo hacia la pared por mm de h sobre PARK_REV_H0
+PARK_AJ float        PARK_REV_CAIDA_CM           = 8.0f;
+PARK_AJ float        PARK_REV_HMAX               = 950.0f;  // mm de la pared al tomar el mando; mas lejos hace la U
+PARK_AJ float        PARK_REV_DWF                = -8.0f;    // se suma a WF en el plan que viene de la reversa en S
+PARK_AJ float        PARK_REV_SIN_ANCLA_MM       = 120.0f;  // sin ver la madera de ida sigue avanzando esto mas y luego la busca retrocediendo
+PARK_AJ int          PARK_REV_BUSCA_PWM          = 90;
+PARK_AJ float        PARK_REV_BUSCA_W_MIN        = 60.0f;   // w mas atras al que se busca la madera retrocediendo
+PARK_AJ float        PARK_REV_B0                 = 34.6f;   // correccion de w del ancla hecha retrocediendo: B0 + B1*(h-350) + B2*(h-200)*tan(theta)
+PARK_AJ float        PARK_REV_B1                 = 0.362f;
+PARK_AJ float        PARK_REV_B2                 = 0.816f;
+PARK_AJ int          PARK_REV_SOLO_ATRAS         = 0;       // prueba: ignora la madera vista de ida y siempre la busca retrocediendo
+PARK_AJ float        PARK_REV_ALTA_H             = 520.0f;  // desde mas lejos de la pared que esto la recta es larga y la inercia del volante pasa mas
+PARK_AJ float        PARK_REV_LEAD_ALTA          = 18.0f;   // LEAD en ese caso (ventana 17-19 en s22)
+PARK_AJ float        PARK_REV_EXT_CM             = 66.0f;   // al iniciar el escaneo, si el carro esta mas lejos de la pared que esto y fuera de la linea, reversa en S
+PARK_AJ float        PARK_REV_DF_CM              = 25.0f;   // el sonar frontal ve algo (senal) a menos de esto: para de avanzar
+PARK_AJ float        PARK_REV_H0                 = 400.0f;
+PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
+PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
+PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
+PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
+PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
+PARK_AJ float        PARK_PL_RI                  = 85.0f;  // radio de la reversa INT (eje trasero)
+PARK_AJ float        PARK_PL_TA_MAX              = 92.0f;
+PARK_AJ float        PARK_PL_T2_PISO             = 12.0f;
+PARK_AJ float        PARK_PL_T1_POR_MM           = 0.0f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
+PARK_AJ float        PARK_PL_H_NOM               = 350.0f;
+PARK_AJ float        PARK_PL_T3                  = 25.0f;
+PARK_AJ float        PARK_PL_T4                  = 13.0f;
+PARK_AJ float        PARK_PL_T5                  = 2.0f;
+PARK_AJ float        PARK_PL_C_MM                = 84.0f;   // reversa recta a theta T2
+PARK_AJ float        PARK_PL_EB_CM               = 3.0f;    // holgura de la esquina de la cola que corta cada tramo
+PARK_AJ float        PARK_PL_EC_CM               = 3.0f;
+PARK_AJ float        PARK_PL_ED_CM               = 1.5f;
+PARK_AJ float        PARK_PL_D3_MM               = 45.0f;   // tope de distancia del tramo adelante
+PARK_AJ int          PARK_PL_PWM_REV             = 92;
+PARK_AJ int          PARK_PL_PWM_FWD             = 80;
+PARK_AJ int          PARK_PL_PAUSA_MS            = 120;     // parado con el volante girando antes de cada tramo nuevo
+PARK_AJ float        PARK_PL_Z1_MM               = 14.0f;   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
+PARK_AJ float        PARK_PL_Z2_MM               = 28.0f;
+PARK_AJ float        PARK_PL_Z3_MM               = 28.0f;
+PARK_AJ float        PARK_PL_Z4_MM               = 14.0f;
+PARK_AJ float        PARK_PL_TOK                 = 3.0f;    // theta final aceptable (grados)
+PARK_AJ float        PARK_PL_DF_MM               = 30.0f;   // zigzag: largo de cada tramo adelante
+PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
+PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
+PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
+PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
+const int            PARK_PL_LEGS                = 8;
+const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
+bool                 parkSinULinea               = false;
+float                parkPlanClrPrev             = 1e9f;
+float                parkPlanT1                  = 80.0f;
+int                  parkPlanDir                 = -1;
+int                  parkPlanSrv                 = 75;
+float                parkPlanSgn                 = 1.0f;
+int                  parkPlanI                   = 0;
+bool                 parkPlanMov                 = false;
+float                parkPlanThMax               = 0.0f;
+const float          PARK_CAJON_LARGO_MM         = 304.0f;   // 2 maderas de 20 + hueco 264 (1.5 x largo del carro)
+long                 parkUturnDisparoOdom        = -1;   // odómetro al armar la espera
+// T15b2 (t15b2_esquina13, "patrón 2", seeds 7/19 CCW): tras la U (fase 25)
+// el carro puede quedar a ext 9-11 cm y la fase 0 (resetParkScan) separa con
+// el tope de rumbo PARK_PUNTA_ANG_MAX_CERCA_DEG=12 (pensado para arrancar a
+// 25-26 cm): ~2 cm cada 10 cm de avance, no llega a PARK_PARED_CM antes del
+// poste 1. Intento descartado: fase 26 "aleja de pared" con giro acotado por
+// gyro — el carro no giraba (f=26 ext=11 girado=0.1), disparaba sin filtro de
+// sentido y empeoraba la carrera (seed 6 pasaba a cajón).
+// T15b2: con PARK_MODO == PARK_PARALELO/_REV y retorno, usar la U de 180° de
+// PUNTA (fases 24-25 de ESTACIONANDO, reusa el arco de PARK_UTURN_*) en vez de
+// la media vuelta de 90° + reversa (fases 20-23). Al cerrar la U entrega
+// directo al escaneo paralelo (resetParkScan(), fase 0), sin la reversa recta.
+// false = comportamiento viejo (fases 20-23, probado y documentado en
+// twin_plan.md "T15b (ruta A)"); no se tocó ese camino.
+const bool          PARK_PARALELO_USA_UTURN    = true;
 const unsigned long PARK_RETORNO_TIMEOUT_MS    = 4000;
 const unsigned long PARK_RETORNO_SETTLE_MAX_MS = 670;    // tope de la espera a que deje de rotar (>= MANIOBRA_FRENO_MS)
 // Reversa recta tras la media vuelta, para tener carrera antes del 1er poste. En CCW
@@ -1199,7 +1774,8 @@ const unsigned long PARK_PUNTA_PING_MIN_MS     = 30;     // fase 0 con un solo s
                                                          // disparado muy seguido oye el eco tardío de su pulso anterior)
 // Maniobra
 const unsigned long PARK_PUNTA_FRENO_MS        = 350;    // coast tras la bajada (el carro se detiene)
-const long          PARK_PUNTA_AJUSTE_MS       = 0;      // + avanza recto / - retrocede recto antes del arco (0 = nada)
+const int           PARK_PUNTA_HUECO_MM        = 0;      // gira al abrirse el hueco; más adentro la trompa da en el poste lejano
+const int           PARK_PUNTA_AJUSTE_MM       = 0;      // el hueco ya posicionó; no avanzar otra vez
 const int           PARK_PUNTA_AJUSTE_PWM      = 90;
 const unsigned long PARK_PUNTA_SERVO_MS        = 200;    // espera a que el servo llegue a tope antes de avanzar
 const int           PARK_PUNTA_ARCO_PWM        = 95;
@@ -1212,7 +1788,7 @@ const int           PARK_PUNTA_OVERSHOOT_DEG   = 8;      // corta antes; la iner
 // el poste. orillas953: detectó a +10.8°, el arco relativo giró 60° y frenó por dF a -49°.
 const bool          PARK_PUNTA_ARCO_ABSOLUTO   = true;
 const unsigned long PARK_PUNTA_ARCO_TIMEOUT_MS = 4000;
-const unsigned long PARK_PUNTA_ENTRA_MS        = 800;    // tras el arco, recto hacia la pared máx. esto (0 = no entra más)
+const int           PARK_PUNTA_ENTRA_MM        = 160;    // tras el arco, recto hacia la pared máx. esto (0 = no entra más)
 const int           PARK_PUNTA_ENTRA_PWM       = 85;
 const int           PARK_PUNTA_DF_STOP_CM      = 8;      // frontal <= esto -> para (arco o entrada)
 const int           PARK_PUNTA_DF_N            = 2;      // lecturas seguidas
@@ -1237,8 +1813,21 @@ float         puntaIntPared     = 0.0f;  // integral del error de pared (cm·s),
 unsigned long puntaIntMs        = 0;
 float         puntaRumboRef     = 0.0f;  // heading de la recta al detectar (fase 2)
 float         puntaRumboArco0   = 0.0f;  // heading al empezar el arco
-bool          puntaRetorno      = false; // estacionando tras la media vuelta (MANIOBRA 13)
-float         puntaRumboGiro0   = 0.0f;  // heading al empezar la media vuelta
+bool          puntaRetorno      = false; // estacionando de regreso, tras la U
+float         puntaRumboGiro0   = 0.0f;  // heading al empezar la U
+bool          parkUturnPendiente = false; // vuelta 12 cerrada: falta la U
+long          parkUturnOdom0     = 0;
+// Contador propio para "ya estoy en la esquina 13" (ver vigilarUturn()): usa
+// el mismo criterio que detectarEsquina() (pared de enfrente + lateral que se
+// abre), pero NO comparte contadorEsquina — vigilarUturn() corre en el mismo
+// frame, antes de la detectarEsquina() de la rama "ronda cerrada" de más
+// abajo; de compartir el contador, un solo frame lo movería dos veces.
+int           contadorEsquina13  = 0;
+int           puntaMuros         = 0;     // paredes del cajón ya contadas (0..2)
+bool          puntaEnPoste       = false; // la bajada actual ya se contó
+bool          puntaHueco         = false; // entre la 1a y la 2a pared
+long          puntaOdom0         = 0;
+int           puntaServoU        = 0;      // servo latcheado de la U (no re-medirlo a media curva)
 unsigned long puntaSettleSampMs = 0;
 int           puntaSettleQuieto = 0;
 long          puntaExtRaw       = 0;     // diag: última lectura cruda del sonar exterior
@@ -1317,6 +1906,10 @@ const bool MODO_CONTINUO = false;
 // durante TERMINANDO_MS, para meterse en el área de salida y ahí sí frenar.
 // Sube/baja este tiempo según la distancia que falte hasta la zona de salida.
 const unsigned long TERMINANDO_MS = 1000;
+// Modo RUTA: la cuenta 12 cae a ~70° de la última curva, a veces antes de la diagonal; tras
+// TERMINANDO_MS se sigue hasta estar en la sección de salida a este margen de la diagonal (tope MAX_MS).
+const float TERMINANDO_RUTA_MARGEN_MM = 100.0f;
+const unsigned long TERMINANDO_RUTA_MAX_MS = 3000;
 unsigned long terminandoEntryMs   = 0;
 
 // ── Filtro EMA para ultrasonidos ──────────────────────────────────────────────
@@ -1325,6 +1918,9 @@ float distL_filtrada = 0;
 float distR_filtrada = 0;
 float distF_filtrada = 0;   // sensor frontal (solo ronda de obstáculos)
 // (Los laterales NO tienen mediana, solo el EMA: ver LATERAL_OPEN_DEBOUNCE.)
+// ToF trasero (hw_nuevo, FOX_TOF): red de seguridad de las reversas del
+// estacionamiento paralelo (ver PARK_ATRAS_MIN_CM). -1 = sin lectura.
+float distB_filtrada = -1;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Actuadores
@@ -1377,8 +1973,10 @@ const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
 int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
 unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
 
-void setMotor(int velocidad) {
-  velocidad = constrain(velocidad, 0, MOTOR_MAX);
+// setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
+// rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
+void setMotorTope(int velocidad, int tope) {
+  velocidad = constrain(velocidad, 0, tope);
   if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
     unsigned long t = millis() - motorDirMs;
     if (t < MOTOR_REV_RAMPA_MS) {
@@ -1387,6 +1985,11 @@ void setMotor(int velocidad) {
     }
   }
   ledcWrite(PWMA, velocidad);
+  pwmActual = velocidad;
+}
+
+void setMotor(int velocidad) {
+  setMotorTope(velocidad, MOTOR_MAX);
 }
 
 // Motor en coast (terminales flotando) — para frenar suave y dejar caer la
@@ -1490,10 +2093,166 @@ void resetModoGiro() {
   hugSeparadoStreak = 0;
 }
 
+bool giroRapidoPermitido() {
+  if (GIRO_RAPIDO_MODO == 0) return false;
+  if (GIRO_RAPIDO_MODO == 1) return true;
+  return piGr != 0;
+}
+
+float extWallTargetCrucero() {
+  if (estado == CRUCERO && giroRapidoPermitido()) return GR_EXT_TARGET_CM;
+  return EXT_WALL_TARGET_CM;
+}
+
+void latchDireccionGiro(long distL, long distR, bool &girarDer) {
+  bool derAbierta = (distR > umbralPared);
+  bool izqAbierta = (distL > umbralPared);
+  if (primerGiro) {
+    girarDer = !direccionIzquierda;
+  } else {
+    if      (direccionAproxLatch == 1) girarDer = false;
+    else if (direccionAproxLatch == 2) girarDer = true;
+    else if (derAbierta && !izqAbierta) girarDer = true;
+    else if (izqAbierta && !derAbierta) girarDer = false;
+    else                               girarDer = (distR > distL);
+    primerGiro = true;
+  }
+  direccionIzquierda = !girarDer;
+}
+
+void entrarGiroRapido(long distL, long distR) {
+  latchDireccionGiro(distL, distR, maniobraGirarDerGr);
+  maniobraGirarDer = maniobraGirarDerGr;
+  grIncl = constrain(anguloGyro, -MANIOBRA_INCL_ENTRADA_MAX_DEG, MANIOBRA_INCL_ENTRADA_MAX_DEG);
+  anguloGyro = 0;
+  float sg = maniobraGirarDerGr ? -1.0f : 1.0f;
+  grObjetivo = sg * constrain(AngGiro - grIncl * sg, 70.0f, 110.0f);
+  grHold     = 0;
+  grEntryMs  = millis();
+  integralGyro  = 0; prevErrorGyro = 0;
+  piPurePursuit = false;
+  estado        = GIRO_RAPIDO;
+  Serial.print("-> GIRO_RAPIDO dir="); Serial.print(maniobraGirarDerGr ? "DER" : "IZQ");
+  Serial.print(" obj="); Serial.println(grObjetivo, 1);
+}
+
+void actualizarOdometria() {
+  float ds = 0.0f;
+#if FOX_ENCODER
+  int32_t cnt;
+#if defined(FOX_SIL)
+  cnt = sil_encoder_count();
+#else
+  portENTER_CRITICAL(&encMux);
+  cnt = encCount;
+  portEXIT_CRITICAL(&encMux);
+#endif
+  // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/5.45 = 0.183 mm/cuenta.
+  ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
+  encCountPrev = cnt;
+#else
+  static unsigned long odomLastMs = 0;
+  unsigned long now = millis();
+  float dt = (odomLastMs == 0) ? 0.02f : (now - odomLastMs) / 1000.0f;
+  odomLastMs = now;
+  if (dt <= 0.0f) dt = 0.02f;
+  float v_cmd = 0.0f;
+  int dirOdom = motorDirActual;
+  if (dirOdom == 0 && pwmActual > ODOM_PWM_0) {
+    if (digitalRead(A1) && !digitalRead(A2))      dirOdom = 1;
+    else if (!digitalRead(A1) && digitalRead(A2)) dirOdom = -1;
+  }
+  if (dirOdom != 0 && pwmActual > ODOM_PWM_0)
+    v_cmd = ODOM_PWM_K * (float)(pwmActual - ODOM_PWM_0);
+  if (dirOdom < 0) v_cmd = -v_cmd;
+  float alpha = dt / ODOM_TAU_S;
+  if (alpha > 1.0f) alpha = 1.0f;
+  odomVfilt += (v_cmd - odomVfilt) * alpha;
+  ds = odomVfilt * dt;
+#endif
+#if FOX_ENCODER
+  // Rumbo medio del tick (punto medio): menos error que el rumbo final en curva.
+  float yawMidRad = 0.5f * (anguloTotal + odomYawPrevDeg) * PI / 180.0f;
+  odomYawPrevDeg = anguloTotal;
+  odomMmF += ds;
+  poseXf  += ds * cosf(yawMidRad);
+  poseYf  += ds * sinf(yawMidRad);
+  odomMm = (long)lroundf(odomMmF);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+#else
+  // Carro actual (modelo PWM): se deja idéntico a propósito mientras T8 afina
+  // esquinas/parking sobre este comportamiento. Pierde el lateral de cada tick;
+  // pasar a los acumuladores float de arriba cuando T8 cierre.
+  odomMm += (long)lroundf(ds);
+  float yawRad = anguloTotal * PI / 180.0f;
+  poseX += (long)lroundf(ds * cos(yawRad));
+  poseY += (long)lroundf(ds * sin(yawRad));
+#endif
+}
+
+#if FOX_TOF && !defined(FOX_SIL)
+// Varios VL53 en el mismo I2C: todos en reset (XSHUT bajo) y se despiertan de a
+// uno para darle a cada uno su dirección antes de despertar el siguiente.
+// Tasa del ToF (VL53L1X). La librería de Pololu fija en init() un presupuesto de
+// 50 ms y startContinuous(33) solo cambia el periodo entre mediciones, que no puede
+// ser menor que el presupuesto: antes de este cambio el ToF corría a ~20 Hz, no a
+// 30. Hay que fijar el presupuesto ANTES de startContinuous. Mínimo según ST:
+// 20 ms en modo Short (hasta 50 Hz, alcance ~1.3 m, mejor con luz ambiente) y
+// 33 ms en Long (30 Hz, hasta 4 m). El pasillo mide 1 m: laterales y trasero en
+// Short; el frontal ve la pared del fondo, queda en Long. Más allá de ~1.3 m los
+// laterales/trasero devuelven estado inválido (-1). El lazo principal debe tardar
+// menos que el periodo para aprovecharlo (ver pulseIn bloqueante de los HC-SR04).
+const bool TOF_LAT_TRAS_SHORT      = true;   // false = todos en Long como antes
+const uint16_t TOF_LAT_TRAS_MS     = 20;     // presupuesto = periodo, modo Short
+const uint16_t TOF_FRENTE_MS       = 33;     // presupuesto = periodo, modo Long
+
+static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
+                      bool corto) {
+  digitalWrite(xshut, HIGH);
+  delay(10);
+  dev.setTimeout(500);
+  if (!dev.init()) { Serial.print("ToF "); Serial.print(nombre); Serial.println(" fail"); return false; }
+  dev.setAddress(addr);
+  const bool usaShort = corto && TOF_LAT_TRAS_SHORT;
+  const uint16_t ms = usaShort ? TOF_LAT_TRAS_MS : (corto ? 33 : TOF_FRENTE_MS);
+  dev.setDistanceMode(usaShort ? VL53L1X::Short : VL53L1X::Long);
+  if (!dev.setMeasurementTimingBudget((uint32_t)ms * 1000UL)) {
+    Serial.print("ToF "); Serial.print(nombre); Serial.println(" presupuesto rechazado");
+  }
+  dev.startContinuous(ms);
+  return true;
+}
+
+void initToF() {
+  const int xs[TOF_N] = {TOF_XSHUT_L, TOF_XSHUT_R, TOF_XSHUT_B, TOF_XSHUT_F};
+  for (int i = 0; i < TOF_N; i++) { pinMode(xs[i], OUTPUT); digitalWrite(xs[i], LOW); }
+  delay(10);
+  // Si uno falla se sigue con los demás (antes un fallo dejaba a los siguientes
+  // en reset); el que falló queda en -1.
+  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L", true);
+  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true);
+  initUnToF(tofB, TOF_XSHUT_B, 0x32, "B", true);
+  initUnToF(tofF, TOF_XSHUT_F, 0x33, "F", false);
+}
+
+void leerToF() {
+  VL53L1X *dev[TOF_N] = {&tofL, &tofR, &tofB, &tofF};
+  for (int i = 0; i < TOF_N; i++) {
+    if (dev[i]->dataReady()) {
+      uint16_t mm = dev[i]->read(false);
+      uint8_t st = dev[i]->rangingData.range_status;
+      tofMm[i] = (st == 0) ? (int)mm : -1;
+    }
+  }
+}
+#endif
+
 // Vigilancia de la esquina de CRUCERO (caídas del lateral + latch de dirección
 // de aproximación) desde cero. Se llama al entrar/salir de CRUCERO.
 void resetVigilanciaEsquina() {
   contadorFront       = 0;
+  contadorGrFront     = 0;
   lateralWatchActivo  = false;
   lateralOpenStreak   = 0;
   lateralDropCount    = 0;
@@ -1513,28 +2272,9 @@ void entrarCrucero() {
 }
 
 void decidirManiobra(long distL, long distR) {
-  bool derAbierta = (distR > umbralPared);
-  bool izqAbierta = (distL > umbralPared);
-
-  // ── DIRECCIÓN de giro ── se decide en la 1ª esquina por la pared que ABRE y
-  //    se LATCHEA (primerGiro): todas las esquinas de la pista son del mismo
-  //    sentido, así que no se re-evalúa. Como CRUCERO ya exige paredAbierta para
-  //    disparar, aquí SIEMPRE llega con una abierta -> nunca se usa el fallback.
-  if (primerGiro) {
-    maniobraGirarDer = !direccionIzquierda;                 // ya latcheada
-  } else {
-    // 1ª esquina: la dirección sale de qué lado abrió. Prioridad al latch de la
-    // APROXIMACIÓN (leído cuando el lateral aún daba el hueco real, antes de que
-    // el cono de sonido se lockeara en un obstáculo cercano). Si no hay latch,
-    // se usa la lectura viva; y por último el fallback histórico.
-    if      (direccionAproxLatch == 1) maniobraGirarDer = false;  // abrió IZQUIERDA
-    else if (direccionAproxLatch == 2) maniobraGirarDer = true;   // abrió DERECHA
-    else if (derAbierta && !izqAbierta) maniobraGirarDer = true;
-    else if (izqAbierta && !derAbierta) maniobraGirarDer = false;
-    else                               maniobraGirarDer = (distR > distL);  // fallback (no debería pasar)
-    primerGiro = true;                                      // latcheado para el resto de la carrera
-  }
-  direccionIzquierda = !maniobraGirarDer;   // para el dir= del ACK
+  bool girarDer;
+  latchDireccionGiro(distL, distR, girarDer);
+  maniobraGirarDer = girarDer;
 
   // ── FWD vs REVERSE ── el MISMO modo que eligió la ventana frontal del preview
   //    (giroModoFwd, con memoria de la aproximación), no la lectura instantánea:
@@ -1569,7 +2309,7 @@ void decidirManiobra(long distL, long distR) {
 void servoRumboPark(float rumboRef) {
   float out = PARK_KP_ANG * (rumboRef - anguloGyro) - PARK_KD_RATE * gyroRate;
   out = constrain(out, (float)-PARK_SERVO_MAX, (float)PARK_SERVO_MAX);
-  escribirServo(constrain(centroServo + (int)out, 30, 160));
+  escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
 
 // ── Trim de rumbo contra la pared (ver el bloque PARK_TRIM_*) ────────────────
@@ -1594,23 +2334,29 @@ void parkTrimMuestra(long ext, float ang, unsigned long ahora, float haciaPared)
   parkTrimD[parkTrimIdx] = ext;
   parkTrimA[parkTrimIdx] = ang;
   parkTrimT[parkTrimIdx] = ahora;
+  parkTrimV[parkTrimIdx] = (pwmActual - 42.1f) * 0.402f;   // cm/s, línea del gemelo
   parkTrimIdx = (parkTrimIdx + 1) % PARK_TRIM_N;   // ahora apunta a la MÁS VIEJA
   if (parkTrimN < PARK_TRIM_N) { parkTrimN++; return; }
 
   unsigned long t0 = parkTrimT[parkTrimIdx];
-  float st = 0, sd = 0, stt = 0, std_ = 0, sa = 0;
+  float st = 0, sd = 0, stt = 0, std_ = 0, sa = 0, sv = 0;
   for (int i = 0; i < PARK_TRIM_N; i++) {
     float t = (float)(long)(parkTrimT[i] - t0) / 1000.0f;
     float d = (float)parkTrimD[i];
     st += t; sd += d; stt += t * t; std_ += t * d; sa += parkTrimA[i];
+    sv += parkTrimV[i];
   }
   float n   = (float)PARK_TRIM_N;
   float den = n * stt - st * st;
   if (den < 1e-3f) return;                    // ventana sin span de tiempo
   float pend   = (n * std_ - st * sd) / den;  // cm/s (+ = alejándose de la pared)
   float angMed = sa / n;
-  // phi = rumbo REAL respecto a "paralelo", en el marco de signos del gyro.
-  float sn  = constrain(pend / PARK_TRIM_VEL_CM_S, -0.6f, 0.6f);
+  // phi = asin(pend/v). La constante está calibrada al escaneo lento; si la
+  // ventana se llenó a PWM 255, v~86 y dividir por 31 satura phi: el candado
+  // de armado tira el poste bueno. Ahí se usa la v media de la ventana.
+  float vUse = sv / n;
+  if (vUse < PARK_TRIM_VEL_CM_S + 20.0f) vUse = PARK_TRIM_VEL_CM_S;
+  float sn  = constrain(pend / vUse, -0.6f, 0.6f);
   float phi = -haciaPared * degrees(asin(sn));
   float medido = constrain(angMed - phi, -PARK_TRIM_MAX_DEG, PARK_TRIM_MAX_DEG);
 
@@ -1675,6 +2421,29 @@ bool parkAtoroDetecta(unsigned long faseMs) {
   return giroAtorado(faseMs, PARK_ATORO_GRACIA_MS, parkAtoroAng, parkAtoroMs);
 }
 
+// Red de seguridad trasera de las reversas del paralelo (ver PARK_ATRAS_MIN_CM).
+// Sin FOX_TOF, distB_filtrada se queda en -1 y esto siempre da false (inerte).
+bool parkAtrasPegado() {
+  return distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_MIN_CM;
+}
+
+// Red de seguridad propia de los swings A/C del PARK_PARALELO_REV (ver
+// PARK_REV_ATRAS_MIN_CM): umbral más chico que parkAtrasPegado() porque el
+// ToF trasero gira CON el carro y a medio swing ya no mira al fondo.
+bool parkRevAtrasPegado() {
+  return distB_filtrada > 0.0f && distB_filtrada <= PARK_REV_ATRAS_MIN_CM;
+}
+
+// Ruta A (T15b): ¿las fases de distancia van por encoder? y cuánto lleva la fase.
+bool parkUsaEncoder() { return FOX_ENCODER && PARK_POR_ENCODER; }
+float parkRecorridoMm() { return fabsf((float)(odomMm - parkOdom0)); }
+// Fin de una fase de distancia: mm del encoder (con timeout) o el tiempo de antes.
+bool parkFinTramo(float mm, unsigned long ms) {
+  if (parkUsaEncoder())
+    return parkRecorridoMm() >= mm || (millis() - parkFaseMs >= PARK_FASE_DIST_TIMEOUT_MS);
+  return millis() - parkFaseMs >= ms;
+}
+
 // ── Cierre de ESTACIONANDO (apaga motor, centra servo y finaliza carrera) ─────
 void finalizarPark(const char *motivo) {
   motorCoast();
@@ -1699,15 +2468,21 @@ void finalizarPark(const char *motivo) {
 // contrario al giro; al regresar tras la media vuelta queda del OTRO lado, que es
 // justo hacia donde gira la media vuelta.
 bool paredCajonEsIzq(bool retorno) {
+#if defined(FOX_SIL)
+  // Harness del twin (twin/prepark.py): el escenario dice de qué lado está.
+  { double w = sil_param("pp_wall_left", -1.0); if (w >= 0.0) return retorno ? !(w > 0.5) : (w > 0.5); }
+#endif
   if (PARK_EN_PRUEBA) return PARK_TEST_PARED_IZQ;
   bool ida = cajonParedDetectada ? cajonParedEsIzquierda : !direccionIzquierda;
   return retorno ? !ida : ida;
 }
 
 void resetParkScan() {
+  parkSinULinea = false;
   parkFase             = 0;
-  parkFaseMs           = millis();
+  parkFaseMs           = millis(); parkOdom0 = odomMm;
   parkEntryMs          = millis();
+  parkCiclos           = 0;
   parkScanSubFase      = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
@@ -1723,6 +2498,8 @@ void resetParkScan() {
   parkExtRaw           = 0;
   parkCaidaLectura     = 0;
   parkHuecoEntryMs     = 0;
+  parkBajadaPre        = false;
+  parkBajadaPreMs      = 0;
   parkBaseLlegada      = 0.0f;
   parkRectoMs          = 0;
   parkAngObjetivo      = (float)PARK_ANG_IN_DEG;
@@ -1733,8 +2510,76 @@ void resetParkScan() {
   escribirServo(centroServo);
 }
 
+#if defined(FOX_SIL)
+// Harness del twin (twin/prepark.py, solo SIL): arranca a la salida de la
+// esquina 12 con la odometría que tendría el ESP tras 3 vueltas (marco del
+// arranque en el cajón: x hacia la salida, y a la izquierda, yaw continuo).
+void silPreParkSeed() {
+  static bool hecho = false;
+  if (hecho || sil_param("pp_on", 0.0) < 0.5) return;
+  hecho = true;
+#define SIL_AJ(n) n = (decltype(n))sil_param(#n, (double)n)
+  SIL_AJ(PARK_ANG_IN_DEG); SIL_AJ(PARK_ANG_MIN_IN_DEG); SIL_AJ(PARK_OVERSHOOT_DEG);
+  SIL_AJ(PARK_PARED_CM); SIL_AJ(PARK_RADIO_CM); SIL_AJ(PARK_FINAL_CM);
+  PARK_RECTO_D0_CM = PARK_FINAL_CM + PARK_RADIO_CM;
+  SIL_AJ(PARK_POSTE2_MM); SIL_AJ(PARK_RECTO_MAX_MM); SIL_AJ(PARK_ENDEREZA_TOL_DEG);
+  SIL_AJ(PARK_FINAL_TOL_DEG); SIL_AJ(PARK_REV_FINAL_DF_CM); SIL_AJ(PARK_CENTER_HI_CM);
+  SIL_AJ(PARK_ATRAS_MIN_CM); SIL_AJ(PARK_ATRAS_FINAL_CM);
+  SIL_AJ(PARK_REV_AJUSTE_MM); SIL_AJ(PARK_REV_SWING_OVERSHOOT_DEG); SIL_AJ(PARK_REV_B_CM);
+  SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
+  SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
+  SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
+  SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
+  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
+  SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
+#undef SIL_AJ
+  anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
+  anguloGyro     = (float)sil_param("pp_ang", 0.0);
+  odomYawPrevDeg = anguloTotal;
+  poseXf = (float)sil_param("pp_x", 0.0);
+  poseYf = (float)sil_param("pp_y", 0.0);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+  Serial.print("SIL pre_park: pose=("); Serial.print(poseXf, 0); Serial.print(",");
+  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
+  Serial.print(" ang="); Serial.println(anguloGyro, 1);
+}
+
+// Harness del twin (sim.py ruta_seed, solo SIL): arranca en modo RUTA en la recta
+// del cajón tras el giro 12, con el estado que grabó una carrera completa
+// (odometría del marco del cajón, tc=12 y la U pendiente).
+void silRutaSeed() {
+  if (sil_param("rp_on", 0.0) < 0.5) return;
+  anguloTotal    = (float)sil_param("rp_yaw", 0.0);
+  anguloGyro     = (float)sil_param("rp_ang", 0.0);
+  odomYawPrevDeg = anguloTotal;
+  poseXf = (float)sil_param("rp_x", 0.0);
+  poseYf = (float)sil_param("rp_y", 0.0);
+  poseX  = (long)lroundf(poseXf);
+  poseY  = (long)lroundf(poseYf);
+  odomMmF = (float)sil_param("rp_od", 0.0);
+  odomMm  = (long)lroundf(odomMmF);
+  direccionIzquierda = sil_param("rp_izq", 0.0) > 0.5;
+  primerGiro     = true;
+  turnsCompleted = TURNS_PER_RACE;
+  lastTurnTime   = millis();
+  if (PARK_MODO != PARK_NINGUNO && PARK_MEDIA_VUELTA) {
+    parkUturnPendiente = true;
+    parkUturnOdom0     = (long)sil_param("rp_od12", (double)odomMm);
+    contadorEsquina13  = 0;
+  }
+  Serial.print("SIL ruta_seed: pose=("); Serial.print(poseXf, 0); Serial.print(",");
+  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
+  Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.print(" od="); Serial.println(odomMm);
+}
+#endif
+
 // ── Entrada a ESTACIONANDO ───────────────────────────────────────────────────
 void iniciarEstacionando() {
+#if defined(FOX_SIL)
+  silPreParkSeed();
+#endif
   estado       = ESTACIONANDO;
   parkBuscando = false;
   parkParedEsIzquierda = paredCajonEsIzq(false);
@@ -1745,7 +2590,7 @@ void iniciarEstacionando() {
     escribirServo(centroServo);
     parkRumboRef = anguloGyro;
     parkFase     = 2;
-    parkFaseMs   = millis();
+    parkFaseMs   = millis(); parkOdom0 = odomMm;
     Serial.println("-> TEST DIRECTO: Iniciando en posicion de lanzamiento para reversa");
   } else if (PARK_TEST_MANO) {
     motorCoast();
@@ -1769,11 +2614,34 @@ void iniciarEstacionandoRetorno() {
   parkSettleQuieto = 0;
   parkSettleSampMs = millis();
   parkFase         = 20;
-  parkFaseMs       = millis();
+  parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorCoast();
-  escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? 160 : 30));
+  escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG));
   Serial.println("==================================================");
   Serial.print("-> MEDIA VUELTA (giro 13), luego paralelo. Pared del regreso: ");
+  Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+  Serial.println("==================================================");
+}
+
+// T15b2 (PARK_PARALELO_USA_UTURN): tras la vuelta 12, U de 180° EN LA RECTA
+// (igual que ESTACIONANDO_PUNTA fases 20-21, pegada a la pared exterior con
+// PARK_UTURN_*) pero sin salir de ESTACIONANDO: al cerrar la U entrega directo
+// al escaneo del paralelo (resetParkScan(), fase 0 de ESTACIONANDO), con
+// parkParedEsIzquierda ya fijada a la pared del regreso. Fases 24-25, no
+// pisan las 20-23 (media vuelta vieja).
+void iniciarEstacionandoParaleloUturn() {
+  parkDirecto = false;
+  estado       = ESTACIONANDO;
+  parkBuscando = false;
+  parkParedEsIzquierda = paredCajonEsIzq(true);
+  parkRumboGiro0   = anguloGyro;
+  parkServoU       = 0;
+  parkFase         = (PARK_UTURN_ALEJAR_CM > 0) ? 26 : 24;
+  parkFaseMs       = millis(); parkOdom0 = odomMm;
+  motorAdelante();
+  escribirServo(centroServo);
+  Serial.println("==================================================");
+  Serial.print("-> MEDIA VUELTA (giro 13): U de 180 (de PUNTA), luego paralelo. Pared del regreso: ");
   Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
   Serial.println("==================================================");
 }
@@ -1810,6 +2678,9 @@ void arrancarSeguirPunta() {
   puntaErrPared     = 0.0f;
   puntaIntPared     = 0.0f;
   puntaIntMs        = millis();
+  puntaMuros        = 0;
+  puntaEnPoste      = false;
+  puntaHueco        = false;
   Serial.print("PUNTA fase 0: sigo pared ");
   Serial.print(puntaParedIzq ? "IZQUIERDA" : "DERECHA");
   Serial.print(" a "); Serial.print(PARK_PUNTA_PARED_CM, 0); Serial.println(" cm");
@@ -1818,6 +2689,9 @@ void arrancarSeguirPunta() {
 // retorno=false: estaciona de frente tras el giro 12 (fase 0 directo).
 // retorno=true : tras la MANIOBRA 13, media vuelta (fase 20) y estaciona regresando.
 void iniciarEstacionandoPunta(bool retorno) {
+#if defined(FOX_SIL)
+  silPreParkSeed();
+#endif
   estado         = ESTACIONANDO_PUNTA;
   parkBuscando   = false;
   puntaRosaVisto = false;
@@ -1830,12 +2704,14 @@ void iniciarEstacionandoPunta(bool retorno) {
   Serial.println(PARK_TEST_MANO ? " PRUEBA A MANO, motor apagado" : "");
   Serial.println("==================================================");
   if (retorno) {
-    motorCoast();
-    // Con avance previo arranca recto; sin él, la fase 20 espera a que llegue a tope.
-    escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (puntaParedIzq ? 160 : 30));
+    motorAdelante();
+    escribirServo(centroServo);
     puntaRumboGiro0 = anguloGyro;
+    puntaOdom0      = odomMm;
+    puntaServoU     = 0;
     puntaFase       = 20;
     puntaFaseMs     = millis();
+    Serial.println("PUNTA fase 20: U por encoder, sin reversa");
   } else {
     motorAdelante();
     escribirServo(centroServo);
@@ -1847,8 +2723,159 @@ void iniciarEstacionandoPunta(bool retorno) {
 // retorno=true: tras la MANIOBRA 13 (media vuelta y estaciona regresando).
 void iniciarEstacionamiento(bool retorno) {
   if (PARK_MODO == PARK_PUNTA) iniciarEstacionandoPunta(retorno);
+  else if (retorno && PARK_PARALELO_USA_UTURN) iniciarEstacionandoParaleloUturn();
   else if (retorno)            iniciarEstacionandoRetorno();
   else                         iniciarParkBuscando();
+}
+
+// Tras la vuelta 12, en SIGUIENDO/CRUCERO. Reglamento 9.23: el cambio de
+// sentido solo puede hacerse en la esquina 13 (la siguiente, al final de la
+// recta de salida), no a mitad de la recta — antes esta función disparaba la
+// U por un umbral fijo de `recorrido` (ver PARK_UTURN_ARRANQUE_MM arriba),
+// que caía a mitad de la recta y a veces encima del cajón según el sentido.
+// Ahora usa la MISMA señal que detectarEsquina() usa para las otras 12
+// esquinas de la carrera (pared de enfrente cerca + un lateral que se abre:
+// la isla interior retrocede en la esquina real, no en la recta) — así el
+// disparo por construcción solo arma cerca de la esquina, sin importar el
+// sentido. Contador propio (contadorEsquina13, ver declaración arriba): no
+// se puede compartir contadorEsquina con detectarEsquina() porque esta
+// función corre antes, en el mismo frame, en la rama "ronda cerrada" de más
+// abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
+float alongSalidaMm();
+extern float parkDetAlong, parkDetHPose, parkDetHSon, parkDetTh; float parkHPoseMm();
+float rutaErrCarrilDeg(); float rutaExtTapeteCm(); void rutaPoseTapete(float &x, float &y); int seccionTapete(float x, float y);
+// Final sin U: dispara el escaneo del cajon (ver PARK_SINU_*). Corre en SIGUIENDO/CRUCERO desde que el carro sale de la
+// esquina 12 (la cuenta de giros llega ~0.5 s tarde y el cajon puede estar ya a la entrada de la recta).
+// No se entra al plan a ciegas. Sin haber visto la madera de adelante, primero se retrocede recto por el carril hasta verla (fase 42).
+void parkRevCaeAU(const char *why) {
+  if (parkFase == 41) {
+    Serial.print("PARK REV: "); Serial.print(why); Serial.println(" -> retrocede a buscar la madera");
+    parkFase = 42; parkFaseMs = millis(); parkOdom0 = odomMm; parkRevBase = 0.0f; parkRevDrop = 0; parkRevEnMadera = false;
+    return;
+  }
+  Serial.print("PARK REV: "); Serial.print(why); Serial.println(" -> U");
+  parkRevModo = false; parkUturnPendiente = false; parkUturnDisparoOdom = -1;
+  anguloGyro = rutaErrCarrilDeg() + parkRevGyroOff;
+  iniciarEstacionamiento(true);
+  parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();
+}
+
+void vigilarSinU() {
+  if (parkRevDir && piRuta && rutaTfOk && rutaSecSalida >= 0) {
+    float along = alongSalidaMm();
+    if (isnan(rutaPka) || along < rutaPka - 264.0f + PARK_REV_W_TOMA) return;
+    if (parkHPoseMm() > PARK_REV_HMAX) { parkRevDir = false; return; }   // muy lejos de la pared: mejor la U
+    parkRevDir = false; parkUturnPendiente = false; parkUturnDisparoOdom = -1;
+    parkDirecto = true;
+    turnsCompleted = TURNS_PER_RACE;
+    iniciarEstacionando();                                 // estado ESTACIONANDO, pared del cajon, escaneo en fase 0
+    parkRevGyroOff = anguloGyro - rutaErrCarrilDeg();
+    anguloGyro = rutaErrCarrilDeg();                       // 0 = paralelo al carril
+    parkRumboRef = 0.0f;
+    parkDetAlong = rutaPka - 64.0f;                        // w = 200 en pka - 64 (marco del plan); pka sale de la Pi
+    parkDetHPose = parkHPoseMm(); parkDetHSon = parkDetHPose; parkDetTh = 0.0f;
+    parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;
+    parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevModo = true;
+    motorAdelante();
+    Serial.print("PARK REV: sigo recto, pka="); Serial.print(rutaPka, 0); Serial.print(" along="); Serial.print(along, 0);
+    Serial.print(" h="); Serial.println(parkDetHSon, 0);
+    return;
+  }
+  if (!sinUActivo() && parkSinUDec == 2) return;
+  if (PARK_MODO == PARK_NINGUNO || !PARK_SIN_U) return;
+  if (!(piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0)) return;
+  float x, y;
+  rutaPoseTapete(x, y);
+  float along = alongSalidaMm();
+  bool pre = (turnsCompleted == TURNS_PER_RACE - 1) && seccionTapete(x, y) == rutaSecSalida && along >= (float)PARK_SINU_PRE_MM;
+  if (!(parkUturnPendiente || pre)) return;
+  if (!isnan(rutaPka) && rutaPka < (float)PARK_SINU_PKA_MIN_MM && parkSinUDec == 0) {
+    // Cajon al inicio de la recta: directo solo si la ruta ya lo trae pegado a su pared (la senal de la entrada se paso por afuera).
+    if (along < (float)PARK_SINU_DEC_MM) return;
+    bool lin = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_DEC_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_DEC_ANG_DEG
+               && (rutaPka - PARK_SINU_B2_OFF_MM - along) >= (float)PARK_SINU_CORRE_MM;   // y queda recta suficiente para armar el sonar antes de la madera
+    parkSinUDec = lin ? 1 : 2;
+    parkRevDir = !lin && PARK_REV_DIR;
+    Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
+    if (!lin) return;
+  }
+  float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
+  if (along < alongIni || along < (float)PARK_SINU_MIN_MM) return;
+  // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
+  bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
+  if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
+  // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
+  if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
+  parkUturnPendiente = false;
+  parkDirecto = true;
+  turnsCompleted = TURNS_PER_RACE;
+  Serial.print("PARK sin U: along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
+  iniciarEstacionamiento(false);
+  anguloGyro = rutaErrCarrilDeg();   // 0 = paralelo al carril, como tras la U
+}
+
+void vigilarUturn(long distL, long distR, long distF) {
+  if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO || sinUActivo()) return;
+  // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
+  // para esta U (que es la de la esquina 13, la siguiente).
+  long recorrido = odomMm - parkUturnOdom0;
+  // Modo RUTA: la Pi manda prio=1 todo el tiempo (sigue la ruta), no es una esquiva. El modo ruta es solo 3 vueltas
+  // sin estacionar; estacionar en ruta es función nueva y va detrás de PARK_UTURN_RUTA_ALONG_MM > 0 (apagado = como antes).
+  bool ocupado = !(piRuta && PARK_UTURN_RUTA_ALONG_MM > 0) && (piPriority || (piMemoryFrames > 0));
+  if (ocupado) {
+    if (estado == CRUCERO) estado = SIGUIENDO;
+    // No dejes historia de "esquina" armándose a medias mientras se esquiva
+    // un obstáculo de la recta — un hueco lateral visto ahí no es la esquina.
+    contadorEsquina13 = max(contadorEsquina13 - 1, 0);
+    parkUturnDisparoOdom = -1;   // se esquiva algo: la espera de la U se rearma después
+    return;
+  }
+  // Piso de seguridad: nada más saliendo de la esquina 12, el lateral puede
+  // leer "abierto" un instante por la geometría de esa esquina misma, antes
+  // de asentarse en la recta — no lo confundas con la esquina 13.
+  if (recorrido <= PARK_UTURN_ARRANQUE_MM) return;
+  if (piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0) {
+    bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
+    float along = alongSalidaMm();
+    float umbralU = (float)PARK_UTURN_RUTA_ALONG_MM;
+    if (PARK_UTURN_ADELANTO_MM > 0 && min(distL, distR) >= PARK_UTURN_ADELANTO_EXT_CM) umbralU = min(umbralU, (float)PARK_UTURN_ADELANTO_MM);   // hueco ya abierto: el radio de la U sale igual que a 500
+    if (PARK_UTURN_RUTA_PKA_MM > 0 && !isnan(rutaPka)) umbralU = max(umbralU, rutaPka + (float)PARK_UTURN_RUTA_PKA_MM);   // la U no cae encima de la madera del cajón
+    if (!fondoR && along < umbralU) return;
+    if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
+    parkUturnDisparoOdom = -1;
+    parkUturnPendiente = false;
+    Serial.print("PARK U por pose: along="); Serial.print(along, 0);
+    Serial.print(" ang="); Serial.println(anguloGyro, 1);
+    iniciarEstacionamiento(true);
+    parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();   // la U y el alejarse miden contra el carril, no contra el rumbo girado de la ruta
+    Serial.print("PARK U carril ref="); Serial.println(parkRumboGiro0, 1);
+    return;
+  }
+  bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
+  bool apertura    = paredFrente && ((distL > umbralPared) || (distR > umbralPared));
+  contadorEsquina13 = apertura ? min(contadorEsquina13 + 1, (int)esquinaDebounce)
+                                : max(contadorEsquina13 - 1, 0);
+  bool enEsquina13 = contadorEsquina13 >= esquinaDebounce;
+  // Red de seguridad: frontal ya muy cerca (va a chocar) aunque el lateral no
+  // haya armado (p.ej. el lado de la U lee corto porque el poste/pared de la
+  // esquina quedó justo ahí) — dispara igual, antes de pegarse a la pared.
+  bool fondo = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
+  if (!(enEsquina13 || fondo || parkUturnDisparoOdom >= 0)) return;   // ya armada: la espera sigue aunque el lateral vuelva a cerrarse
+  // Espera extra antes de cerrar la U: la esquina ya está detectada, se sigue
+  // recto PARK_UTURN_ESPERA_MM más (el frontal muy cerca fuerza el disparo).
+  if (parkUturnDisparoOdom < 0) parkUturnDisparoOdom = odomMm;
+  if (!fondo && (odomMm - parkUturnDisparoOdom) < PARK_UTURN_ESPERA_MM) return;
+  parkUturnDisparoOdom = -1;
+  parkUturnPendiente = false;
+  // Antes llamaba a iniciarEstacionandoPunta(true) directo, sin consultar
+  // PARK_MODO: con PARK_MEDIA_VUELTA=true la carrera completa SIEMPRE
+  // terminaba estacionando DE PUNTA, sin importar PARK_PARALELO/_REV (bug
+  // encontrado en otra verificación; prepark no lo veía porque entra por
+  // iniciarEstacionamiento(), no por aquí). El despacho único ya vive en
+  // iniciarEstacionamiento(): con PARALELO/PARALELO_REV cae en
+  // iniciarEstacionandoRetorno() (fase 20 de ESTACIONANDO); con PUNTA queda
+  // igual que antes.
+  iniciarEstacionamiento(true);
 }
 
 // Servo "recto" hacia un heading (gyro PD) para ESTACIONANDO_PUNTA. Convención
@@ -1856,7 +2883,7 @@ void iniciarEstacionamiento(bool retorno) {
 void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG) {
   float out = kpAng * (rumboRef - anguloGyro) - PARK_PUNTA_KD_RATE * gyroRate;
   out = constrain(out, (float)-PARK_PUNTA_SERVO_MAX, (float)PARK_PUNTA_SERVO_MAX);
-  escribirServo(constrain(centroServo + (int)out, 30, 160));
+  escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
 
 void finalizarPunta(const char *motivo) {
@@ -1889,50 +2916,55 @@ void iniciarTerminando() {
   Serial.println(" ms hacia el area de salida)");
 }
 
-// Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
-// (recta nueva desde 0) y vuelve a SIGUIENDO. Cuenta el giro.
-void finalizarManiobra() {
-  motorAdelante();
-  escribirServo(centroServo);
-  setMotor(0);
+// Cierre de MANIOBRA / GIRO_RAPIDO: bookkeeping compartido (sin coast/backoff/settle).
+void completarTurnoObstaculos() {
+  if (!piRuta) {   // Modo RUTA: la cuenta es solo contabilidad; servo al centro y motor 0 a media curva abrían el arco
+    motorAdelante();
+    escribirServo(centroServo);
+    setMotor(0);
+  }
   velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
-  // Residual real vs la recta nueva (NO zerar a ciegas): si el pivote sub/sobre-
-  // giró, la recuperación termina de cuadrarlo. anguloObjetivo=0 => errorGyro =
-  // -residual. Clamp por si una lectura loca. (ver MANIOBRA_RESIDUAL_MAX_DEG)
   if (esManiobra13() && MANIOBRA_13_CUADRAR_MS > 0) {
-    // MANIOBRA 13: la fase 4 terminó empujando con la cola plana contra la pared del
-    // lote -> el chasis ES perpendicular a ella. Referencia real, no el residual.
     Serial.print("MANIOBRA 13: cuadrado contra la pared, residual descartado=");
     Serial.println(anguloGyro - maniobraIdealRot, 1);
     anguloGyro = 0.0f;
+  } else if (piRuta) {
+    // Modo RUTA: residual entero (sin tope), la cuenta alcanza al giro real y la Pi suma 90 exactos por tc.
+    anguloGyro -= maniobraIdealRot;
   } else {
     anguloGyro     = constrain(anguloGyro - maniobraIdealRot,
                                -MANIOBRA_RESIDUAL_MAX_DEG, MANIOBRA_RESIDUAL_MAX_DEG);
   }
-  // Recta nueva: en vez de apuntar a 0, apunta unos grados hacia la pared
-  // EXTERIOR del giro que se acaba de hacer (ver MANIOBRA_BIAS_AFUERA_DEG).
   anguloObjetivo   = maniobraGirarDer ? +MANIOBRA_BIAS_AFUERA_DEG
                                       : -MANIOBRA_BIAS_AFUERA_DEG;
   lastTurnTime     = millis();
   maniobraDecidida = false;
   maniobraFase     = -1;
   estado           = SIGUIENDO;
-  resetModoGiro();                 // la aproximación a la siguiente esquina empieza de cero
+  resetModoGiro();
   turnsCompleted++;
   if (MODO_CONTINUO) {
-    // Sin parada: ni estaciona ni termina, sigue corriendo vueltas.
   } else if (turnsCompleted >= TURNS_PER_RACE) {
-    if (PARK_MODO == PARK_NINGUNO)            iniciarTerminando();
-    else if (!PARK_MEDIA_VUELTA)              iniciarEstacionamiento(false);  // giro 12: de frente
-    else if (turnsCompleted > TURNS_PER_RACE) iniciarEstacionamiento(true);   // giro 13: media vuelta
-    // giro 12 con PARK_MEDIA_VUELTA: sigue la carrera normal (SIGUIENDO) hasta la esquina 13
+    if (PARK_MODO == PARK_NINGUNO) iniciarTerminando();
+    else if (!PARK_MEDIA_VUELTA)   iniciarEstacionamiento(false);
+    else {
+      parkUturnPendiente = true;
+      parkUturnOdom0     = odomMm;
+      contadorEsquina13  = 0;
+    }
   }
   Serial.print("MANIOBRA completada ");
   Serial.print(turnsCompleted);
   Serial.print("/");
   Serial.println(TURNS_PER_RACE);
+}
+
+// Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
+// (recta nueva desde 0) y vuelve a SIGUIENDO. Cuenta el giro.
+void finalizarManiobra() {
+  completarTurnoObstaculos();
 }
 
 // Entra a la fase 6 (SETTLE): coast + servo centro, y NO cierra la maniobra
@@ -1959,12 +2991,16 @@ void iniciarSettleManiobra() {
 void finalizarInicio() {
   motorAdelante();
   escribirServo(centroServo);
-  setMotor(0);
+  if (!INICIO_SETTLE_MOTOR) setMotor(0);   // con settle a motor, no cortar: SIGUIENDO toma la velocidad en el mismo loop
   velocidadMotor = MOTOR_MAX;
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
   anguloObjetivo = 0;
-  lastTurnTime   = millis();   // cooldown: sin giro-falso en la zona de salida
+  // No anclar lastTurnTime: el hueco de 6 s entre giros contaría desde aquí
+  // y la primera esquina (~4 s después, a mitad de recta) ya está a <40 cm
+  // cuando abre, así que el arco no dispara. La holgura corta de abajo cubre
+  // el eco falso al salir del cajón.
+  inicioFinMs    = millis();
   timeStart      = millis();   // el grace de arranque cuenta desde acá
   inicioFase     = -1;
   estado         = SIGUIENDO;
@@ -2024,7 +3060,7 @@ void aplicarReversaHoldClamp(float headingRef, float outMax) {
   // Signo NEGADO vs el PID de adelante: en reversa, servo izq -> el chasis va der.
   float out = -(KpRev * err + KiRev * integralRev + KdRev * deriv);
   out = constrain(out, -outMax, outMax);
-  escribirServo(constrain(centroServo + (int)out, 30, 160));
+  escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
 // Mantiene anguloGyro en headingRef mientras el carro retrocede recto en fase 4.
 // Escribe el servo directo (como escribirServo(centroServo) al que reemplaza).
@@ -2058,7 +3094,47 @@ float filtroEMA(float nueva, float anterior) {
   return alpha * nueva + (1.0 - alpha) * anterior;
 }
 
+#if FOX_BNO && !defined(FOX_SIL)
+// Lee todos los bytes disponibles de Serial1 (BNO085 en UART-RVC). Copia de BnoRvcTest.ino.
+void leerBNO() {
+  while (Serial1.available()) {
+    uint8_t b = Serial1.read();
+    if (bnoN == 0 && b != 0xAA) continue;              // busca el primer 0xAA
+    if (bnoN == 1 && b != 0xAA) { bnoN = 0; continue; } // el segundo también debe ser 0xAA
+    bnoBuf[bnoN++] = b;
+    if (bnoN < 19) continue;
+    bnoN = 0;
+    uint8_t suma = 0;
+    for (int i = 2; i < 18; i++) suma += bnoBuf[i];
+    if (suma != bnoBuf[18]) { bnoMalos++; continue; }   // checksum malo: resincroniza
+    float bnoYawNuevo = (int16_t)(bnoBuf[3] | (bnoBuf[4] << 8)) * 0.01f;
+    // Acumula el delta de CADA paquete (llegan a 100 Hz y el loop tarda más de 10 ms:
+    // con solo los dos últimos se perdería casi todo el giro).
+    uint32_t ahora = millis();
+    if (bnoYawValid) {
+      float dd = bnoYawNuevo - bnoYaw;
+      while (dd > 180) dd -= 360;
+      while (dd < -180) dd += 360;
+      bnoDeltaAcc += dd;
+      bnoDtAccMs += ahora - bnoLastMs;
+    }
+    bnoYaw = bnoYawNuevo; bnoYawValid = true; bnoLastMs = ahora;
+  }
+}
+#endif
+
 void actualizarGyro() {
+#if FOX_BNO && !defined(FOX_SIL)
+  // Consume lo acumulado por leerBNO() desde la última llamada (varios paquetes por loop).
+  if (bnoDtAccMs == 0) return;
+  float d = bnoDeltaAcc * BNO_YAW_SIGN;
+  float dt = bnoDtAccMs / 1000.0f;
+  bnoDeltaAcc = 0; bnoDtAccMs = 0;
+  anguloGyro += d;
+  anguloTotal += d;
+  float gz = d / dt;
+  gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
+#else
   unsigned long now = millis();
   float dt = (now - lastGyroTime) / 1000.0;
   lastGyroTime = now;
@@ -2066,7 +3142,9 @@ void actualizarGyro() {
   float gz = mpu.getGyroZ() / gyroScale;
   if (abs(gz) < 1.0) gz = 0;
   anguloGyro += gz * dt;
+  anguloTotal += gz * dt;
   gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
+#endif
 }
 
 bool detectarEsquina(long distL, long distR, long distF) {
@@ -2094,8 +3172,245 @@ bool campoPi(const String &line, const char *clave, String &valor) {
   return true;
 }
 
+// Pose del eje trasero en el tapete (modo RUTA): mundo = (rtx,rty) + px·F + py·L.
+void rutaPoseTapete(float &x, float &y) {
+  float th = rutaTh * DEG_TO_RAD;
+  float Fx = sinf(th), Fy = cosf(th), Lx = -cosf(th), Ly = sinf(th);
+  x = rutaTx + poseXf * Fx + poseYf * Lx;
+  y = rutaTy + poseXf * Fy + poseYf * Ly;
+}
+
+// Sección del tapete (cuadrante partido por las diagonales): 0=N 1=E 2=S 3=W.
+int seccionTapete(float x, float y) {
+  return fabsf(x) >= fabsf(y) ? (x > 0 ? 1 : 3) : (y > 0 ? 0 : 2);
+}
+
+// Modo RUTA: mm a lo largo de la sección de salida (rutaSecSalida) desde su centro,
+// en el sentido de la marcha. CCW (direccionIzquierda): S va a +x, E a +y, N a -x, W a -y.
+float alongSalidaMm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float a = (rutaSecSalida == 2) ? x : (rutaSecSalida == 1) ? y : (rutaSecSalida == 0) ? -x : -y;
+  return direccionIzquierda ? a : -a;
+}
+
+// Modo RUTA: error de rumbo contra el carril de la sección de salida, en convención de anguloGyro (+ = izquierda).
+// Rumbo del carril en unidades de anguloGyro = anguloGyro - rutaErrCarrilDeg().
+float rutaErrCarrilDeg() {
+  float carril = (rutaSecSalida == 2) ? 90.0f : (rutaSecSalida == 1) ? 0.0f : (rutaSecSalida == 0) ? 270.0f : 180.0f;
+  if (!direccionIzquierda) carril += 180.0f;
+  float e = carril - (rutaTh - anguloTotal);
+  while (e > 180.0f) e -= 360.0f;
+  while (e < -180.0f) e += 360.0f;
+  return e;
+}
+
+// Modo RUTA: cm del costado del carro a la pared exterior de la sección de salida (pose del tapete; 6.5 cm = medio ancho).
+float rutaExtTapeteCm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float perp = (rutaSecSalida == 2) ? -y : (rutaSecSalida == 1) ? x : (rutaSecSalida == 0) ? y : -x;
+  return (1500.0f - perp) / 10.0f - 6.5f;
+}
+
+// ── Geometria del cajon para el plan de entrada (fase 40) ───────────────────
+// Marco canonico: w = mm a lo largo de la marcha desde la cara interior de la madera de atras (hueco 264, madera 2 en
+// [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
+// La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
+bool parkPlanRectaOn = false;
+bool parkDetPorPose = false, parkIgnOk = false;
+float parkIgnAlong = 0.0f;
+float parkDetAlong = 0.0f, parkDetHPose = 0.0f, parkDetHSon = 350.0f;
+float parkHPoseMm() {
+  float x, y;
+  rutaPoseTapete(x, y);
+  float perp = (rutaSecSalida == 2) ? -y : (rutaSecSalida == 1) ? x : (rutaSecSalida == 0) ? y : -x;
+  return 1500.0f - perp;
+}
+// Rumbo del carro respecto a la pared del cajon (+ = nariz hacia la isla) desde el carril de la pose del tapete; NAN si no hay ruta.
+float parkThCarril() {
+  if (!(piRuta && rutaTfOk && rutaSecSalida >= 0)) return NAN;
+  float e = rutaErrCarrilDeg();                         // + = nariz a la izquierda del carril
+  if (!parkDirecto) { e -= 180.0f; if (e < -180.0f) e += 360.0f; }   // tras la U va en sentido contrario y la pared queda al otro lado
+  return (direccionIzquierda == parkDirecto) ? e : -e;
+}
+float parkDetTh = 0.0f;   // theta al detectar el poste 2
+void parkPlanPose(float &w, float &h) {
+  w = (parkDirecto ? PARK_PL_W_DET : PARK_PL_W_DET_U) + (parkDirecto ? 1.0f : -1.0f) * (alongSalidaMm() - parkDetAlong);
+  // El sonar mira a la pared: con la nariz inclinada theta el haz cruza la madera (a h=200) corrido (h_sonar-200)*tan(theta).
+  if (PARK_PL_TILT) w -= (parkDetHSon - 200.0f) * tanf(parkDetTh * 0.0174533f);
+  // El cono del sonar ve la madera antes cuanto mas lejos pasa: W_DET se midio a h~350.
+  w -= PARK_PL_CONO * (parkDetHSon - 350.0f);
+  h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
+}
+static float parkPtSeg(float px, float py, float ax, float ay, float bx, float by) {
+  float dx = bx - ax, dy = by - ay, t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+  t = constrain(t, 0.0f, 1.0f);
+  float cx = ax + t * dx - px, cy = ay + t * dy - py;
+  return sqrtf(cx * cx + cy * cy);
+}
+// Holgura minima (mm) de la huella del carro a las dos maderas (negativa = dentro) para el eje trasero en (w, h, th).
+float parkPlanHolgura(float w, float h, float thDeg) {
+  float c = cosf(thDeg * 0.0174533f), s = sinf(thDeg * 0.0174533f);
+  const float A[4] = {154.2f, 154.2f, -21.8f, -21.8f}, B[4] = {62.5f, -62.5f, -62.5f, 62.5f};
+  float px[4], py[4];
+  for (int k = 0; k < 4; k++) { px[k] = w + A[k] * c - B[k] * s; py[k] = h + A[k] * s + B[k] * c; }
+  const float R[2][2] = {{-20.0f, 0.0f}, {264.0f, 284.0f}};   // [w0, w1] de cada madera, h de 0 a 200
+  float best = 1e9f;
+  for (int r = 0; r < 2; r++) {
+    for (int k = 0; k < 4; k++) {   // esquinas del carro a la madera
+      float dx = max(max(R[r][0] - px[k], px[k] - R[r][1]), 0.0f), dy = max(py[k] - 200.0f, 0.0f);
+      float d = sqrtf(dx * dx + dy * dy);
+      if (dx == 0.0f && dy == 0.0f) d = -1.0f;
+      best = min(best, d);
+    }
+    for (int t = 0; t < 2; t++) {   // puntas de la madera a los lados del carro
+      float tx = R[r][t], ty = 200.0f;
+      for (int k = 0; k < 4; k++) best = min(best, parkPtSeg(tx, ty, px[k], py[k], px[(k + 1) % 4], py[(k + 1) % 4]));
+    }
+  }
+  return best;
+}
+
+// Angulo th1 del plan RECTA: arco EXT (radio RI) hasta th1, recta, arco INT de vuelta a 0; desde (w0,h0) llega a (wf,hf).
+float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float R) {
+  float dW = w0 - wf, dH = h0 - hf, t0 = th0Deg * DEG_TO_RAD, th = 1.05f;
+  for (int k = 0; k < 12; k++)
+    th = atan2f(dH - R * (cosf(t0) - cosf(th)) - R * (1.0f - cosf(th)), dW - R * (sinf(th) - sinf(t0)) - R * sinf(th));
+  return constrain(th * RAD_TO_DEG, 25.0f, 80.0f);
+}
+
+// Servo para un ángulo de rueda (+ = derecha), sin wallPanic. Acota a ±RUEDA_TOPE_DEG
+// (R 134 mm) y usa la ganancia de cada lado.
+int rutaServo(float ruedaDeg) {
+  // Tabla medida 2026-10-24 (twin/params.py table_right/left, arcos PWM 150): grados de rueda -> unidades
+  // de servo desde el centro (la lineal de 0.552/0.588 se queda corta 15 % a la derecha en curvas suaves).
+  // 2026-10-27: tope 53° parejo (usuario), igual que twin/params.py.
+  static const float DER_W[] = {0.0f, 8.7f, 18.2f, 53.0f};
+  static const float DER_U[] = {0.0f, 13.5f, 28.5f, 72.5f};
+  static const float IZQ_W[] = {0.0f, 7.6f, 15.6f, 53.0f};
+  static const float IZQ_U[] = {0.0f, 13.5f, 28.5f, 71.5f};
+  ruedaDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
+  bool der = ruedaDeg >= 0.0f;
+  const float *W = der ? DER_W : IZQ_W, *U = der ? DER_U : IZQ_U;
+  int n = 4;
+  float w = fabsf(ruedaDeg), u = U[n - 1];
+  for (int i = 1; i < n; i++) {
+    if (w <= W[i]) { u = U[i - 1] + (U[i] - U[i - 1]) * (w - W[i - 1]) / (W[i] - W[i - 1]); break; }
+  }
+  return constrain((int)lroundf(RUTA_CENTRO_SERVO + (der ? -u : u)), SERVO_MIN_DEG, SERVO_MAX_DEG);
+}
+
+// Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
+// Devuelve false si no aplica. ruedaDeg: + = derecha.
+bool rutaSteer(float &ruedaDeg) {
+  if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
+  float x, y;
+  rutaPoseTapete(x, y);
+  float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
+  if (RUTA_LAG_S > 0.0f) {
+    // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
+    // carro estará cuando el comando haga efecto (velocidad y giro filtrados, arco a rumbo medio).
+    static unsigned long tPrev = 0;
+    static float odomPrev = 0.0f, yawPrev = 0.0f, vF = 0.0f, wF = 0.0f;
+    unsigned long nowMs = millis();
+    float dtS = (nowMs - tPrev) / 1000.0f;
+    if (tPrev != 0 && dtS > 0.002f && dtS < 0.2f) {
+      vF += ((odomMmF - odomPrev) / dtS - vF) * 0.3f;
+      wF += ((anguloTotal - yawPrev) / dtS - wF) * 0.3f;
+    }
+    tPrev = nowMs; odomPrev = odomMmF; yawPrev = anguloTotal;
+    float hm = h - 0.5f * wF * DEG_TO_RAD * RUTA_LAG_S;
+    x += vF * RUTA_LAG_S * sinf(hm);
+    y += vF * RUTA_LAG_S * cosf(hm);
+    h -= wF * DEG_TO_RAD * RUTA_LAG_S;
+  }
+  float sh = sinf(h), ch = cosf(h);
+  if (rutaI < 0 || rutaI >= rutaN) {
+    // Primera vez: el punto más cercano que va para donde mira el carro.
+    float best = 1e18f;
+    for (int i = 0; i < rutaN; i++) {
+      int k = (i + 1) % rutaN;
+      float tx = rutaX[k] - rutaX[i], ty = rutaY[k] - rutaY[i];
+      if (tx * sh + ty * ch < 0.3f * rutaPaso) continue;      // más de ~70° de diferencia
+      float dx = rutaX[i] - x, dy = rutaY[i] - y;
+      float d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; rutaI = i; }
+    }
+    if (rutaI < 0) return false;
+  } else {
+    // Después: ventana hacia adelante, sin saltos hacia atrás.
+    int besti = rutaI;
+    float best = 1e18f;
+    for (int o = -5; o < 60; o++) {
+      int i = ((rutaI + o) % rutaN + rutaN) % rutaN;
+      float dx = rutaX[i] - x, dy = rutaY[i] - y;
+      float d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; besti = i; }
+    }
+    rutaI = besti;
+  }
+  int j = (rutaI + (int)(RUTA_LOOKAHEAD_MM / rutaPaso + 0.5f)) % rutaN;
+  float dx = rutaX[j] - x, dy = rutaY[j] - y;
+  float fwd = dx * sh + dy * ch;
+  float right = dx * ch - dy * sh;
+  float ld2 = fwd * fwd + right * right;
+  if (ld2 < 1.0f) ld2 = 1.0f;
+  ruedaDeg = atanf(RUTA_BATALLA_MM * 2.0f * right / ld2) * RAD_TO_DEG;
+  return true;
+}
+
+// RTB / RTP / RTE (ver modo RUTA arriba).
+void parseRuta(const String &line) {
+  if (line.startsWith("RTB,")) {
+    int c1 = line.indexOf(',', 4);
+    rutaCarga = constrain(line.substring(4, c1 < 0 ? line.length() : c1).toInt(), 0, RUTA_MAX);
+    if (c1 >= 0) rutaPaso = line.substring(c1 + 1).toFloat();
+    if (rutaPaso < 1.0f) rutaPaso = 20.0f;
+    rutaRecib = 0;
+    return;
+  }
+  if (line.startsWith("RTP,")) {
+    int p = 4;
+    int c = line.indexOf(',', p);
+    if (c < 0) return;
+    int i = line.substring(p, c).toInt();
+    p = c + 1;
+    while (p < (int)line.length() && i < rutaCarga) {
+      int c2 = line.indexOf(',', p);
+      if (c2 < 0) break;
+      int c3 = line.indexOf(',', c2 + 1);
+      float x = line.substring(p, c2).toFloat();
+      float y = line.substring(c2 + 1, c3 < 0 ? line.length() : c3).toFloat();
+      rutaXb[i] = x;
+      rutaYb[i] = y;
+      i++;
+      rutaRecib++;
+      if (c3 < 0) break;
+      p = c3 + 1;
+    }
+    return;
+  }
+  if (line.startsWith("RTE,")) {
+    int n = line.substring(4).toInt();
+    if (n == rutaCarga && rutaRecib == n && n >= 10) {
+      // Doble buffer: hasta aquí el ESP siguió la ruta anterior completa.
+      memcpy(rutaX, rutaXb, sizeof(float) * n);
+      memcpy(rutaY, rutaYb, sizeof(float) * n);
+      rutaN = n;
+      rutaI = -1;
+    }
+    return;
+  }
+}
+
 void parsePiMessage(String line) {
   line.trim();
+
+  if (line.startsWith("RT")) {
+    parseRuta(line);
+    return;
+  }
 
   // ── Handshake ──────────────────────────────────────────────────────────────
   if (line.startsWith("READY")) {
@@ -2134,12 +3449,42 @@ void parsePiMessage(String line) {
     // -> maniobra de salida (case INICIO). Debe venir ya en el PRIMER V2. SOLO se
     // setea a true (sticky); el one-shot de loop() lo consume una sola vez.
     if (campoPi(line, "inicio=", v) && v.toInt() != 0) piInicioEstacionamiento = true;
+    // isal — lado de paso de la 1ª señal adelante del cajón (solo durante INICIO)
+    if (campoPi(line, ",isal=", v) && v.toInt() != 0) piSalida = v.toInt();
+    // isen — hay señal a <~1.3 m adelante de la salida: INICIO a INICIO_PWM_SENAL (sticky)
+    if (campoPi(line, ",isen=", v) && v.toInt() != 0) piSenalSalida = true;
 
     // park — etapa del cajón vista por la Pi en la recta final
     if (campoPi(line, "park=", v)) piPark = v.toInt();
+    if (campoPi(line, ",gr=", v))  piGr = v.toInt();
+    if (campoPi(line, ",gf=", v))  piGf = v.toInt();
+    piGv           = campoPi(line, ",gv=", v) && v.toInt() != 0;
+    piEsquina      = campoPi(line, ",es=", v)    && v.toInt() != 0;
+    // Modo RUTA: rt=1 y la transformación odometría -> tapete.
+    piRuta         = campoPi(line, ",rt=", v) && v.toInt() != 0;
+    piSteerPi      = campoPi(line, ",ps=", v) && v.toInt() != 0;
+    if (campoPi(line, ",pw=", v)) piWheelDeg = v.toFloat();
+    rutaVel        = campoPi(line, ",rv=", v) ? (int)v.toInt() : -1;
+    if (campoPi(line, ",rtx=", v)) {
+      rutaTx = v.toFloat();
+      if (campoPi(line, ",rty=", v)) rutaTy = v.toFloat();
+      if (campoPi(line, ",rth=", v)) rutaTh = v.toFloat();
+      rutaTfOk = true;
+      if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
+    }
+    if (campoPi(line, ",pka=", v)) rutaPka = v.toFloat();
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
+    if (Serial2.available() > 0
+        && (ACK_SALTA_VIEJOS == 2
+            || (ACK_SALTA_VIEJOS == 1 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)))) {
+      return;   // ver ACK_SALTA_VIEJOS
+    }
+    if (ACK_E_MIN_MS > 0 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)) {
+      if (millis() - ackEUltimoMs < (unsigned long)ACK_E_MIN_MS) return;   // ver ACK_E_MIN_MS
+      ackEUltimoMs = millis();
+    }
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
     Serial2.print("ACK:V2,ang=");
@@ -2152,7 +3497,7 @@ void parsePiMessage(String line) {
     // ESTACIONANDO -> "E" (la Pi queda en stand-down mientras el ESP ejecuta la reversa).
     // TERMINANDO -> "T".
     Serial2.print(estado == INICIO ? "I"
-                  : (estado == GIRANDO || estado == MANIOBRA) ? "G"
+                  : (estado == GIRANDO || estado == MANIOBRA || estado == GIRO_RAPIDO) ? "G"
                   : (estado == RECUPERANDO ? "R"
                      : (estado == CRUCERO ? "C"
                         : ((estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA) ? "E"
@@ -2237,6 +3582,27 @@ void parsePiMessage(String line) {
     //   vel  : velocidad de avance medida entre poste 1 y poste 2 (cm/s).
     //          0 = no se pudo medir -> la fase 1 usó el tiempo nominal.
     Serial2.print(",vel=");  Serial2.print(parkVelCmS, 1);
+    Serial2.print(",yaw=");  Serial2.print(anguloTotal, 2);
+    Serial2.print(",od=");   Serial2.print(odomMm);
+    Serial2.print(",px=");   Serial2.print(poseX);
+    Serial2.print(",py=");   Serial2.print(poseY);
+    Serial2.print(",rn=");   Serial2.print(rutaN);
+    Serial2.print(",enc=");  Serial2.print(FOX_ENCODER ? 1 : 0);
+#if FOX_TOF
+    Serial2.print(",tL=");   Serial2.print(tofMm[0]);
+    Serial2.print(",tR=");   Serial2.print(tofMm[1]);
+    Serial2.print(",tB=");   Serial2.print(tofMm[2]);
+    Serial2.print(",tF=");   Serial2.print(tofMm[3]);
+#else
+    // Sin tF a propósito: el ACK del carro actual queda byte a byte igual (el
+    // largo del ACK mueve los tiempos de UART). La Pi trata tF ausente = sin lectura.
+    Serial2.print(",tL=-1,tR=-1,tB=-1");
+#endif
+#if FOX_BNO && !defined(FOX_SIL)
+    Serial2.print(",bno=");  Serial2.print(bnoYaw, 1);
+    Serial2.print(",bnoM="); Serial2.print(bnoMalos);
+#endif
+    Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
     Serial2.println();
     return;
   }
@@ -2467,13 +3833,13 @@ void controlPID(long distL, long distR) {
       long distIntW = direccionIzquierda ? distL : distR;
       bool intAbierta = (distIntW <= 0 || distIntW > umbralPared);
       if (distExt > 0 && distExt <= umbralPared && intAbierta) {
-        float err  = (float)distExt - EXT_WALL_TARGET_CM;   // >0 = lejos del exterior
+        float err  = (float)distExt - extWallTargetCrucero();   // >0 = lejos del exterior
         float corr = constrain(err * EXT_WALL_GAIN, -EXT_WALL_MAX_DEG, EXT_WALL_MAX_DEG);
         extWallCorr = direccionIzquierda ? -corr : +corr;
       }
     }
 
-    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), 30, 160);
+    int servoRecup = constrain(centroServo + (int)(outputRecup + wallCorr + visCorr + wallPanic + extWallCorr), SERVO_MIN_DEG, SERVO_MAX_DEG);
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
@@ -2486,6 +3852,35 @@ void controlPID(long distL, long distR) {
     return;
 
   } else if (piPurePursuit) {
+    // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
+    float ruedaDeg;
+    if (piSteerPi && piRuta) {
+      // ps=1 (ruta nueva subiendo): rueda que calculó la Pi con la ruta nueva, mismo mapeo que la ruta.
+      int servoAngle = constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      escribirServo(servoAngle);
+      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
+        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+      } else {
+        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      }
+      Serial.print(" | Mode:RUTA-PI"); Serial.print(" | Servo:"); Serial.print(servoAngle);
+      return;
+    }
+    if (rutaSteer(ruedaDeg)) {
+      int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      escribirServo(servoAngle);
+      // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
+      // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
+      // el carro se para al cruzar la meta. Si no, igual que antes: min(rutaVel, velocidadMotor).
+      if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
+        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+      } else {
+        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+      }
+      Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);
+      Serial.print(" | Servo:");  Serial.print(servoAngle);
+      return;
+    }
     // ── Modo Pure Pursuit ────────────────────────────────────────────────────
     // La Pi ya calculó el ángulo de dirección óptimo siguiendo la centerline.
     // obs = steer_deg / ppSteerGain  →  steerDeg = obs * ppSteerGain = steer_deg
@@ -2505,7 +3900,7 @@ void controlPID(long distL, long distR) {
     }
 
     int servoAngle = centroServo - (int)((steerDeg * ppServoGain) - headingCorr - wallCorr);
-    servoAngle = constrain(servoAngle + (int)wallPanic, 30, 160);
+    servoAngle = constrain(servoAngle + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
     escribirServo(servoAngle);
     setMotor(velocidadMotor);
 
@@ -2525,7 +3920,7 @@ void controlPID(long distL, long distR) {
   }
 
   outputFinal = constrain(outputFinal, -25, 25);
-  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, 30, 160));
+  escribirServo(constrain(centroServo + (int)outputFinal + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG));
   setMotor(velocidadMotor);
 
   // ── Debug UART ────────────────────────────────────────────────────────────
@@ -2551,10 +3946,19 @@ void terminando(long distL, long distR) {
   velocidadMotor = MOTOR_MAX;
   controlPID(distL, distR);
 
-  if (millis() - terminandoEntryMs >= TERMINANDO_MS) {
+  unsigned long dt = millis() - terminandoEntryMs;
+  bool listo = dt >= TERMINANDO_MS;
+  float x, y;
+  if (listo && piRuta && rutaTfOk && rutaSecSalida >= 0 && dt < TERMINANDO_RUTA_MAX_MS) {
+    rutaPoseTapete(x, y);
+    // |(|x|-|y|)|/√2 = distancia a la diagonal más cercana.
+    listo = seccionTapete(x, y) == rutaSecSalida
+            && fabsf(fabsf(x) - fabsf(y)) >= TERMINANDO_RUTA_MARGEN_MM * 1.41421f;
+  }
+  if (listo) {
     raceFinished = true;
     setMotor(0);
-    escribirServo(centroServo);
+    if (!piRuta) escribirServo(centroServo);   // Modo RUTA: el servo lo sigue llevando la ruta hasta parar (ver loop)
     Serial.println("TERMINANDO completado -> STOP");
   }
 }
@@ -2564,11 +3968,23 @@ void terminando(long distL, long distR) {
 // Setup
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Twin (pb92): a 921600 el loop sube de ~18 a ~64 Hz y la ronda baja ~1.8 s.
+// PI_BAUD debe coincidir con BAUDRATE en config.py de la Pi.
+#ifndef PI_BAUD
+#define PI_BAUD 115200
+#endif
+#ifndef USB_BAUD
+#define USB_BAUD 115200
+#endif
+
 void setup() {
-  Serial.begin(115200);
-  Serial2.begin(115200, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+  Serial.begin(USB_BAUD);
+  Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
 
   Wire.begin();
+#if FOX_BNO && !defined(FOX_SIL)
+  // Carro v2: sin MPU6050. El yaw viene del BNO085 (Serial1 se abre al final de setup).
+#else
   mpu.begin();
   mpu.calcGyroOffsets(true);
 
@@ -2577,6 +3993,7 @@ void setup() {
   Serial.println(oz);
   gyroScale = (abs(oz) > 7.0) ? 2.0 : 1.0;
   Serial.println(gyroScale == 2.0 ? "Offset sucio → /2" : "Offset limpio");
+#endif
 
   pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
   pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
@@ -2584,6 +4001,8 @@ void setup() {
 
   pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
   digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
+  motorDirActual = 1;
+  motorDirMs     = millis();
 
   ledcAttach(PWMA,      freqMotor, resMotor);
   ledcAttach(SERVO_PIN, freqServo, resServo);
@@ -2598,6 +4017,21 @@ void setup() {
   lastGyroTime = millis();
   lastPiMsgMs  = 0;
   anguloObjetivo = 0;
+
+#if FOX_ENCODER && !defined(FOX_SIL)
+  pinMode(ENC_PIN_A, INPUT);
+  pinMode(ENC_PIN_B, INPUT);
+  encPrevAB = ((digitalRead(ENC_PIN_A) ? 1 : 0) << 1) | (digitalRead(ENC_PIN_B) ? 1 : 0);
+  attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), encIsr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_PIN_B), encIsr, CHANGE);
+#endif
+#if FOX_ENCODER && defined(FOX_SIL)
+  encCountPrev = sil_encoder_count();
+#endif
+#if FOX_TOF && !defined(FOX_SIL)
+  Wire.setClock(400000);
+  initToF();
+#endif
 
   // Esperar READY de la Pi (igual que Controller_PI.ino). Bloquea SIN timeout:
   // loop() siempre arranca con piReadyReceived = true.
@@ -2617,6 +4051,11 @@ void setup() {
     delay(50);
   }
   Serial.println("Sistema listo (PurePursuit)");
+#if FOX_BNO && !defined(FOX_SIL)
+  // Se abre al final de setup: con el buffer grande no se pierden paquetes RVC mientras loop() se tarda.
+  Serial1.setRxBufferSize(1024);
+  Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+#endif
 }
 
 
@@ -2625,6 +4064,29 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+#if defined(FOX_SIL)
+  { static bool sembrado = false; if (!sembrado) { sembrado = true; silRutaSeed(); } }   // antes del 1er ACK
+#endif
+  logEsteLoop = (LOG_MIN_MS == 0 || (estado != ESTACIONANDO && estado != ESTACIONANDO_PUNTA)
+                 || millis() - logUltimoMs >= (unsigned long)LOG_MIN_MS);
+  if (logEsteLoop) logUltimoMs = millis();
+#if FOX_BNO && !defined(FOX_SIL)
+  leerBNO();
+#else
+  mpu.update();
+#endif
+  actualizarGyro();
+#if FOX_TOF
+#if defined(FOX_SIL)
+  for (int _ti = 0; _ti < TOF_N; _ti++) tofMm[_ti] = sil_tof_mm(_ti);
+#else
+  leerToF();
+#endif
+  // Trasero (índice 2) en cm, EMA igual que los HC-SR04 (ver distB_filtrada).
+  if (tofMm[2] > 0)
+    distB_filtrada = filtroEMA(tofMm[2] / 10.0f, distB_filtrada < 0 ? tofMm[2] / 10.0f : distB_filtrada);
+#endif
+
   readPiSerial();
 
   // READY llegó PERO todavía no el primer V2 -> NO rodar. Si no, controlPID()
@@ -2641,7 +4103,16 @@ void loop() {
 
   if (raceFinished) {
     setMotor(0);
-    escribirServo(centroServo);
+    // Modo RUTA: rodando hasta parar sigue la ruta; con el servo al centro a la salida de la curva iba recto a la isla.
+    // En el cajón no: la ruta deja el volante cruzado y el coast de la fase 13 mete la esquina trasera (n7 s9, n10 s14).
+    float ruedaDeg;
+    bool enCajon = (parkFase == 7 || puntaFase == 6);
+    if (!enCajon && piRuta && rutaSteer(ruedaDeg)) {
+      escribirServo(rutaServo(ruedaDeg));
+      actualizarOdometria();
+    } else {
+      escribirServo(centroServo);
+    }
     Serial.print(" | TERMINADO giros="); Serial.print(turnsCompleted);
     Serial.print("/"); Serial.println(TURNS_PER_RACE);
     delay(20);
@@ -2703,8 +4174,12 @@ void loop() {
     ultPingPuntaMs = millis();
   }
 
+#if FOX_BNO && !defined(FOX_SIL)
+  // BNO: leerBNO() y actualizarGyro() ya corrieron al inicio de loop() (sin paquete nuevo no integran).
+#else
   mpu.update();
   actualizarGyro();
+#endif
 
   long distL_raw = leerL ? leerDistancia(TRIG_L, ECHO_L) : (long)distL_filtrada;
   long distR_raw = leerR ? leerDistancia(TRIG_R, ECHO_R) : (long)distR_filtrada;
@@ -2745,11 +4220,14 @@ void loop() {
     //               dirección de giro de TODA la pista (el cajón siempre está en
     //               la pared exterior). anguloGyro := 0 = referencia de la recta.
     //    1 SWING  : servo full hacia el lado de salida, avanza (rampa de PWM)
-    //               hasta |anguloGyro| >= INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG.
-    //    2 RECTO  : servo centro, avanza de frente INICIO_MID_MS.
-    //    3 CONTRA : servo full al lado CONTRARIO, avanza SOLO hasta corregir
-    //               INICIO_CONTRA_CORRIGE_DEG desde el pico de la fase 1; el
-    //               residuo lo cierra la reversa (fase 5).
+    //               hasta |anguloGyro| >= INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG
+    //               (INICIO_ANG_ADENTRO_DEG si la Pi mandó isal=2).
+    //    2 RECTO  : servo centro, avanza hasta que lateral + R·(1-cos ang) llegue a
+    //               INICIO_LAT_AFUERA_MM / INICIO_LAT_ADENTRO_MM (con
+    //               INICIO_REVERSA: tramo fijo INICIO_MID_MS). isal=2 aquí -> fase 1.
+    //    3 CONTRA : servo full al lado CONTRARIO hasta |ang| <= INICIO_CONTRA_FIN_DEG
+    //               y a la fase 6. Con INICIO_REVERSA: solo corrige
+    //               INICIO_CONTRA_CORRIGE_DEG y el residuo lo cierra la reversa (4-8).
     //    4 COAST  : motorCoast + servo centro, MANIOBRA_FRENO_MS (antes de reversa).
     //    5 REV-CORRIGE: reversa con hold a 0 y servo saturado, hasta |ang| <=
     //               INICIO_REV_CORR_TOL_DEG (o timeout).
@@ -2795,7 +4273,15 @@ void loop() {
         inicioFaseMs   = millis();
         inicioFase     = 1;
         inicioAngPico  = 0.0f;
+        inicioAdentro  = false;
+        inicioY0       = poseYf;
+        inicioOdom0    = odomMmF;
+        inicio3pHecho  = false;
         motorAdelante();
+        // El servo llega a tope ANTES de rodar (una sola vez: con delay en cada
+        // loop el chequeo de ángulo corría cada ~100 ms y la fase 1 se pasaba ~25°).
+        escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);
+        delay(100);
         Serial.print("INICIO fase 1 SWING salida=");
         Serial.print(inicioGirarDer ? "DER" : "IZQ");
         Serial.print(" dL="); Serial.print(dL0);
@@ -2811,29 +4297,100 @@ void loop() {
       if (inicioFase <= 3 && deltaIni > inicioAngPico) inicioAngPico = deltaIni;   // pico (incluye la inercia)
 
       // ── Fase 1: SWING — saca la nariz hacia el interior ────────────────────
+      // isal=2 llega a medio swing (la Pi asienta la lata a ~28°): la S se abre.
+      if (inicioFase <= 2 && piSalida == 2 && !inicioAdentro) {
+        inicioAdentro = true;
+        Serial.print("INICIO isal=2 (adentro) en fase "); Serial.print(inicioFase);
+        Serial.print(" ang="); Serial.println(anguloGyro, 1);
+        if (inicioFase == 2 && deltaIni < (float)(INICIO_ANG_ADENTRO_DEG - INICIO_OVERSHOOT_DEG)) {
+          inicioFase   = 1;                       // vuelve a tope hasta ~90°
+          inicioFaseMs = millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS;
+        }
+      }
+
       if (inicioFase == 1) {
-        int vel = rampaPWM(millis() - inicioFaseMs, INICIO_RAMP_MS, INICIO_PWM_MIN, INICIO_PWM);
+        unsigned long tSw = millis() - inicioFaseMs;
+        bool lento3p = (!inicioGirarDer && INICIO_3P_ANG_IZQ_DEG > 0 && !inicio3pHecho && inicioPwm() > INICIO_3P_PWM);
+        unsigned long espera = inicio3pHecho ? INICIO_3P_ESPERA2_MS : INICIO_SERVO_ESPERA_MS;
+        int vel = tSw < espera ? 0
+                : rampaPWM(tSw - espera, INICIO_RAMP_MS, INICIO_PWM_MIN, lento3p ? INICIO_3P_PWM : inicioPwm());
         motorAdelante();
-        escribirServo(inicioGirarDer ? 30 : 160);   // full hacia el lado de salida
-        delay(100);
-        setMotor(vel);
-        bool swingListo   = (deltaIni >= (float)(INICIO_ANG_OUT_DEG - INICIO_OVERSHOOT_DEG));
+        escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
+        inicioMotor(vel);
+        int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
+        bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? (inicioGirarDer ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_ADENTRO_OVERSHOOT_IZQ_DEG) : INICIO_OVERSHOOT_DEG)));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
+        float ang3p = inicioGirarDer ? INICIO_3P_ANG_DEG : INICIO_3P_ANG_IZQ_DEG;
+        if (!swingListo && !inicio3pHecho && ang3p > 0 && deltaIni >= ang3p) {
+          inicio3pHecho   = true;
+          inicioFase      = 11;
+          inicioFaseMs    = millis();
+          inicioOdomRecto = odomMmF;
+          Serial.print("INICIO fase 1: reversa de correccion ang="); Serial.println(anguloGyro, 1);
+          break;
+        }
         if (swingListo || swingTimeout) {
           escribirServo(centroServo);
-          inicioFase   = 2;
-          inicioFaseMs = millis();
+          inicioFase      = 2;
+          inicioFaseMs    = millis();
+          inicioOdomRecto = odomMmF;
           if (swingTimeout) Serial.println("INICIO fase 1: timeout de swing");
         }
         break;
       }
 
-      // ── Fase 2: RECTO — avanza de frente un tramo corto ────────────────────
+      // ── Fase 11: reversa corta con el servo al otro tope, y de vuelta al arco ──
+      if (inicioFase == 11) {
+        motorReversa();
+        escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);
+        inicioMotor(inicioPwm());
+        if (odomMmF > inicioOdomRecto) inicioOdomRecto = odomMmF;   // la reversa cuenta desde donde paró
+        if (inicioOdomRecto - odomMmF >= INICIO_3P_REV_MM || millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS) {
+          motorCoast();
+          inicioFase   = 1;
+          inicioFaseMs = millis();   // espera de servo y rampa otra vez
+        }
+        break;
+      }
+
+      // ── Fase 2: RECTO — avanza hasta que el lateral (odometría) más el de la
+      //   contravuelta, R·(1-cos ang), llegue al objetivo. Sin reversa ya no hace
+      //   falta el tramo fijo de antes (INICIO_MID_MS queda solo para INICIO_REVERSA).
       if (inicioFase == 2) {
         motorAdelante();
         escribirServo(centroServo);
-        setMotor(INICIO_PWM);
-        if (millis() - inicioFaseMs >= INICIO_MID_MS) {
+        inicioMotor(INICIO_RECTO_PWM > 0 ? INICIO_RECTO_PWM : inicioPwm());
+        // Velocidad por odometría (EMA) para el adelanto de frenado.
+        static float odomPrev = 0.0f; static unsigned long msPrev = 0; static float vMmS = 0.0f;
+        if (millis() - inicioFaseMs < 30) { odomPrev = odomMmF; msPrev = millis(); vMmS = 0.0f; }
+        else if (millis() - msPrev >= 30) {
+          vMmS += 0.4f * ((odomMmF - odomPrev) * 1000.0f / (float)(millis() - msPrev) - vMmS);
+          odomPrev = odomMmF; msPrev = millis();
+        }
+        bool fin;
+        if (INICIO_REVERSA) {
+          fin = (millis() - inicioFaseMs >= INICIO_MID_MS);
+        } else {
+          float lat = fabs(poseYf - inicioY0);
+          // Afuera, lead completo cierra la recta en el pico y la contravuelta nace sobre la fila (isen=1). Sin señal cerca, 0.9 no alarga la recta hasta rozar la pared en el 180.
+          float kLead = inicioAdentro ? 1.0f : (piSenalSalida ? 0.75f : 0.9f);
+          float ls = kLead * INICIO_RECTO_LEAD_S;
+          float lead = ls * fabsf(vMmS) * sinf(deltaIni * PI / 180.0f);
+          float latPred = lat + INICIO_R_CONTRA_MM * (1.0f - cosf(deltaIni * PI / 180.0f)) + lead;
+          float objetivo = inicioAdentro ? INICIO_LAT_ADENTRO_MM : INICIO_LAT_AFUERA_MM;
+          bool tope = (odomMmF - inicioOdomRecto >= INICIO_RECTO_MAX_MM)
+                      || (millis() - inicioFaseMs >= INICIO_RECTO_TIMEOUT_MS)
+                      || (inicioAdentro && distF > 0 && distF < INICIO_RECTO_DF_MIN_CM);
+          fin = (latPred >= objetivo) || tope;
+          if (fin) {
+            Serial.print("INICIO fase 2 fin: lat="); Serial.print(lat, 0);
+            Serial.print(" pred="); Serial.print(latPred, 0);
+            Serial.print(" obj="); Serial.print(objetivo, 0);
+            Serial.print(" ang="); Serial.print(anguloGyro, 1);
+            Serial.print(" dF="); Serial.println(distF);
+          }
+        }
+        if (fin) {
           inicioFase   = 3;
           inicioFaseMs = millis();
         }
@@ -2843,21 +4400,41 @@ void loop() {
       // ── Fase 3: CONTRA — contravuelta para re-alinear con la recta ─────────
       if (inicioFase == 3) {
         motorAdelante();
-        escribirServo(inicioGirarDer ? 160 : 30);   // full al lado CONTRARIO
-        setMotor(INICIO_PWM);
+        escribirServo(inicioGirarDer ? SERVO_MAX_DEG : SERVO_MIN_DEG);   // full al lado CONTRARIO
+        inicioMotor(inicioPwm());
         // Corrige solo INICIO_CONTRA_CORRIGE_DEG desde el pico (o llega al piso de
         // margen si el pico fue chico); el residuo lo cierra la reversa (fase 5).
-        float angFin  = max((float)INICIO_ENDEREZA_MARGEN_DEG,
-                            inicioAngPico - (float)INICIO_CONTRA_CORRIGE_DEG);
+        // Sin reversa la contravuelta cierra sola hasta ~0 (INICIO_CONTRA_FIN_DEG).
+        float angFin  = INICIO_REVERSA
+                        ? max((float)INICIO_ENDEREZA_MARGEN_DEG,
+                              inicioAngPico - (float)INICIO_CONTRA_CORRIGE_DEG)
+                        : (float)INICIO_CONTRA_FIN_DEG;
+        // isen y heading negativo: el tick salta de ~7° a ~2° y el asentamiento queda a +12° (cajón).
+        // Al otro lado y sin señal cerca, soltar en 7° mete la pared o el cajón.
+        if (!INICIO_REVERSA && !inicioAdentro && piSenalSalida && anguloGyro < 0.0f && angFin < 7.0f)
+          angFin = 7.0f;
+        if (!INICIO_REVERSA && inicioAdentro && anguloGyro * gyroRate < 0.0f) {
+          float porInercia = fabsf(gyroRate) * INICIO_CONTRA_CIERRE_S;
+          if (porInercia > 18.0f) porInercia = 18.0f;
+          if (porInercia > angFin) angFin = porInercia;
+        }
         bool alineado = (deltaIni <= angFin);
         bool timeout  = (millis() - inicioFaseMs >= INICIO_CONTRA_TIMEOUT_MS);
         if (alineado || timeout) {
           Serial.print("INICIO fase 3 fin: pico="); Serial.print(inicioAngPico, 1);
-          Serial.print(" ang="); Serial.println(anguloGyro, 1);
+          Serial.print(" ang="); Serial.print(anguloGyro, 1);
+          Serial.print(" lat="); Serial.println(fabs(poseYf - inicioY0), 0);
           escribirServo(centroServo);
-          motorCoast();
-          inicioFase   = 4;
+          if (INICIO_REVERSA || !INICIO_SETTLE_MOTOR) motorCoast();
           inicioFaseMs = millis();
+          if (INICIO_REVERSA) {
+            inicioFase = 4;
+          } else {
+            inicioFase          = 6;              // settle y a SIGUIENDO
+            inicioSettleAngPrev = anguloGyro;
+            inicioSettleSampMs  = millis();
+            inicioSettleQuieto  = 0;
+          }
           if (timeout) Serial.println("INICIO fase 3: timeout de contravuelta");
         }
         break;
@@ -2941,7 +4518,7 @@ void loop() {
 
       // ── Fase 6: SETTLE — espera a que deje de rotar y cierra ───────────────
       if (inicioFase == 6) {
-        motorCoast();
+        if (INICIO_SETTLE_MOTOR) { motorAdelante(); setMotor(inicioPwm()); } else motorCoast();  // motorCoast deja A1/A2 en LOW
         escribirServo(centroServo);
         unsigned long nowMs = millis();
         if (nowMs - inicioSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
@@ -2952,7 +4529,7 @@ void loop() {
           if (rate < MANIOBRA_SETTLE_RATE_DPS) inicioSettleQuieto++;
           else                                 inicioSettleQuieto = 0;
         }
-        if (inicioSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N
+        if (inicioSettleQuieto >= INICIO_SETTLE_QUIETO_N
             || nowMs - inicioFaseMs >= MANIOBRA_SETTLE_TIMEOUT_MS) {
           finalizarInicio();
         }
@@ -2963,6 +4540,12 @@ void loop() {
     }
 
     case SIGUIENDO: {
+      vigilarSinU();
+      if (estado != SIGUIENDO) break;
+      if (parkUturnPendiente) {
+        vigilarUturn(distL, distR, distF);
+        if (estado != SIGUIENDO) break;
+      }
       velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
       if (parkBuscando) velocidadMotor = PARK_APPROACH_PWM;
 
@@ -3007,6 +4590,21 @@ void loop() {
       }
 
       controlPID(distL, distR);
+
+      // La Pi dobló la esquina con su línea (prio=1 todo el arco): contarla.
+      // Sin esto turnsCompleted no sube y el mapa/estacionamiento se desfasan.
+      if (GIRO_PI_CUENTA_DEG > 0.0f && rondaObstaculos && primerGiro
+          && !parkBuscando && !parkUturnPendiente && piPriority
+          && (lastTurnTime == 0 || (millis() - lastTurnTime) > (piRuta ? GR_GAP_RUTA_MS : GR_GAP_MS))) {
+        float sgPi = direccionIzquierda ? 1.0f : -1.0f;
+        if (anguloGyro * sgPi >= GIRO_PI_CUENTA_DEG) {
+          maniobraGirarDer = !direccionIzquierda;
+          maniobraIdealRot = sgPi * (float)AngGiro;
+          Serial.print("-> GIRO PI contado ang="); Serial.println(anguloGyro, 1);
+          completarTurnoObstaculos();
+          break;
+        }
+      }
 
       // No girar si hay obstáculo activo en Pi.  (El gate de heading ya no
       // hace falta aquí — mientras el chasis sigue desalineado, ese trabajo
@@ -3140,7 +4738,7 @@ void loop() {
       else                   velocidadMotor = 115;
 
       setMotor(velocidadMotor);
-      escribirServo(direccionIzquierda ? 160 : 30);
+      escribirServo(direccionIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG);
 
       if (delta >= AngGiro) {
         escribirServo(centroServo);
@@ -3174,6 +4772,12 @@ void loop() {
     // vuelve a SIGUIENDO para esquivarlo.
     // ═══════════════════════════════════════════════════════════════════════════
     case CRUCERO: {
+      vigilarSinU();
+      if (estado != CRUCERO) break;
+      if (parkUturnPendiente) {
+        vigilarUturn(distL, distR, distF);
+        if (estado != CRUCERO) break;
+      }
       velocidadMotor = MOTOR_MAX;
       piPasado = false;   // pulso viejo/rezagado: CRUCERO ya mantiene heading
       // Cerca de la pared -> pura gyro+wall (controlPID lo enruta con cruceroCerca).
@@ -3367,10 +4971,54 @@ void loop() {
       // disparar antes, es fantasma (run 2026-09-07). NO gatea cruceroLargo.
       bool gapOk = (millis() - lastTurnTime) > MANIOBRA_MIN_GAP_MS;
 
+      // La Pi puede pedir girar ANTES de la última fila; no después.
+      int grUmbral = GR_FRONT_CM;
+      if (piGf > grUmbral) grUmbral = piGf;
+      int grMin    = max(GR_MIN_FRONT_CM, grUmbral - GR_VENTANA_CM);
+      bool enLaParedGr = false;
+      if (giroRapidoPermitido()) {
+        // Recto según la IMU y ya pasada la última fila (+5 cm): no hace falta
+        // la naranja ni que el lateral se abra.
+        bool _recto = fabs(anguloGyro) <= GR_RECTO_DEG;
+        bool _piEsquina = piEsquina && (millis() - lastPiMsgMs) < GR_PI_ESQUINA_MS;
+        enLaParedGr = (distF > 0 && distF <= grUmbral && distF >= grMin
+                       && !_hayLataMia
+                       && (_recto || paredAbierta || giroSucioArmado || _laAprox
+                           || _muyCerca || _piEsquina));
+      }
+      if (enLaParedGr) contadorGrFront++;
+      else             contadorGrFront = 0;
+
+      // lastTurnTime queda en 0 hasta la primera vuelta: si no, los 6 s
+      // cuentan desde el arranque y la esquina 1 (≈4.5 s) nunca entra.
+      bool gapGr = (lastTurnTime == 0) || ((millis() - lastTurnTime) > GR_GAP_MS);
+      bool holguraInicio = (inicioFinMs == 0)
+                           || ((millis() - inicioFinMs) > INICIO_HOLGURA_GIRO_MS);
+      if (!parkUturnPendiente
+          && giroRapidoPermitido() && gapGr && holguraInicio
+          && contadorGrFront >= CRUCERO_PARED_DEBOUNCE) {
+        bool _fueSucioGr = giroSucioArmado;
+        entrarGiroRapido(distL, distR);
+        resetVigilanciaEsquina();
+        if (_fueSucioGr) Serial.println(" GIRO_RAPIDO SUCIO");
+        break;
+      }
+      // Pegado a la exterior (que es como llega el giro rápido) la MANIOBRA de
+      // frente abre su ventana a ~75 cm y le ganaba al arco antes de los 50: con
+      // giro rápido, MANIOBRA solo entra si ya se pasó su ventana sin confirmar.
+      bool _grPendiente = giroRapidoPermitido() && distF > grMin;
+
       if (enLaPared) contadorFront++;
       else           contadorFront = 0;
 
-      if ((contadorFront >= debounceNecesario && gapOk) || cruceroLargo) {
+      // Ida normal con giro rápido: la esquina es el arco de frente. No hay
+      // reversa de acomodo (MANIOBRA) ni por timeout.
+      // Con giro rápido y la ventana ya pasada (la Pi soltó tarde, dF < grMin):
+      // sin esto el carro seguía de frente hasta la pared. Cae a la MANIOBRA.
+      bool _grPerdido = giroRapidoPermitido() && distF > 0 && distF < grMin
+                        && contadorFront >= debounceNecesario && gapOk;
+      if ((!giroRapidoPermitido() || _grPerdido)
+          && ((contadorFront >= debounceNecesario && gapOk && !_grPendiente) || cruceroLargo)) {
         bool _fueSucio = giroSucioArmado;
         decidirManiobra(distL, distR);   // decisión DEFINITIVA, latcheada (usa direccionAproxLatch)
         resetVigilanciaEsquina();        // latch consumido; la próxima esquina lo re-latchea
@@ -3383,6 +5031,40 @@ void loop() {
         Serial.print(" distF=");   Serial.print(distF);
         Serial.print(_fueSucio ? " SUCIO" : "");
         Serial.println(cruceroLargo ? " TIMEOUT" : "");
+      }
+      break;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GIRO_RAPIDO — pivote adelante en lazo cerrado (sin coast/backoff/settle).
+    // ═══════════════════════════════════════════════════════════════════════════
+    case GIRO_RAPIDO: {
+      maniobraGirarDer = maniobraGirarDerGr;
+      float err = grObjetivo - anguloGyro;
+      int pwmGr = (fabs(err) > 20.0f) ? GR_PWM : GR_PWM_FIN;
+      motorAdelante();
+      int servoGr = constrain(centroServo + (int)(GR_KP * err - GR_KD * gyroRate), SERVO_MIN_DEG, SERVO_MAX_DEG);
+      // Giro a la derecha + verde adelante: el lado de paso es la izquierda
+      // (exterior). El servo no baja del piso, así el arco no se mete en la lata.
+      bool verdeAdelante = piGv && (millis() - lastPiMsgMs < 500);
+      if (verdeAdelante && maniobraGirarDerGr) {
+        int piso = centroServo - GR_VERDE_ABRE;
+        if (servoGr < piso) servoGr = piso;
+      }
+      escribirServo(servoGr);
+      setMotor(pwmGr);
+
+      if (fabs(err) <= GR_TOL_DEG) grHold++;
+      else                         grHold = 0;
+
+      bool grTimeout = (millis() - grEntryMs) >= GR_TIMEOUT_MS;
+      if (grHold >= GR_HOLD_N || grTimeout) {
+        maniobraIdealRot = grObjetivo;
+        maniobraGirarDer  = maniobraGirarDerGr;
+        completarTurnoObstaculos();
+        Serial.print("GIRO_RAPIDO completada");
+        if (grTimeout) Serial.print(" TIMEOUT");
+        Serial.println();
       }
       break;
     }
@@ -3541,7 +5223,7 @@ void loop() {
           else if (delta < EXIT_DEG - 20) velocidadMotor = 145;
           else                            velocidadMotor = 100;   // último tramo: crawl
           motorAdelante();
-          escribirServo(maniobraGirarDer ? 30 : 160);    // servo hacia el giro
+          escribirServo(maniobraGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);    // servo hacia el giro
           setMotor(velocidadMotor);
         }
 
@@ -3705,10 +5387,125 @@ void loop() {
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
-      int   servoHaciaPared = parkParedEsIzquierda ? 160 : 30;      // tope hacia la pared exterior
-      int   servoDesdePared = parkParedEsIzquierda ? 30 : 160;      // contravuelta hacia el interior
+      int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
+      int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
       if (piPark >= 1) parkRosaVisto = true;
+
+      // ── Fase 26: ALEJARSE antes de la U (PARK_UTURN_ALEJAR_CM) — rumbo
+      // abierto lejos de la pared del lado del giro hasta tener espacio ───────
+      if (parkFase == 26) {
+        bool  uturnIzqP   = !parkParedEsIzquierda;
+        float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+        long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
+        float dif     = fabs(anguloGyro - parkRumboGiro0);
+        float lateral = (piRuta && rutaTfOk && rutaSecSalida >= 0) ? rutaExtTapeteCm()
+                      : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
+        bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
+        bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
+        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0
+                                || (PARK_UTURN_ENDEREZA == 2 && parkRecorridoMm() < 30.0f))) {
+          parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 24: U sin enderezar (lat="); Serial.print(lateral, 1);
+          Serial.print(" ang="); Serial.print(anguloGyro - parkRumboGiro0, 1); Serial.println(")");
+          break;
+        }
+        if (lejos || tope) {
+          parkFase = 27; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 27: ENDEREZA antes de la U (ext="); Serial.print(extAhoraP);
+          Serial.print(" lat="); Serial.print(lateral, 1);
+          Serial.println(tope ? " TOPE)" : ")");
+          break;
+        }
+        motorAdelante();
+        servoRumboPark(parkRumboGiro0 - haciaAhoraP * (float)PARK_UTURN_ALEJAR_ANG);
+        setMotorTope(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
+        break;
+      }
+
+      // ── Fase 27: ENDEREZA al rumbo del carril y arranca la U (fase 24) ────
+      if (parkFase == 27) {
+        motorAdelante();
+        servoRumboPark(parkRumboGiro0);
+        setMotorTope(PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
+        if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
+          parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
+        }
+        break;
+      }
+
+      // ── Fase 24: U DE 180° (PARK_PARALELO_USA_UTURN) — mismo arco que
+      // ESTACIONANDO_PUNTA fase 20, pegado a la pared EXTERIOR actual (la
+      // opuesta a parkParedEsIzquierda, que es la del regreso) ───────────────
+      if (parkFase == 24) {
+        unsigned long t = millis() - parkFaseMs;
+        int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN,
+                           PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM);
+        bool  uturnIzqP   = !parkParedEsIzquierda;
+        float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+        long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
+        if (parkServoU == 0) {
+          int gapMm = (extAhoraP > 5 && extAhoraP < 150) ? (int)extAhoraP * 10 : 700;
+          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
+          if (shift < 200) shift = 200;
+          float radio = shift / 2.0f;
+          float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          parkServoU = rutaServo(uturnIzqP ? -delta : delta);
+          Serial.print("PARK U servo="); Serial.print(parkServoU);
+          Serial.print(" ext="); Serial.println(extAhoraP);
+        }
+        escribirServo(parkServoU);
+        motorAdelante();
+        setMotorTope(vel, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
+        float girado = (anguloGyro - parkRumboGiro0) * haciaAhoraP;
+        bool  listo  = girado >= (float)PARK_UTURN_DEG;
+        bool  tout   = t >= PARK_RETORNO_TIMEOUT_MS;
+        if (listo || tout) {
+          if (PARK_UTURN_SIN_SETTLE) {
+            // sin coast: el carro ya va en el sentido del escaneo
+            escribirServo(centroServo);
+            anguloGyro -= haciaAhoraP * 180.0f;
+            Serial.print("PARK: U sin settle girado="); Serial.print(girado, 1);
+            Serial.print(" ang="); Serial.println(anguloGyro, 1);
+            resetParkScan();
+            break;
+          }
+          motorCoast();
+          escribirServo(centroServo);
+          parkFase         = 25;
+          parkFaseMs       = millis();
+          parkSettleSampMs = millis();
+          parkSettleQuieto = 0;
+          Serial.print("PARK fase 25: U girado="); Serial.print(girado, 1);
+          Serial.println(tout ? " (TIMEOUT)" : "");
+        }
+        break;
+      }
+
+      // ── Fase 25: SETTLE tras la U — al quedar quieto, entrega directo al
+      // escaneo del paralelo (resetParkScan, fase 0), sin reversa recta ──────
+      if (parkFase == 25) {
+        motorCoast();
+        escribirServo(centroServo);
+        unsigned long nowMs = millis();
+        if (nowMs - parkSettleSampMs >= MANIOBRA_SETTLE_SAMPLE_MS) {
+          parkSettleSampMs = nowMs;
+          parkSettleQuieto = (fabs(gyroRate) < MANIOBRA_SETTLE_RATE_DPS) ? parkSettleQuieto + 1 : 0;
+        }
+        unsigned long tS = nowMs - parkFaseMs;
+        bool quieto = (parkSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N) && (tS >= MANIOBRA_FRENO_MS);
+        if (quieto || tS >= PARK_RETORNO_SETTLE_MAX_MS) {
+          bool  uturnIzqP   = !parkParedEsIzquierda;
+          float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
+          anguloGyro -= haciaAhoraP * 180.0f;
+          Serial.print("PARK: rumbo de regreso (U de 180) ang="); Serial.println(anguloGyro, 1);
+          Serial.println("PARK: busco cajon en el regreso (paralelo, via U)");
+          resetParkScan();
+        }
+        break;
+      }
 
       // ── Fase 20: MEDIA VUELTA — avance recto, luego 90° hacia la pared del regreso
       if (parkFase == 20) {
@@ -3736,7 +5533,7 @@ void loop() {
           motorCoast();
           escribirServo(centroServo);
           parkFase         = 21;
-          parkFaseMs       = millis();
+          parkFaseMs       = millis(); parkOdom0 = odomMm;
           parkSettleSampMs = millis();
           parkSettleQuieto = 0;
           Serial.print("PARK fase 21: media vuelta girado="); Serial.print(girado, 1);
@@ -3764,7 +5561,7 @@ void loop() {
             integralRev   = 0; prevErrorRev = 0;
             lastRevHoldMs = millis();
             parkFase      = 22;
-            parkFaseMs    = millis();
+            parkFaseMs    = millis(); parkOdom0 = odomMm;
           } else {
             Serial.println("PARK: busco cajon en el regreso (paralelo)");
             resetParkScan();
@@ -3808,7 +5605,7 @@ void loop() {
           motorCoast();
           escribirServo(centroServo);
           parkFase   = 23;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
         }
         break;
       }
@@ -3944,19 +5741,36 @@ void loop() {
         // 0 del gyro: en la 1056 el carro iba PARALELO a la pared y este candado
         // lo leía a 17.4° -> tiró el poste 2 bueno y se fue al TIMEOUT.
         float parkAngRel = anguloGyro - parkRumboParalelo();
-        bool armada = baseLista
-                      && (tEn >= PARK_ARMADO_MS)
+        bool poseOk = baseLista
                       && (fabs(parkAngRel) < PARK_ARMADO_ANG_DEG)
                       && (parkRosaVisto || !PARK_REQUIERE_PI || PARK_TEST_MANO);
+        bool armada = poseOk && (tEn >= PARK_ARMADO_MS);
 
+        // Sin U: la primera madera se puede perder (la ruta llega a la pared tarde, p.ej. senal roja de entrada).
+        // Una bajada confirmada justo donde la Pi dice que esta la madera de adelante ES el poste 2.
+        if (parkDirecto && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
+            && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
+          Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
+          parkDetPorPose = true;
+          parkScanSubFase  = 2;
+          parkHuecoEntryMs = millis();
+          parkPoste1Ms     = 0;
+        }
         // ── Subfase 0: Buscando Poste 1 ──
         if (parkScanSubFase == 0) {
           if (bajada && !armada && parkCaidaCnt == PARK_CAIDA_N) {
+            parkIgnAlong = alongSalidaMm(); parkIgnOk = true;
             Serial.print("PARK: bajada IGNORADA (no armada: base=");
             Serial.print(baseLista ? 1 : 0);
             Serial.print(" rosa="); Serial.print(parkRosaVisto ? 1 : 0);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
             Serial.println(")");
+          }
+          // El poste mide 2 cm: a la salida de la U (PWM 200) cabe entero antes
+          // de PARK_ARMADO_MS. Si se tira, el poste 2 queda como poste 1.
+          if (bajada && poseOk && posteConfirmado && tEn < PARK_ARMADO_MS) {
+            parkBajadaPre = true;
+            parkBajadaPreMs = millis();
           }
 
           if (bajada && armada && posteConfirmado) {
@@ -3971,6 +5785,20 @@ void loop() {
             parkScanSubFase = 1;
             parkGapCnt      = 0;
             parkCaidaCnt    = 0;  // no arrastrar la caída del poste 1
+          } else if (parkBajadaPre && despejado) {
+            // La bajada ya volvió a pared y el timer no llegó a verla.
+            parkGapCnt++;
+            if (parkGapCnt >= PARK_GAP_N) {
+              parkScanSubFase  = 2;
+              parkCaidaCnt     = 0;
+              parkGapCnt       = 0;
+              parkHuecoEntryMs = millis();
+              parkPoste1Ms     = parkBajadaPreMs;
+              parkBajadaPre    = false;
+              Serial.println("PARK: poste 1 pasó antes del armado — hueco");
+            }
+          } else {
+            parkGapCnt = 0;
           }
         }
         // ── Subfase 1: Sobre Poste 1, esperando hueco ──
@@ -4030,15 +5858,28 @@ void loop() {
             // capturó +7.5 y el carro cerró "alineado" a +11.7 del carril
             // real. El rumbo paralelo medido es la referencia correcta.
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
+            parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
+            // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
+            if (parkDetPorPose && parkIgnOk && PARK_PL_ANCLA_IGN > 0 && parkDetAlong - parkIgnAlong >= 0.0f && parkDetAlong - parkIgnAlong <= (float)PARK_PL_ANCLA_IGN) parkDetAlong = 0.5f * (parkDetAlong + parkIgnAlong);   // punto medio: la bajada ignorada adelanta (nariz inclinada), la confirmada atrasa
+            parkDetPorPose = false; parkIgnOk = false;
+            parkDetTh = isnan(parkThCarril()) ? 0.0f : constrain(parkThCarril(), -25.0f, 25.0f);
+            // altura del eje por el sonar (va 68 mm al costado y 64 adelante del eje, el haz sale inclinado theta)
+            { float tr = PARK_PL_TILT_H ? parkDetTh * 0.0174533f : 0.0f; parkDetHSon = (parkBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr); }
+            Serial.print("PARK anclaje along="); Serial.print(parkDetAlong, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
+            Serial.print(" h="); Serial.println(parkDetHSon, 0);
             Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
             Serial.print(parkTrimListo ? " (PARED" : " (gyro");
             Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.println(")");
             if (PARK_TEST_MANO) {
               parkFase = 10;
               Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
+            } else if (PARK_MODO == PARK_PARALELO_REV) {
+              parkFase   = 30;
+              parkFaseMs = millis(); parkOdom0 = odomMm;
+              Serial.println("PARK fase 30: ajuste tras el poste 2 (PARK_REV_AJUSTE_MM)");
             } else {
               parkFase   = 1;
-              parkFaseMs = millis();
+              parkFaseMs = millis(); parkOdom0 = odomMm;
               Serial.println("PARK fase 1: avance extra tras el poste 2 (PARK_POSTE2_*)");
             }
             break;
@@ -4078,15 +5919,42 @@ void loop() {
           float rumboObj  = parkRumboParalelo()
                             + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
           motorAdelante();
-          servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
-          setMotor(PARK_PUNTA_PWM);
+          // Sin U: mientras no este sobre la linea de escaneo sigue la ruta de la Pi (que rodea la senal de la entrada); despues, la pared.
+          float ruedaScan;
+          if (parkDirecto && !parkSinULinea && piRuta && rutaTfOk
+              && !(fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG))
+            parkSinULinea = !rutaSteer(ruedaScan) ? true : false;
+          else if (parkDirecto) parkSinULinea = true;
+          if (parkDirecto && !parkSinULinea) escribirServo(rutaServo(ruedaScan));
+          else servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
+          // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
+          // El PWM no cae en seco: tau de tracción ~0.17 s. 2 tau bastan para llegar
+          // a la velocidad lenta; el piso PARK_SCAN_RAPIDO_MM sigue de tope.
+          float vRap = ((float)PARK_SCAN_RAPIDO_PWM - 42.1f) * 4.02f;
+          float vLen = ((float)PARK_PUNTA_PWM - 42.1f) * 4.02f;
+          float dFreno = (float)PARK_SCAN_RAPIDO_MM;
+          if (vRap > vLen + 50.0f) {
+            float tau = 0.17f, T = 2.0f * tau;
+            float d = vLen * T + (vRap - vLen) * tau * (1.0f - expf(-T / tau)) + 50.0f;
+            if (d < dFreno) dFreno = d;
+          }
+          bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0
+                        && !isnan(rutaPka)
+                        && (parkDirecto ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno);
+          int pwmEsc = PARK_PUNTA_PWM;
+          // Sin U: cerca de la madera de adelante, lento, para que el instante en que el sonar la ve fije bien la posicion (error ~ v * 50 ms).
+          if (parkDirecto && !isnan(rutaPka) && !rapido && alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM - (float)PARK_SINU_LENTO_MM)
+            pwmEsc = PARK_SINU_PWM_B2;
+          setMotorTope(rapido ? (int)PARK_SCAN_RAPIDO_PWM : pwmEsc, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
 
-        Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
-        Serial.print(" ext="); Serial.print(extRaw);
-        Serial.print(" base="); Serial.print(parkBase, 1);
-        Serial.print(" caida="); Serial.print(parkCaidaCnt);
-        Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+        if (logEsteLoop) {
+          Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" base="); Serial.print(parkBase, 1);
+          Serial.print(" caida="); Serial.print(parkCaidaCnt);
+          Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+        }
         break;
       }
 
@@ -4121,9 +5989,23 @@ void loop() {
         if (PARK_VEL_COMP && parkVelCmS > 0.0f)
           espera = (long)((float)espera * (PARK_VEL_REF_CM_S / parkVelCmS));
         espera = constrain(espera, (long)PARK_POSTE2_MIN_MS, (long)PARK_POSTE2_MAX_MS);
-        if (millis() - parkFaseMs >= (unsigned long)espera) {
+        float avanceMm = PARK_POSTE2_MM
+                       + ((parkBase > 5.0f) ? (parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MM_POR_CM : 0.0f);
+        if (parkFinTramo(avanceMm, (unsigned long)espera)) {
+          Serial.print("PARK fase 1 fin: avance="); Serial.print(parkRecorridoMm(), 0);
+          Serial.print("mm t="); Serial.println(millis() - parkFaseMs);
           motorCoast();
-          escribirServo(servoHaciaPared);  // pre-coloca FULL EXTERNO
+          // 2026-10-04: NO pre-colocar FULL EXTERNO aquí. El carro todavía
+          // trae inercia hacia adelante (coast, no frenado); con las ruedas
+          // ya a tope la trompa se abre hacia la pared MIENTRAS SIGUE
+          // avanzando (medido: Ang 0.0 -> 8.8° entre el fin de la fase 1 y
+          // el fin de la fase 2, antes de que arranque la reversa real), lo
+          // que come hueco del cajón y deja la cola mal orientada para el
+          // swing de la fase 3. Servo RECTO durante el coast; FULL EXTERNO
+          // se pone recién al entrar a la fase 3 (reversa de verdad), igual
+          // que el patrón COAST+centro de las demás maniobras (ver
+          // comentario de MANIOBRA_FRENO_MS).
+          escribirServo(centroServo);
           // Altura lateral con la que el carro llegó al cajón: es lo que la
           // fase 14 tiene que compensar. parkBase (EMA de la pared, no el
           // instantáneo) porque el sonar ya está viendo el poste 2.
@@ -4147,7 +6029,7 @@ void loop() {
             }
           }
           parkFase   = 2;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 2: COAST (ext=");
           Serial.print(extRaw);
           Serial.print(" base="); Serial.print(parkBaseLlegada, 1);
@@ -4157,16 +6039,428 @@ void loop() {
         break;
       }
 
-      // ── Fase 2: COAST + servo FULL EXTERNO, luego REV SWING ──────────────
-      if (parkFase == 2) {
+      // ══════════════════════════════════════════════════════════════════
+      // PARK_PARALELO_REV (T15b2): fases 30-38, ver el comentario junto a
+      // PARK_REV_AJUSTE_MM. Solo se entra aquí si PARK_MODO ==
+      // PARK_PARALELO_REV (ver el branching al final de la fase 0).
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── Fase 30: ajuste en mm tras el poste 2 (puede ser negativo) ─────
+      if (parkFase == 30) {
+        bool avanza = (PARK_REV_AJUSTE_MM >= 0.0f);
+        if (avanza) motorAdelante(); else motorReversa();
+        escribirServo(centroServo);
+        setMotor(avanza ? PARK_PWM : PARK_REV_PWM);
+        if (!avanza && parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 30: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 31 ya");
+          parkFase   = 31;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        if (parkFinTramo(fabs(PARK_REV_AJUSTE_MM), PARK_REV_AJUSTE_MAX_MS)) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkFase   = 31;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 31: COAST tras ajuste ("); Serial.print(PARK_REV_AJUSTE_MM, 0);
+          Serial.println("mm)");
+        }
+        break;
+      }
+
+      // ── Fase 31: COAST (MANIOBRA_FRENO_MS), luego arranca el swing A ───
+      if (parkFase == 31) {
         motorCoast();
-        escribirServo(servoHaciaPared);
+        escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           motorReversa();
+          escribirServo(servoHaciaPared);
+          parkFase   = 32;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 32: REV SWING A FULL EXTERNO hasta 90deg (ref=");
+          Serial.print(parkRumboRef, 1); Serial.println(")");
+        }
+        break;
+      }
+
+      // ── Fase 32: (A) REV SWING FULL EXTERNO hasta 90° de parkRumboRef ──
+      if (parkFase == 32) {
+        motorReversa();
+        escribirServo(servoHaciaPared);
+        setMotor(PARK_REV_PWM);
+        if (parkRevAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 32: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 35");
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        float swingMag    = fabs(anguloGyro - parkRumboRef);
+        bool  swingListo  = (swingMag >= (90.0f - PARK_REV_SWING_OVERSHOOT_DEG));
+        bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
+        if (swingListo || swingTimeout) {
+          parkFase   = 33;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 33: REV recta hasta distB<="); Serial.print(PARK_REV_B_CM, 0);
+          Serial.print("cm (swing="); Serial.print(swingMag, 1);
+          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+        }
+        break;
+      }
+
+      // ── Fase 33: (B) REV recta (servo centro) hasta distB_filtrada objetivo ──
+      // PARK_REV_B_CM = 0 -> normalmente ya se cumple en el primer loop (0 mm
+      // de recto, como permite el plan). PARK_REV_B_MAX_MM/_MS son la red de
+      // seguridad si no hay ToF trasero (distB_filtrada queda en -1).
+      if (parkFase == 33) {
+        motorReversa();
+        escribirServo(centroServo);
+        setMotor(PARK_REV_PWM);
+        if (parkRevAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 33: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 35");
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        bool tofListo = (distB_filtrada > 0.0f && distB_filtrada <= PARK_REV_B_CM);
+        bool mmTope   = parkUsaEncoder() && (parkRecorridoMm() >= PARK_REV_B_MAX_MM);
+        bool timeout  = (millis() - parkFaseMs >= PARK_REV_B_MAX_MS);
+        if (tofListo || mmTope || timeout) {
+          escribirServo(servoHaciaPared);
+          parkFase   = 34;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 34: REV SWING C FULL EXTERNO hasta 180deg (distB=");
+          Serial.print(distB_filtrada, 1);
+          Serial.println(tofListo ? ")" : mmTope ? " TOPE mm)" : " TIMEOUT)");
+        }
+        break;
+      }
+
+      // ── Fase 34: (C) REV SWING FULL EXTERNO hasta 180° de parkRumboRef ──
+      // El carro queda paralelo pero mirando al revés del sentido de marcha.
+      if (parkFase == 34) {
+        motorReversa();
+        escribirServo(servoHaciaPared);
+        setMotor(PARK_REV_PWM);
+        if (parkRevAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 34: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 35");
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        float swingMag     = fabs(anguloGyro - parkRumboRef);
+        bool  swingListo   = (swingMag >= (180.0f - PARK_REV_SWING_OVERSHOOT_DEG));
+        bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
+        if (swingListo || swingTimeout) {
+          motorCoast();
+          escribirServo(centroServo);
+          parkCenterCnt = 0;
+          parkFase   = 35;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 35: COAST -> pasadas (swing="); Serial.print(swingMag, 1);
+          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+        }
+        break;
+      }
+
+      // ── Fase 35: COAST antes de las pasadas adelante/atrás ──────────────
+      if (parkFase == 35) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          motorAdelante();
+          parkCenterCnt = 0;
+          parkFase   = 36;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.println("PARK fase 36: ACOMODO ADELANTE (rumbo = parkRumboRef+180)");
+        }
+        break;
+      }
+
+      // ── Fase 36: ACOMODO ADELANTE contra parkRumboRef+180 ───────────────
+      if (parkFase == 36) {
+        float rumboObjRev = parkRumboRef + 180.0f;
+        motorAdelante();
+        servoRumboPark(rumboObjRev);
+        setMotor(PARK_CENTER_PWM_PAR);
+        bool dfCerca = (distF_filtrada > 0 && distF_filtrada <= PARK_REV_CENTER_HI_CM);
+        parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
+        bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
+        bool timeout = (millis() - parkFaseMs >= PARK_REV_FWD_MS);
+        if (dfTope || timeout) {
+          motorCoast();
+          escribirServo(centroServo);
+          float dif = fabs(anguloGyro - rumboObjRev);
+          if (dif <= PARK_REV_FINAL_TOL_DEG) {
+            finalizarPark(dfTope ? "REV ADELANTE dF ya a 0" : "REV ADELANTE tiempo ya a 0");
+          } else {
+            parkFase   = 37;
+            parkFaseMs = millis(); parkOdom0 = odomMm;
+            Serial.print("PARK fase 38: COAST -> REV final (dif="); Serial.print(dif, 1); Serial.println(")");
+          }
+        }
+        break;
+      }
+
+      // ── Fase 37: COAST antes de la reversa final de enderezado ──────────
+      if (parkFase == 37) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          integralRev   = 0;
+          prevErrorRev  = 0;
+          lastRevHoldMs = millis();
+          motorReversa();
+          parkFase   = 38;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.println("PARK fase 38: REV final (rumbo = parkRumboRef+180)");
+        }
+        break;
+      }
+
+      // ── Fase 38: REV final de enderezado contra parkRumboRef+180 ───────
+      // Mismo patrón que la fase 13 del paralelo (servoDesdePared, corte por
+      // dF/alineado/pegado/atrasPegado/timeout) pero contra el rumbo +180 y
+      // ciclando 35<->38 hasta PARK_REV_CICLOS_MAX.
+      if (parkFase == 38) {
+        float rumboObjRev = parkRumboRef + 180.0f;
+        motorReversa();
+        escribirServo(servoDesdePared);
+        setMotor(PARK_REV_PWM);
+        float dif         = fabs(anguloGyro - rumboObjRev);
+        bool  alineado    = (dif <= PARK_REV_FINAL_TOL_DEG);
+        bool  frenteOk     = (distF_filtrada > 0 && distF_filtrada >= PARK_PR_FINAL_DF_CM);
+        bool  pegado       = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
+        bool  atrasPegadoF = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
+        bool  timeout      = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
+        if (frenteOk || alineado || pegado || atrasPegadoF || timeout) {
+          Serial.print("PARK fase 38 fin: dif="); Serial.print(dif, 1);
+          Serial.print(" dF="); Serial.print(distF_filtrada);
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          if (!alineado && !pegado && parkCiclos < PARK_REV_CICLOS_MAX) {
+            parkCiclos++;
+            motorCoast(); escribirServo(centroServo);
+            Serial.print("PARK ciclo "); Serial.print(parkCiclos);
+            Serial.println(": no derecho todavia (REV) -> fase 35 de nuevo");
+            parkFase   = 35;
+            parkFaseMs = millis(); parkOdom0 = odomMm;
+          } else {
+            finalizarPark(frenteOk     ? "REV FINAL: dF objetivo"
+                        : alineado     ? "REV FINAL: ya alineado"
+                        : pegado       ? "REV FINAL: pegado de lado"
+                        : atrasPegadoF ? "REV FINAL: pegado atras"
+                                       : "REV FINAL: TIMEOUT (ciclos agotados)");
+          }
+        }
+        break;
+      }
+
+      // ── Fase 41: pasa el cajon recto por el carril hasta w = PARK_REV_W_MM y de ahi al plan de reversa ──
+      if (parkFase == 41) {
+        motorAdelante();
+        // La madera de adelante es una bajada del sonar de pared (pka de la Pi trae +-30 mm; el sonar +-5 con la correccion de inclinacion).
+        float pw, ph; parkPlanPose(pw, ph);
+        if (!parkRevAnc && !PARK_REV_SOLO_ATRAS && extRaw > 2 && extRaw < 150) {
+          // bajada del sonar de pared respecto a las lecturas anteriores (no se usa la pared esperada por la pose: trae decenas de mm de error)
+          if (parkRevBase <= 0.0f) parkRevBase = (float)extRaw;
+          if ((float)extRaw < parkRevBase - PARK_REV_CAIDA_CM) {
+            if (++parkRevDrop >= 2) {
+              parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
+              float t = parkThCarril(); parkDetTh = isnan(t) ? 0.0f : constrain(t, -25.0f, 25.0f);
+              // altura del eje por el sonar (el sonar va 68 mm al costado y 64 adelante del eje, el haz sale inclinado theta)
+              float tr = parkDetTh * 0.0174533f;
+              parkDetHSon = (parkRevBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr);
+              parkRevAnc = true;
+              Serial.print("PARK REV: madera de adelante por sonar along="); Serial.print(parkDetAlong, 0); Serial.print(" ext="); Serial.print(extRaw); Serial.print(" base="); Serial.println(parkRevBase, 0);
+              parkPlanPose(pw, ph);
+            }
+          } else { parkRevDrop = 0; parkRevBase += 0.5f * ((float)extRaw - parkRevBase); }
+        }
+        // rumbo hacia la pared proporcional a la altura que falta (th negativo = nariz a la pared); anguloGyro: + = izquierda
+        float thCmd = -constrain(PARK_REV_KH * (ph - PARK_REV_H0), 0.0f, 20.0f);
+        servoRumboPark(direccionIzquierda ? thCmd : -thCmd);
+        setMotor(PARK_REV_AVANCE_PWM);
+        // para donde la recta a PARK_REV_TH1 (arco EXT + recta + arco INT) llega a (WF, HEND): w = WF + R(2 sin t) + (h-HEND-2R(1-cos t))/tan t
+        float t1 = PARK_REV_TH1 * 0.0174533f;
+        float wStop = PARK_PL_WF + 2.0f * PARK_PL_RI * sinf(t1) + max(ph - PARK_PL_HEND - 2.0f * PARK_PL_RI * (1.0f - cosf(t1)), 0.0f) / tanf(t1);
+        bool senalAdelante = distF_filtrada > 0 && distF_filtrada <= PARK_REV_DF_CM && fabsf(parkThCarril()) <= 12.0f && millis() - parkFaseMs > 300;   // la senal de la entrada del cuadrante esta delante del cajon
+        if (!parkRevAnc && (pw >= wStop + PARK_REV_SIN_ANCLA_MM || senalAdelante || millis() - parkFaseMs > 6000)) { parkRevCaeAU(senalAdelante ? "senal adelante" : "sin ver la madera"); break; }
+        if (parkRevAnc && (pw >= wStop || senalAdelante || millis() - parkFaseMs > 6000)) {
+          Serial.print("PARK REV fin avance w="); Serial.print(pw, 0); Serial.print(" h="); Serial.println(ph, 0);
+          motorCoast(); escribirServo(centroServo);
+          parkFase = 2; parkFaseMs = millis(); parkOdom0 = odomMm;
+        }
+        break;
+      }
+
+      // ── Fase 42: retrocede recto buscando la madera de adelante con el sonar (al reves: la cara de atras de la madera es w=284) ──
+      if (parkFase == 42) {
+        motorReversa();
+        escribirServo(centroServo);
+        setMotor(PARK_REV_BUSCA_PWM);
+        float pw, ph; parkPlanPose(pw, ph);
+        if (extRaw > 2 && extRaw < 150) {
+          float esperada = (ph - 68.0f) / 10.0f;
+          bool pared = (float)extRaw >= esperada - 6.0f, madera = (float)extRaw < esperada - PARK_REV_CAIDA_CM;
+          int borde = 0;   // 1: pared -> madera (cara de atras, w_sonar 284), 2: madera -> pared (cara de adelante, w_sonar 264)
+          if (pared) {
+            if (parkRevEnMadera && ++parkRevDrop >= 2) borde = 2;
+            if (!parkRevEnMadera) { parkRevBase = parkRevBase <= 0.0f ? (float)extRaw : parkRevBase + 0.5f * ((float)extRaw - parkRevBase); parkRevDrop = 0; }
+          } else if (madera) {
+            if (parkRevBase <= 0.0f) { parkRevEnMadera = true; parkRevDrop = 0; }   // empezo sobre la madera: ancla al salir
+            else if (!parkRevEnMadera && ++parkRevDrop >= 2) borde = 1;
+          }
+          if (borde) {
+            float t = parkThCarril(); parkDetTh = isnan(t) ? 0.0f : constrain(t, -25.0f, 25.0f);
+            float tr = parkDetTh * 0.0174533f;
+            float baseCm = parkRevBase > 0.0f ? parkRevBase : esperada;
+            parkDetHPose = parkHPoseMm(); parkDetHSon = (baseCm * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr);
+            // en reversa la deteccion adelanta hacia atras: el cono suma en vez de restar (parkPlanPose resta CONO*(h-350) siempre)
+            float wNom = (borde == 1 ? 220.0f : 200.0f) + PARK_REV_B0 + PARK_REV_B1 * (parkDetHSon - 350.0f) + PARK_REV_B2 * (parkDetHSon - 200.0f) * tanf(parkDetTh * 0.0174533f)
+                          + PARK_PL_CONO * (parkDetHSon - 350.0f);   // el cono de ida no aplica al reves: se cancela lo que resta parkPlanPose; B0 B1 B2 ajustados con 33 corridas (rmse 3.3 mm)
+            parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET);
+            Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
+            parkRevAnc = true;
+            parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;   // con el ancla, de nuevo hacia adelante hasta el w de parada
+            motorAdelante();
+            break;
+          }
+        }
+        if (pw < PARK_REV_BUSCA_W_MIN || millis() - parkFaseMs > 4000) { parkRevCaeAU("no encuentro la madera"); }
+        break;
+      }
+
+      // ── Fase 2: COAST con servo RECTO (deja que pare), luego REV SWING ───
+      if (parkFase == 2) {
+        motorCoast();
+        escribirServo(centroServo);
+        if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false;
+          parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
+          Serial.print(" d="); Serial.print(parkBaseLlegada, 1); Serial.println(")");
+          break;
+        }
+        if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          motorReversa();
+          escribirServo(servoHaciaPared);  // FULL EXTERNO recién con la reversa real
           parkFase   = 3;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 3: REV SWING FULL EXTERNO hasta 60deg / 1s (ref=");
           Serial.print(parkRumboRef, 1); Serial.println(")");
+        }
+        break;
+      }
+
+      // ── Fase 40: PLAN por segmentos (ver PARK_PL_*) ─────────────────────────
+      // 0 reversa EXT hasta T1; 1 reversa INT hasta T2; 2 reversa recta (mm o esquina de la cola cerca de la madera);
+      // 3 reversa INT hasta T3; 4 adelante EXT hasta T4; 5 reversa INT hasta T5; despues zigzag corto hasta |theta| <= TOK.
+      if (parkFase == 40) {
+        float th = -haciaPared * (anguloGyro - parkRumboRef);   // nariz hacia la isla (+)
+        // El rumbo de la pared medido con los sonares trae hasta ~10 grados de error; el del carril (pose del tapete) no.
+        if (PARK_PL_THLANE && !isnan(parkThCarril())) th = parkThCarril();
+        if (!parkPlanMov) {
+          // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
+          int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
+          if (i == 0)      { parkPlanDir = -1; parkPlanSrv = servoHaciaPared; }
+          else if (i == 1) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
+          else if (i == 2) { parkPlanDir = -1; parkPlanSrv = centroServo; }
+          else if (i == 3) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
+          else if (i == 4) { parkPlanDir = 1;  parkPlanSrv = servoHaciaPared; }
+          else if (i == 5) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
+          else {
+            parkPlanDir = (((parkPlanI - 2) & 1) == 0) ? 1 : -1;   // 2,4,6..: adelante; 3,5..: atras
+            bool bajar = th > 0.0f;                                  // adelante: EXT baja theta; reversa: INT baja theta
+            bool ext = (parkPlanDir > 0) ? bajar : !bajar;
+            parkPlanSrv = ext ? servoHaciaPared : servoDesdePared;
+          }
+          motorCoast();
+          escribirServo(parkPlanSrv);
+          if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
+            if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
+              float w0, h0; parkPlanPose(w0, h0);
+              float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
+              parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
+              Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
+              Serial.print(" th1="); Serial.println(t, 1);
+            }
+            parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
+            if (parkPlanDir > 0) motorAdelante(); else motorReversa();
+            Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
+            Serial.print(parkPlanDir > 0 ? " ADELANTE " : " REVERSA ");
+            Serial.print(parkPlanSrv == servoHaciaPared ? "EXT" : parkPlanSrv == servoDesdePared ? "INT" : "RECTO");
+            Serial.print(" th="); Serial.println(th, 1);
+          }
+          break;
+        }
+        if (parkPlanDir > 0) motorAdelante(); else motorReversa();
+        escribirServo(parkPlanRectaOn ? centroServo : parkPlanSrv);
+        int pwm = (parkPlanDir > 0) ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV;
+        if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = 130;
+        setMotor(pwm);
+        if (th > parkPlanThMax) parkPlanThMax = th;
+        float pw, ph;
+        parkPlanPose(pw, ph);
+        float clr = parkPlanHolgura(pw, ph, th);
+        bool fin = false; const char *why = "";
+        float mm = parkRecorridoMm();
+        unsigned long tseg = millis() - parkFaseMs;
+        int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
+        bool cerca = clr <= PARK_PL_M_MM && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
+        parkPlanClrPrev = clr;
+        // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
+        if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
+          float yaw = th * 0.0174533f;
+          float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw));
+          if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
+        }
+        if (i == 0 && PARK_PL_RECTA) {
+          if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
+          if (parkPlanRectaOn) {
+            float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
+            fin = ph <= thr; why = "RECTA";
+            if ((ph - thr) / max(sinf(th * 0.0174533f), 0.3f) > PARK_PL_RECTA_FRENA_MM) setMotor(PARK_PL_RECTA_PWM);
+          }
+          if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; }
+        }
+        else if (i == 0) { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1"; if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; } }
+        else if (i == 1) { fin = th <= PARK_PL_T2; why = "T2"; }
+        else if (i == 2) { fin = mm >= PARK_PL_C_MM; why = "MM"; }
+        else if (i == 3) { fin = th <= PARK_PL_T3; why = "T3"; }
+        else if (i == 4) { fin = th <= PARK_PL_T4 || mm >= PARK_PL_DF_MM; why = "T4"; }
+        else if (i == 5) { fin = th <= PARK_PL_T5 || mm >= PARK_PL_DR_MM; why = "T5";
+                           if (!fin && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; } }
+        else {
+          float dmax = (parkPlanDir > 0) ? PARK_PL_DF_MM : PARK_PL_DR_MM;
+          int kz = parkPlanI - 2;
+          if (PARK_PL_ZZ && kz >= 0 && kz < 4) dmax = (kz == 0) ? PARK_PL_Z1_MM : (kz == 1) ? PARK_PL_Z2_MM : (kz == 2) ? PARK_PL_Z3_MM : PARK_PL_Z4_MM;
+          if (mm >= dmax) { fin = true; why = "DIST"; }
+          else if (th * parkPlanSgn <= PARK_PL_TOK * 0.5f && fabsf(th) <= PARK_PL_TOK) { fin = true; why = "TH"; }
+          else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
+          else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
+        }
+        if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
+        if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
+        if (fin) {
+          Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);
+          Serial.print(") th="); Serial.print(th, 1); Serial.print(" max="); Serial.print(parkPlanThMax, 1);
+          Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
+          Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
+          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          motorCoast();
+          if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
+            finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");
+          }
         }
         break;
       }
@@ -4175,7 +6469,27 @@ void loop() {
       if (parkFase == 3) {
         motorReversa();
         escribirServo(servoHaciaPared);
-        setMotor(PARK_REV_PWM);
+        // La fase 1 deja ~300 mm/s hacia adelante: el arco entero se va en
+        // invertir eso. PWM 130 solo en la primera mitad; el corte de 9°
+        // sigue con PARK_REV_PWM y la misma tasa de giro.
+        float swingAhora = fabsf(anguloGyro - parkRumboRef);
+        int pwm3 = (swingAhora < 0.40f * parkAngObjetivo) ? 130 : PARK_REV_PWM;
+        if (PARK_F3_RAMPA_MS < MOTOR_REV_RAMPA_MS) {
+          unsigned long t3 = millis() - parkFaseMs;
+          if (t3 < PARK_F3_RAMPA_MS)
+            pwm3 = (int)map((long)t3, 0, (long)PARK_F3_RAMPA_MS, MOTOR_REV_RAMPA_MIN, (long)pwm3);
+          motorDirMs = millis() - MOTOR_REV_RAMPA_MS;   // la rampa de setMotor ya no aplica
+        }
+        setMotor(pwm3);
+        // Red de seguridad trasera (ver PARK_ATRAS_MIN_CM): corta la entrada
+        // YA y pasa a corregir hacia ENFRENTE (fase 9), no a terminar.
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 3: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 9");
+          parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
         float swingMag    = fabs(anguloGyro - parkRumboRef);
         bool  swingListo  = (swingMag >= (parkAngObjetivo - (float)PARK_OVERSHOOT_DEG));
         bool  swingTimeout = (millis() - parkFaseMs >= PARK_SWING_TIMEOUT_MS);
@@ -4191,8 +6505,13 @@ void loop() {
           } else {
             parkRectoMs = 0;
           }
+          // Encoder: la misma reversa recta en mm (exceso lateral / sin 60°).
+          parkRectoMm = 0.0f;
+          if (PARK_RECTO_ENABLED && baseOk && exceso > 0.0f)
+            parkRectoMm = min(exceso * 10.0f / 0.866f, PARK_RECTO_MAX_MM);
+          if (parkUsaEncoder()) parkRectoMs = (parkRectoMm > 0.0f) ? 1 : 0;
           parkFase   = (parkRectoMs > 0) ? 14 : 4;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase "); Serial.print(parkFase);
           Serial.print(parkRectoMs > 0 ? ": RECTO a 60deg " : ": REV FULL EXTERNO (recto 0) ");
           Serial.print("(swing="); Serial.print(swingMag, 1);
@@ -4200,7 +6519,8 @@ void loop() {
           Serial.print(" d="); Serial.print(parkBaseLlegada, 1);
           Serial.print(" d0="); Serial.print(PARK_RECTO_D0_CM, 1);
           Serial.print(" tau="); Serial.print(parkRectoMs);
-          Serial.println("ms)");
+          Serial.print("ms recto="); Serial.print(parkRectoMm, 0);
+          Serial.println("mm)");
         }
         break;
       }
@@ -4214,10 +6534,17 @@ void loop() {
         motorReversa();
         escribirServo(centroServo);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= parkRectoMs) {
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 14: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 9");
+          parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        if (parkFinTramo(parkRectoMm, parkRectoMs)) {
           escribirServo(servoHaciaPared);
           parkFase   = 4;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 4: REV FULL EXTERNO (maniobra base)");
         }
         break;
@@ -4228,11 +6555,19 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= PARK_REV_EXT_HOLD_MS) {
-          // Sin meneo (PARK_WIGGLE_*_MS = 0) se salta directo a la contravuelta.
-          parkFase   = (PARK_WIGGLE_INT_MS > 0) ? 5
-                     : (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
-          parkFaseMs = millis();
+        if (parkAtrasPegado()) {
+          motorCoast(); escribirServo(centroServo);
+          Serial.print("PARK fase 4: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
+          Serial.println(") -> fase 9");
+          parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
+          break;
+        }
+        bool meneoInt = parkUsaEncoder() ? (PARK_WIGGLE_INT_MM > 0.0f) : (PARK_WIGGLE_INT_MS > 0);
+        bool meneoExt = parkUsaEncoder() ? (PARK_WIGGLE_EXT_MM > 0.0f) : (PARK_WIGGLE_EXT_MS > 0);
+        if (parkFinTramo(PARK_REV_EXT_HOLD_MM, PARK_REV_EXT_HOLD_MS)) {
+          // Sin meneo (PARK_WIGGLE_* = 0) se salta directo a la contravuelta.
+          parkFase   = meneoInt ? 5 : meneoExt ? 6 : 8;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase "); Serial.print(parkFase);
           Serial.println(parkFase == 8 ? ": FULL INTERNO hasta heading recta ~ 0 (sin meneo)"
                                        : ": meneo");
@@ -4245,9 +6580,10 @@ void loop() {
         motorReversa();
         escribirServo(servoDesdePared);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= PARK_WIGGLE_INT_MS) {
-          parkFase   = (PARK_WIGGLE_EXT_MS > 0) ? 6 : 8;
-          parkFaseMs = millis();
+        if (parkFinTramo(PARK_WIGGLE_INT_MM, PARK_WIGGLE_INT_MS)) {
+          bool meneoExt = parkUsaEncoder() ? (PARK_WIGGLE_EXT_MM > 0.0f) : (PARK_WIGGLE_EXT_MS > 0);
+          parkFase   = meneoExt ? 6 : 8;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase "); Serial.println(parkFase);
         }
         break;
@@ -4258,9 +6594,9 @@ void loop() {
         motorReversa();
         escribirServo(servoHaciaPared);
         setMotor(PARK_REV_PWM);
-        if (millis() - parkFaseMs >= PARK_WIGGLE_EXT_MS) {
+        if (parkFinTramo(PARK_WIGGLE_EXT_MM, PARK_WIGGLE_EXT_MS)) {
           parkFase   = 8;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 8: FULL INTERNO hasta heading recta ~ 0");
         }
         break;
@@ -4269,28 +6605,67 @@ void loop() {
       // ── Fase 8: FULL INTERNO; luego SIEMPRE acomodo ENFRENTE ────────────
       if (parkFase == 8) {
         motorReversa();
-        escribirServo(servoDesdePared);
-        setMotor(PARK_REV_PWM);
+        // Tope derecho al final del arco clava la esquina: cerrado solo arriba de 50°.
+        // PWM 130 arriba de 65°. En el derecho, solo mientras va cerrado.
         float difHeading = fabs(anguloGyro - parkRumboRef);
+        int servoSuave = (servoDesdePared == SERVO_MIN_DEG) ? 6 : servoDesdePared;
+        bool ladoTope = (servoDesdePared == SERVO_MIN_DEG);
+        bool cierra = difHeading > 50.0f && ladoTope;
+        int servoContra = cierra ? servoDesdePared : servoSuave;
+        escribirServo(servoContra);
+        // El otro tope ya es el cerrado en todo el arco: el PWM 130 temprano
+        // no lo alarga. En el derecho solo mientras también va cerrado.
+        setMotor((difHeading > 65.0f && (cierra || !ladoTope)) ? 130 : PARK_REV_PWM);
         bool  alineado   = (difHeading <= PARK_ENDEREZA_TOL_DEG);
         bool  pegado     = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
         bool  timeout    = (millis() - parkFaseMs >= PARK_CONTRA_TIMEOUT_MS);
         // Topó contra algo (casi siempre la pared de atrás): el gyro se congela y
         // seguir reverseando solo empuja. Cortar YA en vez de esperar el timeout.
         bool  atorado    = parkAtoroDetecta(parkFaseMs);
-        if (alineado || pegado || timeout || atorado) {
-          motorCoast();
-          escribirServo(centroServo);
+        bool  atrasPegado = parkAtrasPegado();
+        // ToF en el eje, 2.2 cm delante del paragolpes: a ~20° la esquina (6.3 cm)
+        // llega al fondo con distB todavía en 6 cm y el coast cierra el resto.
+        // No cortar antes de que pase el mínimo de la esquina delantera (~45°):
+        // 36° izq / 30° der. Más temprano, la fase 11 cruza el carro.
+        float yawCorte = (servoDesdePared == SERVO_MIN_DEG) ? 30.0f : 36.0f;
+        if (!atrasPegado && distB_filtrada > 0.0f && difHeading <= yawCorte) {
+          float yaw = difHeading * 0.0174533f;
+          float esquinaCm = distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw);
+          if (esquinaCm <= 2.5f) atrasPegado = true;
+        }
+        if (alineado || pegado || timeout || atorado || atrasPegado) {
           parkAtoroDisparo = atorado;
-          parkFase   = 9;
-          parkFaseMs = millis();
-          Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
-          Serial.print(difHeading, 1);
-          Serial.print(" ext="); Serial.print(extRaw);
-          if (alineado) Serial.print(" ALINEADO");
-          if (pegado)   Serial.print(" PEGADO");
-          if (atorado)  Serial.print(" ATORADO");
-          Serial.println(timeout ? " TIMEOUT)" : ")");
+          parkCenterCnt = 0;
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          parkColaMm = odomMm;
+          // La cola ya está a ~9 mm solo si el lateral también dice cerca
+          // (ext<=5). Con ext 8-9 el corte es el yaw, no la pared: frenar
+          // ahí deja el carro corto y la fase 13 pega en el poste.
+          bool colaPared = atrasPegado && !alineado && !pegado
+                           && extRaw > 0 && extRaw <= 5;
+          if (colaPared) {
+            motorAdelante();
+            escribirServo(centroServo);
+            parkFase = 11;
+            parkFrenoCola = true;
+            Serial.print("PARK fase 11: FRENO COLA (dif=");
+            Serial.print(difHeading, 1);
+            Serial.print(" distB="); Serial.print(distB_filtrada, 1);
+            Serial.println(")");
+          } else {
+            motorCoast();
+            escribirServo(centroServo);
+            parkFase = 9;
+            parkFrenoCola = false;
+            Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
+            Serial.print(difHeading, 1);
+            Serial.print(" ext="); Serial.print(extRaw);
+            if (alineado) Serial.print(" ALINEADO");
+            if (pegado)   Serial.print(" PEGADO");
+            if (atorado)  Serial.print(" ATORADO");
+            if (atrasPegado) { Serial.print(" ATRAS PEGADO distB="); Serial.print(distB_filtrada, 1); }
+            Serial.println(timeout ? " TIMEOUT)" : ")");
+          }
         }
         break;
       }
@@ -4303,7 +6678,9 @@ void loop() {
           motorAdelante();
           parkCenterCnt = 0;          // arma limpio el debounce de la fase 11
           parkFase   = 11;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+          parkColaMm = odomMm;
+          parkFrenoCola = false;
           Serial.println("PARK fase 11: ACOMODO ENFRENTE");
         }
         break;
@@ -4312,13 +6689,26 @@ void loop() {
       // ── Fase 11: ACOMODO ENFRENTE ──────────────────────────────────────
       if (parkFase == 11) {
         motorAdelante();
-        servoRumboPark(parkRumboRef);
-        setMotor(PARK_CENTER_PWM_PAR);
+        // El mínimo del odom es el fondo de la reversa. En cuanto vuelve a
+        // subir, la velocidad cambió de signo: ruedas al centro y freno al
+        // tope de agarre, si no la cola cierra los ~9 mm que quedan.
+        bool frenando = parkFrenoCola && (odomMm <= parkColaMm);
+        if (odomMm < parkColaMm) parkColaMm = odomMm;
+        if (frenando) {
+          escribirServo(centroServo);
+          setMotor(PARK_FRENO_COLA_PWM);
+        } else {
+          servoRumboPark(parkRumboRef);
+          setMotor(PARK_CENTER_PWM_PAR);
+        }
         bool dfCerca = (distF_filtrada > 0 && distF_filtrada <= PARK_CENTER_HI_CM);
         parkCenterCnt = dfCerca ? min(parkCenterCnt + 1, PARK_CENTER_DEB) : 0;
         bool dfTope  = (parkCenterCnt >= PARK_CENTER_DEB);
         bool timeout = (millis() - parkFaseMs >= PARK_FWD_MS);
-        if (dfTope || timeout) {
+        // 12 mm adelante de la cola ya despegan la pared; el freno del final
+        // para el desliz que antes dejaba este corte en 5.1 mm.
+        bool colaYa = parkFrenoCola && !frenando && (odomMm - parkColaMm) >= 12;
+        if (dfTope || timeout || colaYa) {
           motorCoast();
           escribirServo(centroServo);
           float dif = fabs(anguloGyro - parkRumboRef);
@@ -4328,7 +6718,7 @@ void loop() {
             finalizarPark(dfTope ? "ENFRENTE dF ya a 0" : "ENFRENTE tiempo ya a 0");
           } else {
             parkFase   = 12;
-            parkFaseMs = millis();
+            parkFaseMs = millis(); parkOdom0 = odomMm;
             Serial.print("PARK fase 12: COAST -> REV a 0 (dif=");
             Serial.print(dif, 1); Serial.println(")");
           }
@@ -4338,15 +6728,22 @@ void loop() {
 
       // ── Fase 12: COAST antes de reversear a 0 ──────────────────────────
       if (parkFase == 12) {
-        motorCoast();
+        if (PARK_F12_FRENO_PWM > 0) {
+          // El coast deja ~10 mm de avance hacia el poste: frena con reversa corta.
+          motorReversa(); motorDirMs = millis() - MOTOR_REV_RAMPA_MS;
+          setMotor(PARK_F12_FRENO_PWM);
+        } else {
+          motorCoast();
+        }
         escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           integralRev   = 0;
           prevErrorRev  = 0;
           lastRevHoldMs = millis();
           motorReversa();
+          parkFrenoFin = false;
           parkFase   = 13;
-          parkFaseMs = millis();
+          parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.println("PARK fase 13: REV hasta heading 0");
         }
         break;
@@ -4370,23 +6767,58 @@ void loop() {
       // vale ~2.3°), pero cada cm sale del aire con la pared TRASERA, que es el
       // único lado sin sensor. Por eso el timeout es corto y no negociable.
       if (parkFase == 13) {
+        // Cortó de lado con guiñada de sobra: el coast deja la cola deslizándose
+        // contra la pared. Freno adelante hasta que el encoder deja de retroceder.
+        if (parkFrenoFin) {
+          if (odomMm < parkColaMm) parkColaMm = odomMm;
+          motorAdelante();
+          escribirServo(centroServo);
+          if (odomMm <= parkColaMm) setMotor(PARK_FRENO_COLA_PWM);
+          else finalizarPark("REV FINAL: freno desliz");
+          break;
+        }
         motorReversa();
         escribirServo(servoDesdePared);          // tope hacia AFUERA de la pared
-        setMotor(PARK_REV_PWM);
         float dif      = fabs(anguloGyro - parkRumboRef);
+        // PWM alto hasta el corte de 5° se pasa del poste; por encima de 20° el arco tiene aire.
+        int pwm13 = dif > 20.0f ? 130 : PARK_REV_PWM;
+        if (PARK_F13_RAMPA_MS < MOTOR_REV_RAMPA_MS) {
+          unsigned long t13 = millis() - parkFaseMs;
+          if (t13 < PARK_F13_RAMPA_MS)
+            pwm13 = (int)map((long)t13, 0, (long)PARK_F13_RAMPA_MS, MOTOR_REV_RAMPA_MIN, (long)pwm13);
+          motorDirMs = millis() - MOTOR_REV_RAMPA_MS;
+        }
+        setMotor(pwm13);
         bool  alineado = (dif <= PARK_FINAL_TOL_DEG);          // ya derecho: no sigas
         bool  frenteOk = (distF_filtrada > 0
                           && distF_filtrada >= PARK_REV_FINAL_DF_CM);
         bool  pegado   = (extRaw > 0 && extRaw <= PARK_PEGADO_CM);
+        bool  atrasPegado = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
         bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
-        if (frenteOk || alineado || pegado || timeout) {
+        if (frenteOk || alineado || pegado || atrasPegado || timeout) {
           Serial.print("PARK fase 13 fin: dif="); Serial.print(dif, 1);
           Serial.print(" dF="); Serial.print(distF_filtrada);
-          Serial.print(" ext="); Serial.println(extRaw);
-          finalizarPark(frenteOk ? "REV FINAL: dF objetivo"
-                      : alineado ? "REV FINAL: ya alineado"
-                      : pegado   ? "REV FINAL: pegado de lado"
-                                 : "REV FINAL: TIMEOUT");
+          Serial.print(" ext="); Serial.print(extRaw);
+          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          // El tope de lado ya es un punto del cajón; la pasada siguiente solo
+          // cierra los últimos grados y vuelve a ver el poste. Atrás y timeout sí.
+          if (!alineado && !pegado && parkCiclos < PARK_CICLOS_MAX) {
+            parkCiclos++;
+            motorCoast(); escribirServo(centroServo);
+            Serial.print("PARK ciclo "); Serial.print(parkCiclos);
+            Serial.println(": no derecho todavia -> fase 9 (ENFRENTE) de nuevo");
+            parkFase   = 9;
+            parkFaseMs = millis(); parkOdom0 = odomMm;
+          } else if (PARK_FRENO_FIN_TODO || (pegado && dif > 12.0f)) {
+            parkFrenoFin = true;
+            parkColaMm = odomMm;
+          } else {
+            finalizarPark(frenteOk    ? "REV FINAL: dF objetivo"
+                        : alineado    ? "REV FINAL: ya alineado"
+                        : pegado      ? "REV FINAL: pegado de lado"
+                        : atrasPegado ? "REV FINAL: pegado atras"
+                                      : "REV FINAL: TIMEOUT (ciclos agotados)");
+          }
         }
         break;
       }
@@ -4414,8 +6846,13 @@ void loop() {
     // ═══════════════════════════════════════════════════════════════════════════
     case ESTACIONANDO_PUNTA: {
       long  extRaw     = puntaParedIzq ? distL_raw : distR_raw;
-      float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared"
-      int   servoTope  = puntaParedIzq ? 160 : 30;       // servo a tope hacia la pared
+      float haciaPared = puntaParedIzq ? 1.0f : -1.0f;   // signo de "rotar hacia la pared" del regreso
+      int   servoTope  = puntaParedIzq ? SERVO_MAX_DEG : SERVO_MIN_DEG;       // servo a tope hacia la pared del regreso
+      // La U gira al lado contrario: hacia la pared que traes en la recta de salida.
+      bool  uturnIzq   = !puntaParedIzq;
+      float haciaAhora = uturnIzq ? 1.0f : -1.0f;
+      int   servoU     = uturnIzq ? SERVO_MAX_DEG : SERVO_MIN_DEG;
+      long  extAhora   = uturnIzq ? distL_raw : distR_raw;
       puntaExtRaw = extRaw;
       if (piPark >= 1) puntaRosaVisto = true;
 
@@ -4507,17 +6944,25 @@ void loop() {
           Serial.println(")");
         }
 
-        if (lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N && armada) {
-          puntaCaidaLectura = extRaw;
-          puntaRumboRef     = anguloGyro;
-          Serial.print("PUNTA: BAJADA base="); Serial.print(puntaBase, 1);
-          Serial.print(" lectura="); Serial.print(extRaw);
-          Serial.print(" ang="); Serial.print(anguloGyro, 1);
-          Serial.print(" rosa="); Serial.println(puntaRosaVisto ? 1 : 0);
+        if (puntaEnPoste && !lecturaBaja) {
+          puntaEnPoste = false;
+          puntaHueco   = true;
+          puntaOdom0   = odomMm;
+          Serial.println("PUNTA: hueco, avanzo por encoder");
+        }
+        // El hueco es el cajón. A los N mm se mete; si aparece el poste de
+        // adelante antes, se mete ya para no estrellarlo.
+        bool enHueco = puntaHueco && armada && (odomMm - puntaOdom0) >= PARK_PUNTA_HUECO_MM;
+        bool posteLejano = puntaHueco && armada && !puntaEnPoste
+                           && lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N;
+        if (enHueco || posteLejano) {
+          puntaRumboRef = anguloGyro;
+          Serial.print(posteLejano ? "PUNTA: poste lejano, me meto ext="
+                                   : "PUNTA: dentro del hueco mm=");
+          Serial.println(posteLejano ? extRaw : (odomMm - puntaOdom0));
           if (PARK_TEST_MANO) {
             puntaRumboArco0 = anguloGyro;
             puntaFase       = 10;
-            Serial.println("PUNTA MANO: servo a tope -> empuja el carro por el arco");
           } else {
             motorCoast();
             escribirServo(centroServo);
@@ -4525,6 +6970,12 @@ void loop() {
           }
           puntaFaseMs = millis();
           break;
+        }
+        if (lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N && !puntaEnPoste && puntaMuros == 0) {
+          puntaMuros    = 1;
+          puntaEnPoste  = true;
+          puntaCaidaCnt = 0;
+          Serial.print("PUNTA: primera pared lectura="); Serial.println(extRaw);
         }
 
         if (PARK_TEST_MANO) {
@@ -4568,14 +7019,10 @@ void loop() {
         escribirServo(centroServo);
         if (millis() - puntaFaseMs >= PARK_PUNTA_FRENO_MS) {
           puntaFaseMs = millis();
-          if (PARK_PUNTA_AJUSTE_MS > 0) {
+          if (PARK_PUNTA_AJUSTE_MM > 0) {
             motorAdelante();
-            puntaFase = 2;
-          } else if (PARK_PUNTA_AJUSTE_MS < 0) {
-            motorReversa();
-            integralRev   = 0; prevErrorRev = 0;
-            lastRevHoldMs = millis();
-            puntaFase     = 2;
+            puntaOdom0  = odomMm;
+            puntaFase   = 2;
           } else {
             puntaFase = 3;
           }
@@ -4585,18 +7032,15 @@ void loop() {
 
       // ── Fase 2: AJUSTE — recto adelante (+) o en reversa (-) ────────────────
       if (puntaFase == 2) {
-        if (PARK_PUNTA_AJUSTE_MS > 0) {
-          motorAdelante();
-          servoRumboPunta(puntaRumboRef);
-        } else {
-          motorReversa();
-          aplicarReversaHold(puntaRumboRef);
-        }
+        motorAdelante();
+        servoRumboPunta(puntaRumboRef);
         setMotor(PARK_PUNTA_AJUSTE_PWM);
-        if (millis() - puntaFaseMs >= (unsigned long)labs(PARK_PUNTA_AJUSTE_MS)) {
+        if ((odomMm - puntaOdom0) >= PARK_PUNTA_AJUSTE_MM) {
           motorCoast();
           puntaFase   = 3;
           puntaFaseMs = millis();
+          Serial.print("PUNTA fase 3: avance "); Serial.print(odomMm - puntaOdom0);
+          Serial.println(" mm");
         }
         break;
       }
@@ -4606,9 +7050,7 @@ void loop() {
         motorCoast();
         escribirServo(servoTope);
         // Tras la reversa también cuenta como coast antes de volver a adelante.
-        unsigned long espera = (PARK_PUNTA_AJUSTE_MS < 0)
-                               ? max(PARK_PUNTA_SERVO_MS, MANIOBRA_FRENO_MS)
-                               : PARK_PUNTA_SERVO_MS;
+        unsigned long espera = PARK_PUNTA_SERVO_MS;
         if (millis() - puntaFaseMs >= espera) {
           motorAdelante();
           puntaRumboArco0 = (puntaRetorno && PARK_PUNTA_ARCO_ABSOLUTO && MANIOBRA_13_CUADRAR_MS > 0)
@@ -4635,9 +7077,10 @@ void loop() {
         if (puntaDfCnt >= PARK_PUNTA_DF_N)      { finalizarPunta("ARCO: dF tope");  break; }
         if (tA >= PARK_PUNTA_ARCO_TIMEOUT_MS)   { finalizarPunta("ARCO: timeout");  break; }
         if (girado >= (float)(PARK_PUNTA_ARCO_DEG - PARK_PUNTA_OVERSHOOT_DEG)) {
-          if (PARK_PUNTA_ENTRA_MS == 0) { finalizarPunta("ARCO: angulo"); break; }
+          if (PARK_PUNTA_ENTRA_MM == 0) { finalizarPunta("ARCO: angulo"); break; }
           puntaFase   = 5;
           puntaFaseMs = millis();
+          puntaOdom0  = odomMm;
           Serial.print("PUNTA fase 5: ENTRA girado="); Serial.println(girado, 1);
           break;
         }
@@ -4653,7 +7096,10 @@ void loop() {
         setMotor(PARK_PUNTA_ENTRA_PWM);
         puntaDfCnt = (distF_med > 0 && distF_med <= PARK_PUNTA_DF_STOP_CM) ? puntaDfCnt + 1 : 0;
         if (puntaDfCnt >= PARK_PUNTA_DF_N)                 { finalizarPunta("ENTRA: dF tope"); break; }
-        if (millis() - puntaFaseMs >= PARK_PUNTA_ENTRA_MS) { finalizarPunta("ENTRA: tiempo");  break; }
+        if (PARK_PUNTA_ENTRA_MM > 0 && (odomMm - puntaOdom0) >= PARK_PUNTA_ENTRA_MM) {
+          finalizarPunta("ENTRA: distancia");
+          break;
+        }
         Serial.print(" | PUNTA f=5 dF="); Serial.print(distF_med);
         break;
       }
@@ -4675,35 +7121,28 @@ void loop() {
       // ── Fase 20: MEDIA VUELTA — 90° extra hacia adelante, hacia la pared ────
       if (puntaFase == 20) {
         unsigned long t = millis() - puntaFaseMs;
-        // Sin avance previo el carro arranca parado -> espera a que el servo llegue a
-        // tope. Con avance previo ya va rodando y el servo llega en movimiento.
-        unsigned long tArranque = (PARK_RETORNO_AVANCE_MS > 0) ? 0UL : PARK_PUNTA_SERVO_MS;
-        unsigned long tMov = (t > tArranque) ? (t - tArranque) : 0UL;
-        int vel = rampaPWM(tMov, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
-
-        // 1) Avance RECTO antes de girar: la media vuelta termina más lejos de la
-        //    pared del lote (orillas898 quedó a 17-19 cm y el seguidor no alcanzó a
-        //    salir a 30 antes del 1er poste).
-        if (t < PARK_RETORNO_AVANCE_MS) {
-          motorAdelante();
-          servoRumboPunta(puntaRumboGiro0);   // recto con gyro sobre el rumbo actual
-          setMotor(vel);
-          Serial.print(" | PUNTA f=20 avance t="); Serial.print(t);
-          break;
+        int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, PARK_RETORNO_PWM);
+        // Un solo arco. El radio sale de la distancia a la exterior: 2R es
+        // lo que el eje se corre hacia esa pared. Tope = radio mínimo (~95 mm);
+        // más abierto si vas por el centro, para no volver encima de las latas.
+        if (puntaServoU == 0) {
+          int gapMm = (extAhora > 5 && extAhora < 150) ? (int)extAhora * 10 : 700;
+          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
+          if (shift < 200) shift = 200;
+          float radio = shift / 2.0f;
+          float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
+          delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
+          puntaServoU = rutaServo(uturnIzq ? -delta : delta);
+          Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
+          Serial.print(" ext="); Serial.println(extAhora);
         }
-
-        // 2) Giro: servo a tope hacia la pared del regreso.
-        escribirServo(servoTope);
-        if (t < tArranque) {                     // (solo sin avance) espera al servo parado
-          motorCoast();
-          break;
-        }
+        escribirServo(puntaServoU);
         motorAdelante();
         setMotor(vel);
 
-        float girado = (anguloGyro - puntaRumboGiro0) * haciaPared;   // >0 = hacia la pared del regreso
-        bool  listo  = girado >= (float)(90 - PARK_RETORNO_OVERSHOOT_DEG);
-        bool  tout   = tMov >= PARK_RETORNO_AVANCE_MS + PARK_RETORNO_TIMEOUT_MS;
+        float girado = (anguloGyro - puntaRumboGiro0) * haciaAhora;   // >0 = hacia la pared actual
+        bool  listo  = girado >= (float)PARK_UTURN_DEG;
+        bool  tout   = t >= PARK_RETORNO_TIMEOUT_MS;
         if (listo || tout) {
           motorCoast();
           escribirServo(centroServo);
@@ -4711,7 +7150,7 @@ void loop() {
           puntaFaseMs       = millis();
           puntaSettleSampMs = millis();
           puntaSettleQuieto = 0;
-          Serial.print("PUNTA fase 21: media vuelta girado="); Serial.print(girado, 1);
+          Serial.print("PUNTA fase 21: U girado="); Serial.print(girado, 1);
           Serial.println(tout ? " (TIMEOUT)" : "");
           break;
         }
@@ -4731,21 +7170,11 @@ void loop() {
         unsigned long tS = nowMs - puntaFaseMs;
         bool quieto = (puntaSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N) && (tS >= MANIOBRA_FRENO_MS);
         if (quieto || tS >= PARK_RETORNO_SETTLE_MAX_MS) {
-          // 0° = recta de REGRESO ideal. Antes de la media vuelta 0° era la recta
-          // ideal que dejó finalizarManiobra(); la media vuelta suma 90° hacia la pared.
-          anguloGyro -= haciaPared * 90.0f;
+          // 0° = recta de REGRESO. La U sumó 180° hacia la pared que traíamos.
+          anguloGyro -= haciaAhora * 180.0f;
           Serial.print("PUNTA: rumbo de regreso ang="); Serial.println(anguloGyro, 1);
-          unsigned long revMs = puntaParedIzq ? PARK_RETORNO_REV_CCW_MS : PARK_RETORNO_REV_CW_MS;
-          if (revMs > 0) {
-            motorReversa();
-            integralRev   = 0; prevErrorRev = 0;
-            lastRevHoldMs = millis();
-            puntaFase     = 22;
-            puntaFaseMs   = millis();
-          } else {
-            motorAdelante();
-            arrancarSeguirPunta();
-          }
+          motorAdelante();
+          arrancarSeguirPunta();
         }
         break;
       }
@@ -4780,28 +7209,33 @@ void loop() {
     }
   }
 
+  actualizarOdometria();
+
   // ── Log periódico ─────────────────────────────────────────────────────────
-  Serial.print(" | Estado:");
-  if      (estado == GIRANDO)      Serial.print("GIRANDO");
-  else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
-  else if (estado == CRUCERO)      Serial.print("CRUCERO");
-  else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
-  else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
-  else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
-  else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
-  else if (estado == INICIO)       Serial.print("INICIO");
-  else                              Serial.print("SIGUIENDO");
-  Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
-  Serial.print(" | L:");        Serial.print(distL);
-  Serial.print(" | R:");        Serial.print(distR);
-  Serial.print(" | F:"); Serial.print(distF);
-  Serial.print(" | Ang:");      Serial.print(anguloGyro);
-  Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
-  Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
-  Serial.print(" | turn:");     Serial.print(turnHint);
-  Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
-  Serial.print(" | mem:");      Serial.print(piMemoryFrames);
-  Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
-  Serial.print(" | giros:");    Serial.print(turnsCompleted);
-  Serial.print("/");            Serial.println(TURNS_PER_RACE);
+  if (logEsteLoop) {
+    Serial.print(" | Estado:");
+    if      (estado == GIRANDO)      Serial.print("GIRANDO");
+    else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
+    else if (estado == CRUCERO)      Serial.print("CRUCERO");
+    else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
+    else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
+    else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
+    else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
+    else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
+    else if (estado == INICIO)       Serial.print("INICIO");
+    else                              Serial.print("SIGUIENDO");
+    Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
+    Serial.print(" | L:");        Serial.print(distL);
+    Serial.print(" | R:");        Serial.print(distR);
+    Serial.print(" | F:"); Serial.print(distF);
+    Serial.print(" | Ang:");      Serial.print(anguloGyro);
+    Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
+    Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
+    Serial.print(" | turn:");     Serial.print(turnHint);
+    Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
+    Serial.print(" | mem:");      Serial.print(piMemoryFrames);
+    Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
+    Serial.print(" | giros:");    Serial.print(turnsCompleted);
+    Serial.print("/");            Serial.println(TURNS_PER_RACE);
+  }
 }

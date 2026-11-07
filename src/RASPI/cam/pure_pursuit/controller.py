@@ -143,16 +143,27 @@ class PurePursuitController:
         steer_deg = math.degrees(steer_rad)
 
         # ── NUEVO: atenúa el steer si el obstáculo más cercano aún está lejos ──
+        open_road = True
         if bev_obstacles:
             gain = self._distance_steer_gain(bev_obstacles, robot_x, robot_y)
             steer_deg *= gain
+            nearest_d = min(max(0.0, robot_y - oy) for _, oy, _ in bev_obstacles)
+            open_road = nearest_d >= C.LOOKAHEAD_OBS_FAR_PX
+
+        # Recta libre: ANTi aquí no sigue una línea, sostiene el rumbo.
+        # Un tope chico centra sin gastar el giro (ni la velocidad) en el
+        # zigzag del path. Con la lata ya cerca el tope no aplica.
+        if open_road:
+            cap = float(getattr(C, "PP_OPEN_STEER_CAP_DEG", 0.0))
+            if cap > 0.0:
+                steer_deg = max(-cap, min(cap, steer_deg))
 
         steer_deg = max(-C.MAX_STEER_DEG, min(C.MAX_STEER_DEG, steer_deg))
 
         # ── Límite de slew: capa el cambio de steer entre frames procesados ──
         # Evita el latigazo (+0.56 -> +0.20 -> +0.79 -> -0.28 norm. visto en
         # pista). PP_STEER_SLEW_DEG <= 0 lo desactiva.
-        slew = getattr(C, "PP_STEER_SLEW_DEG", 0.0)
+        slew = C.per_frame(getattr(C, "PP_STEER_SLEW_DEG", 0.0))
         if slew > 0.0:
             lo = self._prev_steer_deg - slew
             hi = self._prev_steer_deg + slew
@@ -162,4 +173,7 @@ class PurePursuitController:
         return steer_deg, (float(target[0]), float(target[1]))
 
     def normalize(self, steer_deg: float) -> float:
-        return max(-1.0, min(1.0, steer_deg / C.PP_STEER_GAIN))
+        # steer_deg es ángulo de RUEDA (geometría PP); el ESP lo escribe como
+        # grados de SERVO 1:1. PP_SERVO_PER_WHEEL convierte (1.0 = como antes).
+        servo_deg = steer_deg * float(getattr(C, "PP_SERVO_PER_WHEEL", 1.0))
+        return max(-1.0, min(1.0, servo_deg / C.PP_STEER_GAIN))

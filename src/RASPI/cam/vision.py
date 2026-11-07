@@ -5,25 +5,55 @@ import numpy as np
 
 
 cv2.setUseOptimized(True)
-cv2.setNumThreads(min(4, os.cpu_count() or 1))
+fox_cv_threads = int(os.environ.get("FOX_CV_THREADS", str(min(4, os.cpu_count() or 1))))
+cv2.setNumThreads(fox_cv_threads)
 
 
-def open_camera(cam_index=0):
+_LENS_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pure_pursuit", "lens_calib.npz")
+
+
+class _UndistortCap:
+    """Envuelve el VideoCapture y endereza cada frame con la calibración de lente."""
+
+    def __init__(self, cap, m1, m2):
+        self._cap, self._m1, self._m2 = cap, m1, m2
+
+    def read(self):
+        ok, frame = self._cap.read()
+        if ok and frame is not None:
+            frame = cv2.remap(frame, self._m1, self._m2, cv2.INTER_LINEAR)
+        return ok, frame
+
+    def __getattr__(self, name):
+        return getattr(self._cap, name)
+
+
+def _wrap_undistort(cap):
+    # FOX_LENS_CALIB: ruta del npz; "" o "0" = apagado. Sin archivo = frames crudos.
+    path = os.environ.get("FOX_LENS_CALIB", _LENS_DEFAULT)
+    if path in ("", "0") or not os.path.exists(path):
+        return cap
+    try:
+        d = np.load(path)
+        size = tuple(int(v) for v in d["size"])   # tamaño con que se calibró (640x480)
+        m1, m2 = cv2.initUndistortRectifyMap(d["K"], d["dist"], None, d["newK"], size, cv2.CV_16SC2)
+        print(f"[CAM] lente enderezado con {path} (sig {str(d['sig'])})", flush=True)
+        return _UndistortCap(cap, m1, m2)
+    except Exception as e:   # una calibración rota no debe tumbar la carrera
+        print(f"[CAM] AVISO: no se pudo cargar {path} ({e}); sin enderezar", flush=True)
+        return cap
+
+
+def open_camera(cam_index=0, undistort=True):
     if os.name == "nt":
         cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
     else:
-        # Color: el lente gran angular no tiene filtro IR -> imagen rojiza y un
-        # aro MAGENTA en las orillas. Se corrige en dos pasos (ver
-        # camera_tuning/README.md):
-        #  1) tabla de sombreado del lente (ALSC) calibrada para ESTE lente,
-        #     dentro de un tuning propio (base imx219_noir.json);
-        #  2) balance de blancos manual con ganancias fijas <rojo,azul>.
-        #  - Pi 4 (ISP VC4): <1.2,1.5> con el tuning del sistema (v1, nacional).
-        #  - Pi 5 (ISP PiSP): tuning camera_tuning/imx219_noir_wro_pi5.json +
-        #    <1.10,1.51>. Calibrado 2026-10-07 (hoja blanca, luz ~3700 K):
-        #    R/G y B/G = 1.00 en centro Y esquinas (antes las esquinas 1.3-1.4).
+        # Color: el lente gran angular no tiene filtro IR -> imagen rojiza y aro
+        # MAGENTA en las orillas (ver camera_tuning/README.md). Pi 5 (ISP PiSP):
+        # tuning propio imx219_noir_wro_pi5.json + ganancias <1.10,1.51>
+        # (calibrado 2026-10-07). Pi 4 (ISP VC4): <1.2,1.5> con el tuning del sistema.
         tuning_pi5 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   "camera_tuning", "imx219_noir_wro_pi5.json")
         if os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp") and os.path.exists(tuning_pi5):
@@ -31,17 +61,27 @@ def open_camera(cam_index=0):
             gains = "<1.10,1.51>"
         else:
             gains = "<1.2,1.5>"
-        # format=BGRx: en la Pi 5 (ISP PiSP) libcamerasrc sin formato explícito
-        # falla con "not-negotiated". BGRx sale directo del ISP (30 fps, ~2% CPU);
-        # NV12 también negocia pero la conversión cae al CPU y baja a ~20 fps.
+        # 40 fps = máximo del modo 1640x1232 del IMX219 (el modo de 3280x2464 solo da
+        # 21). format=BGRx: en la Pi 5 libcamerasrc sin formato explícito falla con
+        # "not-negotiated"; BGRx sale directo del ISP (NV12 cae al CPU y baja fps).
+        fps = int(os.environ.get("FOX_CAM_FPS", "40"))
+        # Escalar antes de convertir: el BGRx de 2 MP baja a 640x480 y recién ahí pasa a BGR (FOX_CAM_PIPE=old: orden viejo).
+        conv = ("! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
+                if os.environ.get("FOX_CAM_PIPE") == "old" else
+                "! videoscale n-threads=2 ! video/x-raw, width=640, height=480 "
+                "! videoconvert n-threads=2 ! video/x-raw, format=BGR ")
         pipeline = (
             f"libcamerasrc awb-enable=false colour-gains={gains} "
             "! queue max-size-buffers=1 leaky=downstream "
-            "! video/x-raw, width=1640, height=1232, framerate=30/1, format=BGRx "
-            "! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
+            f"! video/x-raw, width=1640, height=1232, framerate={fps}/1, format=BGRx "
+            f"{conv}"
             "! appsink drop=true max-buffers=1 sync=false"
         )
         cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        if not cap.isOpened() and os.environ.get("FOX_CAM_PIPE") != "old":
+            # GStreamer viejo sin n-threads: reintenta con la cadena original
+            os.environ["FOX_CAM_PIPE"] = "old"
+            return open_camera(cam_index, undistort)
         if not cap.isOpened():
             cap = cv2.VideoCapture(cam_index)
 
@@ -55,6 +95,8 @@ def open_camera(cam_index=0):
     except Exception:
         pass
 
+    if undistort:
+        cap = _wrap_undistort(cap)
     return cap
 
 
@@ -158,30 +200,37 @@ class Vision:
             solidity = area / bbox_area if bbox_area > 0 else 0
             aspect = max(w, h) / max(1, min(w, h))
 
-            if solidity < MIN_SOLIDITY or aspect > MAX_ASPECT:
+            # La cinta es angosta y poco sólida. Con la mira a 45° y el lente
+            # de 120° una lata a 40–65 cm se ve alta (aspecto ~2.3–2.5) pero
+            # compacta (solidez ~0.85); el tope 2.2 se la comía.
+            if solidity < MIN_SOLIDITY:
                 continue
+            if aspect > MAX_ASPECT and solidity < 0.55:
+                continue
+
+            # Máscara del contorno SOLO dentro de su recuadro (mismos px y mismo
+            # orden row-major que el frame completo -> medianas idénticas).
+            if (color_name == "Red" and bgr is not None) or (color_name == "Green" and hsv is not None):
+                cnt_mask = np.zeros((h, w), np.uint8)
+                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1, offset=(-x, -y))
+                sel = cnt_mask > 0
+                sel_m = sel & (mask[y:y + h, x:x + w] > 0)
 
             # Rechazo de la pared magenta del estacionamiento por B/R (ver
             # RED_BR_MAX). Se mide solo sobre los px del contorno, no del bbox.
             if color_name == "Red" and bgr is not None:
-                cnt_mask = np.zeros(mask.shape, np.uint8)
-                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
-                sel = cnt_mask > 0
-                b_px = bgr[..., 0][sel].astype(np.float32)
-                r_px = bgr[..., 2][sel].astype(np.float32)
+                bgr_r = bgr[y:y + h, x:x + w]
+                b_px = bgr_r[..., 0][sel].astype(np.float32)
+                r_px = bgr_r[..., 2][sel].astype(np.float32)
                 if float(np.median(b_px / np.maximum(r_px, 1.0))) > self.RED_BR_MAX:
                     continue
-                sel_m = sel & (mask > 0)
-                g_px = bgr[..., 1][sel_m].astype(np.float32)
-                r_m = np.maximum(bgr[..., 2][sel_m].astype(np.float32), 1.0)
+                g_px = bgr_r[..., 1][sel_m].astype(np.float32)
+                r_m = np.maximum(bgr_r[..., 2][sel_m].astype(np.float32), 1.0)
                 if g_px.size and float(np.median(g_px / r_m)) > self.RED_GR_MAX:
                     continue   # cinta naranja (ver RED_GR_MAX)
 
             if color_name == "Green" and hsv is not None:
-                cnt_mask = np.zeros(mask.shape, np.uint8)
-                cv2.drawContours(cnt_mask, [cnt], -1, 255, -1)
-                sel = (cnt_mask > 0) & (mask > 0)
-                if sel.any() and float(np.median(hsv[..., 1][sel])) < self.GREEN_S_MIN_MED:
+                if sel_m.any() and float(np.median(hsv[y:y + h, x:x + w, 1][sel_m])) < self.GREEN_S_MIN_MED:
                     continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
 
             objects.append((x, y, w, h))

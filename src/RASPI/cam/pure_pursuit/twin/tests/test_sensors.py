@@ -1,0 +1,236 @@
+"""Sensores contra geometría conocida."""
+
+import math
+from dataclasses import replace
+
+import numpy as np
+import pytest
+
+from pure_pursuit.twin.params import TwinParams, max_wheel_deg
+from pure_pursuit.twin.sensors import Encoder, Gyro, Pose, ToF, Ultrasonic
+from pure_pursuit.twin.world import Segment, World
+from pure_pursuit.wro_field import OUTER_HALF_MM, SIGN_MM, randomize
+
+
+class _WallWorld:
+    """Mundo mínimo: pared norte (segmento horizontal en y constante)."""
+
+    def __init__(self, y_wall: float):
+        a = np.array([-OUTER_HALF_MM, y_wall], dtype=np.float64)
+        b = np.array([OUTER_HALF_MM, y_wall], dtype=np.float64)
+        edge = b - a
+        tangent = edge / np.linalg.norm(edge)
+        normal = np.array([tangent[1], -tangent[0]])
+        self.segments = [
+            Segment(a=a, b=b, material="wall", normal=normal, object_index=0),
+        ]
+        self._a = np.stack([s.a for s in self.segments])
+        self._b = np.stack([s.b for s in self.segments])
+        self._normals = np.stack([s.normal for s in self.segments])
+        self._materials = ["wall"]
+        self._obj_idx = np.array([0], dtype=np.int32)
+        self.field = None
+
+    def cast(self, origins, dirs, max_range):
+        w = World.__new__(World)
+        w.segments = self.segments
+        w._a = self._a
+        w._b = self._b
+        w._normals = self._normals
+        w._materials = self._materials
+        w._obj_idx = self._obj_idx
+        return w.cast(origins, dirs, max_range)
+
+    def material_name(self, idx):
+        return "wall"
+
+
+class _EastWallWorld(_WallWorld):
+    """Pared este en x = +OUTER_HALF_MM."""
+
+    def __init__(self, x_wall: float = OUTER_HALF_MM):
+        a = np.array([x_wall, -OUTER_HALF_MM], dtype=np.float64)
+        b = np.array([x_wall, OUTER_HALF_MM], dtype=np.float64)
+        edge = b - a
+        tangent = edge / np.linalg.norm(edge)
+        normal = np.array([tangent[1], -tangent[0]])
+        self.segments = [
+            Segment(a=a, b=b, material="wall", normal=normal, object_index=0),
+        ]
+        self._a = np.stack([s.a for s in self.segments])
+        self._b = np.stack([s.b for s in self.segments])
+        self._normals = np.stack([s.normal for s in self.segments])
+        self._materials = ["wall"]
+        self._obj_idx = np.array([0], dtype=np.int32)
+        self.field = None
+
+
+@pytest.fixture
+def rng():
+    return np.random.default_rng(42)
+
+
+def test_ultrasonic_perpendicular_wall(rng):
+    params = TwinParams()
+    us = Ultrasonic(params.ultrasonic, rng)
+    y_wall = 1000.0
+    dist_target = 500.0
+    forward_mount = params.ultrasonic.mounts[2].forward_mm
+    y_rear = y_wall - dist_target - forward_mount
+    world = _WallWorld(y_wall)
+    pose = Pose(0.0, y_rear, 0.0)
+    echo = us.echo_us(2, world, pose)
+    expected = 2.0 * dist_target / params.ultrasonic.sound_mm_per_us
+    assert echo > 0
+    assert abs(echo - expected) / expected < 0.02
+
+
+def test_ultrasonic_yaw30(rng):
+    params = TwinParams()
+    us = Ultrasonic(params.ultrasonic, rng)
+    y_wall = 800.0
+    dist_n = 500.0
+    forward_mount = params.ultrasonic.mounts[2].forward_mm
+    y_rear = y_wall - dist_n - forward_mount
+    world = _WallWorld(y_wall)
+    pose = Pose(0.0, y_rear, 30.0)
+    echo = us.echo_us(2, world, pose)
+    d_mm = echo * params.ultrasonic.sound_mm_per_us / 2.0
+    expected = dist_n / math.cos(math.radians(15.0))
+    assert echo > 0
+    assert abs(d_mm - expected) / expected < 0.08
+
+
+def test_ultrasonic_yaw50_no_echo(rng):
+    params = TwinParams()
+    us = Ultrasonic(params.ultrasonic, rng)
+    world = _WallWorld(900.0)
+    pose = Pose(0.0, 300.0, 50.0)
+    assert us.echo_us(2, world, pose) == 0
+
+
+def test_ultrasonic_sign_before_wall(rng):
+    params = TwinParams()
+    us = Ultrasonic(params.ultrasonic, rng)
+    field = randomize(7)
+    world = World(field)
+    half = SIGN_MM / 2.0
+    sign = next(s for s in field.signs if s.color == "Red")
+    y_rear = sign.y - half - 300.0 - params.ultrasonic.mounts[2].forward_mm
+    pose = Pose(sign.x, y_rear, 0.0)
+    echo = us.echo_us(2, world, pose)
+    d_mm = echo * params.ultrasonic.sound_mm_per_us / 2.0
+    assert 250.0 < d_mm < 360.0
+
+
+def test_tof_black_wall_range(rng):
+    params = TwinParams()
+    tof = ToF(params.tof, rng)
+    x_wall = OUTER_HALF_MM
+    world = _EastWallWorld(x_wall)
+    lateral = params.tof.mounts[1].right_mm
+    for dist, valid in ((200.0, True), (2000.0, False)):   # negro visible (medido); 2000 > rango Short
+        x_rear = x_wall - dist - lateral
+        pose = Pose(x_rear, 0.0, 0.0)
+        r = tof.read_mm(1, world, pose, float(dist))
+        if valid:
+            assert r > 0
+            assert abs(r - dist) < 40.0
+        else:
+            assert r == -1
+
+
+def test_tof_short_map_measured(rng):
+    """Short ROI 16 en pared negra (calib 2026-10-21): +19 cerca, 800 -> 610 (ve el piso)."""
+    params = replace(TwinParams().tof, noise_sigma_mm=0.0, noise_rel=0.0)
+    world = _EastWallWorld(OUTER_HALF_MM)
+    lateral = params.mounts[1].right_mm
+    for dist, want in ((300.0, 319), (800.0, 610), (1100.0, 610)):
+        r = ToF(params, rng).read_mm(1, world, Pose(OUTER_HALF_MM - dist - lateral, 0.0, 0.0), 0.0)
+        assert abs(r - want) < 15, (dist, r)
+
+
+def test_tof_red_sign(rng):
+    params = TwinParams()
+    tof = ToF(params.tof, rng)
+    field = randomize(3)
+    world = World(field)
+    sign = next(s for s in field.signs if s.color == "Red")
+    x_rear = sign.x + 400.0
+    pose = Pose(x_rear, sign.y, 0.0)
+    r = tof.read_mm(0, world, pose, 1.0)
+    assert r > 200
+
+
+# Con los parámetros por defecto el umbral de señal está calibrado a pared negra
+# de 250 mm, así que ninguna pared a 1000 mm ni 2500 mm da lectura. Para aislar el
+# límite de alcance (max_range_mm_by_id) se sube black_wall_max_mm en la copia del test.
+_RANGE_TEST_BLACK_WALL_MM = 3000.0
+
+
+def test_tof_lateral_range_limit_1300(rng):
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM, short_map_ids=())
+    x_wall = OUTER_HALF_MM
+    lateral = params.mounts[1].right_mm
+    for dist, valid in ((1000.0, True), (1500.0, False)):
+        tof = ToF(params, np.random.default_rng(42))
+        world = _EastWallWorld(x_wall)
+        pose = Pose(x_wall - dist - lateral, 0.0, 0.0)
+        r = tof.read_mm(1, world, pose, 0.0)
+        if valid:
+            assert r > 0
+            assert abs(r - dist) < 60.0
+        else:
+            assert r == -1
+
+
+def test_tof_front_range_4000(rng):
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    tof = ToF(params, rng)
+    forward = params.mounts[3].forward_mm
+    dist = 2500.0
+    world = _WallWorld(dist + forward)
+    r = tof.read_mm(3, world, Pose(0.0, 0.0, 0.0), 0.0)
+    assert r > 0
+    assert abs(r - dist) < 100.0
+
+
+def test_tof_sample_period_per_sensor(rng):
+    params = TwinParams().tof
+    assert params.sample_period_s_by_id[0] == pytest.approx(0.020)
+    assert params.sample_period_s_by_id[1] == pytest.approx(0.020)
+    assert params.sample_period_s_by_id[3] == pytest.approx(1.0 / 30.0)
+    # Comportamiento: el lateral (0.020 s) re-muestrea a los 21 ms y no a los 15 ms;
+    # el frontal (1/30 s) no re-muestrea a los 20 ms.
+    lat = replace(params, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM, short_map_ids=())
+    tof = ToF(lat, np.random.default_rng(42))
+    world = _EastWallWorld(OUTER_HALF_MM)
+    near = Pose(OUTER_HALF_MM - 200.0 - lat.mounts[1].right_mm, 0.0, 0.0)
+    far = Pose(OUTER_HALF_MM - 1200.0 - lat.mounts[1].right_mm, 0.0, 0.0)
+    r0 = tof.read_mm(1, world, near, 0.0)
+    assert r0 > 0
+    assert tof.read_mm(1, world, far, 0.015) == r0
+    assert abs(tof.read_mm(1, world, far, 0.021) - 1200) < 60
+    fwd = Pose(0.0, 0.0, 0.0)
+    fw_world = _WallWorld(1000.0 + lat.mounts[3].forward_mm)
+    f0 = tof.read_mm(3, fw_world, fwd, 0.0)
+    assert f0 > 0
+    assert tof.read_mm(3, _WallWorld(3000.0), fwd, 0.020) == f0
+
+
+def test_encoder_slip(rng):
+    params = TwinParams()
+    enc = Encoder(params.encoder, rng)
+    wmax = max_wheel_deg(params.steering)
+    ds = 100.0
+    enc.update(ds, 0.0, 0.0, wmax)
+    expected = ds * params.encoder.counts_per_mm
+    assert abs(enc.count - expected) / expected < 0.08
+
+
+def test_gyro_rate(rng):
+    params = TwinParams()
+    g = Gyro(params.gyro, rng)
+    true_rate = 45.0
+    samples = [g.read(true_rate, i * 0.01) for i in range(200)]
+    assert abs(np.mean(samples) - true_rate) < 5.0
