@@ -226,6 +226,7 @@ const int ACK_SALTA_VIEJOS = 0;
 // Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
 // Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (antes). 2026-10-16: 100 (prepark motor físico 0/100 -> 100/100 junto con LOG_MIN_MS y PARK_ANG_IN_DEG 70 / PARK_POSTE2_MM 60; ver docs/HANDOFF_PARKING.md).
 const int ACK_E_MIN_MS = 100;
+unsigned long loopMaxUs = 0;   // loop más largo desde el último ACK (lpm=), diagnóstico del UART
 unsigned long ackEUltimoMs = 0;
 // Log periódico (~170 B por loop = ~15 ms a 115200) frena el loop al estacionar; mínimo de ms entre logs SOLO en ESTACIONANDO/ESTACIONANDO_PUNTA. 0 = cada loop (antes).
 const int LOG_MIN_MS = 100;
@@ -3638,6 +3639,8 @@ void parsePiMessage(String line) {
     Serial2.print(",bnoM="); Serial2.print(bnoMalos);
 #endif
     Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
+    Serial2.print(",lpm=");  Serial2.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
+    loopMaxUs = 0;
     Serial2.println();
     return;
   }
@@ -4014,6 +4017,13 @@ void terminando(long distL, long distR) {
 
 void setup() {
   Serial.begin(USB_BAUD);
+#if !defined(FOX_SIL)
+  // El RX por defecto es de 256 B: a 460800 se llena en ~5 ms y un V2 + 2 líneas de
+  // ruta son ~450 B. Con el loop real (ToF/BNO por I2C) se perdían bytes: la ruta
+  // nunca cuadraba en RTE (rn=0) y faltaban V2/ACK (carro v2, 2026-11-07). El twin
+  // no modela el límite. Debe ir ANTES de begin().
+  Serial2.setRxBufferSize(4096);
+#endif
   Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
 
   Wire.begin();
@@ -4099,6 +4109,12 @@ void setup() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void loop() {
+  {   // duración del loop anterior -> lpm= en el ACK
+    static unsigned long prevUs = 0;
+    unsigned long nowUs = micros();
+    if (prevUs != 0 && nowUs - prevUs > loopMaxUs) loopMaxUs = nowUs - prevUs;
+    prevUs = nowUs;
+  }
 #if defined(FOX_SIL)
   { static bool sembrado = false; if (!sembrado) { sembrado = true; silRutaSeed(); } }   // antes del 1er ACK
 #endif
