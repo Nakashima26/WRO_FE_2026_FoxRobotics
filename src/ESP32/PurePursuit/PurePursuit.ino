@@ -244,6 +244,9 @@ int   rutaVel     = -1;      // rv= : PWM máximo pedido por la Pi (-1 = sin top
 int   rutaN       = 0;       // puntos de la ruta activa (0 = sin ruta)
 int   rutaCarga   = 0;       // puntos anunciados en RTB (carga en curso)
 int   rutaRecib   = 0;       // puntos recibidos de la carga en curso
+int   rutaUltRte  = 0;       // n del último RTE recibido (re= en el ACK)
+volatile int uartErrs = 0;                          // ue= : errores del UART de la Pi
+int lineasV2 = 0, lineasRT = 0, lineasOtras = 0;    // lv/lr/lo : líneas recibidas por tipo
 float rutaPaso    = 20.0f;   // mm entre puntos
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
@@ -370,7 +373,9 @@ static volatile uint8_t encPrevAB = 0;
 static const int8_t encTrans[16] = {
   0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
 };
+volatile uint32_t encIsrN = 0;   // ei= en el ACK: interrupciones del encoder (diagnóstico de ISR storm)
 void IRAM_ATTR encIsr() {
+  encIsrN++;
   uint8_t a = digitalRead(ENC_PIN_A) ? 1 : 0;
   uint8_t b = digitalRead(ENC_PIN_B) ? 1 : 0;
   uint8_t ab = (a << 1) | b;
@@ -1985,6 +1990,9 @@ void setMotorTope(int velocidad, int tope) {
                            MOTOR_REV_RAMPA_MIN, velocidad);
     }
   }
+#ifdef FOX_BANCO_SIN_MOTOR
+  velocidad = 0;   // banco: probar el UART sin mover el motor
+#endif
   ledcWrite(PWMA, velocidad);
   pwmActual = velocidad;
 }
@@ -3424,6 +3432,9 @@ void parseRuta(const String &line) {
   }
   if (line.startsWith("RTE,")) {
     int n = line.substring(4).toInt();
+    Serial.print("RTE n="); Serial.print(n); Serial.print(" carga="); Serial.print(rutaCarga);
+    Serial.print(" recib="); Serial.println(rutaRecib);
+    rutaUltRte = n;
     if (n == rutaCarga && rutaRecib == n && n >= 10) {
       // Doble buffer: hasta aquí el ESP siguió la ruta anterior completa.
       memcpy(rutaX, rutaXb, sizeof(float) * n);
@@ -3634,6 +3645,16 @@ void parsePiMessage(String line) {
     Serial2.print(",bnoM="); Serial2.print(bnoMalos);
 #endif
     Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
+#if FOX_ENCODER && !defined(FOX_SIL)
+    Serial2.print(",ei=");   Serial2.print(encIsrN);
+#endif
+    Serial2.print(",ue=");   Serial2.print(uartErrs);
+    Serial2.print(",lv=");   Serial2.print(lineasV2);
+    Serial2.print(",lr=");   Serial2.print(lineasRT);
+    Serial2.print(",lo=");   Serial2.print(lineasOtras);
+    Serial2.print(",rc=");   Serial2.print(rutaCarga);    // diagnóstico de la subida de ruta:
+    Serial2.print(",rk=");   Serial2.print(rutaRecib);    //   puntos esperados / recibidos / último RTE
+    Serial2.print(",re=");   Serial2.print(rutaUltRte);
     Serial2.print(",lpm=");  Serial2.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
     loopMaxUs = 0;
     Serial2.println();
@@ -3657,10 +3678,33 @@ void parsePiMessage(String line) {
   }
 }
 
+// Diagnóstico del UART de la Pi (ue/lv/lr/lo en el ACK): errores del driver
+// (overflow de FIFO o de buffer), líneas V2, líneas RT y otras (basura).
+#if !defined(FOX_SIL)
+void onPiUartError(hardwareSerial_error_t e) {
+  uartErrs++;
+  static int porTipo[8] = {0};
+  if ((int)e >= 0 && (int)e < 8) porTipo[(int)e]++;
+  if (uartErrs <= 5 || uartErrs % 50 == 0) {
+    // 1 BREAK, 2 BUFFER_FULL, 3 FIFO_OVF, 4 FRAME, 5 PARITY
+    Serial.printf("UARTERR n=%d tipos brk=%d buf=%d fifo=%d frame=%d par=%d\n", uartErrs,
+                  porTipo[1], porTipo[2], porTipo[3], porTipo[4], porTipo[5]);
+  }
+}
+#endif
+
 void readPiSerial() {
   while (Serial2.available() > 0) {
     String line = Serial2.readStringUntil('\n');
-    if (line.length() > 0) parsePiMessage(line);
+    if (line.length() == 0) continue;
+    if (line.startsWith("V2,")) lineasV2++;
+    else if (line.startsWith("RT")) lineasRT++;
+    else {
+      lineasOtras++;
+      Serial.print("PI? len="); Serial.print(line.length()); Serial.print(" ");
+      Serial.println(line.substring(0, 60));
+    }
+    parsePiMessage(line);
   }
 }
 
@@ -4018,8 +4062,30 @@ void setup() {
   // nunca cuadraba en RTE (rn=0) y faltaban V2/ACK (carro v2, 2026-11-07). El twin
   // no modela el límite. Debe ir ANTES de begin().
   Serial2.setRxBufferSize(4096);
+  Serial2.onReceiveError(onPiUartError);
+  // begin() desde una tarea en el núcleo 0: la interrupción del UART queda en el núcleo que
+  // la pide, lejos del I2C de los ToF y del encoder (núcleo 1). Con todo en el núcleo 1 la
+  // FIFO de 128 B se desbordaba (UART_FIFO_OVF, carro v2 2026-11-07; mismo arreglo que
+  // reportan en arduino-esp32 #10420 / esp32.com).
+  {
+    static volatile bool listo = false;
+    xTaskCreatePinnedToCore([](void *) {
+      Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+      listo = true;
+      vTaskDelete(NULL);
+    }, "uartPi", 4096, NULL, 5, NULL, 0);
+    while (!listo) delay(1);
+  }
+#else
+  Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);
 #endif
-  Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 → Raspberry Pi
+#if !defined(FOX_SIL)
+  // Arriba de 57600 el core (3.3.4) deja el umbral de la FIFO de HW en 120 de 128 B:
+  // 8 B de margen = 0.17 ms a 460800. Con el encoder/I2C/BNO metiendo interrupciones
+  // la FIFO se desbordaba (ue=312 en 25 s, líneas cortadas, ruta rechazada). Con 32 B
+  // el ISR la vacía antes y hay ~2 ms de margen.
+  Serial2.setRxFIFOFull(32);
+#endif
 
   Wire.begin();
 #if FOX_BNO && !defined(FOX_SIL)
