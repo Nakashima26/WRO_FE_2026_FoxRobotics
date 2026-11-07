@@ -211,7 +211,10 @@ class Localizer:
         self._predict(px, py, yaw)
         if not correct:
             return
+        sin_us = getattr(C, "US_DESDE_TOF", False)
         for key, mname, scale, kind in _SENSORS:
+            if kind == "us" and sin_us:
+                continue   # dL/dR/dF son los mismos ToF (config.US_DESDE_TOF)
             raw = _ack_num(ack, key)
             if raw is None or raw <= 0:
                 continue

@@ -124,6 +124,11 @@ SENSOR_MOUNTS = {
     "tof_rear":  (  0.0, -19.6, 180.0),
     "tof_front": (  0.0, 141.4,   0.0),
 }
+# Carro v2 (2026-11-07): todavía SIN HC-SR04. El ESP llena dL/dR/dF del ACK con los
+# ToF L/R/F pasados al montaje del sonar (FOX_US_DE_TOF en PurePursuit.ino), así que
+# no son sensores aparte: el localizador y las lecturas de mapa los ignoran y usan
+# tL/tR/tF. False = carro con sonares de verdad.
+US_DESDE_TOF = True
 # Procedencia, para el twin (describe()) y para quien mida.
 VEHICLE_DIMS_PROVENANCE = {
     "ROBOT_LENGTH_MM": "medido en el carro impreso 2026-10-22",

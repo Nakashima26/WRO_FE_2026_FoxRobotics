@@ -3078,7 +3078,36 @@ void aplicarReversaHold(float headingRef) {
 // Sensores
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Carro v2 (2026-11-07): todavía no tiene HC-SR04; los pines TRIG/ECHO quedan al
+// aire y pulseIn siempre daba 200 (sin eco) -> la salida del cajón no sabía de qué
+// lado estaba la pared y giraba siempre a la izquierda. Con FOX_US_DE_TOF las
+// lecturas L/R/F salen del ToF (tofMm, lo llena leerToF() al inicio de loop()),
+// pasadas a la distancia que vería el sonar desde SU montaje para que los umbrales
+// en cm sigan igual: config.SENSOR_MOUNTS pone los ToF laterales en x=±35.2 y los
+// sonares en ±63.5 (28.3 mm más afuera); el ToF frontal en y=141.4 y el sonar en
+// 147.6 (6.2 mm más adelante). Sin lectura válida (-1: fuera de rango, estado
+// malo o sensor caído) = 200, igual que "sin eco". El twin (SIL) pasa por aquí
+// con sil_tof_mm, así que carro y twin leen lo mismo.
+#ifndef FOX_US_DE_TOF
+#define FOX_US_DE_TOF FOX_TOF
+#endif
+#if FOX_US_DE_TOF && FOX_TOF
+const float US_TOF_OFF_LAT_MM    = 63.5f - 35.2f;
+const float US_TOF_OFF_FRENTE_MM = 147.6f - 141.4f;
+#endif
+
 long leerDistancia(int trig, int echo) {
+#if FOX_US_DE_TOF && FOX_TOF
+  (void)echo;
+  int idx = (trig == TRIG_L) ? 0 : (trig == TRIG_R) ? 1 : 3;
+  float off = (idx == 3) ? US_TOF_OFF_FRENTE_MM : US_TOF_OFF_LAT_MM;
+  int mm = tofMm[idx];
+  if (mm <= 0) return 200;
+  long dist = lroundf((mm - off) / 10.0f);
+  if (dist < 1) dist = 1;
+  if (dist > 200) dist = 200;
+  return dist;
+#else
   digitalWrite(trig, LOW);
   delayMicroseconds(2);
   digitalWrite(trig, HIGH);
@@ -3093,6 +3122,7 @@ long leerDistancia(int trig, int echo) {
   long dist = dur * 0.034 / 2;
   if (dist == 0 || dist > 200) dist = 200;
   return dist;
+#endif
 }
 
 float filtroEMA(float nueva, float anterior) {

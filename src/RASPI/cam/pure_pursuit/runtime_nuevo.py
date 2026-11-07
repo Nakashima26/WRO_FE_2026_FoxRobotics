@@ -523,6 +523,8 @@ class PPRuntime:
         dL = self._us_cm_from_fields(fields, "dL")
         dR = self._us_cm_from_fields(fields, "dR")
         dF = self._us_cm_from_fields(fields, "dF")
+        if getattr(C, "US_DESDE_TOF", False):
+            dL = dR = dF = None   # son los mismos ToF de abajo (config.US_DESDE_TOF)
         if dL is not None:
             out.append(SensorReading(
                 "us_left", "us", DEFAULT_MOUNTS["us_left"], US_HALF_ANGLE_DEG, dL * 10.0))
