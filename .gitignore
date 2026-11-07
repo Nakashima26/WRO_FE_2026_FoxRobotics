@@ -14,6 +14,10 @@ __pycache__/
 venv/
 .venv-sim/
 
+# Firmware compilado y corridas del simulador (digital twin)
+_build/
+src/RASPI/cam/runs/
+
 # GitHub token (NUNCA subir el token real)
 deploy/.github-token
 env/
