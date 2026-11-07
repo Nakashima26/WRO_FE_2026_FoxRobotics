@@ -289,7 +289,14 @@ class SerialLink:
 			cc[termios.VMIN]  = 0
 			cc[termios.VTIME] = 2
 
-			ispeed = ospeed = termios.B115200
+			# Velocidad = self.baudrate (BAUDRATE de carrera.json / --baudrate). Antes
+			# estaba fija en B115200 aunque el log dijera "@ 460800": con
+			# PurePursuitCarrera.ino (PI_BAUD 460800) el ESP32 nunca veía el READY.
+			vel = getattr(termios, f"B{int(self.baudrate)}", None)
+			if vel is None:
+				print(f"[SERIAL] {self.baudrate} baud no existe en termios -> 115200", flush=True)
+				vel = termios.B115200
+			ispeed = ospeed = vel
 
 			termios.tcsetattr(self.fd, termios.TCSANOW,
 			                   [iflag, oflag, cflag, lflag, ispeed, ospeed, cc])
