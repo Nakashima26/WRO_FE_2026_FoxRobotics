@@ -10,6 +10,18 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
 ## Estado 2026-11-07 (leer primero)
 
+**Primera prueba en el carro real (2026-11-07, seed 19): el carro no se movió. La Pi→ESP no llega.**
+- Pi: repo en `main`, servicio `wro-runtime` habilitado al arrancar; el drop-in ya no fuerza `--baudrate 115200` (usa 460800 de `carrera.json`). Copia en `deploy/systemd/wro-runtime.service.d/pi5-uart.conf`.
+- ESP: `PurePursuitCarrera.ino` compila y se subió (`fdb8326` arregló `ranging_data`). ToF trasero desconectado (cable roto): el firmware lo deja en -1, no hace falta reflashear.
+- Al picar el botón la Pi manda `READY` ×3 por `/dev/ttyAMA0` (GPIO14), pero el ESP (USB a la Mac) sigue en «Esperando READY desde Pi...».
+- `src/ESP32/PinScan`: sketch de diagnóstico (USB a 460800). Imprime qué pines están en alto y alterna el 16 cada 1 s.
+  - ESP→Pi **funciona**: el GPIO15 de la Pi (`pinctrl get 15`) sigue el pin 16.
+  - Pi→ESP **probablemente roto**: con la Pi prendida (TX en alto en reposo) el pin 17 del ESP nunca subió y ningún otro pin cambió.
+  - Falta confirmar con `pinctrl set 14 op dl` / `op dh` desde la Pi mirando el PinScan (se desconectó el USB a medio test).
+  - **Revisar el cable del pin físico 8 de la Pi (GPIO14) al GPIO17 del ESP, y la tierra común.**
+- **Después de la prueba hay que volver a subir `PurePursuitCarrera.ino`** al ESP: ahora tiene PinScan.
+- El USB del ESP se desconecta seguido de la Mac (cable/conector flojo).
+
 - **Todo está en `main`** (`a01bacb` isla + `6b84197` pruebas de parking de Erick, sin trailers de co-autor). `fox/perfil-isla` queda como historial.
 - **Carrera completa en el twin** (24 semillas × ruidos 1-2, 1.25:1, 460800): **47/48** (falla n1/s22), mejor 33.17 / media 37.16 / mediana 37.26 s.
 - **Tiempos medidos en la Pi 5 real** (twin corriendo en la Pi, 2026-11-06): cuadro 23.5 ms media (p95 32), replan 59-70 ms (pico 223), primer plan 1.95 s. Pi 4: cuadro 60 ms, replan mediana ~190 ms, primer plan 2.6 s. OpenMP con 4 hilos es más lento que 1.
