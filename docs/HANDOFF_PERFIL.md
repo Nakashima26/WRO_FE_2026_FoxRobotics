@@ -19,7 +19,9 @@ Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
   - Pi→ESP **probablemente roto**: con la Pi prendida (TX en alto en reposo) el pin 17 del ESP nunca subió y ningún otro pin cambió.
   - Falta confirmar con `pinctrl set 14 op dl` / `op dh` desde la Pi mirando el PinScan (se desconectó el USB a medio test).
   - **Revisar el cable del pin físico 8 de la Pi (GPIO14) al GPIO17 del ESP, y la tierra común.**
-- **Después de la prueba hay que volver a subir `PurePursuitCarrera.ino`** al ESP: ahora tiene PinScan.
+- **Después de la prueba hay que volver a subir `PurePursuitCarrera.ino`** al ESP: ahora tiene PinScan. El `PurePursuitCarrera.ino` que estaba en main venía de un export viejo (sin los cambios de `PurePursuit.ino` que corre el twin); ya se regeneró. Subirlo así:
+  `arduino-cli compile --fqbn esp32:esp32:esp32 src/ESP32/PurePursuitCarrera && arduino-cli upload --fqbn esp32:esp32:esp32 -p <puerto> src/ESP32/PurePursuitCarrera`
+- En la Pi: `cd ~/FoxRobotics && git pull` (`carrera.json` no cambió), LED encendido = listo, botón = GO. Log: `journalctl -u wro-runtime.service -b 0`; si el ESP contesta sale `ack=sí` en la línea `GO — READY x3`.
 - El USB del ESP se desconecta seguido de la Mac (cable/conector flojo).
 
 - **Todo está en `main`** (`a01bacb` isla + `6b84197` pruebas de parking de Erick, sin trailers de co-autor). `fox/perfil-isla` queda como historial.
