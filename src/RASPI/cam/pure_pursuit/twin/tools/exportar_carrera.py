@@ -20,6 +20,10 @@ from pure_pursuit.twin.firmware.build import load_ino_text, _apply_overrides
 # Solo existen en el twin (compensación de la cámara simulada); el carro real no las usa.
 TWIN_ONLY = {"PARK_PINK_RATIO_MIN"}
 
+# Solo carro real: el twin planea en sincrono (hilo real = no determinista). Validado con la latencia
+# de la Pi 5 en /tmp/ce/costo (twin con DP y cuadro medidos): 40/48 contra 18/48 en sincrono.
+CAR_ONLY = {"ROUTE_PLAN_ASYNC": True}
+
 # La carrera completa estaciona: U + paralelo en modo ruta (docs/HANDOFF_PARKING.md). Pisan el
 # PARK_NINGUNO de los presets de ruta; el bench JSON puede cambiarlos.
 FW_PARK_CARRERA = {"PARK_MODO": "PARK_PARALELO", "PARK_UTURN_RUTA_ALONG_MM": "600",
@@ -45,6 +49,7 @@ def main() -> None:
 
     # Pi: carrera.json, claves que runtime_nuevo.py aplica sobre config.C.
     pi = {k: v for k, v in cfg["pi_overrides"].items() if k not in TWIN_ONLY}
+    pi.update(CAR_ONLY)
     if args.pi_baud is not None:
         pi["BAUDRATE"] = args.pi_baud
     pi["_preset"] = args.preset

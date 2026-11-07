@@ -200,6 +200,8 @@ def _square_pts(cx, cy, half, n=5):
 
 _STATIC_CACHE: dict = {}
 _GEOM_CACHE: dict = {}
+_GRID_CACHE: dict = {}             # gridkey -> malla de estaciones y poses (solo lectura)
+_GT_CACHE: dict = {}               # gkey -> (G, MASK) transpuestos para fox_route_dp_sparse_t
 _RANGE_CACHE: dict = {}            # gkey -> (ALO, AHI) para fox_route_dp_sparse
 _SIGN_CACHE: dict = {}             # (gridkey, cx, cy) -> (ks, dsg) de la señal
 _VIS_CACHE: dict = {}              # (gridkey, ux, uy, ...) -> (kv, vis) de la cámara
@@ -287,13 +289,13 @@ def _dp_geometry(P, prm, side_ok):
 _KERNELS: dict = {}                # (nombre, FOX_NATIVE) -> función nativa o None
 
 
-def _native_fn(name, argtypes):
+def _native_fn(name, argtypes, restype=None):
     """Kernel nativo por nombre, cacheado por FOX_NATIVE (la carga cuesta ~4 ms por llamada)."""
     try:
         from .native import enabled, get_kernel
         key = (name, enabled())
         if key not in _KERNELS:
-            _KERNELS[key] = get_kernel(name, argtypes, None)
+            _KERNELS[key] = get_kernel(name, argtypes, restype)
         return _KERNELS[key]
     except Exception:
         return None
@@ -311,13 +313,24 @@ def _dp_sparse_kernel():
     return _native_fn("fox_route_dp_sparse", [i32, i32, i32] + [vp] * 12)
 
 
+def _dp_sparse_t_kernel():
+    """fox_route_dp_sparse_t (G y MASK transpuestos), o None."""
+    i32, vp = ctypes.c_int32, ctypes.c_void_p
+    return _native_fn("fox_route_dp_sparse_t", [i32, i32, i32] + [vp] * 13)
+
+
 def _geom_kernel():
     """fox_route_geom de la biblioteca nativa, o None si no está disponible."""
     i32, vp, f64 = ctypes.c_int32, ctypes.c_void_p, ctypes.c_double
     return _native_fn("fox_route_geom", [i32, i32, vp, vp, i32] + [f64] * 6 + [vp] * 3)
 
 
-def plan(direction: str, seats: dict, parking: str | None = None,
+def plan(*a, **k) -> "Route":
+    """Planificador (ver _plan). Los reintentos internos llaman a _plan, no a plan: un plan = una llamada."""
+    return _plan(*a, **k)
+
+
+def _plan(direction: str, seats: dict, parking: str | None = None,
          prm: RouteParams | None = None, start_section: str | None = None,
          laps: int = 3, unknown=None, anchor=None, lock=None,
          park_w: float | None = None, extra=None, hug=None) -> Route:
@@ -349,10 +362,16 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     order = _order(direction, start_section or "N")
     secs = [_sec(nm, direction) for nm in order]
     n = prm.n_stations
-    sig, O, V, sec_idx, loc = _stations(secs, n)
-    D = np.arange(prm.d_min, prm.d_max + 0.5, prm.d_step)
+    gridkey = (direction, start_section or "N", n, prm.d_min, prm.d_max, prm.d_step)
+    grid = _GRID_CACHE.get(gridkey) if getattr(C, "ROUTE_FAST_PLAN", True) else None
+    if grid is None:
+        sig, O, V, sec_idx, loc = _stations(secs, n)
+        D = np.arange(prm.d_min, prm.d_max + 0.5, prm.d_step)
+        P = O[:, None, :] + D[None, :, None] * V[:, None, :]          # (n, m, 2)
+        xx, yy, hd = _station_poses(P)
+        grid = _GRID_CACHE[gridkey] = (sig, O, V, sec_idx, loc, D, P, xx, yy, hd, np.sin(hd), np.cos(hd))
+    sig, O, V, sec_idx, loc, D, P, xx, yy, hd, shd, chd = grid       # la malla solo depende de gridkey; solo lectura
     m = len(D)
-    P = O[:, None, :] + D[None, :, None] * V[:, None, :]          # (n, m, 2)
 
     # Obstáculos puntuales: señales y maderas.
     pillars = []
@@ -393,12 +412,9 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     # cajón, malla). Las señales (conocidas o posibles) se suman encima, solo
     # en las estaciones cercanas, como círculo de la diagonal de la señal
     # (conservador: hasta 10 mm de más contra una cara).
-    xx, yy, hd = _station_poses(P)
-    shd, chd = np.sin(hd), np.cos(hd)
     # La malla (O, P) solo depende de sentido, recta de salida y rango de d: paredes,
     # isla, señales y vista se cachean por malla; las maderas del cajón aparte, porque
     # park_w cambia al fijar el arranque (antes eso recalculaba todo: ~45 ms).
-    gridkey = (direction, start_section or "N", n, prm.d_min, prm.d_max, prm.d_step)
     ckey = gridkey + (parking, park_w)
     clear = _STATIC_CACHE.get(ckey)
     if clear is None:
@@ -417,9 +433,18 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 bpts += [(a, b) for a in np.linspace(min(xs), max(xs), 3)
                          for b in np.linspace(min(ys), max(ys), 9)]
             bar = np.array(bpts)
+            fast_bar = getattr(C, "ROUTE_FAST_PLAN", True) and prm.soft_clear_mm <= 300.0
+            r_bar = math.hypot(max(_FRONT_MM, _REAR_MM), _HALF_W) + 300.0
             for k in range(n):
                 near = bar[np.hypot(bar[:, 0] - O[k, 0], bar[:, 1] - O[k, 1]) < 1300.0]
-                if len(near):
+                if len(near) and fast_bar:
+                    # Solo las poses a menos de R de la madera: más lejos la holgura pasa de 300 mm y ni el castigo ni
+                    # el descarte la ven (soft_clear <= 300), así que se salta (misma ruta, ~4x menos cálculo).
+                    sel = np.flatnonzero(np.hypot(P[k][:, None, 0] - near[None, :, 0], P[k][:, None, 1] - near[None, :, 1]).min(1) < r_bar)
+                    if len(sel):
+                        clear[k][:, sel] = np.minimum(clear[k][:, sel], _rect_dist_pose(
+                            near[:, 0], near[:, 1], xx[k][:, sel], yy[k][:, sel], hd[k][:, sel], shd[k][:, sel], chd[k][:, sel]).min(-1))
+                elif len(near):
                     clear[k] = np.minimum(clear[k], _rect_dist_pose(near[:, 0], near[:, 1], xx[k], yy[k], hd[k], shd[k], chd[k]).min(-1))
         _STATIC_CACHE[ckey] = clear
     clear = clear.copy()
@@ -484,9 +509,34 @@ def plan(direction: str, seats: dict, parking: str | None = None,
             a = -0.5 * _LANE_MM + (((k - k_par + n // 2) % n) - n // 2) * dsig
             if a0 <= a <= a1:
                 pen[k] += w_h * ((D[None, :] - d_h) / 100.0) ** 2
+    return _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock, park_w, extra, hug,
+                  t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
+
+
+def _shorter(lock: dict, n: int) -> dict:
+    """La mitad de adelante del lock (estaciones en orden de avance)."""
+    keys = sorted(lock, key=lambda k: (int(k) - min(lock)) % n)
+    return {k: lock[k] for k in keys[: len(keys) // 2]}
+
+
+def _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock, park_w, extra, hug,
+           t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars) -> Route:
+    """Reglas de lado, ancla, lock y la DP sobre lo ya preparado por _plan (holguras, castigos): los reintentos
+    por lock/ancla infactibles repiten solo esto, no el cálculo de holguras."""
     allowed_d = np.ones((n, m), dtype=bool)
     for st, mask in side_rules:
         allowed_d[st] &= mask
+    if lock and getattr(C, "ROUTE_FAST_PLAN", True):
+        # Un lock sin d permitido o sin d libre de choque en alguna estación es infactible seguro (condición necesaria
+        # de la DP): se salta directo al lock más corto, el que la cadena de reintentos alcanzaría tras una DP por intento.
+        def dead(lk):
+            for k, dv in lk.items():
+                row = allowed_d[int(k) % n] & (np.abs(D - dv) <= 0.5 * prm.d_step)
+                if not (row.any() and (~bad[int(k) % n][:, row]).any()):
+                    return True
+            return False
+        while lock and dead(lock):
+            lock = _shorter(lock, n) or None
     if anchor is not None:
         dist = np.hypot(P[..., 0] - anchor[0], P[..., 1] - anchor[1])     # (n, m)
         ka, ja = np.unravel_index(int(np.argmin(dist)), dist.shape)
@@ -505,6 +555,10 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 ok = cosang >= math.cos(math.radians(tol))
                 if (allowed_d[kb] & ok).any():
                     allowed_d[kb] &= ok
+    if anchor is not None and getattr(C, "ROUTE_FAST_PLAN", True) and not (~bad[ka][:, allowed_d[ka]]).any():
+        # El ancla cae donde todo choca: infactible con cualquier lock; la cadena de reintentos terminaba sin ancla ni lock.
+        return _solve(direction, seats, parking, prm, start_section, laps, unknown, None, None, park_w, extra, hug,
+                      t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
     for k, dval in (lock or {}).items():
         allowed_d[int(k) % n] &= np.abs(D - dval) <= 0.5 * prm.d_step
 
@@ -552,10 +606,23 @@ def plan(direction: str, seats: dict, parking: str | None = None,
                 ahi = np.where(anyv, m - 1 - ok[:, ::-1].argmax(axis=1), -1).astype(np.int16)
                 _RANGE_CACHE[gkey] = (np.ascontiguousarray(alo), np.ascontiguousarray(ahi))
             alo, ahi = _RANGE_CACHE[gkey]
-            sparse(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
-                   penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
-                   alo.ctypes.data, ahi.ctypes.data,
-                   Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data)
+            sp_t = _dp_sparse_t_kernel() if getattr(C, "ROUTE_FAST_PLAN", True) else None
+            if sp_t is not None:
+                # Mismo cálculo con G y MASK transpuestos a [k][b][c][a] (lectura contigua; mismo resultado bit a bit).
+                if gkey not in _GT_CACHE:
+                    _GT_CACHE[gkey] = (np.ascontiguousarray(G.transpose(0, 2, 3, 1)),
+                                       np.ascontiguousarray(MASK.transpose(0, 2, 3, 1)).view(np.uint8))
+                GT, MT = _GT_CACHE[gkey]
+                Vt = np.empty((m, m))
+                sp_t(n, m, N, GT.ctypes.data, DS.ctypes.data, MT.ctypes.data,
+                     penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
+                     alo.ctypes.data, ahi.ctypes.data,
+                     Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data, Vt.ctypes.data)
+            else:
+                sparse(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
+                       penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
+                       alo.ctypes.data, ahi.ctypes.data,
+                       Vc.ctypes.data, Vtmp.ctypes.data, back.ctypes.data)
         else:
             kern(n, m, N, G.ctypes.data, DS.ctypes.data, MASK.view(np.uint8).ctypes.data,
                  penc.ctypes.data, bonc.ctypes.data, badu.ctypes.data, alu.ctypes.data,
@@ -573,6 +640,19 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     # Reconstrucción
     b, c = np.unravel_index(int(np.argmin(Vc)), Vc.shape)
     feasible = Vc[b, c] < INF / 2
+    # Los reintentos van antes de armar la ruta: la de un intento infactible se descartaba.
+    if not feasible and lock:
+        # El tramo fijo ya no cabe con lo nuevo: se acorta (la mitad) y se reintenta.
+        return _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, _shorter(lock, n) or None, park_w, extra, hug,
+                      t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
+    if not feasible and anchor is not None:
+        # El ancla cae donde no cabe (p. ej. el carro pegado a algo): sin ancla.
+        return _solve(direction, seats, parking, prm, start_section, laps, unknown, None, None, park_w, extra, hug,
+                      t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
+    if not feasible and unknown:
+        # Lo desconocido tapa el paso: se planea solo con lo conocido.
+        return _plan(direction, seats, parking, prm, start_section, laps, None, None,
+                    park_w=park_w, extra=extra, hug=hug)
     path = [c, b]
     for t in range(N - 1, 1, -1):
         a = back[t][path[-1], path[-2]]
@@ -592,20 +672,6 @@ def plan(direction: str, seats: dict, parking: str | None = None,
     route.station_O = O
     route.station_V = V
     route.feasible = bool(feasible)
-    if not feasible and lock:
-        # El tramo fijo ya no cabe con lo nuevo: se acorta (la mitad) y se reintenta.
-        keys = sorted(lock, key=lambda k: (int(k) - min(lock)) % n)
-        short = {k: lock[k] for k in keys[: len(keys) // 2]}
-        return plan(direction, seats, parking, prm, start_section, laps, unknown, anchor, short or None,
-                    park_w=park_w, extra=extra, hug=hug)
-    if not feasible and anchor is not None:
-        # El ancla cae donde no cabe (p. ej. el carro pegado a algo): sin ancla.
-        return plan(direction, seats, parking, prm, start_section, laps, unknown, None,
-                    park_w=park_w, extra=extra, hug=hug)
-    if not feasible and unknown:
-        # Lo desconocido tapa el paso: se planea solo con lo conocido.
-        return plan(direction, seats, parking, prm, start_section, laps, None, None,
-                    park_w=park_w, extra=extra, hug=hug)
     return route
 
 

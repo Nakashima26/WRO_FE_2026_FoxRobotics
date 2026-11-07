@@ -133,6 +133,89 @@ FOX_API void fox_route_dp_sparse(int32_t n, int32_t m, int32_t N,
     }
 }
 
+/* Igual que fox_route_dp_sparse (mismas operaciones, mismo orden, mismo resultado bit a bit) con G y MASK
+ * transpuestos a [k1][b][c][a]: el bucle interno sobre a lee memoria contigua (la lectura con zancada
+ * m*m*8 bytes era lo caro en la Pi). Vt (m*m) es memoria de trabajo; Vc entra y sale como [a][b]. */
+FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
+    const double *GT, const double *DS, const uint8_t *MT,
+    const double *pen, const double *bonus, const uint8_t *bad, const uint8_t *allowed,
+    const int16_t *ALO, const int16_t *AHI,
+    double *Vc, double *Vtmp, int16_t *back, double *Vt)
+{
+    const double INF = 1e18;
+    const int64_t mm = (int64_t)m * m;
+    const int64_t m3 = mm * m;
+    assert(m <= 256);
+    for (int32_t a = 0; a < m; a++)
+        for (int32_t b = 0; b < m; b++) Vt[(int64_t)b * m + a] = Vc[(int64_t)a * m + b];
+    for (int32_t t = 1; t <= N - 2; t++) {
+        int32_t k1 = t % n, k2 = (t + 1) % n;
+        const double *Gk = GT + k1 * m3;
+        const uint8_t *Mk = MT + k1 * m3;
+        const double *DSk = DS + k1 * mm;
+        const double *penk = pen + k2 * mm;
+        const double *bonk = bonus + k2 * mm;
+        const uint8_t *badk = bad + k2 * mm;
+        const uint8_t *alk = allowed + k2 * m;
+        const int16_t *alok = ALO + k1 * mm;
+        const int16_t *ahik = AHI + k1 * mm;
+        int16_t *bk = back + (t + 1) * mm;
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int32_t b = 0; b < m; b++) {
+            const double *Vb = Vt + (int64_t)b * m;
+            int32_t ia = 0;
+            double ibv = Vb[0] + INF;
+            for (int32_t a = 1; a < m; a++) {
+                double tot = Vb[a] + INF;
+                if (tot < ibv) { ibv = tot; ia = a; }
+            }
+            for (int32_t c = 0; c < m; c++) {
+                int64_t bc = (int64_t)b * m + c;
+                int blocked = badk[bc] || !alk[c];
+                int32_t lo = alok[bc], hi = ahik[bc];
+                if (blocked || lo > hi) {
+                    bk[bc] = (int16_t)ia;
+                    Vtmp[bc] = ibv < INF ? ibv : INF;
+                    continue;
+                }
+                double ds = DSk[bc], pc = penk[bc], bo = bonk[bc];
+                const double *Gr = Gk + bc * m;
+                const uint8_t *Mr = Mk + bc * m;
+                double best = 0.0;
+                int32_t arg = lo;
+                for (int32_t a = lo; a <= hi; a++) {
+                    double s = Mr[a] ? INF : ds * (Gr[a] + pc) + bo;
+                    double tot = Vb[a] + s;
+                    if (a == lo || tot < best) {
+                        best = tot;
+                        arg = a;
+                    }
+                }
+                if (!(best < INF)) {   /* sin costo válido en el rango: bucle completo */
+                    best = 0.0;
+                    arg = 0;
+                    for (int32_t a = 0; a < m; a++) {
+                        double s = Mr[a] ? INF : ds * (Gr[a] + pc) + bo;
+                        double tot = Vb[a] + s;
+                        if (a == 0 || tot < best) {
+                            best = tot;
+                            arg = a;
+                        }
+                    }
+                }
+                bk[bc] = (int16_t)arg;
+                Vtmp[bc] = best < INF ? best : INF;
+            }
+        }
+        for (int32_t b = 0; b < m; b++)
+            for (int32_t c = 0; c < m; c++) Vt[(int64_t)c * m + b] = Vtmp[(int64_t)b * m + c];
+    }
+    for (int32_t a = 0; a < m; a++)
+        for (int32_t b = 0; b < m; b++) Vc[(int64_t)a * m + b] = Vt[(int64_t)b * m + a];
+}
+
 /* Geometría de ring_route._dp_geometry, mismo orden de operaciones que numpy.
  * Por k1: G[k1,a,b,c] = wl + (w_κ·κ)·κ, DS[k1,b,c] = |bc|, MASK[k1,a,b,c] =
  * |κ| > kmax o !side_ok[k1,b,c]. P es (n,m,2); side_ok es (n,m,m) [k1][b][c]. */

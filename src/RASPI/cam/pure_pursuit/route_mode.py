@@ -164,8 +164,38 @@ def _stall_far_along(parking: str, direction: str, park_w: float) -> float:
     return max(px * fx + py * fy for b in _barrier_corners(parking, park_w) for px, py in b)
 
 
+_WARM_DONE = False
+
+
+def warm_plan() -> None:
+    """Llena las cachés del planificador (geometría de la DP ~2 s en la Pi 5, vistas y holguras de los 24 asientos)
+    en los dos sentidos. Se llama una vez al crear el runtime (antes de armar), no en el primer plan de la carrera."""
+    global _WARM_DONE
+    if _WARM_DONE or not getattr(C, "ROUTE_WARM_PLAN", False):
+        return
+    _WARM_DONE = True
+    unk = [(sec, seat) for sec in SECTIONS_CW for seat in SEATS]
+    for d in ("CW", "CCW"):
+        RR.plan(d, {}, None, prm=_route_params(), unknown=unk)
+
+_WARMED = False
+
+
+def warm_caches() -> None:
+    """Llena _GEOM/_STATIC_CACHE (solo dependen de direccion y parametros) antes de armar: el primer plan tarda ~2 s en la Pi."""
+    global _WARMED
+    if _WARMED:
+        return
+    _WARMED = True
+    for d in ("CW", "CCW"):
+        RR.plan(d, {}, None, prm=_route_params())
+        RR.plan(d, {}, None, prm=_prm_for([]))
+
+
 class RouteMode:
     def __init__(self) -> None:
+        if getattr(C, "ROUTE_WARM", False):
+            warm_caches()
         self.route = None
         self.follower = None
         self.loc = None
@@ -180,6 +210,7 @@ class RouteMode:
         self.last_print = None
         self.n_plans = 0
         self._job = None
+        self._swap_left = 0
         self._job_key = None
         self._job_out = None
         self._job_conf = {}
@@ -658,6 +689,11 @@ class RouteMode:
                 k0 = RR.station_of(self.route, pose[0], pose[1])
                 nst = len(self.route.d_stations)
                 nl = int(getattr(C, "ROUTE_LOCK_STATIONS", 7))
+                lead = getattr(C, "ROUTE_LOCK_LEAD_S", None)
+                if lead is not None:
+                    # El plan se adopta ~lead s despues: el prefijo fijo empieza donde estara el carro, no donde esta.
+                    v = float(C.ROUTE_PROFILE_K_MM_S_PER_PWM) * ((255 if self.rv is None else self.rv) - float(C.ROUTE_PROFILE_PWM0))
+                    k0 = (k0 + int(round(max(v, 0.0) * float(lead) / (self.route.length_mm / nst)))) % nst
                 lock = {(k0 + j) % nst: float(self.route.d_stations[(k0 + j) % nst]) for j in range(nl)}
                 anchor = None
             args = (dm.direction, plan_seats, dm.parking, plan_unknown, anchor, lock, self.park_w, extra, hug)
@@ -751,6 +787,10 @@ class RouteMode:
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
+        if getattr(C, "ROUTE_SWAP_PWM", None) is not None and self._swap_left > 0:
+            # Recien cambio la ruta del ESP (RTE): el carro aun no la sigue bien (la DP/subida llegaron tarde).
+            self._swap_left -= 1
+            self.rv = int(C.ROUTE_SWAP_PWM) if self.rv is None else min(self.rv, int(C.ROUTE_SWAP_PWM))
         if getattr(C, "ROUTE_PENDING_PWM", None) is not None and (self._delay_left is not None or self._job is not None):
             # Plan en curso (la DP tarda en la Pi): la ruta vieja puede pasar por la señal recién vista.
             cap = int(C.ROUTE_PENDING_PWM)
@@ -772,6 +812,10 @@ class RouteMode:
                     break
                 lines.append(self.upload.pop(0))
         if any(l.startswith("RTE") for l in lines):
+            sd = getattr(C, "ROUTE_SWAP_DIFF_MM", None)   # solo si la ruta nueva se aparta de la del ESP en el tramo de adelante
+            self._swap_left = int(getattr(C, "ROUTE_SWAP_FRAMES", 0)) if sd is None or self._upload_risky(float(sd)) else 0
+            if getattr(C, "ROUTE_SWAP_NEW_ONLY", False) and not getattr(self, "_new_sign", True):
+                self._swap_left = 0
             self.esp_shift = self.upload_shift
             self.esp_route = self.route
         line = "\n".join(lines) if lines else None
@@ -780,13 +824,13 @@ class RouteMode:
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
-    def _upload_risky(self) -> bool:
+    def _upload_risky(self, tol=None) -> bool:
         """Mientras sube la ruta: ¿la nueva se aparta de la del ESP en el tramo de adelante?
 
         Sin ROUTE_UPLOAD_DIFF_MM, sin ruta previa en el ESP o en otro marco (arranque
         ciego), siempre True (frenar, como antes).
         """
-        tol = getattr(C, "ROUTE_UPLOAD_DIFF_MM", None)
+        tol = getattr(C, "ROUTE_UPLOAD_DIFF_MM", None) if tol is None else tol
         old = self.esp_route
         if tol is None or old is None or self.esp_shift != self.upload_shift:
             return True
@@ -1160,6 +1204,9 @@ class RouteMode:
                                 lock=lock, park_w=park_w, extra=extra, hug=hug)
 
     def _adopt(self, route, key, conf, unknown, empty, dm, shift: float = 0.0, hold: bool = False) -> None:
+        prev = getattr(self, "_conf_prev", None) or {}
+        self._new_sign = any(prev.get(k) != v for k, v in conf.items())   # la ruta nueva trae una señal (o color) que la anterior no
+        self._conf_prev = dict(conf)
         self.route = route
         self.route_shift = shift
         self.follower = RR.RouteFollower(route, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0)))

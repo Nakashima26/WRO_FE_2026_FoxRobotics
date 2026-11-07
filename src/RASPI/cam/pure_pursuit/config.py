@@ -1264,6 +1264,8 @@ ROUTE_FOLLOW = False
 ROUTE_LOOKAHEAD_MM = 200.0
 # Castigo a la curvatura en la ruta (por mm · κ²): más alto = curvas más abiertas.
 ROUTE_W_KAPPA = 3.0e4
+ROUTE_FAST_PLAN = True  # planificador más barato, misma ruta bit a bit que False: DP nativa con G/MASK transpuestos, malla en caché, madera del cajón solo en poses cercanas, lock infactible descartado sin DP (los reintentos reusan el cálculo siempre)
+ROUTE_WARM_PLAN = False  # al crear RouteMode, llena las cachés de la DP de CW y CCW (el primer plan tarda ~2 s en la Pi 5)
 ROUTE_D_STEP = 20.0  # paso lateral (mm) de la malla del planificador, RouteParams.d_step (10: diagonales más rectas, ~5x más lento)
 # Frames que se adelanta la pose de odometría (llega atrasada por el UART).
 # 0: con la pose atrasada la predicción frame a frame resultó ruidosa (peor).
@@ -1401,6 +1403,8 @@ ROUTE_TIME_COST = False
 # Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
 # El twin lo deja en False para que cada corrida sea reproducible.
 ROUTE_PLAN_ASYNC = False
+# Llena las cachés de la DP al crear RouteMode (antes de armar), ambas direcciones. False: sin cambio.
+ROUTE_WARM = False
 # Twin: retraso (s) entre que se pide un plan y que se adopta, como la DP en la Pi 5 (~1 s).
 # Se cuenta en frames de la Pi (PI_FPS). None: al instante (como antes). Solo sin ROUTE_PLAN_ASYNC.
 ROUTE_PLAN_DELAY_S = None
@@ -1409,6 +1413,13 @@ ROUTE_PLAN_DELAY_S = None
 ROUTE_PENDING_PWM = None
 # Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
 ROUTE_LOCK_STATIONS = 7
+# Segundos que el prefijo fijo se adelanta (a la velocidad del tope actual) por lo que tarda el plan. None = desde el carro.
+ROUTE_LOCK_LEAD_S = None
+# Tras subir una ruta nueva al ESP (RTE): tope de PWM durante ROUTE_SWAP_FRAMES frames. None = sin tope.
+ROUTE_SWAP_PWM = None
+ROUTE_SWAP_FRAMES = 0
+ROUTE_SWAP_NEW_ONLY = False  # True: el tope solo si esa ruta incorporó una señal nueva (o cambió de color)
+ROUTE_SWAP_DIFF_MM = None   # None: siempre; mm: solo si la ruta nueva se aparta tanto de la del ESP (horizonte ROUTE_UPLOAD_HORIZON_MM)
 # Mientras sube una ruta nueva al ESP (RTB/RTP/RTE) se baja a ROUTE_SLOW_PWM.
 # False: no se baja (el ESP sigue la anterior hasta el RTE); el ALTO (cap 0) se queda.
 ROUTE_UPLOAD_SLOW = True

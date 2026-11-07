@@ -296,6 +296,9 @@ class PPRuntime:
 
     def __init__(self, cfg: PPConfig, *, vision=None, serial_link=None, bev=None):
         self.cfg = cfg
+        if getattr(C, "ROUTE_FOLLOW", False) and getattr(C, "ROUTE_WARM_PLAN", False):
+            from .route_mode import warm_plan
+            warm_plan()
 
         # Visión
         self.vision     = vision if vision is not None else Vision(cfg.cam_index)
