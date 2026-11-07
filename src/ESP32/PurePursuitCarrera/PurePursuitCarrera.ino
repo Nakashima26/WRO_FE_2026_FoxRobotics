@@ -2209,7 +2209,7 @@ void leerToF() {
   for (int i = 0; i < TOF_N; i++) {
     if (dev[i]->dataReady()) {
       uint16_t mm = dev[i]->read(false);
-      uint8_t st = dev[i]->rangingData.range_status;
+      uint8_t st = dev[i]->ranging_data.range_status;
       tofMm[i] = (st == 0) ? (int)mm : -1;
     }
   }
