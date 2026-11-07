@@ -17,7 +17,7 @@
 3. [Power Architecture & Sensors](#3-power-architecture--sensors)
    - [3.1 Power budget](#31-power-budget) · [3.2 Sensor selection and placement](#32-sensor-selection-and-placement) · [3.3 PCB & wiring](#33-pcb--wiring) · [3.4 Raspberry Pi 5](#34-main-computer--raspberry-pi-5-v2)
 4. [Software Architecture](#4-software-architecture)
-   - [4.1 System overview](#41-system-overview--two-controllers-one-link) · [4.2 Inter-controller protocol ("V2")](#42-inter-controller-protocol-v2) · [4.3 Vision pipeline](#43-vision-pipeline-raspberry-pi--pure_pursuit) · [4.4 Obstacle handling](#44-obstacle-handling-obstacle-challenge) · [4.5 ESP32 state machine](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino) · [4.6 Cascade PID](#46-cascade-pid-always-running-underneath) · [4.7 Startup handshake](#47-startup-handshake) · [4.8 Development status](#48-development-status)
+   - [4.1 System overview](#41-system-overview--two-controllers-one-link) · [4.2 Inter-controller protocol ("V2")](#42-inter-controller-protocol-v2) · [4.3 Vision pipeline](#43-vision-pipeline-raspberry-pi--pure_pursuit) · [4.4 Obstacle handling](#44-obstacle-handling-obstacle-challenge) · [4.5 ESP32 state machine](#45-esp32-finite-state-machine-srcesp32purepursuitpurepursuitino) · [4.6 Cascade PID](#46-cascade-pid-always-running-underneath) · [4.7 Startup handshake](#47-startup-handshake) · [4.8 Development status](#48-development-status) · [4.9 Route mode (v2)](#49-route-mode-v2--a-planned-route-instead-of-reactive-steering)
 5. [Systemic Thinking & Engineering Decisions](#5-systemic-thinking--engineering-decisions)
    - [5.0 Design constraints](#50-design-constraints) · [5.1 Subsystem interaction map](#51-subsystem-interaction-map) · [5.2 Key engineering trade-offs](#52-key-engineering-trade-offs) · [5.3 Iteration log](#53-iteration-log) · [5.4 Risk analysis](#54-risk-analysis) · [5.5 Failure & Incident log](#55-failure--incident-log)
 6. [Testing & Validation](#6-testing--validation)
@@ -220,7 +220,7 @@ We ran the 50:1 configuration first. It was faster, but corner exits were incons
 
 The ratio also keeps the motor in its efficient RPM band during most of the run, which matters because the motor shares a power source with the logic rail.
 
-The car completes all three Open Challenge laps in about 12 seconds at just 60% motor speed. That headroom is useful if we need to push speed in later iterations.
+Official time at the national final, Open Challenge round 1: **57.455 s** for the three laps, driven at a conservative speed for reliability. v2 spends that headroom with a planned route and a speed profile ([§4.9](#49-route-mode-v2--a-planned-route-instead-of-reactive-steering)).
 
 **The takeaway:** we prioritized consistency over raw speed. A robot that reliably finishes 3 laps scores more than one that's faster but unpredictable.
 
@@ -950,8 +950,36 @@ sequenceDiagram
 | Start from the parking lot (`INICIO`) | Obstacle | Raced at the national final |
 | Parallel parking (`ESTACIONANDO`) | Obstacle | Working in testing — perfect parks in runs 1025, 1052, 1064 |
 | Floor-referenced color correction + ratio tests | both | Complete ([ERR-15](docs/engineering-log.md#err-15--in-a-darker-room-the-orange-line-was-read-as-red), [ERR-17](docs/engineering-log.md#err-17--strong-light-tape-read-as-red-pale-floor-read-as-green)) |
-| Raspberry Pi 5 port | both | In progress — pipeline at 40 fps on recorded video; per-frame constants pending (§3.4) |
+| Raspberry Pi 5 port | both | Measured on the real Pi 5 (2026-11-06): 23.5 ms per frame mean, p95 32 ms (≈40 fps); route replan 59–70 ms (§4.9) |
+| Route mode — digital map + planned route + U-turn + parallel park (§4.9) | Obstacle | Validated in the digital twin (47/48 full races); not yet run on the car |
 | VL53L1X ToF sensors | both | Bench testing (§3.2) |
+
+### 4.9 Route mode (v2) — a planned route instead of reactive steering
+
+**Why.** The v1 controller steers toward what the camera sees *now*. Every pillar seat in the Obstacle Challenge is one of 24 known positions, so once a pillar has been seen its position on the mat is known. v2 keeps a **digital map** of the mat and plans the **whole lap** at once, then drives it as fast as the curvature and the remaining unknowns allow.
+
+**How it works.**
+
+1. **Map** (`digital_map.py`): each pillar detection is projected through the BEV calibration and snapped to its seat. A seat not seen yet stays *unknown*.
+2. **Planner** (`ring_route.py`): dynamic programming over 96 stations per lap × lateral offsets every 20 mm. Hard constraints: the real footprint of the car (rectangle, rear-axle reference) keeps a minimum clearance to pillars, walls, island and parking walls; minimum turning radius; side rule (red on the right, green on the left). Cost: travel time + curvature² + a penalty for small clearance. In lap 1 an unknown seat is an obstacle with no side, and the route passes close to it so a late reveal changes the route by ~300 mm instead of ~550 mm. The core loop is a native C kernel.
+3. **Follow** (`route_mode.py` + ESP32): the Pi uploads the route as points (`RTB`/`RTP`/`RTE` lines over the V2 link at 460800 baud). The ESP32 follows it with pure pursuit on its own odometry (encoder + IMU), so steering does not wait for the camera. The Pi sets the speed from a profile (lateral-acceleration and braking limits, slower near pillars).
+4. **Finish**: after lap 3, a 180° U-turn and a parallel park in the bay, both planned in the same frame.
+
+**Compute latency — measured, then designed around.** We ran a full race of the digital twin on the real Pi 5 and timed it:
+
+| | Mac (dev) | Raspberry Pi 4 (v1) | Raspberry Pi 5 (v2) |
+|---|---|---|---|
+| Vision + control per frame | 5.4 ms | 60 ms (≈16 fps) | **23.5 ms** mean, p95 32 ms |
+| Route replan | 11–36 ms | median ≈190 ms | **59–70 ms**, peak 223 ms |
+| First plan (fills the planner caches) | 146 ms | 2.6 s | **1.95 s** |
+
+Running the planner on 4 OpenMP threads was *slower* than 1 thread, so it runs single-threaded. Feeding these delays into the twin showed that the route logic had been tuned for an instantaneous planner: with the Pi 5 latency only **18 of 48** races finished clean. Three changes fixed it:
+
+- **Precompute at boot.** The 1.95 s first plan runs when the program starts, before the ready LED turns on, so it never counts against race time.
+- **Plan in a background thread** on the car, so vision keeps running while the planner works (before, the camera froze during each plan).
+- **Lock only ~150 mm** (2 stations) of the old route ahead of the car instead of ~525 mm, so a new pillar changes the route sooner.
+
+Result: **40/48** clean with Pi 5 latency (repeat: 39/48), and with no latency the race is unchanged (47/48, median 37.26 s). Measurements in [§6.3](#63-validation-matrix); design notes in [`docs/MODO_RUTA.md`](docs/MODO_RUTA.md) and [`docs/HANDOFF_PERFIL.md`](docs/HANDOFF_PERFIL.md).
 
 ---
 
@@ -1228,14 +1256,18 @@ Almost all tuning is done from **recorded track runs**. The runtime writes a com
 | `pure_pursuit/test_vision.py` | HSV masks, pillar shape filter, BEV warp — live camera or a recorded clip | ESP32, motors |
 | `src/RASPI/tests/` | UART framing diagnostics, kinematic simulation | car |
 | `src/ESP32/TestCodes/` | Per-peripheral bring-up — servo sweep, gyro read, motor direction, ultrasonic ping, serial echo | full firmware |
+| `pure_pursuit/twin/` — **digital twin** | The real ESP32 firmware compiled as software-in-the-loop + the real Pi runtime, against a simulated camera, sensors (with noise), vehicle and randomized WRO layouts | car, track |
+| `pure_pursuit/twin/tools/banco/` | Race bench: 24 random layouts × sensor-noise seeds, logs every attempt; a change is accepted only if time drops and no new failure appears | car, track |
 
 ### 6.2 Results to date
 
-**Open Challenge — validated.** After the corner-detection work ([ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner)): **10 complete autonomous runs** from varied start positions and field configurations, no wall contact, correct finish. Three laps in ~12 s at 60 % motor speed. Reference run: [YouTube](https://youtu.be/orP-BNSG-6s).
+**Open Challenge — validated (August 2026).** After the corner-detection work ([ERR-05](#err-05--ultrasonic-beam-cone-bounces-off-the-corner)): **10 complete autonomous runs** from varied start positions and field configurations, no wall contact, correct finish. Official national-final time (round 1): 57.455 s. Reference run: [YouTube](https://youtu.be/orP-BNSG-6s).
 
-**Obstacle Challenge — in progress.** Simple layouts: the car completes the round comfortably. Layouts with a can straddling the corner sightline still fail on the *mine vs. beyond* classification ([ERR-09](#err-09--separating-my-straight-from-the-next-straight-open)) — the current blocker. The pivot-trap fix ([ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing)) was confirmed clean at orillas 417 (both cans cleared, 12 turns). Segmented turns (`CRUCERO → MANIOBRA`) are being tuned on track. The parking maneuver is **not yet designed** — full obstacle-round completion comes first.
+**Obstacle Challenge — status in August 2026 (before parking was added).** Simple layouts: the car completes the round comfortably. Layouts with a can straddling the corner sightline still fail on the *mine vs. beyond* classification ([ERR-09](#err-09--separating-my-straight-from-the-next-straight-open)) — the current blocker. The pivot-trap fix ([ERR-06](#err-06--the-car-pivoted-in-place-instead-of-arcing)) was confirmed clean at orillas 417 (both cans cleared, 12 turns). Segmented turns (`CRUCERO → MANIOBRA`) were then tuned on track and parallel parking was added in September — see the update below.
 
 **Update — national final (2026-09-19): 1st place.** Code: release [`v1.0-nacional`](docs/releases.md) (`d5cc66d`). Reference runs before the event: **700** (first clean 12-corner Obstacle run), **1025** (first perfect parallel park), **1047** (Open, 12/12 corners), **1064** (full clean Obstacle round: start from the lot, 12 corners, parallel park, 0.9° final heading error). The run-by-run record, the replay testing method and the v2 validation matrix are in [`docs/testing.md`](docs/testing.md).
+
+**Update — v2 route mode in the digital twin (2026-11).** Full Obstacle race (start from the bay, 3 laps, U-turn, parallel park) on 24 random layouts × 2 sensor-noise seeds: **47/48 clean**, race time best 33.17 s, mean 37.16 s, median 37.26 s. With the compute latency measured on the real Pi 5: **40/48** ([§4.9](#49-route-mode-v2--a-planned-route-instead-of-reactive-steering)). The twin is not yet calibrated against the v2 car, so these are simulation results; the next step is to measure speed vs. PWM and braking on the car and fit the twin to it.
 
 ### 6.3 Validation matrix
 
@@ -1243,9 +1275,9 @@ Figures are from our own test runs and recorded HUD footage, not lab instrumenta
 
 | # | Quantity | Method | Result |
 |---|---|---|---|
-| 1 | End-to-end Open pass rate | Clean runs / attempts, varied start + config | 10 documented clean; total attempt count not logged |
-| 2 | Open lap time | Stopwatch, 3 laps at 60 % motor | ~12 s |
-| 3 | Obstacle round, simple layouts | Clean runs / attempts | Passes reliably — exact ratio not logged |
+| 1 | End-to-end Open pass rate | Clean runs / attempts, varied start + config | 10 documented clean (Aug 2026); attempts were not logged then — v2 logs every attempt (rows 12–13) |
+| 2 | Open Challenge time | Official timer, national final round 1 | 57.455 s (3 laps) |
+| 3 | Obstacle round, simple layouts | Clean runs / attempts | Passed reliably on track (Aug 2026, ratio not logged); full clean round with park in run 1064 |
 | 4 | Obstacle round, can across the corner sightline | Clean runs / attempts | Fails — see [ERR-09](#err-09--separating-my-straight-from-the-next-straight-open) |
 | 5 | Pivot-trap fix | Dodge-steer amplitude + can `y` progression, recorded | orillas 417: steer ±0.4–0.7, `y` advances = arc |
 | 6 | Gyro heading total over a full run | Integrated rotation vs. the 1080° geometric total (12 × 90°), one measured run | ~1010° vs. 1080° — ≈ 6.5 % low. Does not accumulate: heading is zeroed at every turn and the wall + centerline correction on each straight absorbs the residual |
@@ -1254,6 +1286,10 @@ Figures are from our own test runs and recorded HUD footage, not lab instrumenta
 | 9 | MANIOBRA forward-vs-reverse decision | `decidirManiobra()` choice vs. what the corner needed | No wrong choice in recent testing (weeks of runs) |
 | 10 | RECUPERANDO trigger accuracy | Per recorded dodge: fired only when the chassis was actually crooked | No mis-fire in recent sessions since the measured-state trigger ([ERR-07](#err-07--recuperando-trigger-tied-to-assumed-linear-speed)); systematic count still pending |
 | 11 | Pillar colour classification | Recorded runs under venue-like light, red/green confusion count | No known misclassifications after the white-balance fix ([ERR-03](#err-03--wide-angle-noir-lens-put-a-red-cast-on-every-frame)); earlier colour-ID bugs resolved |
+| 12 | Full Obstacle race, digital twin (v2 route mode) | 24 random layouts × 2 noise seeds; clean = finished, no contact, parked inside the bay | 47/48 clean · best 33.17 s · mean 37.16 s · median 37.26 s |
+| 13 | Same, with Pi 5 compute latency | Every frame and plan delayed by the time measured on the Pi 5 (row 14) | 40/48 clean (repeat 39/48; planner 20 % slower: 37/48). Before the latency changes: 18/48 |
+| 14 | Pi 5 processing time | Full twin race run on the real Pi 5, per-frame and per-plan timers | 23.5 ms/frame mean (p95 32 ms); replan 59–70 ms (peak 223 ms); first plan 1.95 s, done at boot |
+| 15 | Pi 4 processing time (v1 reference) | Same run on the Pi 4 | 60 ms/frame (≈16 fps); replan median ≈190 ms; first plan 2.6 s |
 
 ### 6.4 Pre-run checklist (each venue)
 
@@ -1291,7 +1327,8 @@ The [Engineering Journal](ENGINEERING_JOURNAL.md) places these milestones on the
 | M12 | First clean 12-corner Obstacle run with segmented turns (run 700) | 2026-09-05 | Completed |
 | M13 | Full clean Obstacle round: start from the lot + 12 corners + parallel park (run 1064) | 2026-09 | Completed |
 | M14 | **1st place, Mexico national final** — release `v1.0-nacional` | 2026-09-19 | Completed |
-| M15 | Raspberry Pi 5 port: same pipeline at 40 fps (replayed run 1190), camera calibrated | 2026-10-06 → 10-07 | In progress |
+| M15 | Raspberry Pi 5 port: same pipeline at 40 fps (replayed run 1190), camera calibrated; frame and planner time measured on the Pi 5 | 2026-10-06 → 11-06 | Completed |
+| M17 | Route mode + digital twin: full race (3 laps + U-turn + park) 47/48 clean in simulation, 40/48 with Pi 5 latency ([§4.9](#49-route-mode-v2--a-planned-route-instead-of-reactive-steering)) | 2026-10 → 11 | Under test — simulation only |
 | M16 | International final — release `v2.0-internacional` | 2026-12-08 | In progress |
 
 #### MIL-01 — Open Challenge, full autonomous run

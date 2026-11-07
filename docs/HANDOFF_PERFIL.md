@@ -8,6 +8,17 @@ provisionales hasta medir el carro (Fase 0 de `PLAN_TIEMPO.md`).
 
 Prioridad: ronda de obstáculos. Se ignora el estacionamiento. Batería llena.
 
+## Estado 2026-11-07 (leer primero)
+
+- **Todo está en `main`** (`a01bacb` isla + `6b84197` pruebas de parking de Erick, sin trailers de co-autor). `fox/perfil-isla` queda como historial.
+- **Carrera completa en el twin** (24 semillas × ruidos 1-2, 1.25:1, 460800): **47/48** (falla n1/s22), mejor 33.17 / media 37.16 / mediana 37.26 s.
+- **Tiempos medidos en la Pi 5 real** (twin corriendo en la Pi, 2026-11-06): cuadro 23.5 ms media (p95 32), replan 59-70 ms (pico 223), primer plan 1.95 s. Pi 4: cuadro 60 ms, replan mediana ~190 ms, primer plan 2.6 s. OpenMP con 4 hilos es más lento que 1.
+- **Con esa latencia el código anterior daba 18/48.** Arreglo (`19aaff5`): `ROUTE_FAST_PLAN` (misma ruta bit a bit), `ROUTE_WARM_PLAN` (cachés llenas al arrancar, antes del LED: no cuenta en el tiempo), `ROUTE_LOCK_STATIONS` 7 → 2, y `ROUTE_PLAN_ASYNC` **solo en el carro** (`CAR_ONLY` en `exportar_carrera.py`; el twin sigue síncrono para ser determinista). Resultado: **40/48** con latencia (rep 39, DP 20 % más lenta 37); sin latencia igual que antes.
+- **Banco con latencia:** `pure_pursuit/twin/tools/latencia/eval.sh <tag> '<json pi>' <P>` (desde `src/RASPI/cam`, `FOX_PY` = python del venv; `COSTO=0` = sin latencia). Cobra el tiempo de CPU de cada cuadro ×4.28 y de cada DP ×5.8 dentro del tiempo simulado.
+- **Rechazado:** freno al subir ruta (`ROUTE_SWAP_PWM` 130 × 30 cuadros): 44/48 con latencia pero +3.6 s. Malla de 10 mm (`ROUTE_D_STEP` 10): quita la "jorobita" de las esquinas y baja la mediana 0.3 s, pero sin latencia 44/48 y con latencia 29/48 (replan ~5× más caro).
+- **Ruta en la esquina tras una roja:** la diagonal recta desde la verde hasta la verde siguiente cruza la isla; la ruta de las vueltas 2-3 ya hace la diagonal posible. Forzarla más recta gana ~10 mm por vuelta: no vale la pena.
+- **Pendiente:** las 8 fallas con latencia (sobre todo s1, s14, s20, s22 en ruidos 1-2); probar `ROUTE_PLAN_ASYNC` en la Pi real con el carro; calibrar el twin contra el carro v2.
+
 ## Resultado en una línea
 
 De ~65 s (v3b) a ~55 s de mediana en el twin. Las fallas bajan de 17 a 14 (de 210 corridas).
@@ -194,7 +205,7 @@ la anterior y las referencias (combo1).
 
 ## Siguientes pasos
 
-1. **Latencia del plan (medido sobre o1):** con `ROUTE_PLAN_DELAY_S` 0.3 las fallas suben de 12 a 61, y con 0.6 a 123 de 210. En el twin el plan es instantáneo (~60 ms en Mac). Hay que medir cuánto tarda la DP en la Pi 5 (C + OpenMP) antes de creerle al twin. Con 0.15 s: 24 fallas (+0.53 s); 0.1 s: 15 (+0.23 s); 0.05 s: 18 (+0.07 s), ruido de ±3. **Plan 4x más rápido (0241ad2):** kernel DP disperso + caché por asiento + B-spline vectorizada: tibio 55 → 14 ms en Mac, misma ruta bit a bit (mismo_trace IGUAL). Pi 5 estimado ~30-40 ms, sin medir. `ROUTE_PENDING_PWM` (b1579e3, apagado) con 0.3 s de retraso: 120 → 34 fallas (+1.57 s), 155 → 61 (no sirve). Con el plan rápido no hace falta. Medir en la Pi: líneas `[ROUTE] plan#… XXms` del log.
+1. **(Resuelto 2026-11-06, ver «Estado» arriba.) Latencia del plan (medido sobre o1):** con `ROUTE_PLAN_DELAY_S` 0.3 las fallas suben de 12 a 61, y con 0.6 a 123 de 210. En el twin el plan es instantáneo (~60 ms en Mac). Hay que medir cuánto tarda la DP en la Pi 5 (C + OpenMP) antes de creerle al twin. Con 0.15 s: 24 fallas (+0.53 s); 0.1 s: 15 (+0.23 s); 0.05 s: 18 (+0.07 s), ruido de ±3. **Plan 4x más rápido (0241ad2):** kernel DP disperso + caché por asiento + B-spline vectorizada: tibio 55 → 14 ms en Mac, misma ruta bit a bit (mismo_trace IGUAL). Pi 5 estimado ~30-40 ms, sin medir. `ROUTE_PENDING_PWM` (b1579e3, apagado) con 0.3 s de retraso: 120 → 34 fallas (+1.57 s), 155 → 61 (no sirve). Con el plan rápido no hace falta. Medir en la Pi: líneas `[ROUTE] plan#… XXms` del log.
 - **Rampa de vuelta 1 (`ROUTE_UNSEEN_RAMP_MM`, 763a72b, apagada):** frena en rampa hacia el asiento sin ver en vez del escalón a 155 dentro de 1300 mm. Sobre o1: 900 → −0.40 s, 13 fallas (solo 4/3); 800 → −0.58 s, 16 fallas (solo 8/4); 700 → −0.78 s, 15 fallas (solo 5/2). Ninguna pasa la regla; las fallas no son monótonas con la distancia (ruido de ±3). Gana tiempo real en la vuelta 1 pero suma 1-4 choques sueltos.
 2. **Odometría / arranque ciego (medido en o1, 42 semillas):** con el retraso de ~150 ms descontado, el EKF queda en ~15 mm laterales p95 cuando el cajón se fija bien. El 25 % de los arranques se fija FORZADO (no converge antes de acabar la recta); siempre pasa cuando el cajón está a <200 mm del supuesto. Si el error del cajón es >50 mm, falla el 31 % de las corridas (5/16); si es ≤50 mm, falla el 3.6 % (7/194). Hecho: la línea naranja fija el caso forzado (`ROUTE_FIX_LINE`, fallas 12 → 6). Ojo: cuando el sonar sí converge, la línea es peor (mediana 21 mm contra 10), por eso solo se usa en el forzado. En el carro real hay que comprobar que el tracker naranja ve la cinta en la recta del cajón. Queda abierto: frenar antes del límite de la recta si no ha convergido. El ruido de sonar del twin (3 mm) es optimista.
 3. El arranque y la primera sección (~10 s a PWM 95-110).

@@ -1,5 +1,11 @@
 # HANDOFF — U de 180° y estacionamiento paralelo (2026-10-16)
 
+> **2026-11-07:** todo está en `main`. Cambió el planificador que también usan la U y el paralelo:
+> `ROUTE_FAST_PLAN` (misma ruta bit a bit), cachés llenas al arrancar (`ROUTE_WARM_PLAN`),
+> `ROUTE_LOCK_STATIONS` 2 (antes 7) y, solo en el carro, DP en otro hilo (`ROUTE_PLAN_ASYNC`).
+> Carrera completa en el twin: 47/48 (falla n1/s22), mediana 37.26 s; con la latencia medida en la
+> Pi 5, 40/48. Detalle en `docs/HANDOFF_PERFIL.md` («Estado 2026-11-07»).
+
 Rama `claude/park-uturn-ef38b9`. Todo medido en el twin con `TWIN_MOTOR=fisico`
 (N20 1.5:1: k 3.03, pwm0 19, τ 0.057 s). El twin **no** está calibrado contra el carro.
 

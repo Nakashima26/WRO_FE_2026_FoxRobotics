@@ -1,5 +1,9 @@
 # Handoff — digital twin Fox (rama `digital-twin`)
 
+> **Estado 2026-11-07:** todo el trabajo del twin, modo ruta, U y paralelo está en `main`.
+> Empieza por `docs/HANDOFF_PERFIL.md` («Estado 2026-11-07»: números actuales, tiempos medidos en
+> la Pi 5 y banco con latencia) y `docs/HANDOFF_PARKING.md`. Lo de abajo es historial de la rama `digital-twin`.
+
 Punto de entrada para una sesión nueva. El detalle histórico está en `docs/twin_plan.md`
 (léelo por secciones con grep, no completo: es largo).
 
