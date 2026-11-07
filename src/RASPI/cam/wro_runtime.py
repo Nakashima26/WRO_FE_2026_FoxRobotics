@@ -317,11 +317,16 @@ class SerialLink:
 			print(f"[SERIAL] No se pudo abrir UART ({self.port}): {exc}", flush=True)
 			return
 
+		# Lectura en su propio hilo. Antes este mismo hilo, tras CADA línea escrita,
+		# esperaba una respuesta (VTIME = 200 ms): las líneas de ruta RTB/RTP/RTE no
+		# tienen ACK, así que cada una costaba 200 ms enteros, el UART bajaba a ~5
+		# líneas/s, la cola se llenaba y el ESP recibía V2 de hace segundos (carro v2,
+		# 2026-11-07: giró antes de la pared). Ahora se escribe en cuanto hay línea y se
+		# lee todo lo que llegue; try_readline() da la última línea recibida, igual
+		# que SimSerialLink del twin.
+		threading.Thread(target=self._read_loop, daemon=True).start()
 		while True:
-			try:
-				line = self._queue.get(timeout=0.1)
-			except Empty:
-				continue
+			line = self._queue.get()
 			if line is None:
 				break
 			try:
@@ -329,19 +334,24 @@ class SerialLink:
 				print(f"[SERIAL] TX: {line}", flush=True)
 			except Exception as e:
 				print(f"[SERIAL] Error TX: {e}", flush=True)
+
+	def _read_loop(self):
+		buf = b""
+		while self.fd is not None:
 			try:
-				data = b""
-				while True:
-					chunk = os.read(self.fd, 1)
-					if not chunk or chunk == b"\n":
-						break
-					data += chunk
-				rx = data.decode("utf-8", errors="ignore").strip()
+				chunk = os.read(self.fd, 512)   # VMIN=0/VTIME=2: regresa con lo que haya o a los 200 ms
+			except Exception:
+				time.sleep(0.05)
+				continue
+			if not chunk:
+				continue
+			buf += chunk
+			*lines, buf = buf.split(b"\n")
+			for raw in lines:
+				rx = raw.decode("utf-8", errors="ignore").strip()
 				if rx:
 					self._last_rx = rx
 					print(f"[SERIAL] RX: {rx}", flush=True)
-			except Exception:
-				pass
 
 	def open(self, timeout: float = 5.0) -> bool:
 		"""Bloquea hasta que el hilo del UART terminó el setup + settle.

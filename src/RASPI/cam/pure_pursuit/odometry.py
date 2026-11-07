@@ -137,6 +137,13 @@ class Odometry:
             self.pose = pose
             return pose
 
+        if not fields and self.pose is not None and self.pose.source == "esp_pose":
+            # Loop sin ACK nuevo (el UART real no trae uno por cuadro): la última pose
+            # del ESP sigue siendo la mejor. Caer a legacy aquí inventaba avance con la
+            # velocidad supuesta y un rumbo de giros contados, y el localizador lo tomaba
+            # como movimiento real (carro v2, 2026-11-07: 1830 de 1985 loops).
+            return self.pose
+
         pose = self._legacy_update(fields, t, dt, assumed_speed_mms)
         self.pose = pose
         return pose
