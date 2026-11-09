@@ -233,6 +233,11 @@ class RouteMode:
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
         self.axis = (0.0, 0.0)
         self.park_w = None           # w0 del cajón en uso (supuesto o medido)
+        _pf = getattr(C, "ROUTE_PRUEBA_CAJON_FILE", None)
+        self._prueba_cajon = bool(_pf) and os.path.exists(str(_pf))
+        self._prueba_n = 0
+        if self._prueba_cajon:
+            print(f"[PRUEBA] modo salida del cajón ({_pf}): se para al ubicar el cajón", flush=True)
         self.route_shift = 0.0       # marco de self.route
         self.esp_shift = 0.0         # marco de la ruta activa en el ESP
         self.upload_shift = 0.0      # marco de la ruta que se está subiendo
@@ -824,6 +829,15 @@ class RouteMode:
                                  lap2=tc is not None and 4 <= tc < 8, l23=tc is not None and 4 <= tc < 12)
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
+        if self._prueba_cajon and self.fixed:
+            # Prueba de salida (archivo ROUTE_PRUEBA_CAJON_FILE en la Pi): ubicado el
+            # cajón se para y reporta la pose cada ~1 s, para medirla con cinta.
+            self.rv = 0
+            self._prueba_n += 1
+            if self._prueba_n % 15 == 1:
+                print(f"[PRUEBA] parado: pose x={x:.0f} y={y:.0f} rumbo={hd:.1f}  cajón w0={self.park_w:.0f}  "
+                      f"dL={_ack_num(ack or '', 'dL')} dR={_ack_num(ack or '', 'dR')} dF={_ack_num(ack or '', 'dF')}",
+                      flush=True)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
                     self.follower.i, self.rv, len(unknown))
         # ¿El ESP aceptó la última ruta? Su ACK trae rn = puntos de la ruta activa. Si tras
@@ -1130,6 +1144,12 @@ class RouteMode:
         print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, {how}) tras "
               f"{self.fix.n_frames} lecturas ({self.fix.n_inform} informativas); "
               f"{n} frames de cámara votados", flush=True)
+        if self._prueba_cajon:
+            ld = ", ".join(f"{d:+.0f}" for d in self._line_d)
+            est_d, est_m = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
+            print(f"[PRUEBA] cajón: supuesto w0={self.fix.w0_guess:.0f}  δ={delta:+.0f}  "
+                  f"forzado={forced}  sonar pico={est_d} masa={est_m:.2f} media={self.fix.mean():+.0f}  "
+                  f"votos línea=[{ld}]  pose x={pose[0]:.0f} y={pose[1]:.0f} rumbo={pose[2]:.1f}", flush=True)
         return pose
 
     def _prefix_extras(self, dm, pose):

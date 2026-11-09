@@ -1320,6 +1320,9 @@ ROUTE_PREFIX_PWM = 130
 ROUTE_PREFIX_STOP_CM = 40.0
 ROUTE_PREFIX_STOP_FRAMES = 20
 ROUTE_FIX_STUCK_DF_CM = 12.0
+# Prueba de la salida del cajón: si este archivo existe en la Pi, el carro se para al
+# ubicar el cajón y escribe [PRUEBA] con lo que cree (touch para armarla, rm para quitarla).
+ROUTE_PRUEBA_CAJON_FILE = "/home/user/prueba_cajon"
 ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
 # Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
 # (dentro de ROUTE_SLOWDOWN_MM). None = apagado.
