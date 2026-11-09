@@ -1305,6 +1305,13 @@ ROUTE_STOP_MM = 750.0
 ROUTE_SLOWDOWN_MM = 1300.0
 ROUTE_SLOW_PWM = 100
 ROUTE_BLIND_PWM = None   # tope antes de fijar el avance del cajón (arranque ciego); None = ROUTE_SLOW_PWM
+# 2026-11-09 (corrida 13:26): antes de ubicar el cajón la cámara no entra al mapa. Tope de PWM en ese
+# tramo, alto (rv=0, hasta ROUTE_PREFIX_STOP_FRAMES cuadros; luego ROUTE_SLOW_PWM) si el frontal ve algo a
+# menos de ROUTE_PREFIX_STOP_CM, y sin evidencia para el cajón con el frontal pegado (odometría patinando).
+ROUTE_PREFIX_PWM = 130
+ROUTE_PREFIX_STOP_CM = 40.0
+ROUTE_PREFIX_STOP_FRAMES = 20
+ROUTE_FIX_STUCK_DF_CM = 12.0
 ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
 # Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
 # (dentro de ROUTE_SLOWDOWN_MM). None = apagado.

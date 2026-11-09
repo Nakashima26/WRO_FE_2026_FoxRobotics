@@ -242,6 +242,7 @@ class RouteMode:
         self._pre_poses: list = []
         self._fence = None
         self._pre_key = None
+        self._pre_stop = 0
         self.frame = None            # frame de perspectiva BGR (SEAT_ROI_LOG)
         self.bev = None              # BEVTransformer del runtime (H_inv para la ROI)
         self._roi_t = 0
@@ -588,8 +589,13 @@ class RouteMode:
             self._sync_map(dm, ack, pose)
         if not self.fixed:
             self._pre_poses.append(pose)
-            self.fix.update(ack, pose)
-            if getattr(C, "ROUTE_FIX_LINE", None): self._line_vote(dm, pose)
+            # Pegado a algo (frontal <= ROUTE_FIX_STUCK_DF_CM): las llantas patinan y la odometría avanza
+            # sin moverse; en la corrida 13:26 así ubicó el cajón 247 mm mal. Esas lecturas no cuentan.
+            d_fx = _ack_num(ack or "", "dF")
+            stuck_cm = getattr(C, "ROUTE_FIX_STUCK_DF_CM", None)
+            if not (stuck_cm is not None and d_fx is not None and 0.0 < d_fx <= float(stuck_cm)):
+                self.fix.update(ack, pose)
+                if getattr(C, "ROUTE_FIX_LINE", None): self._line_vote(dm, pose)
             delta = self.fix.converged()
             tol = getattr(C, "ROUTE_FIX_LINE_TOL_MM", None)
             if (delta is not None and tol is not None and getattr(C, "ROUTE_FIX_LINE", None)
@@ -762,6 +768,18 @@ class RouteMode:
             if not (d_f is not None and d_f >= 100.0):
                 blind = getattr(C, "ROUTE_BLIND_PWM", None)
                 self.rv = slow if blind is None else int(blind)
+            # 2026-11-09 (corrida 13:26): sin el cajón ubicado la cámara no entra al mapa y la ruta
+            # cruzó por el primer verde a rv 216. Tope de salida y alto si el frontal ve algo cerca.
+            pre = getattr(C, "ROUTE_PREFIX_PWM", None)
+            if pre is not None:
+                self.rv = int(pre) if self.rv is None else min(self.rv, int(pre))
+            stop_cm = getattr(C, "ROUTE_PREFIX_STOP_CM", None)
+            if stop_cm is not None and d_f is not None and 0.0 < d_f < float(stop_cm):
+                self._pre_stop += 1
+                cap = 0 if self._pre_stop <= int(getattr(C, "ROUTE_PREFIX_STOP_FRAMES", 20)) else slow
+                self.rv = cap if self.rv is None else min(self.rv, cap)
+            elif d_f is not None and d_f > 0.0:
+                self._pre_stop = 0
         if abs(self.follower.cte) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
             cte_cap = _pwm("ROUTE_CTE_PWM")
