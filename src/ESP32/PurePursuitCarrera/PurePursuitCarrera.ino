@@ -73,8 +73,16 @@ MPU6050 mpu(Wire);
 #if FOX_ENCODER && !defined(FOX_SIL)
 // Encoder de cuadratura del N20 (hardware nuevo). 34/36 son solo-entrada y SIN
 // pull-up interno: el encoder debe traer pull-ups (o ponerlos en la PCB).
+// Se cuenta con el PCNT (hardware), no con interrupciones: la ISR (digitalRead de A y B en cada
+// CHANGE) perdía 60-67 % de las cuentas en el carro v2 (2026-11-09: 1 m empujado a mano = 326 y
+// 411 mm de odometría). Misma configuración que carro-real-v2 / RectaBnoTest (probada en el piso).
+#include "driver/pulse_cnt.h"
 #define ENC_PIN_A   34
 #define ENC_PIN_B   36   // morado (CalibFox / EncoderTest de parking)
+// Con azul->34 y morado->36, adelante cuenta NEGATIVO (RectaBnoTest). Si odomMm baja al avanzar, cambiar.
+#ifndef ENC_SIGNO
+#define ENC_SIGNO   -1
+#endif
 #endif
 
 #if FOX_TOF && !defined(FOX_SIL)
@@ -91,7 +99,10 @@ MPU6050 mpu(Wire);
 // BNO085 en modo UART-RVC: TX del BNO -> GPIO25 (Serial1 RX). Paquetes de 19 bytes a 115200.
 const int BNO_RX_PIN = 25;
 // VERIFICAR: girar el carro a la derecha a mano; anguloGyro debe subir igual que con el MPU6050; si baja, poner -1.0f
-const float BNO_YAW_SIGN = 1.0f;
+// -1 verificado en el carro v2 (RondaAbierta BNO_SIGNO -1; carro-real-v2). Con +1 el yaw sube al girar a la
+// DERECHA y la pose (poseYf += ds·sin yaw, + = izquierda) sale espejeada: en modo RUTA el carro gira antes
+// de la esquina y se va contra la isla (corrida 2026-11-09: salida DER con py=+187, yaw +100 -> choque).
+const float BNO_YAW_SIGN = -1.0f;
 float bnoYaw=0, bnoYawPrev=0;
 bool bnoYawValid=false, bnoYawPrevValid=false;
 uint32_t bnoLastMs=0, bnoPrevMs=0;
@@ -372,23 +383,45 @@ float odomYawPrevDeg = 0.0f;
 float odomVfilt = 0.0f;
 int   pwmActual = 0;
 #if FOX_ENCODER
-volatile int32_t encCount = 0;
 int32_t encCountPrev = 0;
 #if !defined(FOX_SIL)
-portMUX_TYPE encMux = portMUX_INITIALIZER_UNLOCKED;
-static volatile uint8_t encPrevAB = 0;
-static const int8_t encTrans[16] = {
-  0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
-};
-volatile uint32_t encIsrN = 0;   // ei= en el ACK: interrupciones del encoder (diagnóstico de ISR storm)
-void IRAM_ATTR encIsr() {
-  encIsrN++;
-  uint8_t a = digitalRead(ENC_PIN_A) ? 1 : 0;
-  uint8_t b = digitalRead(ENC_PIN_B) ? 1 : 0;
-  uint8_t ab = (a << 1) | b;
-  int8_t d = encTrans[(encPrevAB << 2) | ab];
-  encPrevAB = ab;
-  if (d) encCount -= d;   // azul->34, morado->36: la tabla cuenta adelante negativo (EncoderTest/VueltaCalibracion SIGNO -1)
+// PCNT x4 con filtro de glitches de 1 us. accum_count + watch points en los límites: no se desborda a ±30000.
+pcnt_unit_handle_t encPcnt = NULL;
+bool iniciarEncoder() {
+  pcnt_unit_config_t ucfg = {};
+  ucfg.low_limit  = -30000;
+  ucfg.high_limit =  30000;
+  ucfg.flags.accum_count = 1;
+  if (pcnt_new_unit(&ucfg, &encPcnt) != ESP_OK) return false;
+  pcnt_glitch_filter_config_t fcfg = {};
+  fcfg.max_glitch_ns = 1000;
+  pcnt_unit_set_glitch_filter(encPcnt, &fcfg);
+  pcnt_chan_config_t cfgA = {};
+  cfgA.edge_gpio_num  = ENC_PIN_A;
+  cfgA.level_gpio_num = ENC_PIN_B;
+  pcnt_channel_handle_t chA;
+  pcnt_new_channel(encPcnt, &cfgA, &chA);
+  pcnt_chan_config_t cfgB = {};
+  cfgB.edge_gpio_num  = ENC_PIN_B;
+  cfgB.level_gpio_num = ENC_PIN_A;
+  pcnt_channel_handle_t chB;
+  pcnt_new_channel(encPcnt, &cfgB, &chB);
+  pcnt_channel_set_edge_action(chA, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE);
+  pcnt_channel_set_level_action(chA, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_channel_set_edge_action(chB, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE);
+  pcnt_channel_set_level_action(chB, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE);
+  pcnt_unit_add_watch_point(encPcnt, ucfg.high_limit);
+  pcnt_unit_add_watch_point(encPcnt, ucfg.low_limit);
+  pcnt_unit_enable(encPcnt);
+  pcnt_unit_clear_count(encPcnt);
+  pcnt_unit_start(encPcnt);
+  return true;
+}
+// Cuentas con el signo del carro: adelante = positivo (ENC_SIGNO corrige el cableado).
+int32_t leerEncoder() {
+  int v = 0;
+  if (encPcnt) pcnt_unit_get_count(encPcnt, &v);
+  return ENC_SIGNO * (int32_t)v;
 }
 #endif
 #endif
@@ -2159,9 +2192,7 @@ void actualizarOdometria() {
 #if defined(FOX_SIL)
   cnt = sil_encoder_count();
 #else
-  portENTER_CRITICAL(&encMux);
-  cnt = encCount;
-  portEXIT_CRITICAL(&encMux);
+  cnt = leerEncoder();
 #endif
   // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/5.45 = 0.183 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
@@ -3653,7 +3684,7 @@ void parsePiMessage(String line) {
 #endif
     Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
 #if FOX_ENCODER && !defined(FOX_SIL)
-    Serial2.print(",ei=");   Serial2.print(encIsrN);
+    Serial2.print(",ei=");   Serial2.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
     Serial2.print(",ue=");   Serial2.print(uartErrs);
     Serial2.print(",uf=");   Serial2.print(uartErrTipo[3]);   // FIFO_OVF
@@ -4157,11 +4188,8 @@ void setup() {
   anguloObjetivo = 0;
 
 #if FOX_ENCODER && !defined(FOX_SIL)
-  pinMode(ENC_PIN_A, INPUT);
-  pinMode(ENC_PIN_B, INPUT);
-  encPrevAB = ((digitalRead(ENC_PIN_A) ? 1 : 0) << 1) | (digitalRead(ENC_PIN_B) ? 1 : 0);
-  attachInterrupt(digitalPinToInterrupt(ENC_PIN_A), encIsr, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_PIN_B), encIsr, CHANGE);
+  if (!iniciarEncoder()) Serial.println("ENCODER: PCNT no arrancó (odometría en 0)");
+  encCountPrev = leerEncoder();
 #endif
 #if FOX_ENCODER && defined(FOX_SIL)
   encCountPrev = sil_encoder_count();
