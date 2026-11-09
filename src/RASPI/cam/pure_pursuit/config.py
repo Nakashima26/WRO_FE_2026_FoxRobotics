@@ -129,6 +129,13 @@ SENSOR_MOUNTS = {
 # no son sensores aparte: el localizador y las lecturas de mapa los ignoran y usan
 # tL/tR/tF. False = carro con sonares de verdad.
 US_DESDE_TOF = True
+# Alcance que el localizador acepta por ToF (mm). Antes fijo en 240 (VL53L0X del carro viejo): con
+# US_DESDE_TOF el carro v2 va a 30-50 cm de las paredes y el EKF tiraba casi todas las lecturas ->
+# la pose del ESP nunca se corregía y derivó ~20 cm en dos esquinas (corrida 2026-11-09, choque en
+# la esquina SE yendo sobre la ruta). Laterales en Short ROI 16: error < 2 cm hasta 45 cm, -5 cm a 60,
+# -19 cm a 80 (NOTAS_TOF 2026-10-21) -> 500. Frontal en Long, el firmware solo pasa status 0
+# (cerca; status 2 lejos trae +20 cm de sesgo y sale -1) -> 500. Trasero roto/sin medir -> 240.
+LOC_TOF_MAX_MM = {"tL": 500.0, "tR": 500.0, "tF": 500.0, "tB": 240.0}
 # Procedencia, para el twin (describe()) y para quien mida.
 VEHICLE_DIMS_PROVENANCE = {
     "ROBOT_LENGTH_MM": "medido en el carro impreso 2026-10-22",

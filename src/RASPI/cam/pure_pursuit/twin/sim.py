@@ -433,6 +433,12 @@ class Sim:
         if speed_scale != 1.0:
             self.params.motor.k_mm_s_per_pwm *= speed_scale
             self.params.motor.k_rev_mm_s_per_pwm *= speed_scale
+        # TWIN_ENC_SCALE: cuentas reales por mm = scale × las del firmware (odometría que lee scale× la
+        # distancia). El carro real llegó a ~20 cm de deriva en 2 esquinas (2026-11-09); con 1.0 el gemelo
+        # no prueba la corrección del localizador.
+        enc_scale = float(os.environ.get("TWIN_ENC_SCALE", 1.0))
+        if enc_scale != 1.0:
+            self.params.encoder.counts_per_mm *= enc_scale
         tau_scale = float(os.environ.get("TWIN_TAU_SCALE", 1.0))
         if tau_scale != 1.0:
             self.params.motor.tau_drive_s *= tau_scale

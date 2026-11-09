@@ -226,7 +226,7 @@ class Localizer:
                 continue   # primera lectura tras un salto: puede ser eco de transición
             if kind == "us" and (z < 30.0 or z > 1500.0):
                 continue
-            if kind == "tof" and (z < 20.0 or z > 240.0):
+            if kind == "tof" and (z < 20.0 or z > float(getattr(C, "LOC_TOF_MAX_MM", {}).get(key, 240.0))):
                 continue
             mount = C.SENSOR_MOUNTS[mname]
             zh, surf, cosi = self._expect(self.x, mount, kind)
