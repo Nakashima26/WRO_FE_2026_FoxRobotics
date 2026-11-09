@@ -158,6 +158,13 @@ class Localizer:
         ds = math.hypot(dpx, dpy)
         dyaw = abs(yaw - y0)
         q_xy = (0.02 * ds) ** 2 + 0.2
+        # 2026-11-09: el (2 %·ds)² por paso crece como raíz del recorrido (σ ~6 mm en 2 m), y el
+        # error real del carro es sistemático (~19 cm en la recta norte de la 13:49). Con P tan chica
+        # el gate de 3σ tiraba TODAS las lecturas laterales buenas y la pose nunca se corregía.
+        # LOC_Q_XY_PER_MM: varianza (mm²) que se suma por mm recorrido (2 -> σ ~65 mm en 2 m sin paredes).
+        q_lin = getattr(C, "LOC_Q_XY_PER_MM", None)
+        if q_lin is not None:
+            q_xy += float(q_lin) * ds
         q_th = (math.radians(0.6) * ds / 1000.0) ** 2 + (math.radians(0.01) * dyaw) ** 2 + math.radians(0.01) ** 2
         # Error de rumbo -> error de posición al avanzar: w = R(θ+yaw0)·Δp,
         # ∂wx/∂θ = wy, ∂wy/∂θ = -wx.
