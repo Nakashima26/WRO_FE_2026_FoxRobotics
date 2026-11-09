@@ -394,7 +394,8 @@ class PPRuntime:
         self._map_prev_odom = None
 
         # Serial
-        self.serial_link = serial_link if serial_link is not None else SerialLink(cfg.serial_port, cfg.baudrate)
+        self.serial_link = serial_link if serial_link is not None else SerialLink(
+            cfg.serial_port, cfg.baudrate, checksum=bool(getattr(C, "UART_CHECKSUM", False)))
 
         # Captura / grabación
         self.loop_count    = 0

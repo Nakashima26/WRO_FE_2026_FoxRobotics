@@ -1532,6 +1532,13 @@ CORR_LIMIT_PX    = 160.0
 CAM_INDEX      = 1
 SERIAL_PORT    = "/dev/ttyS0"
 BAUDRATE       = 115200  # = PI_BAUD del ESP; 921600 rinde ~1.8 s/ronda en el twin
+# "*HH" (XOR) al final de cada línea Pi->ESP; el ESP (checaLineaPi) tira las dañadas. En
+# pista, con el motor en carga, el UART perdía/cambiaba bytes (carro v2, 2026-11-09).
+# Requiere PurePursuit.ino con checaLineaPi; un ESP viejo tomaría "*HH" como parte del valor.
+UART_CHECKSUM  = True
+# Reenvío de la ruta: si N frames después del RTE el ACK no trae rn = puntos subidos, se
+# vuelve a mandar completa (una línea perdida dejaba al ESP con la ruta vieja).
+ROUTE_UPLOAD_RETRY_FRAMES = 10
 PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
 

@@ -201,6 +201,10 @@ class RouteMode:
         self.loc = None
         self.key = None
         self.upload: list[str] = []
+        self._upload_full: list[str] = []   # la subida completa, para reenviarla
+        self._rte_n = None           # puntos del último RTE mandado, hasta que el ACK traiga rn igual
+        self._rte_wait = 0
+        self.n_retries = 0
         self.esp_route = None        # última ruta completa en el ESP (tras su RTE)
         self.empty: set = set()
         self.view_count: dict = {}
@@ -804,6 +808,22 @@ class RouteMode:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
                     self.follower.i, self.rv, len(unknown))
+        # ¿El ESP aceptó la última ruta? Su ACK trae rn = puntos de la ruta activa. Si tras
+        # ROUTE_UPLOAD_RETRY_FRAMES no cuadra con el RTE mandado, una línea se perdió en el UART
+        # y el ESP sigue con la ruta vieja: se reenvía completa.
+        retry = int(getattr(C, "ROUTE_UPLOAD_RETRY_FRAMES", 0) or 0)
+        if retry > 0 and self._rte_n is not None and not self.upload:
+            rn = _ack_num(ack or "", "rn")
+            if rn is not None and int(rn) == self._rte_n:
+                self._rte_n = None
+            else:
+                self._rte_wait += 1
+                if self._rte_wait >= retry and self._upload_full:
+                    self.n_retries += 1
+                    print(f"[ROUTE] reenvío #{self.n_retries}: el ESP no confirmó la ruta "
+                          f"(rn={rn} esperado {self._rte_n})", flush=True)
+                    self.upload = list(self._upload_full)
+                    self._rte_n = None
         lines = []
         if self.upload and getattr(C, "ROUTE_ON_ESP", False):
             # shortcut: >1 línea por frame pide subir el baud (a 115200 solo cabe una junto al V2).
@@ -811,6 +831,9 @@ class RouteMode:
                 if not self.upload:
                     break
                 lines.append(self.upload.pop(0))
+                if lines[-1].startswith("RTE,"):
+                    self._rte_n = int(lines[-1].split(",")[1])
+                    self._rte_wait = 0
         if any(l.startswith("RTE") for l in lines):
             sd = getattr(C, "ROUTE_SWAP_DIFF_MM", None)   # solo si la ruta nueva se aparta de la del ESP en el tramo de adelante
             self._swap_left = int(getattr(C, "ROUTE_SWAP_FRAMES", 0)) if sd is None or self._upload_risky(float(sd)) else 0
@@ -1213,6 +1236,8 @@ class RouteMode:
         self.key = key
         self.n_plans += 1
         self.upload = self._upload_lines(route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
+        self._upload_full = list(self.upload)
+        self._rte_n = None
         self.upload_shift = shift
         self.hold = hold
         self.loc.set_map(conf, unknown, dm.parking, self.park_w)

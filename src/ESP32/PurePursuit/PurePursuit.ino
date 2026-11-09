@@ -246,7 +246,9 @@ int   rutaCarga   = 0;       // puntos anunciados en RTB (carga en curso)
 int   rutaRecib   = 0;       // puntos recibidos de la carga en curso
 int   rutaUltRte  = 0;       // n del último RTE recibido (re= en el ACK)
 volatile int uartErrs = 0;                          // ue= : errores del UART de la Pi
-int lineasV2 = 0, lineasRT = 0, lineasOtras = 0;    // lv/lr/lo : líneas recibidas por tipo
+volatile int uartErrTipo[8] = {0};                 // por tipo: [3] FIFO_OVF, [4] FRAME (ruido), [2] BUFFER_FULL
+int lineasV2 = 0, lineasRT = 0, lineasOtras = 0;
+int lineasMalas = 0;                                // lc= : líneas con checksum malo (descartadas)    // lv/lr/lo : líneas recibidas por tipo
 float rutaPaso    = 20.0f;   // mm entre puntos
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
@@ -3649,6 +3651,10 @@ void parsePiMessage(String line) {
     Serial2.print(",ei=");   Serial2.print(encIsrN);
 #endif
     Serial2.print(",ue=");   Serial2.print(uartErrs);
+    Serial2.print(",uf=");   Serial2.print(uartErrTipo[3]);   // FIFO_OVF
+    Serial2.print(",ut=");   Serial2.print(uartErrTipo[4]);   // FRAME
+    Serial2.print(",ub=");   Serial2.print(uartErrTipo[1] + uartErrTipo[2]);   // BREAK + BUFFER_FULL
+    Serial2.print(",lc=");   Serial2.print(lineasMalas);
     Serial2.print(",lv=");   Serial2.print(lineasV2);
     Serial2.print(",lr=");   Serial2.print(lineasRT);
     Serial2.print(",lo=");   Serial2.print(lineasOtras);
@@ -3683,20 +3689,36 @@ void parsePiMessage(String line) {
 #if !defined(FOX_SIL)
 void onPiUartError(hardwareSerial_error_t e) {
   uartErrs++;
-  static int porTipo[8] = {0};
-  if ((int)e >= 0 && (int)e < 8) porTipo[(int)e]++;
+  if ((int)e >= 0 && (int)e < 8) uartErrTipo[(int)e]++;
   if (uartErrs <= 5 || uartErrs % 50 == 0) {
     // 1 BREAK, 2 BUFFER_FULL, 3 FIFO_OVF, 4 FRAME, 5 PARITY
     Serial.printf("UARTERR n=%d tipos brk=%d buf=%d fifo=%d frame=%d par=%d\n", uartErrs,
-                  porTipo[1], porTipo[2], porTipo[3], porTipo[4], porTipo[5]);
+                  uartErrTipo[1], uartErrTipo[2], uartErrTipo[3], uartErrTipo[4], uartErrTipo[5]);
   }
 }
 #endif
 
+// Checksum de línea de la Pi: "<texto>*HH" con HH = XOR (hex) de los bytes de <texto>.
+// Devuelve 1 = válida (y quita el sufijo), 0 = sin checksum (se acepta: twin/firmware viejo),
+// -1 = checksum malo (la línea llegó dañada: se descarta; con ruido del motor el UART
+// perdía/cambiaba bytes y un V2 cortado podía leerse con números equivocados).
+int checaLineaPi(String &line) {
+  int n = line.length();
+  if (n < 3 || line.charAt(n - 3) != '*') return 0;
+  uint8_t ck = 0;
+  for (int i = 0; i < n - 3; i++) ck ^= (uint8_t)line.charAt(i);
+  long hh = strtol(line.substring(n - 2).c_str(), NULL, 16);
+  if ((long)ck != hh) return -1;
+  line = line.substring(0, n - 3);
+  return 1;
+}
+
 void readPiSerial() {
   while (Serial2.available() > 0) {
     String line = Serial2.readStringUntil('\n');
+    if (line.endsWith("\r")) line = line.substring(0, line.length() - 1);
     if (line.length() == 0) continue;
+    if (checaLineaPi(line) < 0) { lineasMalas++; continue; }
     if (line.startsWith("V2,")) lineasV2++;
     else if (line.startsWith("RT")) lineasRT++;
     else {
@@ -4062,6 +4084,8 @@ void setup() {
   // nunca cuadraba en RTE (rn=0) y faltaban V2/ACK (carro v2, 2026-11-07). El twin
   // no modela el límite. Debe ir ANTES de begin().
   Serial2.setRxBufferSize(4096);
+  // Sin buffer TX el ACK (~330 B) bloqueaba el loop ~6 ms mientras salía por la FIFO.
+  Serial2.setTxBufferSize(1024);
   Serial2.onReceiveError(onPiUartError);
   // begin() desde una tarea en el núcleo 0: la interrupción del UART queda en el núcleo que
   // la pide, lejos del I2C de los ToF y del encoder (núcleo 1). Con todo en el núcleo 1 la
@@ -4085,6 +4109,9 @@ void setup() {
   // la FIFO se desbordaba (ue=312 en 25 s, líneas cortadas, ruta rechazada). Con 32 B
   // el ISR la vacía antes y hay ~2 ms de margen.
   Serial2.setRxFIFOFull(32);
+  // readStringUntil esperaba hasta 1 s (default) si se perdía el '\n' de una línea; a
+  // 460800 una línea entera llega en <15 ms. La incompleta la tira el checksum.
+  Serial2.setTimeout(10);
 #endif
 
   Wire.begin();

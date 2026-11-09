@@ -33,6 +33,15 @@ class SimSerialLink:
         pass
 
     def send_line(self, line: str) -> None:
+        from pure_pursuit import config as C
+        if getattr(C, "UART_CHECKSUM", False):   # mismo formato que wro_runtime.con_checksum
+            parts = []
+            for l in line.split("\n"):
+                ck = 0
+                for b in l.encode("utf-8"):
+                    ck ^= b
+                parts.append(f"{l}*{ck:02X}")
+            line = "\n".join(parts)
         raw = line if line.endswith("\n") else line + "\n"
         arrival = self._pi_now_us + int(len(raw) * _UART_US_PER_BYTE)
         self._fw.push_serial2(line, arrival_us=arrival)

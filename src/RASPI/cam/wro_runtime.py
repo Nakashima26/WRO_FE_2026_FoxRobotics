@@ -253,10 +253,23 @@ class TurnDetector:
 		return 0, left_ratio, right_ratio
 
 
+def con_checksum(line: str) -> str:
+	"""Cada línea -> "<texto>*HH" (HH = XOR de sus bytes, hex). El ESP (checaLineaPi)
+	descarta la que no cuadre: con el motor en carga el UART perdía/cambiaba bytes."""
+	out = []
+	for l in line.split("\n"):
+		ck = 0
+		for b in l.encode("utf-8"):
+			ck ^= b
+		out.append(f"{l}*{ck:02X}")
+	return "\n".join(out)
+
+
 class SerialLink:
-	def __init__(self, port: str, baudrate: int):
+	def __init__(self, port: str, baudrate: int, checksum: bool = False):
 		self.port = port
 		self.baudrate = baudrate
+		self.checksum = checksum   # True solo con firmware que verifica (PurePursuit.ino checaLineaPi)
 		self.fd = None
 		# Cola grande: si el hilo aún no drena (settle inicial) los primeros
 		# mensajes NO se deben perder (maxsize=4 los tiraba en silencio ->
@@ -366,6 +379,8 @@ class SerialLink:
 		return ok
 
 	def send_line(self, line: str):
+		if self.checksum:
+			line = con_checksum(line)
 		try:
 			self._queue.put_nowait(line)
 		except Full:
