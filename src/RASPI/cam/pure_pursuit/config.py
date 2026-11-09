@@ -135,10 +135,12 @@ US_DESDE_TOF = True
 # la esquina SE yendo sobre la ruta). Laterales en Short ROI 16: error < 2 cm hasta 45 cm, -5 cm a 60,
 # -19 cm a 80 (NOTAS_TOF 2026-10-21) -> 500. Frontal en Long, el firmware solo pasa status 0
 # (cerca; status 2 lejos trae +20 cm de sesgo y sale -1) -> 500. Trasero roto/sin medir -> 240.
-# 2026-11-09: con 500 la corrida 13:02 se rompió (al resolver el cajón el rumbo enviado al ESP saltó
-# ~25° y el carro se fue derecho a la pared norte creyendo que ya giraba). Vuelto a 240 hasta
-# reproducirlo con los ACK de esa corrida.
-LOC_TOF_MAX_MM = {"tL": 240.0, "tR": 240.0, "tF": 240.0, "tB": 240.0}
+# 2026-11-09: la 13:02 no se rompió por el rango: el cajón medido está a w0≈1400 y esa corrida lo
+# ubicó en 978 (42 cm mal), así que las paredes contradecían la pose. Con 240 las laterales (que en
+# la recta leen 30-50 cm) casi nunca corrigen: en la 13:36 la pose iba ~20 cm corrida en la recta
+# norte y el rojo N/X2 cayó a 19 cm de su asiento (no entró al mapa) y lo chocó. Laterales hasta
+# 500 (Short ROI 16: <2 cm hasta 45, -5 a 60); frontal/trasero en 240 (Long: +20 cm más allá de 50).
+LOC_TOF_MAX_MM = {"tL": 500.0, "tR": 500.0, "tF": 240.0, "tB": 240.0}
 # Procedencia, para el twin (describe()) y para quien mida.
 VEHICLE_DIMS_PROVENANCE = {
     "ROBOT_LENGTH_MM": "medido en el carro impreso 2026-10-22",
