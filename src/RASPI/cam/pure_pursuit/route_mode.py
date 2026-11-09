@@ -229,6 +229,7 @@ class RouteMode:
         self.fix = None              # StartFix mientras no se sabe el avance
         self.orange = None           # estado de la línea naranja (OrangeLineTracker) del frame
         self._line_d: list = []      # δ por lectura de la línea naranja (ROUTE_FIX_LINE)
+        self._pix_ok = None          # None = aún no se sabe si la cinta de esta recta sirve para pixeles
         self.fixed = not self.blind
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
         self.axis = (0.0, 0.0)
@@ -626,6 +627,13 @@ class RouteMode:
                          or (PARK_W_MAX - self.fix.w0_guess) - delta < float(edge))):
                 # Pico pegado al extremo del rango y sin la línea: una señal en la pared supuesta (s894: -691, verdad -299).
                 delta = None
+            n_dec = getattr(C, "ROUTE_FIX_LINE_DECIDE_N", None)
+            if (delta is None and n_dec is not None and getattr(C, "ROUTE_FIX_LINE", None)
+                    and len(self._line_d) >= int(n_dec)):
+                # La cinta ya votó varias veces y cuadra: decide sin esperar al final de la recta.
+                q1, q3 = np.percentile(self._line_d[-int(n_dec):], [25, 75])
+                if q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0)):
+                    delta = float(np.median(self._line_d[-int(n_dec):]))
             forced = False
             if delta is None and self._past_straight(dm, pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
@@ -1087,9 +1095,23 @@ class RouteMode:
         return front >= 1900.0 if sgn > 0 else front <= 1100.0
 
     def _line_vote(self, dm, pose):
-        """δ del cajón según la línea naranja: punto de la recta en la columna central del BEV, llevado al mundo con la pose supuesta."""
+        """δ del cajón según la línea naranja. Con `_pix` (pixeles de cinta del frame,
+        corner_lines._center_pix): cada pixel llevado al mundo con la pose supuesta da
+        un δ, y el voto es la mediana. Si no, el punto de la recta ajustada en la
+        columna central del BEV."""
         o = self.orange
-        if not o or not o.get("seen") or not o.get("line") or o.get("dead_reckoned"):
+        if not o or not o.get("seen") or o.get("dead_reckoned"):
+            return
+        pix = o.get("_pix")
+        if pix is not None and len(pix) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+            if self._pix_vote(dm, pose, np.asarray(pix, float)):
+                return
+        elif getattr(C, "ROUTE_FIX_LINE_PIX", False) and getattr(self, "_pix_ok", None) is not False:
+            return
+        if not o.get("line"):
+            # Con pixeles, sin _pix este frame no se vota: la recta que queda es la
+            # SOSTENIDA de frames anteriores y con la pose avanzando arrastraba el
+            # voto ~10 mm/frame (gemelo s19: de +327 a +74).
             return
         vx, vy, x0, y0 = o["line"]
         if abs(vx) < 1e-6:
@@ -1118,6 +1140,51 @@ class RouteMode:
                 best = (float(d), dist)
         if best is not None:
             self._line_d.append(best[0])
+
+    def _pix_vote(self, dm, pose, pix):
+        k = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
+        cur_h = pose[2]
+        if len(self._pre_poses) > k:
+            pose = self._pre_poses[-1 - k]   # pose del momento de la imagen (latencia cámara->ACK)
+        fwd = (float(C.ROBOT_BEV_Y) - pix[:, 1]) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
+        lat = (pix[:, 0] - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
+        h = math.radians(pose[2])
+        P = np.column_stack([pose[0] + fwd * math.sin(h) + lat * math.cos(h),
+                             pose[1] + fwd * math.cos(h) - lat * math.sin(h)])
+        c = P.mean(axis=0)
+        a = np.array(self.axis)
+        span = PARK_W_MAX - PARK_W_MIN
+        lo, hi = (-150.0, span + 150.0) if dm.direction == "CW" else (-span - 150.0, 150.0)
+        best = None
+        for (sx, sy), (ex, ey) in orange_segments():
+            u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
+            n = np.array([-u[1], u[0]])
+            if abs(n @ a) < 0.3:
+                continue
+            d = float((n @ np.array([sx, sy]) - n @ c) / (n @ a))
+            dist = math.hypot(sx - c[0], sy - c[1])
+            if lo <= d <= hi and (best is None or dist < best[2]):
+                best = (n, float(n @ np.array([sx, sy])), dist)
+        if best is None:
+            return True
+        n, ns, _ = best
+        # Cinta casi paralela a la recta (|n·a| chico, CCW con la de 30°): un error
+        # lateral de la pose se multiplica por |n_perp|/|n·a| (1.7 a 30°; gemelo s23
+        # −190 mm). Ahí se queda el voto de la recta ajustada de siempre.
+        self._pix_ok = abs(float(n @ a)) >= float(getattr(C, "ROUTE_FIX_PIX_MIN_NA", 0.7))
+        if not self._pix_ok:
+            return False
+        # Solo con el carro casi alineado a la recta y sin girar (cámara y pose del mismo instante).
+        turn = abs((cur_h - pose[2] + 180.0) % 360.0 - 180.0)
+        if turn > float(getattr(C, "ROUTE_FIX_PIX_MAX_TURN_DEG", 3.0)):
+            return True
+        if abs(math.sin(h) * a[1] - math.cos(h) * a[0]) > math.sin(math.radians(float(getattr(C, "ROUTE_FIX_PIX_MAX_ANG_DEG", 15.0)))):
+            return True
+        d = (ns - P @ n) / (n @ a)
+        d = d[(d >= lo) & (d <= hi)]
+        if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+            self._line_d.append(float(np.median(d)))
+        return True
 
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""

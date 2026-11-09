@@ -258,6 +258,12 @@ class StartFix:
             if raw is None:
                 continue
             z = raw * 10.0
+            tof_max = (getattr(C, "ROUTE_FIX_TOF_MAX_MM", None) or {}).get(key)
+            if tof_max is not None and (raw <= 0 or z > float(tof_max)):
+                # ToF (carro v2): más allá de esto lee largo o le pega a un bloque y el
+                # modelo lo tomaba por la pared del fondo (prueba 14:35: δ −26, verdad ~+400).
+                # Sin lectura tampoco es evidencia: el ToF no tiene el timeout de 119 cm.
+                continue
             z = None if (raw <= 0 or z >= _US_MAX_MM) else z
             mount = C.SENSOR_MOUNTS[mname]
             e0 = self._expected_us(pose, mount)

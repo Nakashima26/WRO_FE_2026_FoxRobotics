@@ -1323,6 +1323,22 @@ ROUTE_FIX_STUCK_DF_CM = 12.0
 # Prueba de la salida del cajón: si este archivo existe en la Pi, el carro se para al
 # ubicar el cajón y escribe [PRUEBA] con lo que cree (touch para armarla, rm para quitarla).
 ROUTE_PRUEBA_CAJON_FILE = "/home/user/prueba_cajon"
+# Ubicación del cajón con ToF (carro v2, sin ultrasónicos): lecturas por sensor más
+# allá de esto no votan (el frontal lee ~20 cm largo pasando 50 cm y le pega a los
+# bloques). None = modelo viejo de ultrasónico (119 cm, sin eco = evidencia).
+ROUTE_FIX_TOF_MAX_MM = {"dF": 600.0, "dL": 500.0, "dR": 500.0}
+# Voto de la naranja por pixeles de cinta (corner_lines._center_pix): mínimo de pixeles.
+ROUTE_FIX_LINE_MIN_PIX = 25
+# True = solo pixeles de cinta del frame (sin respaldo de la recta ajustada sostenida).
+ROUTE_FIX_LINE_PIX = True
+# Voto por pixeles solo con el rumbo a <= ANG de la recta y girando <= TURN grados entre la imagen y ahora.
+ROUTE_FIX_PIX_MAX_ANG_DEG = 15.0
+ROUTE_FIX_PIX_MAX_TURN_DEG = 3.0
+# Pixeles solo si la cinta cruza la recta con |n·a| >= esto (≈45°); si no, la recta ajustada de siempre.
+ROUTE_FIX_PIX_MIN_NA = 0.7
+# Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.
+ROUTE_FIX_LINE_DECIDE_N = 5
+ROUTE_FIX_LINE_DECIDE_IQR_MM = 60.0
 ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
 # Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
 # (dentro de ROUTE_SLOWDOWN_MM). None = apagado.

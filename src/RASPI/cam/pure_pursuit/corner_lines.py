@@ -451,7 +451,38 @@ def detect_lines(bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None) -> dict
         out["curve"] = _curve_from(comp, near_y, float(getattr(C, "LINE_FIT_BAND_PX", 45)))
     if near_y is None and rej is not None:
         out["rej"] = rej
+    if near_y is not None:
+        # Solo la componente de cinta aceptada (la de más pixeles en la banda de
+        # near_y): en el gemelo, con la cinta ya debajo de la ventana, otros pixeles
+        # naranjas quietos en el BEV arrastraban el voto del cajón ~10 mm/frame.
+        k = _band_main_label(comp, near_y, half)
+        if k is not None:
+            out["_mask"] = (comp[1] == k).astype(np.uint8)
     return {"Orange": out}
+
+
+def _center_pix(mask) -> np.ndarray | None:
+    """Pixeles naranjas (bx, by) de la franja central del BEV (±LINE_PIX_HALF_COLS
+    columnas del eje del carro, 100..600 mm adelante del eje trasero): para ubicar el
+    cajón con la cinta misma y no con una recta ajustada, que con la cinta curva por
+    la lente y el carro saliendo en ángulo salía empinada (corrida 14:27: 1 voto)."""
+    if mask is None:
+        return None
+    half = int(getattr(C, "LINE_PIX_HALF_COLS", 80))
+    x0 = max(0, int(C.ROBOT_BEV_X) - half)
+    x1 = min(mask.shape[1], int(C.ROBOT_BEV_X) + half + 1)
+    ahead = float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
+    y0 = max(0, int(C.ROBOT_BEV_Y - (600.0 - ahead) / C.MM_PER_PX))
+    y1 = min(mask.shape[0], int(C.ROBOT_BEV_Y - (100.0 - ahead) / C.MM_PER_PX) + 1)
+    if y1 <= y0 or x1 <= x0:
+        return None
+    ys, xs = np.nonzero(mask[y0:y1, x0:x1])
+    if len(xs) == 0:
+        return None
+    pix = np.column_stack([xs + x0, ys + y0]).astype(np.float32)
+    if len(pix) > 400:
+        pix = pix[np.linspace(0, len(pix) - 1, 400).astype(int)]
+    return pix
 
 
 class OrangeLineTracker:
@@ -547,7 +578,17 @@ class OrangeLineTracker:
         return abs(raw["near_y"] - self._candidate["near_y"]) <= self.tolerance_px
 
     def update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None,
-              ds_px: float = 0.0, in_turn_cooldown: bool = False) -> dict:
+               ds_px: float = 0.0, in_turn_cooldown: bool = False) -> dict:
+        """_update() + `_pix`: pixeles de cinta de ESTE frame (solo si la lectura cruda
+        la vio), para el voto del cajón en route_mode. El estado sostenido no los trae."""
+        self._raw_pix = None
+        out = self._update(bev_bgr, bev_hsv, ds_px, in_turn_cooldown)
+        if self._raw_pix is None:
+            return out
+        return dict(out, _pix=self._raw_pix)
+
+    def _update(self, bev_bgr: np.ndarray, bev_hsv: np.ndarray | None = None,
+                ds_px: float = 0.0, in_turn_cooldown: bool = False) -> dict:
         """
         bev_hsv: ver detect_lines() -- si el caller ya convirtió bev_bgr a
         HSV este frame (runtime_nuevo.py lo hace para compartirla con
@@ -572,6 +613,9 @@ class OrangeLineTracker:
             bev_hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
         raw = detect_lines(bev_bgr, bev_hsv=bev_hsv)["Orange"]
         self._prov = raw.get("curve") if raw["seen"] else None
+        if raw["seen"] and not in_turn_cooldown:
+            self._raw_pix = _center_pix(raw.get("_mask"))
+        raw.pop("_mask", None)
 
         if self._matches_candidate(raw):
             self._candidate_count += 1

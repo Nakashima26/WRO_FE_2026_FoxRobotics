@@ -20,7 +20,8 @@ def _rm(orange):
     return rm
 
 
-def test_line_vote_recovers_delta():
+def test_line_vote_recovers_delta(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_PIX", False, raising=False)
     delta, fwd = 300.0, 350.0
     (sx, sy), (ex, ey) = W.orange_segments()[0]
     # Punto de la cinta cerca de su punta; el look-point del carro está δ atrás (marco supuesto).
