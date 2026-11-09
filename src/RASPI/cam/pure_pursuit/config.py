@@ -987,7 +987,11 @@ LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin 
 # Tope de S en 255 (no 200 como la banda ancha): parte del núcleo real vive
 # arriba de 200 y recortarlo bajaba la cuenta a la mitad en las lecturas más
 # débiles (f096/f097: 14 -> 22/27 px al abrir el tope).
-LINE_CORE_HSV    = [(np.array([7, 140, 140]), np.array([18, 255, 255]))]
+# 2026-11-09 (carro v2, Pi 5): S 140 -> 115. En la 14:12 (orillas32_bev.bin) la
+# cinta a 30-45 cm salía S 80-135 -> núcleo 0, solo entraba como franja sin recta
+# y el cajón se forzó sin votos de línea (1062 vs ~1400). Con 115 se sigue desde
+# ~60 cm con recta; el piso de esta sede sale S ~60-65.
+LINE_CORE_HSV    = [(np.array([7, 115, 140]), np.array([18, 255, 255]))]
 LINE_CORE_MIN_PX = 8     # px de núcleo mínimos para aceptar el near_y. Medido en
                          # los 396 frames de orillas820: los grupos de línea REAL
                          # dan núcleo 9-221 px (los tres frames más flojos: 9, 9,
