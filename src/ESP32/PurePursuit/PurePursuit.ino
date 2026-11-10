@@ -3233,16 +3233,17 @@ bool detectarEsquina(long distL, long distR, long distF) {
 // Protocolo serial con Raspberry Pi
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Valor del campo `clave` (p.ej. "prio=") de un mensaje V1/V2, hasta la coma
-// siguiente. false = el campo no viene en el mensaje.
-bool campoPi(const String &line, const char *clave, String &valor) {
-  int idx = line.indexOf(clave);
-  if (idx < 0) return false;
-  int ini = idx + strlen(clave);
-  int end = line.indexOf(',', ini);
-  valor = (end >= 0) ? line.substring(ini, end) : line.substring(ini);
+// Valor del campo `clave` (p.ej. "prio=") de un mensaje V1/V2: puntero dentro de la línea, sin copiarla
+// (antes un substring por campo). Primera aparición, como el indexOf de antes. false = el campo no viene.
+// El número se lee con strtol/strtod, lo mismo que String::toInt/toFloat, y se para en la coma.
+bool campoPi(const String &line, const char *clave, const char *&valor) {
+  const char *p = strstr(line.c_str(), clave);
+  if (!p) return false;
+  valor = p + strlen(clave);
   return true;
 }
+static inline long  campoInt(const char *v)   { return strtol(v, NULL, 10); }
+static inline float campoFloat(const char *v) { return (float)strtod(v, NULL); }
 
 // Pose del eje trasero en el tapete (modo RUTA): mundo = (rtx,rty) + px·F + py·L.
 void rutaPoseTapete(float &x, float &y) {
@@ -3515,11 +3516,11 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
   //      o:  V1,obs=+0.123,turn=0,state=avoid_red,prio=1,mem=18,pp=0
   //          (ambos se parsean igual — solo difiere el campo pp=)
   if (line.startsWith("V1,") || line.startsWith("V2,")) {
-    String v;
-    if (campoPi(line, "obs=", v))  obsBiasNorm = constrain(v.toFloat(), -1.0, 1.0);
-    if (campoPi(line, "turn=", v)) { int t = v.toInt(); turnHint = (t > 0) ? 1 : (t < 0) ? -1 : 0; }
-    if (campoPi(line, "prio=", v)) piPriority = (v.toInt() != 0);
-    if (campoPi(line, "mem=", v))  piMemoryFrames = max(0L, v.toInt());
+    const char *v;
+    if (campoPi(line, "obs=", v))  obsBiasNorm = constrain(campoFloat(v), -1.0, 1.0);
+    if (campoPi(line, "turn=", v)) { int t = campoInt(v); turnHint = (t > 0) ? 1 : (t < 0) ? -1 : 0; }
+    if (campoPi(line, "prio=", v)) piPriority = (campoInt(v) != 0);
+    if (campoPi(line, "mem=", v))  piMemoryFrames = max(0L, campoInt(v));
 
     // Marca del último frame CON obstáculo activo -> grace post-esquiva de
     // SIGUIENDO->CRUCERO (deja aterrizar el pulso `pasado`).
@@ -3530,38 +3531,38 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     //   pasado : evento de UN frame, el robot ya atravesó físicamente el obstáculo
     //   intr   : el obstáculo se pasa por el mismo lado hacia el que gira la pista
     //            (corner_lines.py); sin dirección confirmada -> sigue bloqueando
-    piPurePursuit  = campoPi(line, ",pp=", v)    && v.toInt() != 0;
-    piPasado       = campoPi(line, "pasado=", v) && v.toInt() != 0;
-    piInteriorPass = campoPi(line, "intr=", v)   && v.toInt() != 0;
+    piPurePursuit  = campoPi(line, ",pp=", v)    && campoInt(v) != 0;
+    piPasado       = campoPi(line, "pasado=", v) && campoInt(v) != 0;
+    piInteriorPass = campoPi(line, "intr=", v)   && campoInt(v) != 0;
 
     // inicio — la Pi vio rosa MAYORITARIO al arrancar (está en el estacionamiento)
     // -> maniobra de salida (case INICIO). Debe venir ya en el PRIMER V2. SOLO se
     // setea a true (sticky); el one-shot de loop() lo consume una sola vez.
-    if (campoPi(line, "inicio=", v) && v.toInt() != 0) piInicioEstacionamiento = true;
+    if (campoPi(line, "inicio=", v) && campoInt(v) != 0) piInicioEstacionamiento = true;
     // isal — lado de paso de la 1ª señal adelante del cajón (solo durante INICIO)
-    if (campoPi(line, ",isal=", v) && v.toInt() != 0) piSalida = v.toInt();
+    if (campoPi(line, ",isal=", v) && campoInt(v) != 0) piSalida = campoInt(v);
     // isen — hay señal a <~1.3 m adelante de la salida: INICIO a INICIO_PWM_SENAL (sticky)
-    if (campoPi(line, ",isen=", v) && v.toInt() != 0) piSenalSalida = true;
+    if (campoPi(line, ",isen=", v) && campoInt(v) != 0) piSenalSalida = true;
 
     // park — etapa del cajón vista por la Pi en la recta final
-    if (campoPi(line, "park=", v)) piPark = v.toInt();
-    if (campoPi(line, ",gr=", v))  piGr = v.toInt();
-    if (campoPi(line, ",gf=", v))  piGf = v.toInt();
-    piGv           = campoPi(line, ",gv=", v) && v.toInt() != 0;
-    piEsquina      = campoPi(line, ",es=", v)    && v.toInt() != 0;
+    if (campoPi(line, "park=", v)) piPark = campoInt(v);
+    if (campoPi(line, ",gr=", v))  piGr = campoInt(v);
+    if (campoPi(line, ",gf=", v))  piGf = campoInt(v);
+    piGv           = campoPi(line, ",gv=", v) && campoInt(v) != 0;
+    piEsquina      = campoPi(line, ",es=", v)    && campoInt(v) != 0;
     // Modo RUTA: rt=1 y la transformación odometría -> tapete.
-    piRuta         = campoPi(line, ",rt=", v) && v.toInt() != 0;
-    piSteerPi      = campoPi(line, ",ps=", v) && v.toInt() != 0;
-    if (campoPi(line, ",pw=", v)) piWheelDeg = v.toFloat();
-    rutaVel        = campoPi(line, ",rv=", v) ? (int)v.toInt() : -1;
+    piRuta         = campoPi(line, ",rt=", v) && campoInt(v) != 0;
+    piSteerPi      = campoPi(line, ",ps=", v) && campoInt(v) != 0;
+    if (campoPi(line, ",pw=", v)) piWheelDeg = campoFloat(v);
+    rutaVel        = campoPi(line, ",rv=", v) ? (int)campoInt(v) : -1;
     if (campoPi(line, ",rtx=", v)) {
-      rutaTx = v.toFloat();
-      if (campoPi(line, ",rty=", v)) rutaTy = v.toFloat();
-      if (campoPi(line, ",rth=", v)) rutaTh = v.toFloat();
+      rutaTx = campoFloat(v);
+      if (campoPi(line, ",rty=", v)) rutaTy = campoFloat(v);
+      if (campoPi(line, ",rth=", v)) rutaTh = campoFloat(v);
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
-    if (campoPi(line, ",pka=", v)) rutaPka = v.toFloat();
+    if (campoPi(line, ",pka=", v)) rutaPka = campoFloat(v);
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
@@ -3761,21 +3762,51 @@ int checaLineaPi(String &line) {
   return 1;
 }
 
+void procesarLineaPi(String &line) {
+  if (line.endsWith("\r")) line = line.substring(0, line.length() - 1);
+  if (line.length() == 0) return;
+  if (checaLineaPi(line) < 0) { lineasMalas++; return; }
+  if (line.startsWith("V2,")) lineasV2++;
+  else if (line.startsWith("RT")) lineasRT++;
+  else {
+    lineasOtras++;
+    Serial.print("PI? len="); Serial.print(line.length()); Serial.print(" ");
+    Serial.println(line.substring(0, 60));
+  }
+  parsePiMessage(line);
+}
+
+// EXPERIMENTO (apagado): 1 = junta los bytes en un buffer fijo y procesa solo líneas completas, sin esperar
+// en readStringUntil a que llegue el resto de una línea a medias (hasta ~3 ms por V2 a 460800).
+#ifndef FOX_SERIAL_NOBLOQ
+#define FOX_SERIAL_NOBLOQ 0
+#endif
+
 void readPiSerial() {
+#if FOX_SERIAL_NOBLOQ
+  static char buf[1024];
+  static int n = 0;
+  static bool larga = false;   // no cupo: se tira entera (cuenta como línea mala)
+  while (Serial2.available() > 0) {
+    int c = Serial2.read();
+    if (c < 0) break;
+    if (c != '\n') {
+      if (n < (int)sizeof(buf) - 1) buf[n++] = (char)c; else larga = true;
+      continue;
+    }
+    buf[n] = '\0';
+    bool tirar = larga;
+    n = 0; larga = false;
+    if (tirar) { lineasMalas++; continue; }
+    String line(buf);
+    procesarLineaPi(line);
+  }
+#else
   while (Serial2.available() > 0) {
     String line = Serial2.readStringUntil('\n');
-    if (line.endsWith("\r")) line = line.substring(0, line.length() - 1);
-    if (line.length() == 0) continue;
-    if (checaLineaPi(line) < 0) { lineasMalas++; continue; }
-    if (line.startsWith("V2,")) lineasV2++;
-    else if (line.startsWith("RT")) lineasRT++;
-    else {
-      lineasOtras++;
-      Serial.print("PI? len="); Serial.print(line.length()); Serial.print(" ");
-      Serial.println(line.substring(0, 60));
-    }
-    parsePiMessage(line);
+    procesarLineaPi(line);
   }
+#endif
 }
 
 
