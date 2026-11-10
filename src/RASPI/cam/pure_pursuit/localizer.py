@@ -17,6 +17,7 @@ rumbo = th - yaw. Las correcciones solo mueven esa transformación.
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 
@@ -31,6 +32,8 @@ _WALL, _ISLAND, _SIGN, _BARRIER = 0, 1, 2, 3
 # (nombre en el ACK, montaje en config.SENSOR_MOUNTS, escala a mm, cono, alcance máx)
 _US_HALF_CONE = 15.0
 _US_MAX_INC = 20.0
+_US_OFFS = np.arange(-_US_HALF_CONE, _US_HALF_CONE + 0.1, 3.0)   # rayos del cono (_expect), constantes
+_TOF_OFFS = np.array([0.0])
 _SENSORS = (
     ("dL", "us_left", 10.0, "us"),
     ("dR", "us_right", 10.0, "us"),
@@ -42,8 +45,13 @@ _SENSORS = (
 )
 
 
+@functools.cache
+def _ack_re(key: str):
+    return re.compile(r"(?:^|,)" + key + r"=(-?[\d.]+)")
+
+
 def _ack_num(ack: str, key: str):
-    m = re.search(r"(?:^|,)" + key + r"=(-?[\d.]+)", ack)
+    m = _ack_re(key).search(ack)
     return float(m.group(1)) if m else None
 
 
@@ -181,10 +189,7 @@ class Localizer:
         right, fwd, ddeg = mount
         ox = x + fwd * math.sin(h) + right * math.cos(h)
         oy = y + fwd * math.cos(h) - right * math.sin(h)
-        if kind_sensor == "us":
-            offs = np.arange(-_US_HALF_CONE, _US_HALF_CONE + 0.1, 3.0)
-        else:
-            offs = np.array([0.0])
+        offs = _US_OFFS if kind_sensor == "us" else _TOF_OFFS
         ang = h + np.radians(ddeg + offs)
         dirs = np.stack([np.sin(ang), np.cos(ang)], 1)
         orig = np.broadcast_to(np.array([ox, oy]), dirs.shape)

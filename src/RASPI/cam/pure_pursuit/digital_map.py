@@ -91,8 +91,9 @@ def _ack_num(ack: str | None, key: str) -> float | None:
         return None
 
 
-def _lane_pose(section: str, direction: str, along_mm: float, lat_mm: float) -> tuple[float, float, float]:
-    """along: mm desde la pared de atrás. lat: + a la derecha del sentido."""
+@functools.cache
+def _lane_axes(section: str, direction: str) -> tuple[float, float, float, float, float, float, float]:
+    """(h, fx, fy, rx, ry, ox, oy) del carril: _lane_pose se llama decenas de veces por frame."""
     h = _heading(section, direction)
     rad = math.radians(h)
     fx, fy = math.sin(rad), math.cos(rad)
@@ -101,7 +102,12 @@ def _lane_pose(section: str, direction: str, along_mm: float, lat_mm: float) -> 
     centers = {"N": (0.0, _LANE_MM), "E": (_LANE_MM, 0.0),
                "S": (0.0, -_LANE_MM), "W": (-_LANE_MM, 0.0)}
     cx, cy = centers[section]
-    ox, oy = cx - fx * OUTER_HALF_MM, cy - fy * OUTER_HALF_MM
+    return h, fx, fy, rx, ry, cx - fx * OUTER_HALF_MM, cy - fy * OUTER_HALF_MM
+
+
+def _lane_pose(section: str, direction: str, along_mm: float, lat_mm: float) -> tuple[float, float, float]:
+    """along: mm desde la pared de atrás. lat: + a la derecha del sentido."""
+    h, fx, fy, rx, ry, ox, oy = _lane_axes(section, direction)
     x = ox + fx * along_mm + rx * lat_mm
     y = oy + fy * along_mm + ry * lat_mm
     return x, y, h
