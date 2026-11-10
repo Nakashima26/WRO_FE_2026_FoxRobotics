@@ -144,6 +144,16 @@ int digitalRead(uint8_t pin) {
 
 int sil_digital(uint8_t pin) { return digitalRead(pin); }
 
+// Same pins and arithmetic as FirmwareSIL's individual getters.
+extern "C" void sil_actuators(double *out) {
+  double duty = sil_ledc_duty(13);
+  double pulse_us = duty * 20000.0 / 65535.0;
+  out[0] = (pulse_us - 500.0) * 180.0 / 2000.0;
+  out[1] = sil_ledc_duty(23);
+  int a1 = digitalRead(18), a2 = digitalRead(19);
+  out[2] = a1 && !a2 ? 1 : (!a1 && a2 ? -1 : 0);
+}
+
 bool ledcAttach(uint8_t pin, uint32_t freq, uint8_t resolution) {
   LedcState &s = g_ledc[pin];
   s.attached = true;

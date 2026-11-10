@@ -64,6 +64,7 @@ def test_sonar_motor_servo():
     fw.push_serial2(V2_LINE)
     for _ in range(80):
         fw.loop()
+        assert fw.actuators() == (fw.servo_angle(), fw.motor_pwm(), fw.motor_dir())
         if fw.motor_dir() == 1 and fw.motor_pwm() >= 100:
             assert abs(fw.servo_angle() - 77.0) < 15.0   # centroServo medido
             fw.close()

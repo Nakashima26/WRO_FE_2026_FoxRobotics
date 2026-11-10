@@ -49,6 +49,7 @@ class FirmwareSIL:
         self._tof_cb = None
 
         self._bind()
+        self._actuator_buf = (ctypes.c_double * 3)()
         self.set_callbacks(
             advance=lambda _us: None,
             sonar=lambda _id: 0,
@@ -95,6 +96,8 @@ class FirmwareSIL:
         lib.sil_ledc_duty.restype = ctypes.c_int
         lib.sil_digital.argtypes = [ctypes.c_uint8]
         lib.sil_digital.restype = ctypes.c_int
+        lib.sil_actuators.argtypes = [ctypes.c_void_p]
+        lib.sil_actuators.restype = None
 
     def set_callbacks(
         self,
@@ -182,6 +185,10 @@ class FirmwareSIL:
         duty = self._lib.sil_ledc_duty(_SERVO_PIN)
         pulse_us = duty * 20000.0 / 65535.0
         return (pulse_us - 500.0) * 180.0 / 2000.0
+
+    def actuators(self):
+        self._lib.sil_actuators(self._actuator_buf)
+        return self._actuator_buf[0], self._actuator_buf[1], int(self._actuator_buf[2])
 
     def motor_pwm(self) -> int:
         return int(self._lib.sil_ledc_duty(_PWMA))

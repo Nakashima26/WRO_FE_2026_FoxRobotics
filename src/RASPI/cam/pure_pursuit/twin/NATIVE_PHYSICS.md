@@ -34,3 +34,10 @@ Summed run wall time was 286.624 s versus 278.365 s with four concurrent jobs.
 This roughly 3% observation is host/load dependent, not a physical-car speedup.
 The isolated vehicle kernel gain did not translate to a full-run improvement
 until the batched ray kernel was added.
+
+The SIL actuator snapshot (`FirmwareSIL.actuators`) combines four native getters
+into one call. Physics reads it once per advance callback; actuator outputs and
+SIL time cannot change while the firmware is suspended inside that callback.
+This preserves substep scheduling. The same 48 fixed-cadence races retained
+identical trace columns apart from CPU timings; summed wall time decreased from
+278.365 s to 268.369 s on the development Mac (four concurrent jobs).
