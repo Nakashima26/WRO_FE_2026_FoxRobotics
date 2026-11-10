@@ -1637,3 +1637,14 @@ PARK_LOT_CENTER_W_MM = 1177.0
 MAP_OBS_DEDUP_PX = 60.0
 MAP_YAW_RATE_SKIP_DEG_S = 120.0
 MAP_LOG_COST_EVERY_N = 60
+
+# Regla sorpresa WRO, 9 noviembre 2026. Activar solo en el intento declarado.
+SURPRISE_RULE = False
+SURPRISE_HEIGHT_TOL_MM = 18.0
+SURPRISE_CONFIRM_FRAMES = 3
+SURPRISE_MIN_CONTOUR_AREA = 200.0  # la señal de 50 mm debe verse antes que el corte normal de 1000 px
+
+# Opcional: altura esperada de un bloque NORMAL de 100 mm según su pie en BEV.
+# Pares (distancia longitudinal desde el origen BEV, mm; alto del bbox, px),
+# ordenados. Vacío: geometría H + montaje de cámara. Nunca extrapola la tabla.
+SURPRISE_NORMAL_HEIGHT_SAMPLES = ()

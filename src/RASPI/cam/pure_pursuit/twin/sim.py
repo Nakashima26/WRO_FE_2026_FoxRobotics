@@ -371,6 +371,7 @@ class Sim:
         inject_map_truth: Any = None,
         park_pos: Any = None,
         ruta_seed: dict[str, Any] | None = None,
+        surprise: tuple[int, int] | None = None,
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
@@ -381,6 +382,7 @@ class Sim:
         # Escenario armado a mano (p. ej. twin/prepark.py) en vez del sorteo, y
         # parámetros SIL de arranque (sil_set_param) para el firmware.
         self.field_override = field
+        self.surprise = surprise
         self.fw_params = dict(fw_params or {})
         # TWIN_FW_PARAMS="serial2_us_per_char=10.85,serial_us_per_char=10.85" (p. ej. otro baud)
         for kv in filter(None, os.environ.get("TWIN_FW_PARAMS", "").split(",")):
@@ -474,6 +476,18 @@ class Sim:
         _ns = os.environ.get("TWIN_NOISE_SEED")
         rng = np.random.default_rng(self.seed if _ns is None else [self.seed, int(_ns)])
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
+        try:
+            if self.surprise is not None:
+                from ..wro_field import with_surprise
+                field = with_surprise(field, *self.surprise)
+            if any(s.original_color is not None for s in field.signs) and not C.SURPRISE_RULE:
+                raise ValueError("Campo sorpresa requiere pi_overrides={SURPRISE_RULE: True}")
+            if C.SURPRISE_RULE and getattr(C, "ROUTE_SEAT_ROI", False):
+                raise ValueError("Regla sorpresa no admite ROI de color sin clasificar altura")
+        except ValueError:
+            for key, value in saved_cfg.items():
+                setattr(C, key, value)
+            raise
         if self.ruta_seed:
             field.start_x, field.start_y, field.start_heading = self.ruta_seed["true"]
         seed_rec = {} if self.log_dir and not self.ruta_seed and getattr(C, "ROUTE_FOLLOW", False) else None
@@ -485,6 +499,9 @@ class Sim:
         if len(self.inject_map_truth) < len(_MAP_TRUTH_KEYS):
             print(f"[twin] mapa digital: verdad inyectada {self.inject_map_truth or 'ninguna'}"
                   f" (campo {field.parking_section}/{field.direction})", flush=True)
+        from .surprise import SurpriseJudge
+        special = next((s for s in field.signs if s.original_color is not None), None)
+        surprise_judge = SurpriseJudge(special, field.direction) if special is not None else None
         world = World(field)
         vehicle_cls = Vehicle
         if os.environ.get("FOX_TWIN_PHYSICS", "native") != "python":
@@ -700,7 +717,7 @@ class Sim:
                 )
                 if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
                     for s in field.signs:
-                        runtime.digital.confirmed[(s.section, s.seat)] = s.color
+                        runtime.digital.confirmed[(s.section, s.seat)] = s.driving_color
                     print(
                         f"[twin] mapa: {len(runtime.digital.confirmed)} asientos "
                         f"sembrados (camino conocido)",
@@ -758,6 +775,12 @@ class Sim:
                             tc = int(tc_s)
                         except ValueError:
                             pass
+                    if surprise_judge is not None and armed:
+                        event = surprise_judge.update(veh.x, veh.y, tc or 0, sim_t)
+                        if event is not None and not event["correct"]:
+                            stop_reason = "wrong_sign_side"
+                            _log_trace({"est": est, "ack": link._last_ack})
+                            break
                     tpr_s = _parse_ack_field(link._last_ack, "tpr")
                     tpr = int(tpr_s) if tpr_s else 12
 
@@ -772,7 +795,7 @@ class Sim:
                         and est in ("S", "C", "R")
                     ):
                         for s in field.signs:
-                            runtime.digital.confirmed[(s.section, s.seat)] = s.color
+                            runtime.digital.confirmed[(s.section, s.seat)] = s.driving_color
                         if "DIGITAL_MAP_SEED_CONFIRMED" not in saved_cfg and hasattr(
                             C, "DIGITAL_MAP_SEED_CONFIRMED"
                         ):
@@ -847,7 +870,7 @@ class Sim:
                                 # perdía y SEED_CONFIRMED no tenía efecto).
                                 if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
                                     for s in field.signs:
-                                        runtime.digital.confirmed[(s.section, s.seat)] = s.color
+                                        runtime.digital.confirmed[(s.section, s.seat)] = s.driving_color
                                 if self.ruta_seed:
                                     _seed_pi(runtime, field, self.ruta_seed)
                                 armed = True
@@ -909,6 +932,8 @@ class Sim:
             collision_cause=collision_cause,
             collision_t=collision_t,
         )
+        if surprise_judge is not None:
+            metrics.update(surprise_judge.report())
         metrics["sign_contacts"] = sign_contacts
         metrics["signs_touched"] = len(sign_contacts)
         metrics["ignored_contacts"] = list(ignored_contacts.values())
