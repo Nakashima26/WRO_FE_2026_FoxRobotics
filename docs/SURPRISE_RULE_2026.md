@@ -154,3 +154,19 @@ que todas las trayectorias o el estacionamiento mantengan el resultado anterior.
   La inversión de color de la especial fue correcta en esos casos. Hay que
   resolver estas diferencias y validar el clasificador con imágenes reales
   antes de recomendar este modo para un intento oficial.
+
+### Demo visual
+
+Desde `src/RASPI/cam`:
+
+```sh
+PY=/ruta/al/python bash pure_pursuit/twin/tools/ver_sorpresa.sh 9 150
+```
+
+Abre la ventana Fox e inicia a velocidad real. La señal especial se marca en
+amarillo; la cámara muestra el color visible y el de conducción cuando se confirma.
+Azul en «mapa real» es el historial físico recorrido. El plan naranja permanece en
+«mapa del carro»: pertenece a su estimación y puede diferir del campo verdadero.
+En s9 a t=11.3 s, por ejemplo, S/T4 se cree S/T2 (200 mm de diferencia); superponer
+ese plan sobre los obstáculos verdaderos aparentaba un choque inexistente.
+Espacio pausa/reanuda, `r` repite, `+`/`-` cambia velocidad y Esc sale.
