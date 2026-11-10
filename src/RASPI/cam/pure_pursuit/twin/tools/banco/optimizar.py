@@ -27,7 +27,7 @@ ENV = {
     **os.environ,
     "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
     "PYTHONUTF8": "1", "PYTHONPATH": ".",
-    "TWIN_FW_PARAMS": "serial2_us_per_char=21.7,serial_us_per_char=21.7",
+    "TWIN_FW_PARAMS": "serial2_us_per_char=21.7,serial_us_per_char=10.85",
     "TWIN_PI_UART_US_PER_BYTE": "21.7",
 }
 # (clave en cfg["pi"], minimo, maximo, entero)

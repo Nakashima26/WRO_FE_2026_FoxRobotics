@@ -4104,7 +4104,7 @@ void terminando(long distL, long distR) {
 #define PI_BAUD 115200
 #endif
 #ifndef USB_BAUD
-#define USB_BAUD 115200
+#define USB_BAUD 921600
 #endif
 
 void setup() {

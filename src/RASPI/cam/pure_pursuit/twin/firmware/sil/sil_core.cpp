@@ -426,14 +426,16 @@ struct UartTx {
 };
 static UartTx g_usb_tx;
 static UartTx g_uart2_tx;
+static double g_usb_us_per_char = 86.8;
+static double g_uart2_us_per_char = 86.8;
 // Defaults del core ESP32 3.x para Serial2: RX ring 256, TX ring 0, timeout 1000 ms.
 static size_t g_serial2_rx_buf = 256;
 static size_t g_serial2_tx_buf = 0;
 static unsigned long g_serial2_timeout_ms = 1000;
 static uint64_t g_serial2_rx_dropped = 0;
 
-static void uart_tx_char(UartTx &u, const char *per_key, const char *fifo_key, double sw_buf = 0.0) {
-  double per = param_get(per_key, 86.8);
+static void uart_tx_char(UartTx &u, const char *per_key, const char *fifo_key, double default_us_per_char, double sw_buf = 0.0) {
+  double per = param_get(per_key, default_us_per_char);
   if (per <= 0) return;
   double fifo = param_get(fifo_key, 128.0) + sw_buf;
   if (u.free_us < (double)now_us) u.free_us = (double)now_us;
@@ -449,14 +451,20 @@ static void uart_tx_char(UartTx &u, const char *per_key, const char *fifo_key, d
 HardwareSerial Serial(HardwareSerial::USB);
 HardwareSerial Serial2(HardwareSerial::UART2);
 
-void HardwareSerial::begin(unsigned long) {}
-void HardwareSerial::begin(unsigned long, uint32_t, int, int) {}
+void HardwareSerial::begin(unsigned long baud) {
+  if (baud) {
+    const double us_per_char = 10000000.0 / (double)baud; // 8N1: 10 bits por carácter
+    if (kind_ == USB) g_usb_us_per_char = us_per_char;
+    else g_uart2_us_per_char = us_per_char;
+  }
+}
+void HardwareSerial::begin(unsigned long baud, uint32_t, int, int) { begin(baud); }
 
 size_t HardwareSerial::writeChar(char c) {
   if (kind_ == USB) {
     g_serial_usb.push_back(c);
     while (g_serial_usb.size() > kSerialUsbMax) g_serial_usb.pop_front();
-    uart_tx_char(g_usb_tx, "serial_us_per_char", "serial_fifo");
+    uart_tx_char(g_usb_tx, "serial_us_per_char", "serial_fifo", g_usb_us_per_char);
     if (c == '\n') {
       if (!g_ready_wait_armed && g_serial_usb_line.find("Esperando READY") != std::string::npos) {
         g_ready_wait_armed = true;
@@ -468,7 +476,7 @@ size_t HardwareSerial::writeChar(char c) {
     }
     return 1;
   }
-  uart_tx_char(g_uart2_tx, "serial2_us_per_char", "serial2_fifo", (double)g_serial2_tx_buf);
+  uart_tx_char(g_uart2_tx, "serial2_us_per_char", "serial2_fifo", g_uart2_us_per_char, (double)g_serial2_tx_buf);
   if (c == '\n') {
     std::string line = g_serial2_tx_line;
     if (!line.empty() && line.back() == '\r') line.pop_back();
