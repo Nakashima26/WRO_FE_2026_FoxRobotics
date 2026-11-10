@@ -13,6 +13,7 @@ def _feed(loc, dfs):
 
 
 def test_salto_de_sensor_se_ignora(monkeypatch):
+    monkeypatch.setattr(C, "US_DESDE_TOF", False)   # el filtro de salto se prueba con el dF ultrasónico
     dfs = [35.2, 35.2, 35.2, 15.0]          # el último salta 200 mm: eco de transición
     a = Localizer({}, None, 1000.0, -1000.0, 90.0)
     _feed(a, dfs)                           # con el filtro (LOC_SENSOR_JUMP_MM = 100)

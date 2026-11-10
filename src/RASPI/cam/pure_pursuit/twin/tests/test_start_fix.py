@@ -57,7 +57,9 @@ def _drive(sf, sec, direction, true_delta, h_lane=350.0, est="S", seed=0):
     return None, None
 
 
-def test_converges_cw_and_ccw():
+def test_converges_cw_and_ccw(monkeypatch):
+    # Lecturas de ultrasónico (sin tope): el tope del ToF v2 (f818e9b) deja E/CW δ=0 sin evidencia.
+    monkeypatch.setattr(C, "ROUTE_FIX_TOF_MAX_MM", None, raising=False)
     for sec, direction, true in (("N", "CW", 400.0), ("S", "CCW", -300.0), ("E", "CW", 0.0), ("W", "CCW", -690.0)):
         sf = StartFix(sec, direction)
         assert sf.w0_guess == guess_w0(direction)
