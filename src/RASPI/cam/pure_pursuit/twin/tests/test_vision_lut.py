@@ -51,15 +51,23 @@ _SETS = {
 }
 
 
+@pytest.fixture(params=("native", "opencv"))
+def lut_backend(request, monkeypatch):
+    kernel = V._hsv_mask_kernel()
+    if request.param == "native" and kernel is None:
+        pytest.skip("biblioteca nativa no disponible")
+    monkeypatch.setattr(V, "_HSV_MASK_KERNEL", [kernel if request.param == "native" else None])
+
+
 @pytest.mark.parametrize("name", list(_SETS))
-def test_lut_cubo_completo(name):
+def test_lut_cubo_completo(name, lut_backend):
     vis = Vision(open_cam=False)
     if _SETS[name] is not None:
         vis.color_ranges = {c: [(np.array(lo), np.array(hi)) for lo, hi in rs] for c, rs in _SETS[name].items()}
     _same(vis, _CUBE)
 
 
-def test_lut_se_rearma_si_cambian_los_rangos():
+def test_lut_se_rearma_si_cambian_los_rangos(lut_backend):
     vis = Vision(open_cam=False)
     rng = np.random.default_rng(0)
     hsv = rng.integers(0, 256, (120, 160, 3), dtype=np.uint8)
@@ -72,7 +80,7 @@ def test_lut_se_rearma_si_cambian_los_rangos():
     _same(vis, hsv)                                  # 9 rangos no caben en un byte: cv2.inRange
 
 
-def test_detect_on_lut_igual_inrange_en_cuadros_del_gemelo():
+def test_detect_on_lut_igual_inrange_en_cuadros_del_gemelo(lut_backend):
     from pure_pursuit.twin.camera import CameraModel
     from pure_pursuit.twin.params import TwinParams
     from pure_pursuit.wro_field import randomize
@@ -92,3 +100,22 @@ def test_detect_on_lut_igual_inrange_en_cuadros_del_gemelo():
                 assert pa == pb and np.array_equal(fa, fb)
                 n_obj += sum(len(v) for v in pa.values())
     assert n_obj > 0
+
+
+@pytest.mark.parametrize("colors", (0, 1, 2, 4))
+def test_lut_vistas_no_contiguas_y_colores_vacios(colors, lut_backend):
+    vis = Vision(open_cam=False)
+    vis.color_ranges = {f"c{i}": [(np.array([i * 20, 30, 15]), np.array([i * 20 + 30, 240, 255]))]
+                        for i in range(colors)}
+    vis.color_ranges["vacio"] = []
+    hsv = np.random.default_rng(7).integers(0, 256, (120, 160, 3), dtype=np.uint8)
+    _same(vis, hsv[::2, ::-2])
+    # Las máscaras devueltas son independientes entre cuadros.
+    before = vis.hsv_masks(hsv)
+    copies = {c: None if m is None else m.copy() for c, m in before.items()}
+    vis.hsv_masks(hsv[::-1])
+    for c, m in before.items():
+        if copies[c] is None:
+            assert m is None
+        else:
+            assert np.array_equal(m, copies[c])
