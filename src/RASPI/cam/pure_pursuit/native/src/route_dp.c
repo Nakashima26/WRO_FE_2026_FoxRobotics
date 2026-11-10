@@ -1,6 +1,12 @@
 #include <assert.h>
 #include <stdint.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <sched.h>
+#endif
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -136,18 +142,53 @@ FOX_API void fox_route_dp_sparse(int32_t n, int32_t m, int32_t N,
 /* Igual que fox_route_dp_sparse (mismas operaciones, mismo orden, mismo resultado bit a bit) con G y MASK
  * transpuestos a [k1][b][c][a]: el bucle interno sobre a lee memoria contigua (la lectura con zancada
  * m*m*8 bytes era lo caro en la Pi). Vt (m*m) es memoria de trabajo; Vc entra y sale como [a][b]. */
-FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
-    const double *GT, const double *DS, const uint8_t *MT,
-    const double *pen, const double *bonus, const uint8_t *bad, const uint8_t *allowed,
-    const int16_t *ALO, const int16_t *AHI,
-    double *Vc, double *Vtmp, int16_t *back, double *Vt)
+/* Equipo local a la llamada: no hay estado global ni interferencia entre planes.
+ * Una barrera por estación publica el búfer siguiente. La espera corta evita
+ * dormir/despertar al equipo en cada estación; cede CPU si hay contención. */
+typedef struct {
+    int32_t n, m, N;
+    const double *GT, *DS, *pen, *bonus;
+    const uint8_t *MT, *bad, *allowed;
+    const int16_t *ALO, *AHI;
+    double *Vtmp, *Vt;
+    int16_t *back;
+    int threads, ready, arrived, generation;
+} route_job;
+
+typedef struct { route_job *job; int rank; } route_worker;
+
+static void route_barrier(route_job *j)
 {
+#ifndef _WIN32
+    if (j->threads == 1) return;
+    int generation = __atomic_load_n(&j->generation, __ATOMIC_ACQUIRE);
+    if (__atomic_add_fetch(&j->arrived, 1, __ATOMIC_ACQ_REL) == j->threads) {
+        __atomic_store_n(&j->arrived, 0, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&j->generation, 1, __ATOMIC_RELEASE);
+    } else {
+        unsigned spins = 0;
+        while (__atomic_load_n(&j->generation, __ATOMIC_ACQUIRE) == generation)
+            if (++spins % 256 == 0) sched_yield();
+    }
+#else
+    (void)j;
+#endif
+}
+
+static void route_sparse_worker(route_job *j, int rank)
+{
+    const int32_t n = j->n, m = j->m, N = j->N;
+    const double *GT = j->GT, *DS = j->DS, *pen = j->pen, *bonus = j->bonus;
+    const uint8_t *MT = j->MT, *bad = j->bad, *allowed = j->allowed;
+    const int16_t *ALO = j->ALO, *AHI = j->AHI;
+    int16_t *back = j->back;
+    double *input = j->Vt, *output = j->Vtmp;
+    const int32_t begin = m * rank / j->threads, end = m * (rank + 1) / j->threads;
+
     const double INF = 1e18;
     const int64_t mm = (int64_t)m * m;
     const int64_t m3 = mm * m;
     assert(m <= 256);
-    for (int32_t a = 0; a < m; a++)
-        for (int32_t b = 0; b < m; b++) Vt[(int64_t)b * m + a] = Vc[(int64_t)a * m + b];
     for (int32_t t = 1; t <= N - 2; t++) {
         int32_t k1 = t % n, k2 = (t + 1) % n;
         const double *Gk = GT + k1 * m3;
@@ -160,11 +201,8 @@ FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
         const int16_t *alok = ALO + k1 * mm;
         const int16_t *ahik = AHI + k1 * mm;
         int16_t *bk = back + (t + 1) * mm;
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
-        for (int32_t b = 0; b < m; b++) {
-            const double *Vb = Vt + (int64_t)b * m;
+        for (int32_t b = begin; b < end; b++) {
+            const double *Vb = input + (int64_t)b * m;
             int32_t ia = 0;
             double ibv = Vb[0] + INF;
             for (int32_t a = 1; a < m; a++) {
@@ -177,7 +215,7 @@ FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
                 int32_t lo = alok[bc], hi = ahik[bc];
                 if (blocked || lo > hi) {
                     bk[bc] = (int16_t)ia;
-                    Vtmp[bc] = ibv < INF ? ibv : INF;
+                    output[(int64_t)c * m + b] = ibv < INF ? ibv : INF;
                     continue;
                 }
                 double ds = DSk[bc], pc = penk[bc], bo = bonk[bc];
@@ -225,14 +263,68 @@ FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
                     }
                 }
                 bk[bc] = (int16_t)arg;
-                Vtmp[bc] = best < INF ? best : INF;
+                output[(int64_t)c * m + b] = best < INF ? best : INF;
             }
         }
-        for (int32_t b = 0; b < m; b++)
-            for (int32_t c = 0; c < m; c++) Vt[(int64_t)c * m + b] = Vtmp[(int64_t)b * m + c];
+        route_barrier(j);
+        double *swap = input; input = output; output = swap;
     }
+}
+
+#ifndef _WIN32
+static void *route_thread(void *arg)
+{
+    route_worker *w = arg;
+    while (!__atomic_load_n(&w->job->ready, __ATOMIC_ACQUIRE)) sched_yield();
+    route_sparse_worker(w->job, w->rank);
+    return NULL;
+}
+#endif
+
+FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
+    const double *GT, const double *DS, const uint8_t *MT,
+    const double *pen, const double *bonus, const uint8_t *bad, const uint8_t *allowed,
+    const int16_t *ALO, const int16_t *AHI,
+    double *Vc, double *Vtmp, int16_t *back, double *Vt)
+{
+    route_job j = {0};
+    j.n=n; j.m=m; j.N=N; j.GT=GT; j.DS=DS; j.MT=MT;
+    j.pen=pen; j.bonus=bonus; j.bad=bad; j.allowed=allowed;
+    j.ALO=ALO; j.AHI=AHI; j.Vtmp=Vtmp; j.back=back; j.Vt=Vt;
+    j.threads = 1;
+    assert(m <= 256);
     for (int32_t a = 0; a < m; a++)
-        for (int32_t b = 0; b < m; b++) Vc[(int64_t)a * m + b] = Vt[(int64_t)b * m + a];
+        for (int32_t b = 0; b < m; b++) Vt[(int64_t)b * m + a] = Vc[(int64_t)a * m + b];
+#ifndef _WIN32
+    /* Default serial: evita consumir los cuatro núcleos sin una medición local.
+     * FOX_DP_THREADS=1..4 se lee por llamada; inválido equivale a 1. */
+    const char *env = getenv("FOX_DP_THREADS");
+    int wanted = 1;
+    if (env && env[0] >= '1' && env[0] <= '4' && env[1] == '\0') wanted = env[0] - '0';
+    if (wanted > m) wanted = m;
+    if (N <= 2) wanted = 1;
+    pthread_t threads[3];
+    route_worker workers[3];
+    for (int i = 0; i < wanted - 1; i++) {
+        workers[i].job = &j; workers[i].rank = i + 1;
+        if (pthread_create(&threads[i], NULL, route_thread, &workers[i]) != 0) break;
+        j.threads++;
+    }
+    /* Publica el tamaño real del equipo, incluso si falla pthread_create. */
+    __atomic_store_n(&j.ready, 1, __ATOMIC_RELEASE);
+#endif
+    route_sparse_worker(&j, 0);
+#ifndef _WIN32
+    for (int i = 0; i < j.threads - 1; i++) pthread_join(threads[i], NULL);
+#endif
+    const double *last = N > 2 && (N - 2) % 2 ? Vtmp : Vt;
+    for (int32_t a = 0; a < m; a++)
+        for (int32_t b = 0; b < m; b++) Vc[(int64_t)a * m + b] = last[(int64_t)b * m + a];
+    if (N > 2) {
+        /* Conserva también los búferes observables de la ABI original. */
+        if (last != Vt) memcpy(Vt, last, (size_t)m * m * sizeof(double));
+        memcpy(Vtmp, Vc, (size_t)m * m * sizeof(double));
+    }
 }
 
 /* Geometría de ring_route._dp_geometry, mismo orden de operaciones que numpy.
