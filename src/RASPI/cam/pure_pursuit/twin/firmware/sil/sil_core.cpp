@@ -660,6 +660,17 @@ String HardwareSerial::readStringUntil(char terminator) {
   return String(out.c_str());
 }
 
+int HardwareSerial::read() {
+  if (kind_ != UART2) return -1;
+  serial2_apply_overflow();
+  if (g_serial2_rx.empty() || g_serial2_rx.front().arrival_us > now_us) return -1;
+  RxChunk &ch = g_serial2_rx.front();
+  int c = (unsigned char)ch.data[0];
+  ch.data.erase(0, 1);
+  if (ch.data.empty()) g_serial2_rx.pop_front();
+  return c;
+}
+
 size_t HardwareSerial::setRxBufferSize(size_t n) { if (kind_ == UART2) g_serial2_rx_buf = n; return n; }
 size_t HardwareSerial::setTxBufferSize(size_t n) { if (kind_ == UART2) g_serial2_tx_buf = n; return n; }
 void HardwareSerial::setTimeout(unsigned long ms) { if (kind_ == UART2) g_serial2_timeout_ms = ms; }

@@ -170,6 +170,7 @@ class HardwareSerial {
 
   int available();
   String readStringUntil(char terminator);
+  int read();   // un byte ya llegado (UART2) o -1; no espera
   // Como en el core ESP32: llamar antes de begin(). Solo tienen efecto en UART2.
   size_t setRxBufferSize(size_t n);
   size_t setTxBufferSize(size_t n);
