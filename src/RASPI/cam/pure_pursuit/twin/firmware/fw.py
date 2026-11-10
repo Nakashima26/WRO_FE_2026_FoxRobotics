@@ -50,6 +50,8 @@ class FirmwareSIL:
 
         self._bind()
         self._actuator_buf = (ctypes.c_double * 3)()
+        self._advance_clock = (ctypes.c_uint64 * 1)()
+        self._advance_actuators = (ctypes.c_double * 3)()
         self.set_callbacks(
             advance=lambda _us: None,
             sonar=lambda _id: 0,
@@ -96,8 +98,18 @@ class FirmwareSIL:
         lib.sil_ledc_duty.restype = ctypes.c_int
         lib.sil_digital.argtypes = [ctypes.c_uint8]
         lib.sil_digital.restype = ctypes.c_int
+        lib.sil_set_advance_snapshot.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        lib.sil_set_advance_snapshot.restype = None
         lib.sil_actuators.argtypes = [ctypes.c_void_p]
         lib.sil_actuators.restype = None
+
+    def enable_advance_snapshot(self):
+        """Reloj y actuadores válidos durante advance, sin consultas ctypes adicionales.
+
+        Los buffers pertenecen a esta instancia y no se comparten con actuators().
+        """
+        self._lib.sil_set_advance_snapshot(self._advance_clock, self._advance_actuators)
+        return self._advance_clock, self._advance_actuators
 
     def set_callbacks(
         self,

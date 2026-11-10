@@ -39,6 +39,14 @@ static void on_digital_write(uint8_t pin, uint8_t val);
 static uint64_t now_us = 0;
 
 static sil_advance_cb_t g_advance_cb = nullptr;
+// Memoria propiedad del wrapper; solo se publica antes del callback de avance.
+static uint64_t *g_advance_now = nullptr;
+static double *g_advance_actuators = nullptr;
+extern "C" void sil_actuators(double *out);
+extern "C" void sil_set_advance_snapshot(uint64_t *clock, double *actuators) {
+  g_advance_now = clock;
+  g_advance_actuators = actuators;
+}
 static sil_sonar_cb_t g_sonar_cb = nullptr;
 static sil_gyro_cb_t g_gyro_cb = nullptr;
 static sil_encoder_cb_t g_encoder_cb = nullptr;
@@ -69,7 +77,13 @@ static void set_error(const char *msg) {
 static void sil_advance_internal(uint64_t us) {
   if (us == 0) return;
   now_us += us;
-  if (g_advance_cb) g_advance_cb(us);
+  if (g_advance_cb) {
+    if (g_advance_now && g_advance_actuators) {
+      *g_advance_now = now_us;
+      sil_actuators(g_advance_actuators);
+    }
+    g_advance_cb(us);
+  }
 }
 
 void sil_set_callbacks(sil_advance_cb_t advance, sil_sonar_cb_t sonar,
