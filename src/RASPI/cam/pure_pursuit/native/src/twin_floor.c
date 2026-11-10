@@ -24,3 +24,28 @@ FOX_API void fox_twin_floor(int64_t n, const int64_t *idx, const float *ff, cons
         out[idx[i]] = (uint8_t)((m <= outer) + (m < inner));
     }
 }
+
+/* Variante BGR para el simulador: evita materializar ids, merge y LUT.
+ * El llamador inicializa el cielo; el orden de las operaciones es el mismo. */
+FOX_API void fox_twin_floor_bgr(int64_t n, const int64_t *idx, const float *ff, const float *rr,
+    float sh, float ch, float ox, float oy, float outer, float inner, uint8_t *out)
+{
+    for (int64_t i = 0; i < n; i++) {
+        float gx = ff[i] * sh;
+        gx = gx + ox;
+        gx = gx + rr[i] * ch;
+        float gy = ff[i] * ch;
+        gy = gy + oy;
+        gy = gy - rr[i] * sh;
+        gx = fabsf(gx);
+        gy = fabsf(gy);
+        if (gx != gx || gy != gy)
+            continue;
+        float m = gx > gy ? gx : gy;
+        int id = (m <= outer) + (m < inner);
+        uint8_t *pixel = out + 3 * idx[i];
+        pixel[0] = id == 1 ? 175 : (id == 2 ? 0 : 48);
+        pixel[1] = id == 1 ? 198 : (id == 2 ? 0 : 48);
+        pixel[2] = id == 1 ? 213 : (id == 2 ? 0 : 48);
+    }
+}

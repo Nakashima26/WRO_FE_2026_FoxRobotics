@@ -49,6 +49,10 @@ class FirmwareSIL:
         self._tof_cb = None
 
         self._bind()
+        # Buffers por instancia: las lecturas son síncronas y devuelven copias.
+        self._serial2_buf = ctypes.create_string_buffer(4096)
+        self._serial2_time = ctypes.c_uint64()
+        self._debug_buf = ctypes.create_string_buffer(65536)
         self._actuator_buf = (ctypes.c_double * 3)()
         self._advance_clock = (ctypes.c_uint64 * 1)()
         self._advance_actuators = (ctypes.c_double * 3)()
@@ -119,9 +123,8 @@ class FirmwareSIL:
         encoder: Callable[[], int] | None = None,
         tof: Callable[[int], int] | None = None,
     ) -> None:
-        @ctypes.CFUNCTYPE(None, ctypes.c_uint64)
-        def _advance(us: int) -> None:
-            advance(int(us))
+        # ctypes ya convierte uint64 a int de Python: sin envoltura por subpaso.
+        _advance = ctypes.CFUNCTYPE(None, ctypes.c_uint64)(advance)
 
         @ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_int)
         def _sonar(sid: int) -> int:
@@ -174,8 +177,8 @@ class FirmwareSIL:
 
     def pop_serial2_lines(self) -> list[tuple[int, str]]:
         out: list[tuple[int, str]] = []
-        buf = ctypes.create_string_buffer(4096)
-        t_done = ctypes.c_uint64()
+        buf = self._serial2_buf
+        t_done = self._serial2_time
         while True:
             n = self._lib.sil_serial2_tx_pop_line(buf, len(buf), ctypes.byref(t_done))
             if n < 0:
@@ -185,7 +188,7 @@ class FirmwareSIL:
 
     def pop_debug(self) -> str:
         chunks: list[bytes] = []
-        buf = ctypes.create_string_buffer(65536)
+        buf = self._debug_buf
         while True:
             n = self._lib.sil_serial_tx_pop(buf, len(buf))
             if n <= 0:
