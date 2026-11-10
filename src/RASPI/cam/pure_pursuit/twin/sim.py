@@ -264,9 +264,9 @@ def _pose_at(history: "deque[tuple[float, float, float, float]]", t: float) -> t
     # resultado bit a bit (ver nota de empate en el PR): intervalos
     # consecutivos comparten el punto en el límite, así que da igual desde
     # qué lado se llegue.
-    t1, x1, y1, h1 = history[-1]
-    for i in range(len(history) - 2, -1, -1):
-        t0, x0, y0, h0 = history[i]
+    entries = reversed(history)
+    t1, x1, y1, h1 = next(entries)
+    for t0, x0, y0, h0 in entries:
         if t0 <= t <= t1:
             u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
             return (

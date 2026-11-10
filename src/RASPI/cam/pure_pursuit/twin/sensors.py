@@ -57,7 +57,6 @@ class Ultrasonic:
         )
         # Rotar al mundo
         h = math.radians(pose.heading_deg)
-        rot = np.array([[math.sin(h), math.cos(h)], [math.cos(h), -math.sin(h)]], dtype=np.float64)
         # body: x right, y forward -> world: same as robot_to_world Jacobian
         dirs = np.column_stack(
             [

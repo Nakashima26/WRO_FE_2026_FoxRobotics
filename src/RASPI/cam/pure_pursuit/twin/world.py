@@ -127,6 +127,9 @@ class World:
         self._materials = [s.material for s in self.segments]
         self._obj_idx = np.array([s.object_index for s in self.segments], dtype=np.int32)
         self._mat_idx = np.array([{"wall": 0, "magenta": 1, "sign": 2}[m] for m in self._materials], dtype=np.int32)
+        # These arrays stay owned by World for its lifetime.
+        self._cast_static_ptrs = tuple(a.ctypes.data for a in
+            (self._a, self._b, self._normals, self._mat_idx, self._obj_idx))
         self._cast_kernel = None
         if os.environ.get("FOX_TWIN_CAST", "native") != "python":
             from ..native import get_kernel
@@ -145,8 +148,8 @@ class World:
         mat = np.empty(n, np.int32)
         normal = np.empty((n, 2), np.float64)
         obj = np.empty(n, np.int32)
-        self._cast_kernel(n, len(self.segments), *(a.ctypes.data for a in
-            (origins, dirs, self._a, self._b, self._normals, self._mat_idx, self._obj_idx)),
+        self._cast_kernel(n, len(self.segments), origins.ctypes.data, dirs.ctypes.data,
+            *self._cast_static_ptrs,
             max_range, *(a.ctypes.data for a in (dist, mat, normal, obj)))
         return dist, mat, normal, obj
 
