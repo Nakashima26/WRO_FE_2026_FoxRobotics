@@ -170,3 +170,8 @@ Azul en «mapa real» es el historial físico recorrido. El plan naranja permane
 En s9 a t=11.3 s, por ejemplo, S/T4 se cree S/T2 (200 mm de diferencia); superponer
 ese plan sobre los obstáculos verdaderos aparentaba un choque inexistente.
 Espacio pausa/reanuda, `r` repite, `+`/`-` cambia velocidad y Esc sale.
+
+El panel «mapa del carro» dibuja la ruta completa de RouteMode/DP cuando está
+activa, con cierre de vuelta y el desplazamiento del marco de arranque resuelto.
+La guía local corta de DigitalMap solo se usa como fallback sin RouteMode.
+«plan DP (subiendo)» indica que todavía se está transmitiendo ese plan al ESP.
