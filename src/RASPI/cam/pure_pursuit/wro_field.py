@@ -180,6 +180,12 @@ class Sign:
     color: str          # "Red" | "Green"
     section: str
     seat: str
+    height_mm: float | None = None
+    original_color: str | None = None
+
+    @property
+    def driving_color(self):
+        return self.original_color or self.color
 
 
 @dataclass
@@ -469,3 +475,44 @@ def randomize(seed: int | None = None, start: str = "centro", park_pos=None) -> 
         start_mode=mode,
         parking_w=park_w,
     )
+
+
+def surprise_candidates(field: Field) -> list[int]:
+    """Índices elegibles: excluye la primera señal por orden de recorrido.
+
+    El orden es el de las rectas y su coordenada longitudinal desde el arranque;
+    si dos señales comparten la primera columna, se excluyen ambas (empate).
+    """
+    order = list(SECTIONS_CW)
+    if field.direction == "CCW":
+        order.reverse()
+    first_section = order.index(field.parking_section)
+    order = order[first_section:] + order[:first_section]
+    start_heading = math.radians(_heading(field.parking_section, field.direction))
+    start_along = field.start_x*math.sin(start_heading)+field.start_y*math.cos(start_heading)
+    progress = []
+    for i, sign in enumerate(field.signs):
+        hs = math.radians(_heading(sign.section, field.direction))
+        along = sign.x*math.sin(hs)+sign.y*math.cos(hs)
+        distance = (order.index(sign.section)*MAT_MM+along-start_along) % (4*MAT_MM)
+        progress.append((distance, i))
+    if not progress:
+        return []
+    first = min(d for d, _ in progress)
+    return [i for d, i in progress if d > first+1e-6]
+
+
+def with_surprise(field: Field, index: int, height_mm: int) -> Field:
+    """Copia del campo con una sola señal modificada, después del sorteo normal."""
+    from dataclasses import replace
+    if height_mm not in (50, 150):
+        raise ValueError("altura sorpresa debe ser 50 o 150 mm")
+    if any(s.original_color is not None for s in field.signs):
+        raise ValueError("solo puede haber una señal sorpresa")
+    if index not in surprise_candidates(field):
+        raise ValueError("la primera señal no puede ser la señal sorpresa")
+    signs = list(field.signs)
+    sign = signs[index]
+    signs[index] = replace(sign, color="Green" if sign.color == "Red" else "Red",
+                           original_color=sign.color, height_mm=float(height_mm))
+    return replace(field, signs=signs)
