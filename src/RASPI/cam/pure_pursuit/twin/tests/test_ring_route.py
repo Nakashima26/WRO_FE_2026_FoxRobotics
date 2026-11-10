@@ -7,6 +7,7 @@ import math
 import numpy as np
 import pytest
 
+from pure_pursuit import config as C
 from pure_pursuit import ring_route as RR
 from pure_pursuit.localizer import Localizer, build_segments, raycast
 from pure_pursuit.route_mode import RouteMode
@@ -94,8 +95,9 @@ def test_raycast_pared():
     assert kind[0] == 0 and cosi[0] == pytest.approx(1.0)
 
 
-def test_localizer_corrige_lateral():
+def test_localizer_corrige_lateral(monkeypatch):
     """Odometría corrida 40 mm de lado: el ultrasónico lateral la corrige."""
+    monkeypatch.setattr(C, "US_DESDE_TOF", False)   # con True dL/dR son los ToF y no cuentan
     loc = Localizer({}, None, 0.0, 1040.0, 90.0)       # cree estar en y=1040; real y=1000
     ack0 = "ACK:V2,yaw=0.00,px=0,py=0"
     loc.update(ack0)

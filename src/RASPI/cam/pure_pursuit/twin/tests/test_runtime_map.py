@@ -114,6 +114,7 @@ def test_map_pose_includes_motion_before_direction_known(monkeypatch):
 
 def test_map_start_lateral_snap(monkeypatch):
     _shadow_only(monkeypatch)
+    monkeypatch.setattr(C, "US_DESDE_TOF", False)   # el snap lateral sale de dL/dR (ultrasónicos)
     rt, serial = _make_runtime()
     # Carro 250 mm a la derecha del centro del pasillo de salida (hacia la pared exterior).
     serial.queue_ack("ACK:V2,yaw=0,od=0,dir=L,est=S,tc=0,dL=68,dR=18")
