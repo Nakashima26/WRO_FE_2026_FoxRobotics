@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import ctypes
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -124,8 +126,31 @@ class World:
         self._normals = np.stack([s.normal for s in self.segments], axis=0)
         self._materials = [s.material for s in self.segments]
         self._obj_idx = np.array([s.object_index for s in self.segments], dtype=np.int32)
+        self._mat_idx = np.array([{"wall": 0, "magenta": 1, "sign": 2}[m] for m in self._materials], dtype=np.int32)
+        self._cast_kernel = None
+        if os.environ.get("FOX_TWIN_CAST", "native") != "python":
+            from ..native import get_kernel
+            vp = ctypes.c_void_p
+            self._cast_kernel = get_kernel("fox_twin_cast", [ctypes.c_int, ctypes.c_int] + [vp]*7 + [ctypes.c_double] + [vp]*4, None)
 
     def cast(
+        self, origins, dirs, max_range,
+    ):
+        if getattr(self, "_cast_kernel", None) is None:
+            return self._cast_python(origins, dirs, max_range)
+        origins = np.ascontiguousarray(origins, dtype=np.float64)
+        dirs = np.ascontiguousarray(dirs, dtype=np.float64)
+        n = len(origins)
+        dist = np.empty(n, np.float64)
+        mat = np.empty(n, np.int32)
+        normal = np.empty((n, 2), np.float64)
+        obj = np.empty(n, np.int32)
+        self._cast_kernel(n, len(self.segments), *(a.ctypes.data for a in
+            (origins, dirs, self._a, self._b, self._normals, self._mat_idx, self._obj_idx)),
+            max_range, *(a.ctypes.data for a in (dist, mat, normal, obj)))
+        return dist, mat, normal, obj
+
+    def _cast_python(
         self,
         origins: np.ndarray,
         dirs: np.ndarray,

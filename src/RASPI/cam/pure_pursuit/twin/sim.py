@@ -486,7 +486,13 @@ class Sim:
             print(f"[twin] mapa digital: verdad inyectada {self.inject_map_truth or 'ninguna'}"
                   f" (campo {field.parking_section}/{field.direction})", flush=True)
         world = World(field)
-        veh = Vehicle(
+        vehicle_cls = Vehicle
+        if os.environ.get("FOX_TWIN_PHYSICS", "native") != "python":
+            from .native_vehicle import NativeVehicle
+            from ..native import get_lib
+            if get_lib() is not None:
+                vehicle_cls = NativeVehicle
+        veh = vehicle_cls(
             self.params,
             field.start_x,
             field.start_y,
