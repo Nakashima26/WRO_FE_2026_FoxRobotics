@@ -261,8 +261,14 @@ class Vision:
         # con los rectángulos blancos que dibuja process_color().
         bgr = frame.copy()
 
-        masks = {color: np.bitwise_or.reduce([cv2.inRange(hsv, lower, upper) for lower, upper in ranges])
-                 for color, ranges in self.color_ranges.items()}
+        # OR en el sitio con cv2: np.bitwise_or.reduce de una lista apilaba copias del frame.
+        masks = {}
+        for color, ranges in self.color_ranges.items():
+            m = None
+            for lower, upper in ranges:
+                r = cv2.inRange(hsv, lower, upper)
+                m = r if m is None else cv2.bitwise_or(m, r, dst=m)
+            masks[color] = m
 
         positions = {color: self.process_color(frame, mask, color, bgr, hsv)
                      for color, mask in masks.items()}

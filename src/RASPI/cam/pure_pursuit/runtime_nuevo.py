@@ -1451,7 +1451,8 @@ class PPRuntime:
         print(f"[GPIO] GO — READY x3 enviado (ack={'sí' if ready_ack else '?'}).", flush=True)
         return ready_ack
 
-    def process_frame(self, frame, now: float, armed: bool, need_bev_frame: bool = True) -> FrameResult:
+    def process_frame(self, frame, now: float, armed: bool, need_bev_frame: bool = True,
+                      need_dig_map: bool = True) -> FrameResult:
         # FPS contador
         self._fps_count += 1
         if now - self._last_fps_time >= 1.0:
@@ -1643,7 +1644,9 @@ class PPRuntime:
                 # mientras el cono se alejaba), lo fijó `beyond` y la cinta
                 # provisional soltó la esquiva ya en SIGUIENDO. Las lecturas
                 # REALES de la línea siguen clasificando igual.
-                line_info = {"Orange": self.line_tracker.update(
+                # Modo ruta con el cajón ubicado y las 4 rectas en el mapa: la naranja ya no la usa nadie.
+                line_info = {"Orange": {"seen": False, "near_y": None, "line": None}} if getattr(
+                    self, "_sin_naranja", False) else {"Orange": self.line_tracker.update(
                     bev_frame, bev_hsv=bev_hsv, ds_px=_dr_ds_px,
                     in_turn_cooldown=(self._turn_recovery_frames > 0
                                       or self._esp_inicio))}
@@ -1869,7 +1872,8 @@ class PPRuntime:
                 # ya sin los que quedaron más allá de la naranja).
                 # Lo que la cámara sigue viendo por arriba de la hoja entra
                 # solo aquí: no a la memoria ni al filtro de la naranja.
-                path_points = detect_centerline(
+                # Modo ruta siguiendo (frame anterior): el steer sale de la ruta y obs se tira.
+                path_points = [] if getattr(self, "_route_steering", False) else detect_centerline(
                     bev_frame, bev_obstacles, bev_hsv=bev_hsv,
                     obstacle_conf=obstacle_conf, stats_out=cl_stats,
                 )
@@ -2118,6 +2122,9 @@ class PPRuntime:
         _roi_frame = (frame if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
                       or getattr(C, "SEAT_ROI_LOG", False)) else None)
         _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame, line_info["Orange"])
+        self._route_steering = _route_steer is not None
+        self._sin_naranja = (self._route_steering and getattr(self._rmode, "fixed", False)
+                             and len({sec for (sec, _s) in self.digital.confirmed}) >= 4)
         if _route_steer is not None:
             obs_norm = _route_steer
             state = "pp_follow"
@@ -2277,7 +2284,7 @@ class PPRuntime:
         shift = (0, 0)
         # La imagen del mapa digital solo la lee el visor (mismo caso que
         # warp_wide abajo); sin él son ~2 ms por frame tirados.
-        self._dig_img = self.digital.render() if need_bev_frame else None
+        self._dig_img = self.digital.render() if (need_bev_frame and need_dig_map) else None
         # warp_wide es un cv2.warpPerspective a un lienzo ~2300x1320 SOLO
         # para el HUD de depuración (bev_frame no realimenta el PP: ya se
         # usó bev_frame/bev_hsv de arriba para todo el pipeline). Los
@@ -2417,7 +2424,8 @@ class PPRuntime:
                     if on_ready is not None:
                         on_ready()
 
-                result = self.process_frame(frame, time.perf_counter(), armed)
+                # dig_map solo lo lee el visor del twin (chassis_twin): en el carro era ~2 ms/frame tirados.
+                result = self.process_frame(frame, time.perf_counter(), armed, need_dig_map=False)
                 t_ser = time.perf_counter()
 
                 # ── Display ──────────────────────────────────────────────────
