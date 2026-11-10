@@ -258,9 +258,10 @@ class Vision:
         """Detecta colores SIN voltear el frame (ya está en el espacio de trabajo)."""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         self.last_hsv = hsv   # el runtime la usa para saber si hay naranja antes de hacer el BEV
-        # Copia limpia para el filtro B/R del rojo: `frame` se va ensuciando
-        # con los rectángulos blancos que dibuja process_color().
-        bgr = frame.copy()
+        # El original queda limpio para el filtro B/R del rojo; los recuadros
+        # se dibujan en una sola copia, sin modificar el buffer de captura.
+        bgr = frame
+        frame = frame.copy()
 
         # OR en el sitio con cv2: np.bitwise_or.reduce de una lista apilaba copias del frame.
         masks = {}

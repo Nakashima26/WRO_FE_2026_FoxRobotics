@@ -1480,9 +1480,9 @@ class PPRuntime:
         # rangos HSV (conos, BEV/naranja/piso, rosa). Con la luz del
         # cuarto de pruebas las ganancias son ~1 y no cambia nada.
         frame = self.color_corr.process(frame)
-        # detect_on dibuja recuadros en su frame: va sobre copia para no tocar el
-        # buffer del grabber ni el frame sin dibujar que usa la ROI de asiento.
-        processed_frame, positions = self.vision.detect_on(frame.copy())
+        # detect_on dibuja sobre su propia copia; conserva este frame limpio
+        # para el grabber y la ROI de asiento.
+        processed_frame, positions = self.vision.detect_on(frame)
         t_vis = time.perf_counter()
         self._timing_ms["vis"] = (t_vis - now) * 1000.0
 
