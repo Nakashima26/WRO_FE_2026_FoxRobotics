@@ -11,14 +11,17 @@ _HERE = Path(__file__).resolve().parent
 _SRC = _HERE / 'src'
 _OUT = Path(os.environ.get('FOX_NATIVE_BUILD_DIR', _HERE / '_build'))
 
-FLAGS = ['-std=c99', '-O2', '-fno-fast-math', '-ffp-contract=off', '-shared']
+FLAGS = ['-std=c99', '-O3', '-fno-fast-math', '-ffp-contract=off', '-shared']
 
 
 def flags():
     """Return compilation flags."""
     f = list(FLAGS)
     if platform.system() != 'Windows':
-        f.append('-fPIC')
+        f.extend(['-fPIC', '-pthread'])
+    # Opt-in local para la Pi; el hash distingue el binario específico de CPU.
+    if os.environ.get('FOX_NATIVE_CPU') == 'native':
+        f.append('-mcpu=native' if platform.machine().lower() in ('aarch64', 'arm64', 'armv7l') else '-march=native')
     if platform.system() == 'Darwin':
         f.extend(['-arch', platform.machine()])
     if platform.system() == 'Linux':
