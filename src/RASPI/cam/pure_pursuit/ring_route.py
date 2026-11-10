@@ -162,7 +162,7 @@ class Route:
 
 
 def signs_from_field(field) -> dict:
-    return {(s.section, s.seat): s.color for s in field.signs}
+    return {(s.section, s.seat): s.driving_color for s in field.signs}
 
 
 def _rect_dist_pose(px, py, x, y, hd_rad, fx=None, fy=None):

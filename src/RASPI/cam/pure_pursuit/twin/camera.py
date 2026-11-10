@@ -313,7 +313,7 @@ class CameraModel:
         """(esquinas (N·4, 3), cuántas son cintas, color por quad), cacheado por pista."""
         p = self.params
         key = (
-            tuple((s.x, s.y, s.color) for s in track.signs),
+            tuple((s.x, s.y, s.color, s.height_mm) for s in track.signs),
             tuple(tuple(map(tuple, box)) for box in track.barriers),
             p.wall_height_mm,
             p.sign_height_mm,
@@ -355,7 +355,7 @@ class CameraModel:
                 sign.x + half,
                 sign.y - half,
                 sign.y + half,
-                p.sign_height_mm,
+                p.sign_height_mm if sign.height_mm is None else sign.height_mm,
             ):
                 quads.append(corners)
                 colors.append(color)
