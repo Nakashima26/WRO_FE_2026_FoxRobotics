@@ -51,6 +51,7 @@ from .centerline import (
     bend_line_above, detect_centerline, draw_bev_debug,
     map_obstacle_to_bev, seen_above_obstacles,
 )
+from .surprise import SurpriseInterpreter, estimate_height
 from .digital_map import DigitalMap
 from .salida_cajon import SalidaCajon
 from .corner_lines import OrangeLineTracker, TurnDirectionTracker, is_interior_pass
@@ -139,6 +140,8 @@ class FrameResult:
     dig_map: np.ndarray | None = None
     # Polilínea planificada en mundo (mm) para dibujar en el twin.
     line_world: list | None = None
+    visible_positions: dict | None = None
+    surprise_observations: list | None = None
 
 def _shift_line_info(info: dict, dx: int, dy: int) -> dict:
     """La naranja se calculó en la hoja de 400 px. El dibujo va en la ancha."""
@@ -304,7 +307,14 @@ class PPRuntime:
         # Visión
         self.vision     = vision if vision is not None else Vision(cfg.cam_index)
         self.vision.use_lut = bool(getattr(C, "VISION_LUT", True))
+        self.vision.min_contour_area = (C.SURPRISE_MIN_CONTOUR_AREA if C.SURPRISE_RULE else 1000.0)
+        self.surprise = SurpriseInterpreter() if C.SURPRISE_RULE else None
         self.bev        = bev if bev is not None else BEVTransformer(cfg.calib_path)
+        if self.surprise is not None:
+            if not self.bev.is_calibrated:
+                raise ValueError("SURPRISE_RULE requiere calibración BEV válida")
+            if getattr(C, "ROUTE_SEAT_ROI", False):
+                raise ValueError("SURPRISE_RULE requiere ROUTE_SEAT_ROI=False")
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()
         self.far_hint   = FarHintManager()
@@ -1440,6 +1450,8 @@ class PPRuntime:
         # giro de la carrera).
         self.turn_dir_tracker.reset()
         self.mid_turn.reset()
+        if self.surprise is not None:
+            self.surprise.reset()
         self._ext_corner_block = 0
         self._pasado_hold = 0
         self._pasado_from_measured = False
@@ -1486,7 +1498,19 @@ class PPRuntime:
         frame = self.color_corr.process(frame)
         # detect_on dibuja sobre su propia copia; conserva este frame limpio
         # para el grabber y la ROI de asiento.
+        if self.surprise is not None:
+            self.vision.small_object_filter = lambda box: (
+                (z := estimate_height(self.bev, box, frame.shape)) is not None
+                and abs(z-50) <= C.SURPRISE_HEIGHT_TOL_MM)
         processed_frame, positions = self.vision.detect_on(frame)
+        visible_positions = positions
+        surprise_height_scale = {}
+        if self.surprise is not None:
+            positions = self.surprise.interpret(positions, self.bev, frame.shape, self.digital, image=frame)
+            # El LOCK/far-hint usaba h como proximidad suponiendo bloques de
+            # 100 mm. Normalizar esa pista; el bbox real sigue intacto para BEV.
+            surprise_height_scale = {o["box"]: 100.0/o["confirmed_mm"]
+                                     for o in self.surprise.observations if o["driving"] is not None}
         t_vis = time.perf_counter()
         self._timing_ms["vis"] = (t_vis - now) * 1000.0
 
@@ -1570,11 +1594,11 @@ class PPRuntime:
                         result = map_obstacle_to_bev(self.bev, x, y, w, h)
                         if result is not None:
                             new_obstacles.append((result[0], result[1], color_name))
-                            new_obs_h.append(float(h))
+                            new_obs_h.append(float(h) if self.surprise is None else float(h)*surprise_height_scale.get(tuple(obj), 1.0))
                         else:
                             # No proyectó (fuera de bev_in_bounds o
                             # cam_to_bev falló) → tratar como lejano
-                            far_objects.append((x + w / 2.0, w, h, color_name))
+                            far_objects.append((x + w / 2.0, w, h if self.surprise is None else h*surprise_height_scale.get(tuple(obj), 1.0), color_name))
                 _t2 = time.perf_counter()
                 bev_timing["proj"] = (_t2 - _t1) * 1000.0
 
@@ -2322,6 +2346,8 @@ class PPRuntime:
             processed_frame=processed_frame,
             bev_frame=shown,
             positions=positions,
+            visible_positions=visible_positions if self.surprise is not None else None,
+            surprise_observations=list(self.surprise.observations) if self.surprise is not None else None,
             steer_deg=steer_deg,
             obs_norm=obs_norm,
             pp_active=pp_active,
@@ -2547,6 +2573,8 @@ def parse_args() -> argparse.Namespace:
                    help="Cada cuántos frames procesados se actualiza la captura para vista remota (VNC)")
     p.add_argument("--start-delay",      type=float, default=0.5,
                    help="Segundos de espera entre el botón y el arranque (quitar la mano). 0 = sin espera")
+    p.add_argument("--surprise-rule", action=argparse.BooleanOptionalAction, default=None,
+                   help="Participar en la regla sorpresa: señal de 50/150 mm invierte el color de paso")
     p.add_argument("--sin-carrera",      action="store_true",
                    help="no cargar carrera.json")
     return p.parse_args()
@@ -2644,6 +2672,11 @@ def main():
         if "BAUDRATE" in data and not any(a.startswith("--baudrate") for a in sys.argv):
             args.baudrate = data["BAUDRATE"]
         print(f"[carrera] {sum(not k.startswith('_') for k in data)} valores de carrera.json", flush=True)
+
+    if args.surprise_rule is not None:
+        C.SURPRISE_RULE = args.surprise_rule
+    if C.SURPRISE_RULE and getattr(C, "ROUTE_SEAT_ROI", False):
+        raise ValueError("SURPRISE_RULE requiere ROUTE_SEAT_ROI=False: la ROI solo clasifica color visible")
 
     threaded = True
     if args.no_threaded_capture:
