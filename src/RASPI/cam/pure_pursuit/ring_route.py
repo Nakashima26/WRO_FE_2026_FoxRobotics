@@ -472,22 +472,37 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
         cf = clear.reshape(-1)
         cf[idx] = np.minimum(cf[idx], dsg)
     bad = clear < prm.hard_clear_mm
+    # w·clip((soft - clear)/soft, 0)² en un solo buffer (mismas operaciones por elemento)
+    pen = np.subtract(prm.soft_clear_mm, clear)
+    pen /= prm.soft_clear_mm
+    np.clip(pen, 0.0, None, out=pen)
+    np.square(pen, out=pen)
+    pen *= prm.w_clear
     bonus = np.zeros((n, m, m))
-    pen = prm.w_clear * np.clip((prm.soft_clear_mm - clear) / prm.soft_clear_mm, 0.0, None) ** 2
     if prm.w_unknown_near > 0.0:
-        T = np.roll(O, -1, axis=0) - np.roll(O, 1, axis=0)
-        T /= np.maximum(np.linalg.norm(T, axis=1, keepdims=True), 1e-9)
         for sname, seat in (unknown or ()):
             if sname not in order or seat not in SEATS or (sname, seat) in seats:
                 continue
             ux, uy = section_to_world(sname, *SEATS[seat])
-            along = np.abs((ux - O[:, 0]) * T[:, 0] + (uy - O[:, 1]) * T[:, 1])
-            ks = np.flatnonzero((along < 300.0) & (np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1150.0))
-            if len(ks) == 0:
+            nk = (gridkey, "near", float(ux), float(uy), prm.w_unknown_near, prm.unknown_near_mm)
+            if nk not in _VIS_CACHE:
+                T = np.roll(O, -1, axis=0) - np.roll(O, 1, axis=0)
+                T /= np.maximum(np.linalg.norm(T, axis=1, keepdims=True), 1e-9)
+                along = np.abs((ux - O[:, 0]) * T[:, 0] + (uy - O[:, 1]) * T[:, 1])
+                ks = np.flatnonzero((along < 300.0) & (np.hypot(O[:, 0] - ux, O[:, 1] - uy) < 1150.0))
+                runs = []
+                if len(ks):
+                    dist = np.hypot(P[ks, :, 0] - ux, P[ks, :, 1] - uy)                 # (k, m)
+                    near_pen = (prm.w_unknown_near * np.clip(dist - prm.unknown_near_mm, 0.0, None) / 100.0)[:, None, :]
+                    # por tramos de estaciones seguidas: suma in situ sobre vistas, sin copiar pen[ks]
+                    for r in np.split(np.arange(len(ks)), np.flatnonzero(np.diff(ks) != 1) + 1):
+                        runs.append((slice(int(ks[r[0]]), int(ks[r[-1]]) + 1), near_pen[r[0]:r[-1] + 1]))
+                _VIS_CACHE[nk] = runs
+            runs = _VIS_CACHE[nk]
+            if not runs:
                 continue
-            dist = np.hypot(P[ks, :, 0] - ux, P[ks, :, 1] - uy)                 # (k, m)
-            near_pen = prm.w_unknown_near * np.clip(dist - prm.unknown_near_mm, 0.0, None) / 100.0
-            pen[ks] += near_pen[:, None, :]
+            for sl, npn in runs:
+                pen[sl] += npn
             if prm.w_visible > 0.0:
                 # Premio por estación desde la que la cámara lo vería (zona de
                 # detección medida ~98 %): la ruta pasa mirándolo y se resuelve.
@@ -511,10 +526,11 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
         d_h, a0, a1, w_h = hug
         dsig = 4.0 * _SEC_SIGMA / n
         k_par = (order.index(parking) if parking in order else 0) * (n // 4)   # estación donde empieza la recta del cajón
+        row = w_h * ((D[None, :] - d_h) / 100.0) ** 2
         for k in range(n):
             a = -0.5 * _LANE_MM + (((k - k_par + n // 2) % n) - n // 2) * dsig
             if a0 <= a <= a1:
-                pen[k] += w_h * ((D[None, :] - d_h) / 100.0) ** 2
+                pen[k] += row
     return _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock, park_w, extra, hug,
                   t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
 
@@ -659,10 +675,10 @@ def _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor,
         # Lo desconocido tapa el paso: se planea solo con lo conocido.
         return _plan(direction, seats, parking, prm, start_section, laps, None, None,
                     park_w=park_w, extra=extra, hug=hug)
-    path = [c, b]
+    path = [int(c), int(b)]
+    bf, mm = back.reshape(-1), m * m
     for t in range(N - 1, 1, -1):
-        a = back[t][path[-1], path[-2]]
-        path.append(int(a))
+        path.append(bf.item(t * mm + path[-1] * m + path[-2]))     # back[t][path[-1], path[-2]]
     path = path[::-1]                                # d index por t = 0..N-1
     di = np.array(path[:N])
     mid = di[n:2 * n] if laps >= 3 else di[-n:]
@@ -690,13 +706,7 @@ def station_of(route: Route, x: float, y: float) -> int:
     return int(np.argmin(np.hypot(px - x, py - y)))
 
 
-def _resample(xy: np.ndarray, step: float, direction: str) -> Route:
-    """Polilínea cerrada -> B-spline cúbica uniforme cerrada + muestreo uniforme.
-
-    La B-spline es C2 (curvatura continua) y queda a ~κ·h²/6 de los puntos de
-    la DP (h ≈ 75 mm, R ≥ 170: < 6 mm), así que no se come la holgura.
-    """
-    pts = xy
+def _bspline_basis():
     B = [[], [], [], []]
     for t in np.linspace(0.0, 1.0, 16, endpoint=False):
         t2, t3 = t * t, t * t * t
@@ -704,7 +714,20 @@ def _resample(xy: np.ndarray, step: float, direction: str) -> Route:
         B[1].append((3 * t3 - 6 * t2 + 4) / 6.0)
         B[2].append((-3 * t3 + 3 * t2 + 3 * t + 1) / 6.0)
         B[3].append(t3 / 6.0)
-    B0, B1, B2, B3 = (np.array(b)[None, :, None] for b in B)
+    return tuple(np.array(b)[None, :, None] for b in B)
+
+
+_BSPLINE = _bspline_basis()                # base de la B-spline cúbica uniforme (16 sub-puntos): constante
+
+
+def _resample(xy: np.ndarray, step: float, direction: str) -> Route:
+    """Polilínea cerrada -> B-spline cúbica uniforme cerrada + muestreo uniforme.
+
+    La B-spline es C2 (curvatura continua) y queda a ~κ·h²/6 de los puntos de
+    la DP (h ≈ 75 mm, R ≥ 170: < 6 mm), así que no se come la holgura.
+    """
+    pts = xy
+    B0, B1, B2, B3 = _BSPLINE
     # p0 = pts[i-1], p2 = pts[i+1], p3 = pts[i+2] (cíclico), como el bucle por i
     P0, P1 = np.roll(pts, 1, axis=0), pts
     P2, P3 = np.roll(pts, -1, axis=0), np.roll(pts, -2, axis=0)
@@ -732,18 +755,31 @@ def _heading_kappa(x, y, ds):
     return hd, kap
 
 
-def _min_rect_dist(clusters, x, y, hd_rad):
-    """min de _rect_dist_pose sobre varios grupos de puntos; descarta las poses
+_CLUSTER_CACHE: dict = {}          # clave -> [(puntos, centro, radio)] de señales y maderas para check()
+
+
+def _clusters(key, make):
+    v = _CLUSTER_CACHE.get(key)
+    if v is None:
+        v = []
+        for pts in make():
+            c = pts.mean(axis=0)
+            v.append((pts, c, float(np.hypot(pts[:, 0] - c[0], pts[:, 1] - c[1]).max())))
+        if len(_CLUSTER_CACHE) > 512:          # los extra del arranque ciego traen posiciones sueltas
+            _CLUSTER_CACHE.clear()
+        _CLUSTER_CACHE[key] = v
+    return v
+
+
+def _min_rect_dist(clusters, x, y, hd_rad, fx, fy):
+    """min de _rect_dist_pose sobre varios grupos (puntos, centro, radio); descarta las poses
     que, por cota de círculos, no pueden dar el mínimo (mismo valor exacto)."""
-    fx, fy = np.sin(hd_rad), np.cos(hd_rad)
     lon_c = (_FRONT_MM - _REAR_MM) / 2.0
     hl = (_FRONT_MM + _REAR_MM) / 2.0
     R, r_in = math.hypot(hl, _HALF_W), min(hl, _HALF_W)
     xc, yc = x + fx * lon_c, y + fy * lon_c
     best = np.inf
-    for pts in clusters:
-        c = pts.mean(axis=0)
-        rc = float(np.hypot(pts[:, 0] - c[0], pts[:, 1] - c[1]).max())
+    for pts, c, rc in clusters:
         dc = np.hypot(xc - c[0], yc - c[1])
         ub = float(dc.min()) + rc - r_in            # algún punto del grupo queda a ≤ ub
         k = np.flatnonzero(dc - R - rc <= ub + 1.0)  # poses que pueden quedar por debajo
@@ -755,19 +791,23 @@ def check(route: Route, pillars, parking: str | None, park_w: float | None = Non
     """Holguras mínimas de la huella sobre la ruta (mm) y curvatura máxima."""
     x, y = route.x, route.y
     hd = np.radians(route.heading_deg)
+    fx, fy = np.sin(hd), np.cos(hd)
     rep = {}
     if pillars:
-        rep["sign_mm"] = _min_rect_dist([_square_pts(px, py, SIGN_MM / 2.0, 7) for px, py, _c in pillars], x, y, hd)
-    cs = _corners_pose(x, y, hd)
+        cl = [g for px, py, _c in pillars for g in _clusters(("sq", px, py), lambda: [_square_pts(px, py, SIGN_MM / 2.0, 7)])]
+        rep["sign_mm"] = _min_rect_dist(cl, x, y, hd, fx, fy)
+    cs = _corners_pose(x, y, hd, fx, fy)
     rep["wall_mm"] = float(OUTER_HALF_MM - np.max([np.maximum(np.abs(cx), np.abs(cy)) for cx, cy in cs]))
-    rep["island_mm"] = float(_static_clearance(x, y, hd, None).min())
+    rep["island_mm"] = float(_static_clearance(x, y, hd, None, fx, fy).min())
     if parking is not None:
-        boxes = []
-        for box in _barrier_corners(parking, *(() if park_w is None else (park_w,))):
-            xs = [p[0] for p in box]
-            ys = [p[1] for p in box]
-            boxes.append(np.array([(a, b) for a in np.linspace(min(xs), max(xs), 4) for b in np.linspace(min(ys), max(ys), 12)]))
-        rep["barrier_mm"] = _min_rect_dist(boxes, x, y, hd)
+        def boxes():
+            out = []
+            for box in _barrier_corners(parking, *(() if park_w is None else (park_w,))):
+                xs = [p[0] for p in box]
+                ys = [p[1] for p in box]
+                out.append(np.array([(a, b) for a in np.linspace(min(xs), max(xs), 4) for b in np.linspace(min(ys), max(ys), 12)]))
+            return out
+        rep["barrier_mm"] = _min_rect_dist(_clusters(("bar", parking, park_w), boxes), x, y, hd, fx, fy)
     rep["kappa_max"] = float(np.abs(route.kappa).max())
     rep["r_min_mm"] = float(1.0 / max(rep["kappa_max"], 1e-9))
     rep["length_mm"] = route.length_mm
