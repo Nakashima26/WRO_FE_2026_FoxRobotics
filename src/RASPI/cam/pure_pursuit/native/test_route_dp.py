@@ -5,14 +5,18 @@ import pytest
 from pure_pursuit import ring_route as RR
 
 
+@pytest.mark.parametrize('threads', [1, 2, 4])
 @pytest.mark.parametrize('m', [1, 2, 5, 17, 64, 256])
 @pytest.mark.parametrize('scenario', ['normal', 'saturado', 'empates', 'nan'])
-def test_sparse_t_matches_sparse_buffers(m, scenario):
+def test_sparse_t_matches_sparse_buffers(m, scenario, threads, monkeypatch, steps=None):
+    monkeypatch.setenv("FOX_DP_THREADS", str(threads))
     sparse, transposed = RR._dp_sparse_kernel(), RR._dp_sparse_t_kernel()
     if sparse is None or transposed is None:
         pytest.skip('biblioteca nativa no disponible')
     rng = np.random.default_rng(209 + m)
-    n, steps = 3, 6
+    n = 3
+    if steps is None:
+        steps = 7 if scenario in ("empates", "nan") else 6
     g = rng.uniform(0, 3, (n, m, m, m))
     mask = rng.random(g.shape) < 0.7
     ds = rng.uniform(0, 5, (n, m, m))
@@ -51,3 +55,9 @@ def test_sparse_t_matches_sparse_buffers(m, scenario):
     for reference, actual in zip(*outputs):
         # Comparación de bytes: también detecta diferencias en ceros con signo.
         assert reference.tobytes() == actual.tobytes()
+
+
+@pytest.mark.parametrize('threads', ['1', '2', '4', '0', '5', 'invalido'])
+@pytest.mark.parametrize('steps', [2, 3])
+def test_sparse_t_estaciones_minimas(threads, steps, monkeypatch):
+    test_sparse_t_matches_sparse_buffers(5, 'normal', threads, monkeypatch, steps=steps)
