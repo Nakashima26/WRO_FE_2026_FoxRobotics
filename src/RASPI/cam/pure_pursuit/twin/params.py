@@ -96,6 +96,7 @@ class SteeringParams:
         (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (71.5, 53.0))
 
     def __post_init__(self) -> None:
+        _prov("steering.gain_left/right", "supuesto", "pendiente lineal solo para herramientas; el modelo usa las tablas")
         _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
         _prov("steering.servo_center_deg", "medido", "2026-10-24: 75 ±0.3 en rectas; 74.5 del ajuste a 4 vueltas (antihorario y horario)")
         _prov("steering.lag_tau_s", "medido", "2026-10-24: ajuste a las vueltas de referencia (0.10 s)")

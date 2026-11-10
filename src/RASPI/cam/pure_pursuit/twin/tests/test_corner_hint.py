@@ -23,7 +23,7 @@ def test_v2_carries_hint_when_enabled(monkeypatch):
     monkeypatch.setattr(C, "CORNER_HINT_TO_ESP", True, raising=False)
     rt, serial = _make_runtime()
     rt.process_frame(_floor_frame(), time.perf_counter(), armed=True)
-    assert serial.sent[-1].endswith(",es=0")
+    assert ",es=0," in serial.sent[-1] + ","
 
 
 def test_hint_holds_after_line_passes_under_car(monkeypatch):

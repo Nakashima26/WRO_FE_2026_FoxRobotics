@@ -12,8 +12,9 @@ struct RangingDataMock {
 class VL53L1X {
  public:
   enum DistanceMode { Short, Medium, Long, Unknown };
-  RangingDataMock rangingData;
+  RangingDataMock ranging_data;
   void setTimeout(uint16_t) {}
+  void setROISize(uint8_t, uint8_t) {}
   bool init() { budget_ms_ = 50; mode_ = Long; return true; }
   void setDistanceMode(DistanceMode m) { mode_ = m; }
   bool setMeasurementTimingBudget(uint32_t us) { budget_ms_ = us / 1000; return true; }
@@ -22,9 +23,9 @@ class VL53L1X {
   bool dataReady() { delay(1); return millis() - last_ >= period_; }
   uint16_t read(bool = true) {
     last_ = millis();
-    rangingData.range_mm = 1000;
-    rangingData.range_status = (mode_ == Short && 1000 > 1300) ? 4 : 0;
-    return rangingData.range_mm;
+    ranging_data.range_mm = 1000;
+    ranging_data.range_status = (mode_ == Short && 1000 > 1300) ? 4 : 0;
+    return ranging_data.range_mm;
   }
  private:
   uint32_t budget_ms_ = 50, period_ = 50, last_ = 0;
