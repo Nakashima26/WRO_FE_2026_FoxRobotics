@@ -600,7 +600,7 @@ class Sim:
                 last_ds = 0.0 + veh.v * sub
                 last_yaw_rate = -(veh.heading_deg - h0) / sub
                 # El encoder cuenta la llanta: frenando con la llanta bloqueada no ve lo que patina.
-                enc_update(veh.v_wheel * sub, wheel_deg_from_servo(veh.wheel_lag_deg, st_params),
+                enc_update(veh.v_wheel * sub, veh.last_wheel_deg,
                            (veh.v - v0) / sub, w_max)
                 t = int(sil_now_us()) / 1e6
                 hist_append((t, veh.x, veh.y, veh.heading_deg))

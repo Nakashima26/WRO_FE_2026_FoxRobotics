@@ -43,6 +43,8 @@ class Vehicle:
         if self.wheel_lag_deg is None:
             self.wheel_lag_deg = self.wheel_servo_deg
         self.v_wheel = self.v
+        self._w_max: float | None = None
+        self.last_wheel_deg = wheel_deg_from_servo(self.wheel_lag_deg, self.params.steering)
 
     @property
     def wheel_deg(self) -> float:
@@ -120,6 +122,7 @@ class Vehicle:
         self.wheel_lag_deg = eff
 
         wheel = wheel_deg_from_servo(eff, st)
+        self.last_wheel_deg = wheel   # = wheel_deg_from_servo(wheel_lag_deg): el encoder del sim lo reusa
         braking = direction != 0 and pwm <= mot.pwm0
         if braking:
             # Freno en corto: desaceleración casi constante; rápido, la llanta se bloquea y patina.
@@ -151,7 +154,9 @@ class Vehicle:
                     v = mot.k_rev_mm_s_per_pwm * (pwm - mot.pwm0_rev)
                 else:
                     v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
-                w_max = max_wheel_deg(st)
+                w_max = self._w_max
+                if w_max is None:
+                    w_max = self._w_max = max_wheel_deg(st)   # constante: params no cambian en la corrida
                 if w_max > 1e-6:
                     v *= 1.0 - mot.scrub_coeff * (abs(wheel) / w_max) ** 2
                 v_ss = max(0.0, v)
