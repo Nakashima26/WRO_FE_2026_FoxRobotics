@@ -87,7 +87,7 @@ def test_pwm_odom_and_yaw_integration():
         ack = _latest_ack(fw)
         if not ack:
             continue
-        m = re.search(r",od=(-?\d+),px=(-?\d+),py=(-?\d+),enc=\d+,tL=", ack)
+        m = re.search(r",od=(-?\d+),px=(-?\d+),py=(-?\d+),", ack)
         if not m:
             continue
         od = int(m.group(1))
@@ -114,8 +114,6 @@ def test_encoder_odom():
     target_counts = int(round(target_mm * counts_per_mm))
 
     fw = FirmwareSIL(defines={"FOX_ENCODER": "1"}, force_rebuild=True)
-    fw.set_param("loop_overhead_us", 0)
-    fw.set_param("mpu_update_us", 0)
 
     enc = [0]
 
@@ -133,10 +131,13 @@ def test_encoder_odom():
     fw.push_serial2(V2_PP)
 
     enc[0] = target_counts
-    for _ in range(5):
+    ack = None
+    for _ in range(30):   # la odometría arranca ~0.3 s después del setup: dejar correr el reloj
         fw.push_serial2(V2_PP)
         fw.loop()
-    ack = _latest_ack(fw)
+        ack = _latest_ack(fw) or ack
+        if ack and ",od=0," not in ack:
+            break
     fw.close()
     assert ack is not None
     assert ",enc=1" in ack
@@ -160,10 +161,13 @@ def test_tof_ack():
     )
     fw.push_serial2("READY")
     fw.setup()
-    fw.push_serial2(V2_PP)
-    fw.push_serial2(V2_PP)
-    fw.loop()
-    ack = _latest_ack(fw)
+    ack = None
+    for _ in range(30):
+        fw.push_serial2(V2_PP)
+        fw.loop()
+        ack = _latest_ack(fw) or ack
+        if ack and ",tF=400" in ack:
+            break
     fw.close()
     assert ack is not None
     assert ",tL=100" in ack
