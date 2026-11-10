@@ -59,6 +59,7 @@ from .obstacle_memory import ObstacleMemory
 from .far_hint import FarHintManager
 from .mid_turn import MidTurnObstacleDetector
 from .bev_recorder import BevRecorder
+from .live_jpeg import LiveJpegWriter
 from .color_corr import FloorColorCorrector
 from . import config as C
 from .odometry import Odometry, parse_ack
@@ -404,6 +405,7 @@ class PPRuntime:
         self.bev_recorder  = None   # BEV limpio cada frame (REC_BEV_CLEAN), ver bev_recorder.py
         self.record_count  = 0
         self.cam_frame_count = 0
+        self._cam_writer = None
         self.output_file   = (resolve_output_path(cfg.record_output)
                               if cfg.record_orillas else None)
 
@@ -1302,19 +1304,16 @@ class PPRuntime:
     def _write_cam_frame(self, frame: np.ndarray):
         # Throttle: esto es para la vista remota en vivo (VNC), no para el
         # video grabado -- no necesita actualizarse cada frame procesado.
-        # Antes corría SIEMPRE, sin condición, comiéndose un encode JPEG +
-        # escritura a disco síncrona en cada frame.
+        # El worker guarda solo la última imagen pendiente: JPEG y disco
+        # corren fuera del loop de control y nunca acumulan una cola de frames.
         self.cam_frame_count += 1
         if self.cam_frame_count % max(1, self.cfg.cam_frame_every_n) != 0:
             return
         if frame is None:            # HUD no armado en este frame
             return
-        try:
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
-            with open(CAM_FRAME_PATH, "wb") as f:
-                f.write(buf.tobytes())
-        except Exception:
-            pass
+        if self._cam_writer is None:
+            self._cam_writer = LiveJpegWriter(CAM_FRAME_PATH)
+        self._cam_writer.write(frame)
 
     # ── Anotación ─────────────────────────────────────────────────────────────
 
@@ -2506,6 +2505,8 @@ class PPRuntime:
                 self._timing_ms["rec"] = (self._t_prev_end - t_disp) * 1000.0
 
         finally:
+            if self._cam_writer is not None:
+                self._cam_writer.stop()
             if self.frame_grabber is not None:
                 self.frame_grabber.stop()
             self.vision.cap.release()
