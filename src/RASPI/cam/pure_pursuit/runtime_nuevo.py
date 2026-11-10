@@ -303,6 +303,7 @@ class PPRuntime:
 
         # Visión
         self.vision     = vision if vision is not None else Vision(cfg.cam_index)
+        self.vision.use_lut = bool(getattr(C, "VISION_LUT", True))
         self.bev        = bev if bev is not None else BEVTransformer(cfg.calib_path)
         self.controller = PurePursuitController()
         self.memory     = ObstacleMemory()

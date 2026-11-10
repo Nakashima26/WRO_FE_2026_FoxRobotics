@@ -166,6 +166,57 @@ class Vision:
             for k, ranges in COLOR_RANGES.items()
         }
         self.kernel = np.ones((3, 3), np.uint8)
+        # True: máscaras por LUT de bits (ver hsv_masks); False: cv2.inRange por rango.
+        # El runtime lo pone desde config.VISION_LUT.
+        self.use_lut = True
+        self._lut_key = None
+
+    def _ranges_key(self):
+        return tuple((c, tuple((tuple(int(v) for v in lo), tuple(int(v) for v in hi)) for lo, hi in rs))
+                     for c, rs in self.color_ranges.items())
+
+    def _build_lut(self, key):
+        """LUT (256,1,3) uint8 de bits desde self.color_ranges: el bit i del canal c
+        está prendido en v si lo_i[c] <= v <= hi_i[c] (lo mismo que cv2.inRange).
+        Un pixel cae en el rango i si el bit i está en los 3 canales."""
+        self._lut_key = key
+        if sum(len(rs) for _c, rs in key) > 8:
+            self._lut = None              # no caben en un byte: hsv_masks usa cv2.inRange
+            return
+        lut = np.zeros((256, 1, 3), np.uint8)
+        bits = {}
+        i = 0
+        for color, rs in key:
+            bits[color] = 0
+            for lo, hi in rs:
+                for c in range(3):
+                    a, b = max(lo[c], 0), min(hi[c], 255)
+                    if a <= b:
+                        lut[a:b + 1, 0, c] |= 1 << i
+                bits[color] |= 1 << i
+                i += 1
+        self._lut, self._lut_bits = lut, bits
+
+    def hsv_masks(self, hsv):
+        """{color: máscara 0/255} de self.color_ranges, idéntica a OR de cv2.inRange."""
+        if self.use_lut:
+            key = self._ranges_key()
+            if key != self._lut_key:      # rangos nuevos (o cambiados en el sitio): se rearma
+                self._build_lut(key)
+        if not self.use_lut or self._lut is None:
+            masks = {}
+            for color, ranges in self.color_ranges.items():
+                m = None
+                for lower, upper in ranges:
+                    r = cv2.inRange(hsv, lower, upper)
+                    m = r if m is None else cv2.bitwise_or(m, r, dst=m)
+                masks[color] = m
+            return masks
+        h, s, v = cv2.split(cv2.LUT(hsv, self._lut))
+        cv2.bitwise_and(h, s, dst=h)
+        cv2.bitwise_and(h, v, dst=h)
+        return {color: (cv2.compare(cv2.bitwise_and(h, b), 0, cv2.CMP_GT) if b else None)   # sin rangos: None, igual que inRange
+                for color, b in self._lut_bits.items()}
 
     # Tope de B/R para aceptar un blob como cono ROJO. Medido en frames:
     # cono rojo real 0.11-0.35 (el rojo del cono casi no tiene azul), pared
@@ -263,14 +314,7 @@ class Vision:
         bgr = frame
         frame = frame.copy()
 
-        # OR en el sitio con cv2: np.bitwise_or.reduce de una lista apilaba copias del frame.
-        masks = {}
-        for color, ranges in self.color_ranges.items():
-            m = None
-            for lower, upper in ranges:
-                r = cv2.inRange(hsv, lower, upper)
-                m = r if m is None else cv2.bitwise_or(m, r, dst=m)
-            masks[color] = m
+        masks = self.hsv_masks(hsv)
 
         positions = {color: self.process_color(frame, mask, color, bgr, hsv)
                      for color, mask in masks.items()}
