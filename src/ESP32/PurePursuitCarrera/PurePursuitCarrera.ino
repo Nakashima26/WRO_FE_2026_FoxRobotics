@@ -3484,7 +3484,21 @@ void parseRuta(const String &line) {
   }
 }
 
-void parsePiMessage(String line) {
+#if !defined(FOX_SIL)
+// El ACK se arma en RAM y sale con un solo write: eran ~150 write() al driver del UART (cada uno toma su lock).
+// Mismos bytes: el formato lo hace el mismo Print del core. Si se llena, vacía y sigue.
+struct AckBuf : public Print {
+  uint8_t b[512];
+  size_t n = 0;
+  size_t write(uint8_t c) override { if (n == sizeof(b)) enviar(); b[n++] = c; return 1; }
+  void enviar() { Serial2.write(b, n); n = 0; }
+};
+static AckBuf ackOut;
+#else
+#define ackOut Serial2   // el shim del SIL no tiene Print; los bytes son los mismos
+#endif
+
+void parsePiMessage(String &line) {   // por referencia: el único llamador (readPiSerial) ya no usa la línea después
   line.trim();
 
   if (line.startsWith("RT")) {
@@ -3567,16 +3581,16 @@ void parsePiMessage(String line) {
     }
     // Regresamos el heading integrado del gyro para que la Pi pueda mantener
     // su mapa rodante de obstáculos alineado al doblar (obstacle_memory.py).
-    Serial2.print("ACK:V2,ang=");
-    Serial2.print(anguloGyro, 2);
-    Serial2.print(",est=");
+    ackOut.print("ACK:V2,ang=");
+    ackOut.print(anguloGyro, 2);
+    ackOut.print(",est=");
     // MANIOBRA -> "G" (la Pi hace su manejo de giro: borra memoria, resetea
     // line_tracker). CRUCERO -> "C" (la Pi lo trata igual que "S"; solo sirve
     // para verlo en el journalctl). RECUPERANDO -> "R". SIGUIENDO -> "S".
     // INICIO -> "I" (la Pi debe quedarse en stand-down).
     // ESTACIONANDO -> "E" (la Pi queda en stand-down mientras el ESP ejecuta la reversa).
     // TERMINANDO -> "T".
-    Serial2.print(estado == INICIO ? "I"
+    ackOut.print(estado == INICIO ? "I"
                   : (estado == GIRANDO || estado == MANIOBRA || estado == GIRO_RAPIDO) ? "G"
                   : (estado == RECUPERANDO ? "R"
                      : (estado == CRUCERO ? "C"
@@ -3587,8 +3601,8 @@ void parsePiMessage(String line) {
     // manejo de conos exteriores de esquina — fiable de la esquina 2 en
     // adelante (la 1 la sigue estimando por visión). primerGiro arranca en
     // false cada corrida porque el ESP se resetea entre runs.
-    Serial2.print(",dir=");
-    Serial2.print(!primerGiro ? "?" : (direccionIzquierda ? "L" : "R"));
+    ackOut.print(",dir=");
+    ackOut.print(!primerGiro ? "?" : (direccionIzquierda ? "L" : "R"));
     // ── DEBUG: estado interno del ESP para verlo en el journalctl de la Pi ──
     // (la Pi loguea el ACK crudo; sus parsers ignoran campos que no conocen).
     //   fase  : maniobraFase  (-1 sin init, 0 frenar-antes, 1 pivote, 2 frenar-desp, 3 frenar-y-fwd)
@@ -3599,107 +3613,110 @@ void parsePiMessage(String line) {
     //   drop  : lateralDropCount (CRUCERO: caídas del lateral vigilado, ver LATERAL_WATCH_CM)
     //   sucio : giroSucioArmado (1 = esquina "sucia" armada, el giro va a disparar sin paredAbierta)
     //   alat  : direccionAproxLatch (0 nada, 1 abrió IZQ, 2 abrió DER — hueco leído en la aproximación)
-    Serial2.print(",fase="); Serial2.print(maniobraFase);
-    Serial2.print(",rev=");  Serial2.print(maniobraReversa ? 1 : 0);
-    Serial2.print(",hug=");  Serial2.print(giroModoFwd ? 1 : 0);   // modo del PRÓXIMO giro (1 = FORWARD)
-    Serial2.print(",gd=");   Serial2.print(maniobraGirarDer ? 1 : 0);
-    Serial2.print(",dL=");   Serial2.print((long)distL_filtrada);
-    Serial2.print(",dR=");   Serial2.print((long)distR_filtrada);
-    Serial2.print(",dF=");   Serial2.print((long)distF_filtrada);
-    Serial2.print(",cerca="); Serial2.print(cruceroCerca ? 1 : 0);  // CRUCERO: 1 = gyro+wall (sin visión)
-    Serial2.print(",drop=");  Serial2.print(lateralDropCount);
-    Serial2.print(",sucio="); Serial2.print(giroSucioArmado ? 1 : 0);
-    Serial2.print(",alat=");  Serial2.print(direccionAproxLatch);
+    ackOut.print(",fase="); ackOut.print(maniobraFase);
+    ackOut.print(",rev=");  ackOut.print(maniobraReversa ? 1 : 0);
+    ackOut.print(",hug=");  ackOut.print(giroModoFwd ? 1 : 0);   // modo del PRÓXIMO giro (1 = FORWARD)
+    ackOut.print(",gd=");   ackOut.print(maniobraGirarDer ? 1 : 0);
+    ackOut.print(",dL=");   ackOut.print((long)distL_filtrada);
+    ackOut.print(",dR=");   ackOut.print((long)distR_filtrada);
+    ackOut.print(",dF=");   ackOut.print((long)distF_filtrada);
+    ackOut.print(",cerca="); ackOut.print(cruceroCerca ? 1 : 0);  // CRUCERO: 1 = gyro+wall (sin visión)
+    ackOut.print(",drop=");  ackOut.print(lateralDropCount);
+    ackOut.print(",sucio="); ackOut.print(giroSucioArmado ? 1 : 0);
+    ackOut.print(",alat=");  ackOut.print(direccionAproxLatch);
     // ── DEBUG heading/control (2026-09-07: "heading es mi pata de palo") ──
     //   ao   : anguloObjetivo — el TARGET de heading que persigue el gyro PID
     //   eg   : errorGyro (anguloObjetivo - anguloGyro, capado ±20 en controlPID)
     //   srv  : último ángulo escrito al servo (centroServo = centro; menor der, mayor izq)
     //   tc   : turnsCompleted — qué esquina física va (0..12)
-    Serial2.print(",ao=");   Serial2.print(anguloObjetivo, 1);
-    Serial2.print(",eg=");   Serial2.print(errorGyro, 1);
-    Serial2.print(",srv=");  Serial2.print(ultimoServo);
-    Serial2.print(",tc=");   Serial2.print(turnsCompleted);
+    ackOut.print(",ao=");   ackOut.print(anguloObjetivo, 1);
+    ackOut.print(",eg=");   ackOut.print(errorGyro, 1);
+    ackOut.print(",srv=");  ackOut.print(ultimoServo);
+    ackOut.print(",tc=");   ackOut.print(turnsCompleted);
     //   tpr  : TURNS_PER_RACE. La Pi busca el rosa del cajón cuando tc >= tpr, así
     //          que probar con 4 vueltas o correr 12 funciona sin tocar la Pi.
-    Serial2.print(",tpr=");  Serial2.print(TURNS_PER_RACE);
-    Serial2.print(",pb=");   Serial2.print(parkBuscando ? 1 : 0);
+    ackOut.print(",tpr=");  ackOut.print(TURNS_PER_RACE);
+    ackOut.print(",pb=");   ackOut.print(parkBuscando ? 1 : 0);
     //   pnf/pnx/pnb : ESTACIONANDO(_PUNTA) — fase, sonar exterior, línea base (pns = subfase del scan paralelo)
     if (estado == ESTACIONANDO) {
-      Serial2.print(",pnf="); Serial2.print(parkFase);
-      Serial2.print(",pns="); Serial2.print(parkScanSubFase);
-      Serial2.print(",pnx="); Serial2.print(parkExtRaw);   // sonar exterior (mediana 3) que ve la detección
-      Serial2.print(",pnb="); Serial2.print((int)parkBase);
+      ackOut.print(",pnf="); ackOut.print(parkFase);
+      ackOut.print(",pns="); ackOut.print(parkScanSubFase);
+      ackOut.print(",pnx="); ackOut.print(parkExtRaw);   // sonar exterior (mediana 3) que ve la detección
+      ackOut.print(",pnb="); ackOut.print((int)parkBase);
       //   pnd/pnt : altura lateral latcheada al llegar al cajón y el tramo recto
       //             (fase 14) que se calculó para compensarla
-      Serial2.print(",pnd="); Serial2.print((int)parkBaseLlegada);
-      Serial2.print(",pnt="); Serial2.print(parkRectoMs);
+      ackOut.print(",pnd="); ackOut.print((int)parkBaseLlegada);
+      ackOut.print(",pnt="); ackOut.print(parkRectoMs);
       //   pnq : ángulo de entrada calculado para esta llegada (antes fijo en 60)
-      Serial2.print(",pnq="); Serial2.print((int)parkAngObjetivo);
+      ackOut.print(",pnq="); ackOut.print((int)parkAngObjetivo);
       //   pntr : rumbo PARALELO medido contra la pared (ver PARK_TRIM_*); 999 = aún sin medir
-      Serial2.print(",pntr="); Serial2.print(parkTrimListo ? parkTrimPared : 999.0f, 1);
+      ackOut.print(",pntr="); ackOut.print(parkTrimListo ? parkTrimPared : 999.0f, 1);
     }
     if (estado == ESTACIONANDO_PUNTA) {
-      Serial2.print(",pnf="); Serial2.print(puntaFase);
-      Serial2.print(",pnx="); Serial2.print(puntaExtRaw);
-      Serial2.print(",pnb="); Serial2.print((long)puntaBase);
-      Serial2.print(",pna="); Serial2.print(puntaAltasTot);   // lecturas altas descartadas (eco perdido/rebote)
+      ackOut.print(",pnf="); ackOut.print(puntaFase);
+      ackOut.print(",pnx="); ackOut.print(puntaExtRaw);
+      ackOut.print(",pnb="); ackOut.print((long)puntaBase);
+      ackOut.print(",pna="); ackOut.print(puntaAltasTot);   // lecturas altas descartadas (eco perdido/rebote)
     }
     //   rr   : rerefCount — cuántas veces corrió el re-referenciado de CRUCERO.
     //          Si deja de crecer en una recta, el gate nuevo está bloqueando.
-    Serial2.print(",rr=");   Serial2.print(rerefCount);
+    ackOut.print(",rr=");   ackOut.print(rerefCount);
     //   tp   : parkTrimPared — lo que marca el gyro cuando el carro va PARALELO a
     //          la pared, medido con la pendiente del sonar lateral. Si crece a lo
     //          largo de la fase 0, ESO es la deriva del gyro (1141: +12 -> +21).
     //   tl   : parkTrimListo — 0 = la medición NO convergió y todo se cae al gyro.
     //   at   : la última fase 8 se cortó por ATORO (el carro topó) en vez de por
     //          rumbo o por timeout.
-    Serial2.print(",tp=");   Serial2.print(parkTrimPared, 1);
-    Serial2.print(",tl=");   Serial2.print(parkTrimListo ? 1 : 0);
-    Serial2.print(",at=");   Serial2.print(parkAtoroDisparo ? 1 : 0);
+    ackOut.print(",tp=");   ackOut.print(parkTrimPared, 1);
+    ackOut.print(",tl=");   ackOut.print(parkTrimListo ? 1 : 0);
+    ackOut.print(",at=");   ackOut.print(parkAtoroDisparo ? 1 : 0);
     //   tps  : dispersión de las últimas PARK_TRIM_MED_N estimaciones. Chica = el
     //          trim ya se asentó; grande = todavía se está moviendo.
-    Serial2.print(",tps=");  Serial2.print(parkTrimSpread(), 1);
+    ackOut.print(",tps=");  ackOut.print(parkTrimSpread(), 1);
     //   vel  : velocidad de avance medida entre poste 1 y poste 2 (cm/s).
     //          0 = no se pudo medir -> la fase 1 usó el tiempo nominal.
-    Serial2.print(",vel=");  Serial2.print(parkVelCmS, 1);
-    Serial2.print(",yaw=");  Serial2.print(anguloTotal, 2);
-    Serial2.print(",od=");   Serial2.print(odomMm);
-    Serial2.print(",px=");   Serial2.print(poseX);
-    Serial2.print(",py=");   Serial2.print(poseY);
-    Serial2.print(",rn=");   Serial2.print(rutaN);
-    Serial2.print(",enc=");  Serial2.print(FOX_ENCODER ? 1 : 0);
+    ackOut.print(",vel=");  ackOut.print(parkVelCmS, 1);
+    ackOut.print(",yaw=");  ackOut.print(anguloTotal, 2);
+    ackOut.print(",od=");   ackOut.print(odomMm);
+    ackOut.print(",px=");   ackOut.print(poseX);
+    ackOut.print(",py=");   ackOut.print(poseY);
+    ackOut.print(",rn=");   ackOut.print(rutaN);
+    ackOut.print(",enc=");  ackOut.print(FOX_ENCODER ? 1 : 0);
 #if FOX_TOF
-    Serial2.print(",tL=");   Serial2.print(tofMm[0]);
-    Serial2.print(",tR=");   Serial2.print(tofMm[1]);
-    Serial2.print(",tB=");   Serial2.print(tofMm[2]);
-    Serial2.print(",tF=");   Serial2.print(tofMm[3]);
+    ackOut.print(",tL=");   ackOut.print(tofMm[0]);
+    ackOut.print(",tR=");   ackOut.print(tofMm[1]);
+    ackOut.print(",tB=");   ackOut.print(tofMm[2]);
+    ackOut.print(",tF=");   ackOut.print(tofMm[3]);
 #else
     // Sin tF a propósito: el ACK del carro actual queda byte a byte igual (el
     // largo del ACK mueve los tiempos de UART). La Pi trata tF ausente = sin lectura.
-    Serial2.print(",tL=-1,tR=-1,tB=-1");
+    ackOut.print(",tL=-1,tR=-1,tB=-1");
 #endif
 #if FOX_BNO && !defined(FOX_SIL)
-    Serial2.print(",bno=");  Serial2.print(bnoYaw, 1);
-    Serial2.print(",bnoM="); Serial2.print(bnoMalos);
+    ackOut.print(",bno=");  ackOut.print(bnoYaw, 1);
+    ackOut.print(",bnoM="); ackOut.print(bnoMalos);
 #endif
-    Serial2.print(",gr=");   Serial2.print(giroRapidoPermitido() ? 1 : 0);
+    ackOut.print(",gr=");   ackOut.print(giroRapidoPermitido() ? 1 : 0);
 #if FOX_ENCODER && !defined(FOX_SIL)
-    Serial2.print(",ei=");   Serial2.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
+    ackOut.print(",ei=");   ackOut.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
-    Serial2.print(",ue=");   Serial2.print(uartErrs);
-    Serial2.print(",uf=");   Serial2.print(uartErrTipo[3]);   // FIFO_OVF
-    Serial2.print(",ut=");   Serial2.print(uartErrTipo[4]);   // FRAME
-    Serial2.print(",ub=");   Serial2.print(uartErrTipo[1] + uartErrTipo[2]);   // BREAK + BUFFER_FULL
-    Serial2.print(",lc=");   Serial2.print(lineasMalas);
-    Serial2.print(",lv=");   Serial2.print(lineasV2);
-    Serial2.print(",lr=");   Serial2.print(lineasRT);
-    Serial2.print(",lo=");   Serial2.print(lineasOtras);
-    Serial2.print(",rc=");   Serial2.print(rutaCarga);    // diagnóstico de la subida de ruta:
-    Serial2.print(",rk=");   Serial2.print(rutaRecib);    //   puntos esperados / recibidos / último RTE
-    Serial2.print(",re=");   Serial2.print(rutaUltRte);
-    Serial2.print(",lpm=");  Serial2.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
+    ackOut.print(",ue=");   ackOut.print(uartErrs);
+    ackOut.print(",uf=");   ackOut.print(uartErrTipo[3]);   // FIFO_OVF
+    ackOut.print(",ut=");   ackOut.print(uartErrTipo[4]);   // FRAME
+    ackOut.print(",ub=");   ackOut.print(uartErrTipo[1] + uartErrTipo[2]);   // BREAK + BUFFER_FULL
+    ackOut.print(",lc=");   ackOut.print(lineasMalas);
+    ackOut.print(",lv=");   ackOut.print(lineasV2);
+    ackOut.print(",lr=");   ackOut.print(lineasRT);
+    ackOut.print(",lo=");   ackOut.print(lineasOtras);
+    ackOut.print(",rc=");   ackOut.print(rutaCarga);    // diagnóstico de la subida de ruta:
+    ackOut.print(",rk=");   ackOut.print(rutaRecib);    //   puntos esperados / recibidos / último RTE
+    ackOut.print(",re=");   ackOut.print(rutaUltRte);
+    ackOut.print(",lpm=");  ackOut.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
     loopMaxUs = 0;
-    Serial2.println();
+    ackOut.println();
+#if !defined(FOX_SIL)
+    ackOut.enviar();
+#endif
     return;
   }
 
@@ -3743,7 +3760,7 @@ int checaLineaPi(String &line) {
   if (n < 3 || line.charAt(n - 3) != '*') return 0;
   uint8_t ck = 0;
   for (int i = 0; i < n - 3; i++) ck ^= (uint8_t)line.charAt(i);
-  long hh = strtol(line.substring(n - 2).c_str(), NULL, 16);
+  long hh = strtol(line.c_str() + n - 2, NULL, 16);   // los 2 últimos chars, sin copiar
   if ((long)ck != hh) return -1;
   line = line.substring(0, n - 3);
   return 1;
@@ -4113,6 +4130,8 @@ void terminando(long distL, long distR) {
 #endif
 
 void setup() {
+  // Sin buffer TX el log de cada loop (~150 B) esperaba en la FIFO de 128 B del UART0 (~3 ms por línea a 460800).
+  Serial.setTxBufferSize(1024);
   Serial.begin(USB_BAUD);
 #if !defined(FOX_SIL)
   // El RX por defecto es de 256 B: a 460800 se llena en ~5 ms y un V2 + 2 líneas de
