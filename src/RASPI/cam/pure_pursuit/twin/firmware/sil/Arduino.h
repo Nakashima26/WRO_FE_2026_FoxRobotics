@@ -170,6 +170,10 @@ class HardwareSerial {
 
   int available();
   String readStringUntil(char terminator);
+  // Como en el core ESP32: llamar antes de begin(). Solo tienen efecto en UART2.
+  size_t setRxBufferSize(size_t n);
+  size_t setTxBufferSize(size_t n);
+  void setTimeout(unsigned long ms);
 
   size_t writeChar(char c);
   size_t writeRaw(const char *s, size_t n);

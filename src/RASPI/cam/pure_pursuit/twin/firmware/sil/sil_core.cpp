@@ -426,11 +426,16 @@ struct UartTx {
 };
 static UartTx g_usb_tx;
 static UartTx g_uart2_tx;
+// Defaults del core ESP32 3.x para Serial2: RX ring 256, TX ring 0, timeout 1000 ms.
+static size_t g_serial2_rx_buf = 256;
+static size_t g_serial2_tx_buf = 0;
+static unsigned long g_serial2_timeout_ms = 1000;
+static uint64_t g_serial2_rx_dropped = 0;
 
-static void uart_tx_char(UartTx &u, const char *per_key, const char *fifo_key) {
+static void uart_tx_char(UartTx &u, const char *per_key, const char *fifo_key, double sw_buf = 0.0) {
   double per = param_get(per_key, 86.8);
   if (per <= 0) return;
-  double fifo = param_get(fifo_key, 128.0);
+  double fifo = param_get(fifo_key, 128.0) + sw_buf;
   if (u.free_us < (double)now_us) u.free_us = (double)now_us;
   double pending = (u.free_us - (double)now_us) / per;
   if (pending >= fifo) {
@@ -463,7 +468,7 @@ size_t HardwareSerial::writeChar(char c) {
     }
     return 1;
   }
-  uart_tx_char(g_uart2_tx, "serial2_us_per_char", "serial2_fifo");
+  uart_tx_char(g_uart2_tx, "serial2_us_per_char", "serial2_fifo", (double)g_serial2_tx_buf);
   if (c == '\n') {
     std::string line = g_serial2_tx_line;
     if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -550,7 +555,28 @@ size_t HardwareSerial::println(double v, int digits) {
 
 size_t HardwareSerial::println(bool v) { return println(v ? 1 : 0); }
 
+// RX del ESP32: lo que llega mientras el ring (setRxBufferSize) + la FIFO de hardware
+// (128) están llenos se pierde. El chunk llega entero al final de su línea, así que se
+// aplica al leer: se conservan los primeros bytes sin leer y se tiran los que sobran.
+// serial2_rx_overflow=0 lo apaga (twin de antes).
+static void serial2_apply_overflow() {
+  if (param_get("serial2_rx_overflow", 1.0) <= 0) return;
+  size_t cap = g_serial2_rx_buf + (size_t)param_get("serial2_rx_fifo", 128.0);
+  size_t n = 0;
+  for (auto it = g_serial2_rx.begin(); it != g_serial2_rx.end() && it->arrival_us <= now_us;) {
+    if (n + it->data.size() <= cap) { n += it->data.size(); ++it; continue; }
+    size_t keep = cap - n, drop = it->data.size() - keep;
+    g_serial2_rx_dropped += drop;
+    fprintf(stderr, "[SIL] UART2 RX lleno: %zu bytes perdidos t=%.3f s (total %llu)\n",
+            drop, now_us / 1e6, (unsigned long long)g_serial2_rx_dropped);
+    it->data.erase(keep);
+    n = cap;
+    if (it->data.empty()) it = g_serial2_rx.erase(it); else ++it;
+  }
+}
+
 static size_t serial2_visible_count() {
+  serial2_apply_overflow();
   size_t n = 0;
   for (const auto &ch : g_serial2_rx) {
     if (ch.arrival_us <= now_us) n += ch.data.size();
@@ -560,6 +586,7 @@ static size_t serial2_visible_count() {
 
 // true si encontró el terminador (aunque la línea esté vacía).
 static bool serial2_consume_visible(std::string *out, char until) {
+  serial2_apply_overflow();
   while (true) {
     bool progress = false;
     while (!g_serial2_rx.empty() && g_serial2_rx.front().arrival_us <= now_us) {
@@ -592,7 +619,7 @@ int HardwareSerial::available() {
 
 String HardwareSerial::readStringUntil(char terminator) {
   if (kind_ != UART2) return String("");
-  const unsigned long timeout_ms = 1000;
+  const unsigned long timeout_ms = g_serial2_timeout_ms;
   unsigned long start = millis();
   std::string out;
   while (true) {
@@ -614,6 +641,10 @@ String HardwareSerial::readStringUntil(char terminator) {
   }
   return String(out.c_str());
 }
+
+size_t HardwareSerial::setRxBufferSize(size_t n) { if (kind_ == UART2) g_serial2_rx_buf = n; return n; }
+size_t HardwareSerial::setTxBufferSize(size_t n) { if (kind_ == UART2) g_serial2_tx_buf = n; return n; }
+void HardwareSerial::setTimeout(unsigned long ms) { if (kind_ == UART2) g_serial2_timeout_ms = ms; }
 
 void sil_serial2_rx_push(const char *data, int n, uint64_t arrival_us) {
   if (!data || n <= 0) return;

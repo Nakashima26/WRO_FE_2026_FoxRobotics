@@ -4113,7 +4113,7 @@ void setup() {
   // El RX por defecto es de 256 B: a 460800 se llena en ~5 ms y un V2 + 2 líneas de
   // ruta son ~450 B. Con el loop real (ToF/BNO por I2C) se perdían bytes: la ruta
   // nunca cuadraba en RTE (rn=0) y faltaban V2/ACK (carro v2, 2026-11-07). El twin
-  // no modela el límite. Debe ir ANTES de begin().
+  // lo modela (sil_core serial2_apply_overflow). Debe ir ANTES de begin().
   Serial2.setRxBufferSize(4096);
   // Sin buffer TX el ACK (~330 B) bloqueaba el loop ~6 ms mientras salía por la FIFO.
   Serial2.setTxBufferSize(1024);
@@ -4132,7 +4132,11 @@ void setup() {
     while (!listo) delay(1);
   }
 #else
+  // Twin: mismos buffers y timeout que el carro (el SIL modela el RX lleno y el TX que bloquea).
+  Serial2.setRxBufferSize(4096);
+  Serial2.setTxBufferSize(1024);
   Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);
+  Serial2.setTimeout(10);
 #endif
 #if !defined(FOX_SIL)
   // Arriba de 57600 el core (3.3.4) deja el umbral de la FIFO de HW en 120 de 128 B:
