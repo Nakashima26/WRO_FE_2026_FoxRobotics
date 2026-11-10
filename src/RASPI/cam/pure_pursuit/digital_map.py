@@ -1365,7 +1365,8 @@ class DigitalMap:
                 out.append((max(0, min(C.BEV_W - 1, bx)), max(0, min(C.ROBOT_BEV_Y - 1, by))))
         return out
 
-    def render(self, size: int = 520) -> np.ndarray:
+    def render(self, size: int = 520, *, route_line=None, route_closed=False,
+               route_label=None) -> np.ndarray:
         img = np.full((size, size, 3), (232, 224, 208), np.uint8)
         scale = (size - 24) / _SPAN_MM
 
@@ -1401,10 +1402,15 @@ class DigitalMap:
                 else:
                     cv2.circle(img, px(x, y), 4, (150, 150, 150), 1, cv2.LINE_AA)
 
-        # Línea planificada (corner continuo / _build_line) — visible en twin.
-        if len(self.line_world) >= 2:
-            lp = np.array([px(x, y) for x, y in self.line_world], np.int32)
-            cv2.polylines(img, [lp], False, (40, 90, 220), 2, cv2.LINE_AA)
+        # El runtime puede entregar la DP completa. line_world es solo la
+        # guía local auxiliar, y no representa la ruta de RouteMode.
+        shown_line = self.line_world if route_line is None else route_line
+        if len(shown_line) >= 2:
+            lp = np.array([px(x, y) for x, y in shown_line], np.int32)
+            cv2.polylines(img, [lp], route_closed, (40, 90, 220), 2, cv2.LINE_AA)
+        if route_label:
+            cv2.putText(img, route_label, (8, 20), cv2.FONT_HERSHEY_SIMPLEX,
+                        .45, (40, 40, 40), 1, cv2.LINE_AA)
 
         cx, cy = self.pose_xy
         rad = math.radians(self.heading)
