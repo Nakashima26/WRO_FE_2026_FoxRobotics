@@ -434,7 +434,11 @@ class PPRuntime:
         rm = getattr(self, "_rmode", None)
         if rm is not None and rm.route is not None:
             r = rm.route
-            return list(zip(r.x[::4].tolist(), r.y[::4].tolist()))
+            # La ruta no se modifica en el sitio (cada plan trae otra): la lista se arma una vez por ruta.
+            if getattr(self, "_shown_route", None) is not r:
+                self._shown_route = r
+                self._shown_pts = list(zip(r.x[::4].tolist(), r.y[::4].tolist()))
+            return self._shown_pts
         dm = getattr(self, "digital", None)
         return list(dm.line_world) if dm is not None and dm.line_world else None
 
@@ -1536,9 +1540,10 @@ class PPRuntime:
                 # Sin un solo pixel naranja en la cámara el BEV tampoco tiene: el tracker
                 # recibe "no vista" sin imagen. Siguiendo la ruta nadie más usa el BEV.
                 _hsv_cam = getattr(self.vision, "last_hsv", None)
-                _hay_naranja = (_hsv_cam is None or any(
-                    cv2.countNonZero(cv2.inRange(_hsv_cam, lo, hi)) for lo, hi in C.LINE_ORANGE_HSV))
                 _sin_nar = getattr(self, "_sin_naranja", False)
+                # Con _sin_nar nadie lee _hay_naranja (ni el BEV ni el tracker): no se mide.
+                _hay_naranja = (_sin_nar or _hsv_cam is None or any(
+                    cv2.countNonZero(cv2.inRange(_hsv_cam, lo, hi)) for lo, hi in C.LINE_ORANGE_HSV))
                 if getattr(self, "_route_steering", False) and (_sin_nar or not _hay_naranja):
                     bev_frame = bev_hsv = None
                 else:
