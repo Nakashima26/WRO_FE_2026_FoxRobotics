@@ -3479,7 +3479,7 @@ void parseRuta(const String &line) {
   }
 }
 
-void parsePiMessage(String line) {
+void parsePiMessage(String &line) {   // por referencia: el único llamador (readPiSerial) ya no usa la línea después
   line.trim();
 
   if (line.startsWith("RT")) {
@@ -3738,7 +3738,7 @@ int checaLineaPi(String &line) {
   if (n < 3 || line.charAt(n - 3) != '*') return 0;
   uint8_t ck = 0;
   for (int i = 0; i < n - 3; i++) ck ^= (uint8_t)line.charAt(i);
-  long hh = strtol(line.substring(n - 2).c_str(), NULL, 16);
+  long hh = strtol(line.c_str() + n - 2, NULL, 16);   // los 2 últimos chars, sin copiar
   if ((long)ck != hh) return -1;
   line = line.substring(0, n - 3);
   return 1;
