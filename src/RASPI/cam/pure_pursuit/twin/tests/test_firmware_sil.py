@@ -58,7 +58,15 @@ def test_sonar_motor_servo():
             return SONAR_50CM_US
         return 0
 
-    fw.set_callbacks(advance=lambda _us: None, sonar=sonar, gyro=lambda: 0.0)
+    clock, outputs = fw.enable_advance_snapshot()
+    snapshots = []
+
+    def advance(us):
+        # Comprobar fuera del callback: ctypes captura las excepciones de Python.
+        snapshots.append((clock[0], fw.now_us, tuple(outputs), fw.actuators(),
+                          (fw.servo_angle(), fw.motor_pwm(), fw.motor_dir())))
+
+    fw.set_callbacks(advance=advance, sonar=sonar, gyro=lambda: 0.0)
     fw.push_serial2("READY")
     fw.setup()
     fw.push_serial2(V2_LINE)
@@ -67,6 +75,9 @@ def test_sonar_motor_servo():
         assert fw.actuators() == (fw.servo_angle(), fw.motor_pwm(), fw.motor_dir())
         if fw.motor_dir() == 1 and fw.motor_pwm() >= 100:
             assert abs(fw.servo_angle() - 77.0) < 15.0   # centroServo medido
+            assert snapshots
+            assert all(t == now and out == getters == individual
+                       for t, now, out, getters, individual in snapshots)
             fw.close()
             return
     fw.close()

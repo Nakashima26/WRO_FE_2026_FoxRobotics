@@ -589,8 +589,8 @@ class Sim:
 
         # Locales para advance (~566k llamadas por corrida).
         veh_substep, enc_update = veh._integrate_substep, enc.update
-        sil_now_us, hist_append = fw._lib.sil_now_us, history.append
-        actuators = fw.actuators
+        hist_append = history.append
+        advance_clock, advance_actuators = fw.enable_advance_snapshot()
         st_params = self.params.steering
         # NativeVehicle: leer el arreglo de estado directo (índices de native_vehicle._FIELDS)
         # en vez de 6 properties por sub-paso.
@@ -602,8 +602,8 @@ class Sim:
             remaining = dt_total
             # Firmware is suspended throughout this callback: actuator outputs
             # and SIL time stay constant across its physics substeps.
-            servo_cmd, pwm_cmd, direction_cmd = actuators()
-            t = int(sil_now_us()) / 1e6
+            servo_cmd, pwm_cmd, direction_cmd = advance_actuators
+            t = advance_clock[0] / 1e6
             while remaining > 1e-12:
                 sub = min(remaining, 0.001)
                 remaining -= sub
