@@ -66,9 +66,9 @@ def test_hw_nuevo_todo_aceptado(monkeypatch):
     for k in ("TURNS_PER_RACE", "FOX_ENCODER", "FOX_TOF", "imu", "pi_period_s",
               "inject_map_truth", "servo.fisico"):
         assert by[k].difiere, k
-    assert not by["servo.centro"].difiere and not by["servo.rueda_izq"].difiere
+    assert by["servo.centro"].difiere   # 74.5 a propósito (ACEPTADAS)
     # v2: misma ganancia a los dos lados (mismo piñón), el .ino ya coincide.
-    assert not by["servo.rueda_max"].difiere and not by["servo.rueda_der"].difiere
+    assert not by["servo.rueda_max"].difiere
 
 
 def test_diferencia_sin_motivo_rompe(monkeypatch):

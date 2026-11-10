@@ -45,6 +45,14 @@ _CONFIG_PY = Path(C.__file__)
 #   twin      = solo del twin, el carro no lo necesita.
 #   pendiente = hueco conocido sin resolver (otro frente lo atiende).
 ACEPTADAS: dict[str, tuple[str, str]] = {
+    "GR_VENTANA_CM": ("carro", "giro rápido a PWM~155: con 55 (grMin=40) se pierde el arco; "
+                      "PurePursuitCarrera.ino ya lleva 75 (exportar_carrera)"),
+    "MOTOR_MAX": ("carro", "presets de ruta a 155; PurePursuitCarrera.ino ya lo lleva (exportar_carrera)"),
+    "DIGITAL_MAP_PARK_OUTER_MAX_MM": ("carro", "carrera.json ya lleva 120 (runtime_nuevo lo aplica sobre config.py)"),
+    "ROUTE_FOLLOW": ("carro", "carrera.json ya lleva true"),
+    "RACING_LINE": ("carro", "carrera.json ya lleva '' (modo ruta, sin línea qp)"),
+    "servo.centro": ("twin", "74.5 = ajuste a las 4 vueltas de referencia; el carro usa el 75 de las "
+                     "rectas, dentro de ±0.3 + juego de 1.5 (params.py SteeringParams)"),
     "TURNS_PER_RACE": (
         "carro", "el .ino está en TEST de 1 vuelta (4); la carrera son 12 esquinas: "
         "poner 12 antes de competir"),
