@@ -968,6 +968,11 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 # la corrida contigua cruzara/no-cruzara LINE_MIN_RUN_PX frame a frame y
 # 'seen'/near_y parpadearan. Hue se mantiene >=7 para no invadir el rojo de las
 # latas; S y V se abren un poco para tolerar sombra/desgaste de la cinta.
+# Vision.detect_on: máscaras Red/Green con una LUT de bits (256×1×3 uint8 = 768 B, armada
+# sola desde Vision.color_ranges) en vez de un cv2.inRange por rango. Mismas máscaras,
+# ~7 % menos en el Mac. False vuelve a cv2.inRange (si en la Pi resulta más lenta).
+VISION_LUT = True
+
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 
