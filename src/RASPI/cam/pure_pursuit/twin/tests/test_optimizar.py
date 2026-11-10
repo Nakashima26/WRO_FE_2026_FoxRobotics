@@ -17,8 +17,8 @@ _spec.loader.exec_module(opt)
 
 
 def test_score_media_pareada_y_penalizacion_por_fallo_nuevo():
-    base = {(1, 1): (True, 40.0), (1, 2): (True, 41.0), (2, 1): (True, 39.0)}
-    cand = {(1, 1): (True, 39.0), (1, 2): (True, 40.0), (2, 1): (False, None)}
+    base = {(1, 1): (True, 40.0, False), (1, 2): (True, 41.0, False), (2, 1): (True, 39.0, False)}
+    cand = {(1, 1): (True, 39.0, False), (1, 2): (True, 40.0, False), (2, 1): (False, None, False)}
     s, info = opt.score(base, cand)
     assert s == pytest.approx(0.0)  # media -1 s, +1 s por el fallo nuevo
     assert info["new_fail"] == [(2, 1)]
@@ -26,16 +26,16 @@ def test_score_media_pareada_y_penalizacion_por_fallo_nuevo():
 
 
 def test_score_fallo_de_base_que_sigue_fallando_no_cuesta():
-    base = {(1, 1): (True, 40.0), (1, 5): (False, None)}
-    cand = {(1, 1): (True, 40.0), (1, 5): (False, None)}
+    base = {(1, 1): (True, 40.0, False), (1, 5): (False, None, False)}
+    cand = {(1, 1): (True, 40.0, False), (1, 5): (False, None, False)}
     s, info = opt.score(base, cand)
     assert s == pytest.approx(0.0)
     assert info["new_fail"] == []
 
 
 def test_score_semilla_fallida_en_dos_ruidos_rechaza():
-    base = {(1, 7): (True, 40.0), (2, 7): (True, 40.0), (1, 8): (True, 40.0)}
-    cand = {(1, 7): (False, None), (2, 7): (False, None), (1, 8): (True, 30.0)}
+    base = {(1, 7): (True, 40.0, False), (2, 7): (True, 40.0, False), (1, 8): (True, 40.0, False)}
+    cand = {(1, 7): (False, None, False), (2, 7): (False, None, False), (1, 8): (True, 30.0, False)}
     s, _ = opt.score(base, cand)
     assert s == math.inf
 
@@ -44,23 +44,23 @@ def test_parse_out_con_basura_antes_y_despues(tmp_path):
     rec = {"lap_times_s": [13.9, 9.1, 9.0], "stop_reason": "race_finished", "collisions": 0}
     f = tmp_path / "s1.out"
     f.write_text("aviso previo\nSTOP race_finished " + json.dumps(rec) + "\nbasura al final\n")
-    assert opt.ok_t(opt.parse_out(f)) == (True, pytest.approx(32.0))
+    assert opt.ok_t(opt.parse_out(f)) == (True, pytest.approx(32.0), False)
 
 
 def test_parse_out_sin_stop_o_con_pocas_vueltas_falla(tmp_path):
     f = tmp_path / "s2.out"
     f.write_text("sin linea de parada\n")
-    assert opt.ok_t(opt.parse_out(f)) == (False, None)
+    assert opt.ok_t(opt.parse_out(f)) == (False, None, False)
     f.write_text('STOP x {"lap_times_s": [10.0, 9.0]}\n')
-    assert opt.ok_t(opt.parse_out(f)) == (False, None)
-    assert opt.ok_t(opt.parse_out(tmp_path / "no_existe.out")) == (False, None)
+    assert opt.ok_t(opt.parse_out(f)) == (False, None, False)
+    assert opt.ok_t(opt.parse_out(tmp_path / "no_existe.out")) == (False, None, False)
 
 
 def test_roce_de_pared_exterior_es_falla():
     rec = {"lap_times_s": [13.9, 9.1, 9.0],
-           "ignored_contacts": {"pared exterior": {"t": 5.0, "cause": "pared exterior", "max_mm": 3.0}}}
-    assert opt.ok_t(rec) == (False, None)
-    assert opt.ok_t({"lap_times_s": [13.9, 9.1, 9.0], "ignored_contacts": {}}) == (True, pytest.approx(32.0))
+           "ignored_contacts": [{"t": 5.0, "cause": "pared exterior", "max_mm": 3.0}]}
+    assert opt.ok_t(rec) == (False, None, False)
+    assert opt.ok_t({"lap_times_s": [13.9, 9.1, 9.0], "ignored_contacts": []}) == (True, pytest.approx(32.0), False)
 
 
 def test_encode_decode_round_trip():
