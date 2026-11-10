@@ -80,6 +80,8 @@ def _field_payload(field) -> dict:
         "blue": [((a[0], a[1]), (b[0], b[1])) for a, b in blue_segments()],
         "seats": [section_to_world(sec, h, w) for sec in SECTIONS_CW for h, w in SEATS.values()],
         "signs": [(s.x, s.y, s.color) for s in field.signs],
+        "special": [(s.x, s.y, s.height_mm, s.color, s.driving_color)
+                    for s in field.signs if s.original_color is not None],
         "barriers": [[(x, y) for x, y in box] for box in field.barriers],
     }
 
@@ -236,12 +238,10 @@ def _paint(field, trail, pose, bev, cam=None, dig=None):
         cv2.polylines(world, [p], True, (0, 0, 0) if fill else color, thick, cv2.LINE_AA)
     if len(trail) > 1:
         pts = np.array([_to_px(x, y) for x, y in trail], np.int32)
-        cv2.polylines(world, [pts], False, (140, 140, 140), 1, cv2.LINE_AA)
-    # Línea planificada del mapa digital (corner continuo / PP).
-    if pose is not None and pose.get("line"):
-        lp = np.array([_to_px(x, y) for x, y in pose["line"]], np.int32)
-        if len(lp) >= 2:
-            cv2.polylines(world, [lp], False, (40, 90, 220), 2, cv2.LINE_AA)
+        cv2.polylines(world, [pts], False, (220, 110, 30), 2, cv2.LINE_AA)
+    # Este panel representa verdad física. La ruta pertenece al mapa
+    # ESTIMADO (puede tener un asiento equivocado o un plan en subida), y ya
+    # se dibuja en «mapa del carro». Superponerla aquí parecía un choque.
     if pose is not None:
         # Vista de arriba del modelo 3D (twin/assets/car_top.json), solo dibujo.
         h = math.radians(pose["h"])
@@ -283,7 +283,15 @@ def _paint_static(field):
         poly(box, (0, 0, 255) if color == "Red" else (0, 200, 0), fill=True)
     for box in field["barriers"]:
         poly(box, (255, 0, 255), fill=True)
-    cv2.putText(world, "mapa real", (10, _VIEW - 12), cv2.FONT_HERSHEY_SIMPLEX,
+    for x, y, height, visible, driving in field.get("special", []):
+        px, py = _to_px(x, y)
+        cv2.circle(world, (px, py), 15, (0, 220, 255), 3, cv2.LINE_AA)
+        label = f"{height:g}mm {visible} -> {driving}"
+        tx, ty = max(8, min(_VIEW-235, px-80)), max(130, py-23)
+        cv2.rectangle(world, (tx-3, ty-15), (tx+225, ty+5), (0, 220, 255), -1)
+        cv2.putText(world, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX,
+                    .43, (0,0,0), 1, cv2.LINE_AA)
+    cv2.putText(world, "mapa real | azul: recorrido real", (10, _VIEW - 12), cv2.FONT_HERSHEY_SIMPLEX,
                 0.5, (20, 20, 20), 1, cv2.LINE_AA)
     return world
 
@@ -429,6 +437,9 @@ def _run_once(args, seed: int, interactive: bool):
         pre_params.update({k: float(v) for k, v in (kv.split("=", 1) for kv in args.par.split(",") if kv)})
         fw_overrides = {**HARNESS_FW, **fw_overrides}
 
+    if args.surprise_height:
+        pi_overrides.update(SURPRISE_RULE=True, ROUTE_SEAT_ROI=False,
+                            DIGITAL_MAP_SEED_CONFIRMED=False)
     sim = Sim(
         seed,
         start=args.start or None,
@@ -442,6 +453,17 @@ def _run_once(args, seed: int, interactive: bool):
         fw_params=pre_params,
         park_pos=args.park_pos or None,
     )
+    if args.surprise_height:
+        if pre_field is not None:
+            raise ValueError("--surprise-height no se combina con --prepark")
+        import random
+        from .wro_field import surprise_candidates, with_surprise
+        ordinary = randomize(seed, start=sim.start, park_pos=sim.park_pos)
+        index = args.surprise_index
+        if index is None:
+            index = random.Random(seed).choice(surprise_candidates(ordinary))
+        pre_field = with_surprise(ordinary, index, args.surprise_height)
+        sim.field_override = pre_field
     trail: list[tuple[float, float]] = []
     frames: list[np.ndarray] = []
     keys = {"cmd": None, "pause": False}
@@ -557,6 +579,16 @@ def _run_once(args, seed: int, interactive: bool):
                     robot_xy=(C.ROBOT_BEV_X + dx, C.ROBOT_BEV_Y + dy),
                 )
             ack = view.frame_result.serial_ack if view.frame_result is not None else ""
+            camera_panel = fr.processed_frame.copy() if show_cam and fr.processed_frame is not None else None
+            if camera_panel is not None:
+                for observation in fr.surprise_observations or ():
+                    if observation["confirmed_mm"] not in (50, 150):
+                        continue
+                    x,y,w,h = observation["box"]
+                    cv2.rectangle(camera_panel,(x,y),(x+w,y+h),(0,220,255),2)
+                    text = f'{observation["confirmed_mm"]}mm {observation["visible"]} -> {observation["driving"]}'
+                    cv2.putText(camera_panel,text,(max(4,min(x,360)),max(18,y-12)),
+                                cv2.FONT_HERSHEY_SIMPLEX,.48,(0,220,255),2,cv2.LINE_AA)
             _offer(view_q, ("frame", {
                 "h": veh.heading_deg,
                 "xy": (veh.x, veh.y),
@@ -565,8 +597,7 @@ def _run_once(args, seed: int, interactive: bool):
                 "bev": bev_dbg,
                 # Imágenes solo cada render_every: copiar y picklear ~2 MB por
                 # frame hacia el proceso de la ventana costaba ~5 ms por frame.
-                "cam": None if not show_cam or fr.processed_frame is None
-                else fr.processed_frame.copy(),
+                "cam": camera_panel,
                 "dig": None if not show_cam or fr.dig_map is None
                 else fr.dig_map.copy(),
                 "line": None if fr is None else getattr(fr, "line_world", None),
@@ -595,7 +626,7 @@ def _run_once(args, seed: int, interactive: bool):
         return True
 
     go = True
-    if interactive and view_q is not None:
+    if interactive and view_q is not None and not args.auto_start:
         preview = pre_field or randomize(seed, start=sim.start, park_pos=sim.park_pos)
         view_q.put(("field", _field_payload(preview)))
         field_sent = True
@@ -674,6 +705,11 @@ def main():
     ap.add_argument("--pi", action="append", default=[])
     ap.add_argument("--max-time", type=float, default=180.0)
     ap.add_argument("--no-show", action="store_true")
+    ap.add_argument("--auto-start", action="store_true", help="Iniciar al abrir el visor")
+    ap.add_argument("--surprise-height",type=int,choices=(50,150),default=None,
+                    help="Mostrar una señal especial y activar su interpretación visual")
+    ap.add_argument("--surprise-index",type=int,default=None,
+                    help="Índice del bloque modificado; no puede ser el primero")
     ap.add_argument("--save-gif", type=str, default="")
     ap.add_argument("--render-every", type=int, default=3)
     ap.add_argument("--speed", type=float, default=5.0,
