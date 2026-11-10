@@ -270,7 +270,8 @@ class Vision:
         Ademas descarta bounding boxes con aspect ratio extremo (muy
         anchos/planos), típico de una línea diagonal o casi horizontal.
         """
-        if np.count_nonzero(mask) < 500:
+        min_area = getattr(self, "min_contour_area", 1000.0)
+        if np.count_nonzero(mask) < min(500, min_area):
             return []
 
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
@@ -282,7 +283,7 @@ class Vision:
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area <= 1000:
+            if area <= min_area:
                 continue
 
             x, y, w, h = cv2.boundingRect(cnt)
@@ -323,6 +324,12 @@ class Vision:
                 if sel_m.any() and float(np.median(hsv[y:y + h, x:x + w, 1][sel_m])) < self.GREEN_S_MIN_MED:
                     continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
 
+            # En modo sorpresa se admiten blobs pequeños solo si su altura
+            # física es compatible con el bloque bajo. Los normales conservan
+            # el umbral de siempre; no se añaden señales lejanas al mapa.
+            small_filter = getattr(self, "small_object_filter", None)
+            if area <= 1000 and small_filter is not None and not small_filter((x, y, w, h)):
+                continue
             objects.append((x, y, w, h))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 255), 2)
             cv2.putText(frame, color_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)

@@ -132,6 +132,7 @@ def compute_metrics(
     sign_cross_prev: dict[int, float] = {}
     violations: list[dict[str, Any]] = []
     signs_passed = 0
+    surprise_passages = []
 
     corners: list[dict[str, Any]] = []
     corner_open: dict[str, Any] | None = None
@@ -226,7 +227,10 @@ def compute_metrics(
                 continue
             if prev_along < 0.0 <= along and abs(lat) < 450.0:
                 signs_passed += 1
-                ok = lat > 0 if sign.color == "Red" else lat < 0
+                ok = lat > 0 if sign.driving_color == "Red" else lat < 0
+                if sign.original_color is not None:
+                    surprise_passages.append({"t": t, "correct": ok,
+                                              "visible": sign.color, "original": sign.original_color})
                 if not ok:
                     violations.append(
                         {
@@ -250,7 +254,14 @@ def compute_metrics(
     total_time = max(0.0, t_end - t0) if armed_t is not None else 0.0
     mean_speed = (dist_fwd + dist_back) / total_time if total_time > 1e-6 else 0.0
 
+    surprise_metrics = {}
+    if any(s.original_color is not None for s in field.signs):
+        correct = min(3, sum(p["correct"] for p in surprise_passages))
+        surprise_metrics = {"surprise_passages": surprise_passages,
+                            "surprise_points": 5*correct,
+                            "surprise_wrong_side": any(not p["correct"] for p in surprise_passages)}
     return {
+        **surprise_metrics,
         "finished": finished,
         "stop_reason": stop_reason,
         "total_time_s": round(total_time, 3),
