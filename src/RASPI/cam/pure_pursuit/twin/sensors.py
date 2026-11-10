@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import math
 from dataclasses import dataclass, field
+from typing import Callable
 
 import numpy as np
 
@@ -115,7 +116,8 @@ class ToF:
         """sensor_id es índice de p.mounts (0=L 1=R 2=atrás 3=frente); fuera de rango, el valor por defecto."""
         return table[sensor_id] if 0 <= sensor_id < len(table) else fallback
 
-    def read_mm(self, sensor_id: int, world: World, pose: Pose, t: float) -> int:
+    def read_mm(self, sensor_id: int, world: World, pose: Pose | Callable[[], Pose], t: float) -> int:
+        """Return a held reading, resolving a deferred pose only for a new sample."""
         p = self.params
         period = self._sensor_value(p.sample_period_s_by_id, p.sample_period_s, sensor_id)
         if t - self._last_sample_t.get(sensor_id, -1e9) < period - 1e-9:
@@ -124,6 +126,8 @@ class ToF:
         if not 0 <= sensor_id < len(p.mounts):
             self._held_mm[sensor_id] = -1
             return -1
+        if callable(pose):
+            pose = pose()
         max_mm = self._sensor_value(p.max_range_mm_by_id, p.max_range_mm, sensor_id)
         mount = p.mounts[sensor_id]
         ox, oy = robot_to_world(mount.right_mm, mount.forward_mm, pose.x, pose.y, pose.heading_deg)

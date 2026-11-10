@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..wro_field import INNER_HALF_MM, OUTER_HALF_MM, SIGN_MM
+from ..wro_field import Field, INNER_HALF_MM, OUTER_HALF_MM, SIGN_MM
 
 if TYPE_CHECKING:
     from ..wro_field import Field
@@ -308,6 +308,39 @@ def _hits_polygon(corners, poly) -> bool:
     return any(_segments_cross(a, b, c, d) for a, b in edges for c, d in other)
 
 
+def _collision_geometry(world):
+    """Cache static geometry while preserving edits to a Field's objects.
+
+    Custom fields may compute wall polygons dynamically, so they use the
+    uncached path. World.__new__ fixtures require no initialization here.
+    """
+    track = world.field
+    key = None
+    if type(track) is Field:
+        key = (id(track),
+               tuple((s.x, s.y, s.color, s.section, s.seat) for s in track.signs),
+               tuple(tuple(tuple(p) for p in box) for box in track.barriers))
+        cached = getattr(world, "_collision_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+    walls = []
+    for poly in (track.outer, track.inner):
+        wall = [(float(p[0]), float(p[1])) for p in poly]
+        rect = len(wall) == 4 and len({p[0] for p in wall}) == 2 and len({p[1] for p in wall}) == 2
+        walls.append((wall, _bbox(wall), list(zip(wall, wall[1:] + wall[:1])), rect))
+    half = SIGN_MM / 2.0
+    signs = []
+    for sign in track.signs:
+        box = [(sign.x-half, sign.y-half), (sign.x+half, sign.y-half),
+               (sign.x+half, sign.y+half), (sign.x-half, sign.y+half)]
+        signs.append((box, _bbox(box), f"señal {sign.color} {sign.section}/{sign.seat}"))
+    barriers = [(box, _bbox(box)) for box in track.barriers]
+    geometry = (walls, signs, barriers)
+    if key is not None:
+        world._collision_cache = (key, geometry)
+    return geometry
+
+
 def collision(
     world: World,
     x: float,
@@ -328,33 +361,26 @@ def collision(
             return "isla"
     edges = list(zip(corner_list, corner_list[1:] + corner_list[:1]))
     car_box = _bbox(corner_list)
-    track = world.field
-    polys = (track.inner,) if "pared exterior" in ignore else (track.outer, track.inner)
-    for poly in polys:
-        wall =[(float(p[0]), float(p[1])) for p in poly]
-        wall_box = _bbox(wall)
+    walls, signs, barriers = _collision_geometry(world)
+    polys = walls[1:] if "pared exterior" in ignore else walls
+    for wall, wall_box, wall_edges, rect in polys:
         # Carro lejos de la isla, o bien adentro del tapete: no hay cruce.
-        if _bbox_apart(car_box, wall_box) or _inside_rect(car_box, wall):
+        m = _BBOX_MARGIN_MM
+        inside = rect and (car_box[0] > wall_box[0] + m and car_box[1] > wall_box[1] + m
+                           and car_box[2] < wall_box[2] - m and car_box[3] < wall_box[3] - m)
+        if _bbox_apart(car_box, wall_box) or inside:
             continue
-        wall_edges = list(zip(wall, wall[1:] + wall[:1]))
         for a, b in edges:
             for c, d in wall_edges:
                 if _segments_cross(a, b, c, d):
                     return "pared"
-    half = SIGN_MM / 2.0
-    for sign in track.signs:
-        box = [
-            (sign.x - half, sign.y - half),
-            (sign.x + half, sign.y - half),
-            (sign.x + half, sign.y + half),
-            (sign.x - half, sign.y + half),
-        ]
-        if _bbox_apart(car_box, _bbox(box)):
+    for box, box_bounds, cause in signs:
+        if _bbox_apart(car_box, box_bounds):
             continue
         if _hits_polygon(corner_list, box):
-            return f"señal {sign.color} {sign.section}/{sign.seat}"
-    for box in track.barriers:
-        if _bbox_apart(car_box, _bbox(box)):
+            return cause
+    for box, box_bounds in barriers:
+        if _bbox_apart(car_box, box_bounds):
             continue
         if _hits_polygon(corner_list, box):
             return "cajón magenta"

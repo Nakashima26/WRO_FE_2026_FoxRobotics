@@ -655,6 +655,11 @@ class Sim:
                             collision_t = t
                             stop_reason = "collision"
 
+        def tof_pose() -> Pose:
+            # Most firmware reads reuse the ToF sample. Avoid constructing a
+            # pose (and reading native vehicle fields) until a new one is due.
+            return Pose(veh.x, veh.y, veh.heading_deg)
+
         fw.set_callbacks(
             advance=advance,
             sonar=lambda sid: sonar.echo_us(
@@ -664,7 +669,7 @@ class Sim:
             else (lambda: gyro.read(last_yaw_rate, _t_s())),
             encoder=lambda: enc.count,
             tof=lambda idx: tof.read_mm(
-                idx, world, Pose(veh.x, veh.y, veh.heading_deg), _t_s()
+                idx, world, tof_pose, _t_s()
             ),
         )
 
