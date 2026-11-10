@@ -193,7 +193,26 @@ FOX_API void fox_route_dp_sparse_t(int32_t n, int32_t m, int32_t N,
                         arg = a;
                     }
                 }
-                if (!(best < INF)) {   /* sin costo válido en el rango: bucle completo */
+                if (!(best < INF) && !isnan(best)) {
+                    /* Fuera de [lo,hi] MASK ya impone INF. Reutiliza el mínimo
+                     * del rango y recorre solo V+INF fuera: mismas sumas,
+                     * mismo primer mínimo, sin releer ni recalcular geometría. */
+                    double range_best = best;
+                    int32_t range_arg = arg;
+                    if (lo > 0) {
+                        best = Vb[0] + INF;
+                        arg = 0;
+                        for (int32_t a = 1; a < lo; a++) {
+                            double tot = Vb[a] + INF;
+                            if (tot < best) { best = tot; arg = a; }
+                        }
+                        if (range_best < best) { best = range_best; arg = range_arg; }
+                    }
+                    for (int32_t a = hi + 1; a < m; a++) {
+                        double tot = Vb[a] + INF;
+                        if (tot < best) { best = tot; arg = a; }
+                    }
+                } else if (!(best < INF)) {   /* conserva el recorrido para NaN */
                     best = 0.0;
                     arg = 0;
                     for (int32_t a = 0; a < m; a++) {
