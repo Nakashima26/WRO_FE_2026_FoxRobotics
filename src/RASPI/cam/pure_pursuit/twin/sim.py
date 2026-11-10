@@ -592,6 +592,9 @@ class Sim:
         sil_now_us, hist_append = fw._lib.sil_now_us, history.append
         actuators = fw.actuators
         st_params = self.params.steering
+        # NativeVehicle: leer el arreglo de estado directo (índices de native_vehicle._FIELDS)
+        # en vez de 6 properties por sub-paso.
+        vs = veh.__dict__.get("_state")
 
         def advance(us: int) -> None:
             nonlocal last_yaw_rate, last_ds, last_coll_check, collision_cause, collision_t, stop_reason, world
@@ -605,14 +608,20 @@ class Sim:
                 sub = min(remaining, 0.001)
                 remaining -= sub
                 # = veh.step(sub, ...) con sub <= 1 ms (un solo sub-paso), sin StepInfo.
-                h0, v0 = veh.heading_deg, veh.v
-                veh_substep(sub, servo_cmd, pwm_cmd, direction_cmd)
-                last_ds = 0.0 + veh.v * sub
-                last_yaw_rate = -(veh.heading_deg - h0) / sub
+                if vs is None:
+                    h0, v0 = veh.heading_deg, veh.v
+                    veh_substep(sub, servo_cmd, pwm_cmd, direction_cmd)
+                    x, y, h, v, v_wheel, wheel = (veh.x, veh.y, veh.heading_deg, veh.v,
+                                                  veh.v_wheel, veh.last_wheel_deg)
+                else:
+                    h0, v0 = vs[2], vs[3]
+                    veh_substep(sub, servo_cmd, pwm_cmd, direction_cmd)
+                    x, y, h, v, v_wheel, wheel = vs[0], vs[1], vs[2], vs[3], vs[6], vs[9]
+                last_ds = 0.0 + v * sub
+                last_yaw_rate = -(h - h0) / sub
                 # El encoder cuenta la llanta: frenando con la llanta bloqueada no ve lo que patina.
-                enc_update(veh.v_wheel * sub, veh.last_wheel_deg,
-                           (veh.v - v0) / sub, w_max)
-                hist_append((t, veh.x, veh.y, veh.heading_deg))
+                enc_update(v_wheel * sub, wheel, (v - v0) / sub, w_max)
+                hist_append((t, x, y, h))
                 if t - last_coll_check >= _COLLISION_INTERVAL_S:
                     last_coll_check = t
                     hit = collision(
