@@ -203,8 +203,8 @@ _GEOM_CACHE: dict = {}
 _GRID_CACHE: dict = {}             # gridkey -> malla de estaciones y poses (solo lectura)
 _GT_CACHE: dict = {}               # gkey -> (G, MASK) transpuestos para fox_route_dp_sparse_t
 _RANGE_CACHE: dict = {}            # gkey -> (ALO, AHI) para fox_route_dp_sparse
-_SIGN_CACHE: dict = {}             # (gridkey, cx, cy) -> (ks, dsg) de la señal
-_VIS_CACHE: dict = {}              # (gridkey, ux, uy, ...) -> (kv, vis) de la cámara
+_SIGN_CACHE: dict = {}             # (gridkey, cx, cy) -> (celdas planas, dsg) donde la señal baja la holgura
+_VIS_CACHE: dict = {}              # (gridkey, ux, uy, ...) -> celdas planas visibles por la cámara
 _NATIVE_DP = True                  # False: bucle de la DP en numpy (sin fox_route_dp)
 
 
@@ -457,14 +457,20 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
         sk = (gridkey, float(cx), float(cy))
         if sk not in _SIGN_CACHE:
             ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
-            dsg = None
+            idx = np.empty(0, np.intp)
+            dsg = np.empty(0)
             if len(ks) > 0:
                 dsg = _rect_dist_pose(np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks], shd[ks], chd[ks])[..., 0] - r_sign
-            _SIGN_CACHE[sk] = (ks, dsg)
-        ks, dsg = _SIGN_CACHE[sk]
-        if len(ks) == 0:
+                # clear <= base siempre: solo se guardan las celdas donde la señal puede bajar la holgura
+                low = dsg < _STATIC_CACHE[gridkey][ks]
+                idx = np.ravel_multi_index((ks[np.nonzero(low)[0]],) + np.nonzero(low)[1:], clear.shape)
+                dsg = dsg[low]
+            _SIGN_CACHE[sk] = (idx, dsg)
+        idx, dsg = _SIGN_CACHE[sk]
+        if len(idx) == 0:
             continue
-        clear[ks] = np.minimum(clear[ks], dsg)
+        cf = clear.reshape(-1)
+        cf[idx] = np.minimum(cf[idx], dsg)
     bad = clear < prm.hard_clear_mm
     bonus = np.zeros((n, m, m))
     pen = prm.w_clear * np.clip((prm.soft_clear_mm - clear) / prm.soft_clear_mm, 0.0, None) ** 2
@@ -498,9 +504,9 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
                     dist = np.hypot(fwd, latv)
                     vis = (fwd > 0) & (dist >= prm.view_min_mm) & (dist <= prm.view_max_mm) & (
                         np.abs(latv) <= fwd * math.tan(math.radians(prm.view_half_deg)))
-                    _VIS_CACHE[vk] = (kv, vis)
-                kv, vis = _VIS_CACHE[vk]
-                bonus[kv] -= prm.w_visible * vis
+                    nz = np.nonzero(vis)
+                    _VIS_CACHE[vk] = np.ravel_multi_index((kv[nz[0]],) + nz[1:], bonus.shape)
+                bonus.reshape(-1)[_VIS_CACHE[vk]] -= prm.w_visible   # ~1 % de celdas visibles: solo esas
     if hug is not None:
         d_h, a0, a1, w_h = hug
         dsig = 4.0 * _SEC_SIGMA / n
@@ -726,26 +732,42 @@ def _heading_kappa(x, y, ds):
     return hd, kap
 
 
+def _min_rect_dist(clusters, x, y, hd_rad):
+    """min de _rect_dist_pose sobre varios grupos de puntos; descarta las poses
+    que, por cota de círculos, no pueden dar el mínimo (mismo valor exacto)."""
+    fx, fy = np.sin(hd_rad), np.cos(hd_rad)
+    lon_c = (_FRONT_MM - _REAR_MM) / 2.0
+    hl = (_FRONT_MM + _REAR_MM) / 2.0
+    R, r_in = math.hypot(hl, _HALF_W), min(hl, _HALF_W)
+    xc, yc = x + fx * lon_c, y + fy * lon_c
+    best = np.inf
+    for pts in clusters:
+        c = pts.mean(axis=0)
+        rc = float(np.hypot(pts[:, 0] - c[0], pts[:, 1] - c[1]).max())
+        dc = np.hypot(xc - c[0], yc - c[1])
+        ub = float(dc.min()) + rc - r_in            # algún punto del grupo queda a ≤ ub
+        k = np.flatnonzero(dc - R - rc <= ub + 1.0)  # poses que pueden quedar por debajo
+        best = min(best, float(_rect_dist_pose(pts[:, 0], pts[:, 1], x[k], y[k], hd_rad[k], fx[k], fy[k]).min()))
+    return best
+
+
 def check(route: Route, pillars, parking: str | None, park_w: float | None = None) -> dict:
     """Holguras mínimas de la huella sobre la ruta (mm) y curvatura máxima."""
     x, y = route.x, route.y
     hd = np.radians(route.heading_deg)
     rep = {}
     if pillars:
-        pts = np.vstack([_square_pts(px, py, SIGN_MM / 2.0, 7) for px, py, _c in pillars])
-        dist = _rect_dist_pose(pts[:, 0], pts[:, 1], x, y, hd)
-        rep["sign_mm"] = float(dist.min())
+        rep["sign_mm"] = _min_rect_dist([_square_pts(px, py, SIGN_MM / 2.0, 7) for px, py, _c in pillars], x, y, hd)
     cs = _corners_pose(x, y, hd)
     rep["wall_mm"] = float(OUTER_HALF_MM - np.max([np.maximum(np.abs(cx), np.abs(cy)) for cx, cy in cs]))
     rep["island_mm"] = float(_static_clearance(x, y, hd, None).min())
     if parking is not None:
-        pts = []
+        boxes = []
         for box in _barrier_corners(parking, *(() if park_w is None else (park_w,))):
             xs = [p[0] for p in box]
             ys = [p[1] for p in box]
-            pts += [(a, b) for a in np.linspace(min(xs), max(xs), 4) for b in np.linspace(min(ys), max(ys), 12)]
-        pts = np.array(pts)
-        rep["barrier_mm"] = float(_rect_dist_pose(pts[:, 0], pts[:, 1], x, y, hd).min())
+            boxes.append(np.array([(a, b) for a in np.linspace(min(xs), max(xs), 4) for b in np.linspace(min(ys), max(ys), 12)]))
+        rep["barrier_mm"] = _min_rect_dist(boxes, x, y, hd)
     rep["kappa_max"] = float(np.abs(route.kappa).max())
     rep["r_min_mm"] = float(1.0 / max(rep["kappa_max"], 1e-9))
     rep["length_mm"] = route.length_mm
