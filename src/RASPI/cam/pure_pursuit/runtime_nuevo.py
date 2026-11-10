@@ -1534,12 +1534,21 @@ class PPRuntime:
         if self.bev.is_calibrated:
             try:
                 _t0 = time.perf_counter()
-                bev_frame = self.bev.warp(processed_frame)
-                # Se convierte UNA sola vez y se comparte con
-                # detect_centerline() y line_tracker.update() -- antes
-                # cada una convertía la misma imagen BGR->HSV por su
-                # cuenta, duplicando trabajo cada frame.
-                bev_hsv = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
+                # Sin un solo pixel naranja en la cámara el BEV tampoco tiene: el tracker
+                # recibe "no vista" sin imagen. Siguiendo la ruta nadie más usa el BEV.
+                _hsv_cam = getattr(self.vision, "last_hsv", None)
+                _hay_naranja = (_hsv_cam is None or any(
+                    cv2.countNonZero(cv2.inRange(_hsv_cam, lo, hi)) for lo, hi in C.LINE_ORANGE_HSV))
+                _sin_nar = getattr(self, "_sin_naranja", False)
+                if getattr(self, "_route_steering", False) and (_sin_nar or not _hay_naranja):
+                    bev_frame = bev_hsv = None
+                else:
+                    bev_frame = self.bev.warp(processed_frame)
+                    # Se convierte UNA sola vez y se comparte con
+                    # detect_centerline() y line_tracker.update() -- antes
+                    # cada una convertía la misma imagen BGR->HSV por su
+                    # cuenta, duplicando trabajo cada frame.
+                    bev_hsv = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
                 _t1 = time.perf_counter()
                 bev_timing["warp"] = (_t1 - _t0) * 1000.0
 
@@ -1645,9 +1654,10 @@ class PPRuntime:
                 # provisional soltó la esquiva ya en SIGUIENDO. Las lecturas
                 # REALES de la línea siguen clasificando igual.
                 # Modo ruta con el cajón ubicado y las 4 rectas en el mapa: la naranja ya no la usa nadie.
-                line_info = {"Orange": {"seen": False, "near_y": None, "line": None}} if getattr(
-                    self, "_sin_naranja", False) else {"Orange": self.line_tracker.update(
-                    bev_frame, bev_hsv=bev_hsv, ds_px=_dr_ds_px,
+                line_info = {"Orange": {"seen": False, "near_y": None, "line": None}} if _sin_nar else {
+                    "Orange": self.line_tracker.update(
+                    bev_frame if _hay_naranja else None,
+                    bev_hsv=bev_hsv if _hay_naranja else None, ds_px=_dr_ds_px,
                     in_turn_cooldown=(self._turn_recovery_frames > 0
                                       or self._esp_inicio))}
 

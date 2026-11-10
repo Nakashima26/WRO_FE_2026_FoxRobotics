@@ -609,9 +609,13 @@ class OrangeLineTracker:
             self._prov = None
             return self._out
 
-        if bev_hsv is None:
-            bev_hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
-        raw = detect_lines(bev_bgr, bev_hsv=bev_hsv)["Orange"]
+        if bev_bgr is None:
+            # El runtime ya vio que no hay naranja en la cámara: lo mismo que detect_lines con la máscara vacía.
+            raw = {"seen": False, "near_y": None, "src": None, "band": 0, "core": 0}
+        else:
+            if bev_hsv is None:
+                bev_hsv = cv2.cvtColor(bev_bgr, cv2.COLOR_BGR2HSV)
+            raw = detect_lines(bev_bgr, bev_hsv=bev_hsv)["Orange"]
         self._prov = raw.get("curve") if raw["seen"] else None
         if raw["seen"] and not in_turn_cooldown:
             self._raw_pix = _center_pix(raw.get("_mask"))
@@ -631,7 +635,7 @@ class OrangeLineTracker:
 
         if self._candidate_count >= self.persist_frames:
             self._apply_candidate(dict(self._candidate), bev_hsv,
-                                  bev_bgr.shape[1])
+                                  0 if bev_bgr is None else bev_bgr.shape[1])
         if not self.stable["seen"]:
             self._curve = None
 
