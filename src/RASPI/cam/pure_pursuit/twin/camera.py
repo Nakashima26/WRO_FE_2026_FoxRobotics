@@ -79,7 +79,7 @@ def _floor_kernel():
         try:
             from ..native import get_kernel
             vp, f32 = ctypes.c_void_p, ctypes.c_float
-            fn = get_kernel("fox_twin_floor", [ctypes.c_int64, vp, vp, vp] + [f32] * 6 + [vp], None)
+            fn = get_kernel("fox_twin_floor_bgr", [ctypes.c_int64, vp, vp, vp] + [f32] * 6 + [vp], None)
         except Exception:
             pass
         _FLOOR_KERNEL.append(fn)
@@ -244,13 +244,14 @@ class CameraModel:
         # La suma float es conmutativa (no asociativa): ox + a + b se arma como
         # (a + ox) + b, igual bit a bit, pero sin arreglos temporales.
         idx, ff, rr = self._floor_rays(p.height_mm)
-        best_id = np.zeros(p.height * p.width, dtype=np.uint8)
         kern = _floor_kernel()
         if kern is not None:
-            # Mismo cálculo en C (native/src/twin_floor.c), ~5x más rápido.
+            # Piso directamente en BGR: evita ids, merge y LUT por cuadro.
+            img = np.full((p.height, p.width, 3), 48, dtype=np.uint8)
             kern(len(idx), idx.ctypes.data, ff.ctypes.data, rr.ctypes.data, sh, ch, ox, oy,
-                 OUTER_HALF_MM, INNER_HALF_MM, best_id.ctypes.data)
+                 OUTER_HALF_MM, INNER_HALF_MM, img.ctypes.data)
         else:
+            best_id = np.zeros(p.height * p.width, dtype=np.uint8)
             f_sh, f_ch = np.float32(sh), np.float32(ch)
             gx = ff * f_sh
             gx += np.float32(ox)
@@ -265,8 +266,8 @@ class CameraModel:
             ids = (gx <= OUTER_HALF_MM).view(np.uint8)
             ids += gx < INNER_HALF_MM      # isla dentro del tapete: 1 + 1 = 2
             best_id[idx] = ids
-        best_id = best_id.reshape(p.height, p.width)
-        img = cv2.LUT(cv2.merge((best_id, best_id, best_id)), _PALETTE_LUT)
+            best_id = best_id.reshape(p.height, p.width)
+            img = cv2.LUT(cv2.merge((best_id, best_id, best_id)), _PALETTE_LUT)
 
         oz = p.height_mm
         # Todas las esquinas de la escena (cintas + caras) van a la cámara en
