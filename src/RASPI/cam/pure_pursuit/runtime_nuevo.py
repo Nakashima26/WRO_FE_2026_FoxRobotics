@@ -446,12 +446,25 @@ class PPRuntime:
         if rm is not None and rm.route is not None:
             r = rm.route
             # La ruta no se modifica en el sitio (cada plan trae otra): la lista se arma una vez por ruta.
-            if getattr(self, "_shown_route", None) is not r:
+            shift = float(rm.shift-rm.route_shift)
+            axis = tuple(rm.axis)
+            key = (id(r), shift, axis)
+            if getattr(self, "_shown_route_key", None) != key:
                 self._shown_route = r
-                self._shown_pts = list(zip(r.x[::4].tolist(), r.y[::4].tolist()))
+                self._shown_route_key = key
+                self._shown_pts = list(zip((r.x[::4]+shift*axis[0]).tolist(),
+                                           (r.y[::4]+shift*axis[1]).tolist()))
             return self._shown_pts
         dm = getattr(self, "digital", None)
         return list(dm.line_world) if dm is not None and dm.line_world else None
+
+    def _render_digital_map(self):
+        rm = getattr(self, "_rmode", None)
+        if rm is not None and rm.route is not None:
+            label = "plan DP (subiendo)" if rm.upload else "plan DP"
+            return self.digital.render(route_line=self._shown_line(),
+                                       route_closed=rm.route.closed, route_label=label)
+        return self.digital.render()
 
     def _route_step(self, armed: bool, frame=None, orange=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
@@ -2323,7 +2336,7 @@ class PPRuntime:
         shift = (0, 0)
         # La imagen del mapa digital solo la lee el visor (mismo caso que
         # warp_wide abajo); sin él son ~2 ms por frame tirados.
-        self._dig_img = self.digital.render() if (need_bev_frame and need_dig_map) else None
+        self._dig_img = self._render_digital_map() if (need_bev_frame and need_dig_map) else None
         # warp_wide es un cv2.warpPerspective a un lienzo ~2300x1320 SOLO
         # para el HUD de depuración (bev_frame no realimenta el PP: ya se
         # usó bev_frame/bev_hsv de arriba para todo el pipeline). Los
