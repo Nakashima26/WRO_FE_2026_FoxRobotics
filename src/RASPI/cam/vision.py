@@ -1,4 +1,5 @@
 import os
+import ctypes
 
 import cv2
 import numpy as np
@@ -157,6 +158,18 @@ COLOR_RANGES = {
 }
 
 
+_HSV_MASK_KERNEL = []
+
+
+def _hsv_mask_kernel():
+    if not _HSV_MASK_KERNEL:
+        from pure_pursuit.native import get_kernel
+        vp = ctypes.c_void_p
+        _HSV_MASK_KERNEL.append(get_kernel(
+            "fox_hsv_masks", [ctypes.c_int64, ctypes.c_int32] + [vp] * 4, None))
+    return _HSV_MASK_KERNEL[0]
+
+
 class Vision:
     def __init__(self, cam_index=0, *, open_cam=True):
         """Inicializa la cámara y define los rangos de colores."""
@@ -196,6 +209,8 @@ class Vision:
                 bits[color] |= 1 << i
                 i += 1
         self._lut, self._lut_bits = lut, bits
+        self._lut_colors = tuple(c for c, b in bits.items() if b)
+        self._lut_color_bits = np.array([bits[c] for c in self._lut_colors], dtype=np.uint8)
 
     def hsv_masks(self, hsv):
         """{color: máscara 0/255} de self.color_ranges, idéntica a OR de cv2.inRange."""
@@ -211,6 +226,15 @@ class Vision:
                     r = cv2.inRange(hsv, lower, upper)
                     m = r if m is None else cv2.bitwise_or(m, r, dst=m)
                 masks[color] = m
+            return masks
+        kern = _hsv_mask_kernel() if hsv.dtype == np.uint8 and hsv.ndim == 3 and hsv.shape[2] == 3 else None
+        if kern is not None:
+            hsv = np.ascontiguousarray(hsv)
+            out = np.empty((len(self._lut_colors), *hsv.shape[:2]), dtype=np.uint8)
+            kern(hsv.shape[0] * hsv.shape[1], len(self._lut_colors), hsv.ctypes.data,
+                 self._lut.ctypes.data, self._lut_color_bits.ctypes.data, out.ctypes.data)
+            masks = dict.fromkeys(self._lut_bits)
+            masks.update(zip(self._lut_colors, out))
             return masks
         h, s, v = cv2.split(cv2.LUT(hsv, self._lut))
         cv2.bitwise_and(h, s, dst=h)
