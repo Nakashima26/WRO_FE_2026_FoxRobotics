@@ -608,6 +608,31 @@ const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
 const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
 
+// ── Lazo de velocidad con encoder (2026-11-11) ───────────────────────────────
+// Con PWM directo la velocidad depende de la pila: orillas36 a 11.1 V dio
+// 255 -> ~710 mm/s y 130 -> 264, contra ~800 / ~325 con carga fresca. Con el lazo,
+// el PWM que piden los estados se lee como VELOCIDAD: v* = K·(pwm − PWM0) (el
+// modelo a ~12 V, el mismo del gemelo), y setMotorTope() pone feedforward + PI
+// sobre la velocidad del encoder. La salida puede pasar del tope (hasta 255):
+// el tope limita la velocidad pedida, no el voltaje que hace falta para lograrla.
+// _V_MAX recorta v* para que con la pila baja también se alcance (0 = sin tope):
+// con 700 la carga fresca ya no sale a 800 en las rectas largas.
+// Solo corre si el carro va en el sentido pedido (o casi parado): al frenar con
+// reversa mientras avanza se deja el PWM tal cual, el lazo no se mete.
+// 0 = PWM directo, como antes.
+#define MOTOR_LAZO_VEL 1
+const float LAZO_K_FWD       = 3.82f;   // mm/s por PWM adelante (gemelo MotorParams)
+const float LAZO_PWM0_FWD    = 45.5f;
+const float LAZO_K_REV       = 3.61f;   // reversa
+const float LAZO_PWM0_REV    = 61.0f;
+const float LAZO_V_MAX       = 700.0f;  // mm/s; 0 = sin tope
+const float LAZO_KP          = 0.10f;   // PWM por mm/s
+const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
+const float LAZO_I_MAX       = 80.0f;   // PWM
+const float LAZO_V_TAU_S     = 0.05f;   // filtro de la velocidad del encoder
+float encVelMmS = 0.0f;                 // velocidad medida (mm/s, con signo)
+float lazoI = 0.0f;
+
 // ── Anti-MANIOBRA-fantasma (run 2026-09-07) ──────────────────────────────────
 // En 716 la maniobra salía con el carro rotando 40-60° sin control; la
 // recuperación no alcanzaba a frenarlo y ~5 s después CRUCERO leía la pose
@@ -2034,6 +2059,37 @@ const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
 int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
 unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
 
+// PWM pedido (ya recortado y con rampa) -> PWM de salida para lograr la velocidad
+// que ese PWM daría a ~12 V. Ver MOTOR_LAZO_VEL.
+int lazoVelocidad(int pwm) {
+  static unsigned long tPrev = 0;
+  static int dirPrev = 0;
+  unsigned long now = millis();
+  float dt = (tPrev == 0) ? 0.0f : (now - tPrev) / 1000.0f;
+  tPrev = now;
+  int dir = motorDirActual;
+  if (pwm <= 0 || dir == 0 || dir != dirPrev || dt > 0.2f) {
+    lazoI = 0.0f; dirPrev = dir;
+    return pwm;
+  }
+  float v = (float)dir * encVelMmS;                 // velocidad en el sentido pedido
+  if (v < -60.0f) { lazoI = 0.0f; return pwm; }     // frenando con contramarcha: no tocar
+  float k  = dir > 0 ? LAZO_K_FWD : LAZO_K_REV;
+  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  float vObj = k * ((float)pwm - p0);
+  if (vObj <= 0.0f) { lazoI = 0.0f; return pwm; }   // por debajo del arranque: PWM tal cual
+  float ff = (float)pwm;
+  if (LAZO_V_MAX > 0.0f && vObj > LAZO_V_MAX) { vObj = LAZO_V_MAX; ff = LAZO_V_MAX / k + p0; }
+  float e = vObj - v;
+  float u = ff + LAZO_KP * e + lazoI;
+  // anti-windup: integra solo si la salida no está saturada hacia el lado del error
+  if (dt > 0.003f && !((u >= 255.0f && e > 0) || (u <= 0.0f && e < 0))) {
+    lazoI = constrain(lazoI + LAZO_KI * e * dt, -LAZO_I_MAX, LAZO_I_MAX);
+  }
+  u = ff + LAZO_KP * e + lazoI;
+  return constrain((int)lroundf(u), 0, 255);
+}
+
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
 void setMotorTope(int velocidad, int tope) {
@@ -2045,6 +2101,9 @@ void setMotorTope(int velocidad, int tope) {
                            MOTOR_REV_RAMPA_MIN, velocidad);
     }
   }
+#if MOTOR_LAZO_VEL && FOX_ENCODER
+  velocidad = lazoVelocidad(velocidad);
+#endif
 #ifdef FOX_BANCO_SIN_MOTOR
   velocidad = 0;   // banco: probar el UART sin mover el motor
 #endif
@@ -2212,6 +2271,20 @@ void actualizarOdometria() {
   // Cuentas con signo (cuadratura x4): ds < 0 en reversa. 1/5.45 = 0.183 mm/cuenta.
   ds = (float)(cnt - encCountPrev) / ENC_CUENTAS_POR_MM;
   encCountPrev = cnt;
+  {
+    // Velocidad del encoder para el lazo: distancia acumulada / tiempo, con EMA.
+    static unsigned long tv = 0;
+    static float accV = 0.0f;
+    unsigned long nowV = millis();
+    accV += ds;
+    if (tv == 0) { tv = nowV; accV = 0.0f; }
+    else if (nowV - tv >= 5) {
+      float dtv = (nowV - tv) / 1000.0f;
+      float a = dtv / (LAZO_V_TAU_S + dtv);
+      encVelMmS += (accV / dtv - encVelMmS) * a;
+      tv = nowV; accV = 0.0f;
+    }
+  }
 #else
   static unsigned long odomLastMs = 0;
   unsigned long now = millis();
