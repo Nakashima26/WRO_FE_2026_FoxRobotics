@@ -1599,7 +1599,10 @@ UART_CHECKSUM  = True
 # Reenvío de la ruta: si N frames después del RTE el ACK no trae rn = puntos subidos, se
 # vuelve a mandar completa (una línea perdida dejaba al ESP con la ruta vieja).
 ROUTE_UPLOAD_RETRY_FRAMES = 10
-PROCESS_EVERY  = 3       # procesar 1 de cada N frames capturados
+# Procesar 1 de cada N lecturas del grabber. Era 3: con el grabber devolviendo el último frame sin
+# esperar, 2 de 3 eran repetidos y daba igual. Desde que read() espera un frame nuevo (2026-11-11)
+# con 3 el loop bajaba a 40/3 = 13 Hz -> 1 = cada frame nuevo de la cámara (40 fps).
+PROCESS_EVERY  = 1
 WARMUP_FRAMES  = 40      # frames descartados para estabilizar exposición
 
 # ── Chequeo de cámara antes de dar LISTO (2026-09-14) ──────────────────────────
