@@ -1331,7 +1331,10 @@ ROUTE_PRUEBA_CAJON_FILE = "/home/user/prueba_cajon"
 # Ubicación del cajón con ToF (carro v2, sin ultrasónicos): lecturas por sensor más
 # allá de esto no votan (el frontal lee ~20 cm largo pasando 50 cm y le pega a los
 # bloques). None = modelo viejo de ultrasónico (119 cm, sin eco = evidencia).
-ROUTE_FIX_TOF_MAX_MM = {"dF": 600.0, "dL": 500.0, "dR": 500.0}
+# El frontal no vota (0): en Long lee +3 cm a 30 cm y +19 a 60 con ±7-20 de ruido, y el
+# firmware tira el 57-68 % (status 2/7). Con el frontal real en el gemelo, s23 ubicaba el
+# cajón a −555 (verdad −43) y chocaba a los 3 s; sin él la naranja lo pone a −64.
+ROUTE_FIX_TOF_MAX_MM = {"dF": 0.0, "dL": 500.0, "dR": 500.0}
 # Voto de la naranja por pixeles de cinta (corner_lines._center_pix): mínimo de pixeles.
 ROUTE_FIX_LINE_MIN_PIX = 25
 # True = solo pixeles de cinta del frame (sin respaldo de la recta ajustada sostenida).

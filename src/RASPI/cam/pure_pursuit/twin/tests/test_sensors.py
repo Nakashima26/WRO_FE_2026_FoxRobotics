@@ -185,14 +185,32 @@ def test_tof_lateral_range_limit_1300(rng):
 
 
 def test_tof_front_range_4000(rng):
-    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    # Sin el tope de lectura (física del VL53L1X en Long): la pared a 2.5 m se ve, con el
+    # +19 cm medido del frontal (calib 2026-10-19).
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM,
+                     status_ok_prob_by_id=(1.0,) * 4, max_read_mm_by_id=(4000.0,) * 4)
     tof = ToF(params, rng)
     forward = params.mounts[3].forward_mm
     dist = 2500.0
     world = _WallWorld(dist + forward)
     r = tof.read_mm(3, world, Pose(0.0, 0.0, 0.0), 0.0)
     assert r > 0
-    assert abs(r - dist) < 100.0
+    assert abs(r - (dist + 190.0)) < 250.0
+
+
+def test_tof_front_like_car(rng):
+    """Frontal como en el carro (corridas 2026-11-09): el firmware solo acepta status 0,
+    ~40 % de las lecturas, nunca arriba de ~1.32 m, y de 60 cm en adelante lee ~+20 cm."""
+    params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
+    forward = params.mounts[3].forward_mm
+    far = [ToF(params, np.random.default_rng(i)).read_mm(3, _WallWorld(1500.0 + forward), Pose(0.0, 0.0, 0.0), 0.0)
+           for i in range(200)]
+    assert all(r == -1 for r in far)
+    mid = [ToF(params, np.random.default_rng(i)).read_mm(3, _WallWorld(700.0 + forward), Pose(0.0, 0.0, 0.0), 0.0)
+           for i in range(400)]
+    ok = [r for r in mid if r > 0]
+    assert 0.3 < len(ok) / len(mid) < 0.5
+    assert abs(float(np.median(ok)) - 893.0) < 40.0
 
 
 def test_tof_sample_period_per_sensor(rng):
@@ -202,7 +220,8 @@ def test_tof_sample_period_per_sensor(rng):
     assert params.sample_period_s_by_id[3] == pytest.approx(1.0 / 30.0)
     # Comportamiento: el lateral (0.020 s) re-muestrea a los 21 ms y no a los 15 ms;
     # el frontal (1/30 s) no re-muestrea a los 20 ms.
-    lat = replace(params, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM, short_map_ids=())
+    lat = replace(params, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM, short_map_ids=(),
+                  status_ok_prob_by_id=(1.0,) * 4)
     tof = ToF(lat, np.random.default_rng(42))
     world = _EastWallWorld(OUTER_HALF_MM)
     near = Pose(OUTER_HALF_MM - 200.0 - lat.mounts[1].right_mm, 0.0, 0.0)

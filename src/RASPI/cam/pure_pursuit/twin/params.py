@@ -261,6 +261,18 @@ class ToFParams:
     short_map_true_mm: tuple[float, ...] = (100.0, 200.0, 300.0, 450.0, 600.0, 800.0)
     short_map_read_mm: tuple[float, ...] = (119.0, 217.0, 319.0, 462.0, 550.0, 610.0)
     short_map_ids: tuple[int, ...] = (0, 1, 2)
+    # Frontal Long (calib 2026-10-19 frontal_estatica, pared negra): +32 a 30 cm y ~+20 cm de 60 a 150,
+    # con ±7..20 cm de ruido, y casi todo con status 2/7. El firmware (leerToF) solo acepta status 0:
+    # en las corridas del 2026-11-09 (14:27, 14:35) el frontal salió -1 el 57-68 % de las lecturas y
+    # nunca leyó más de 1312 mm. Antes el gemelo daba el frontal exacto y válido el 94 % hasta 1.5 m.
+    long_map_true_mm: tuple[float, ...] = (300.0, 600.0, 1000.0, 1500.0)
+    long_map_read_mm: tuple[float, ...] = (332.0, 787.0, 1217.0, 1690.0)
+    long_map_ids: tuple[int, ...] = (3,)
+    long_noise_sigma_mm: float = 60.0
+    # Probabilidad de status 0 por lectura y lectura máxima que llega como status 0, por id (0=L 1=R 2=atrás 3=frente).
+    # Trasero (2) desconectado en el carro v2 (2026-11-11, el usuario): siempre -1.
+    status_ok_prob_by_id: tuple[float, ...] = (1.0, 1.0, 0.0, 0.4)
+    max_read_mm_by_id: tuple[float, ...] = (4000.0, 4000.0, 4000.0, 1320.0)
     max_range_mm: float = 4000.0
     noise_sigma_mm: float = 5.0
     noise_rel: float = 0.01
@@ -282,6 +294,7 @@ class ToFParams:
         _prov("tof.reflectivity", "supuesto", "VL53 en pared negra vs magenta vs señal")
         _prov("tof.black_wall_max_mm", "medido", "calib 2026-10-21 tof: negro visible a 800 (Short) y 1500 mm (Long)")
         _prov("tof.short_map", "medido", "calib 2026-10-21 lateral izq Short ROI 16 50 ms, todo status 0; der/atrás sin medir (misma curva)")
+        _prov("tof.long_map", "medido", "calib 2026-10-19 frontal Long ROI 8; status/tope por id: corridas 2026-11-09 (tF -1 57-68 %, máx 1312)")
         _prov("tof.mounts", "supuesto", "L/R/atrás/frente; frente nuevo, espejo del trasero; pendiente medir")
         _prov("tof.rate_range", "supuesto", "firmware v2: L/R/atrás Short 20 ms (50 Hz, ~1.3 m), frente Long 33 ms (30 Hz, 4 m); ST: modo Short máx 50 Hz y ~1.3 m; sin medir en el carro")
 
