@@ -268,10 +268,16 @@ class ToFParams:
     long_map_true_mm: tuple[float, ...] = (300.0, 600.0, 1000.0, 1500.0)
     long_map_read_mm: tuple[float, ...] = (332.0, 787.0, 1217.0, 1690.0)
     long_map_ids: tuple[int, ...] = (3,)
-    long_noise_sigma_mm: float = 60.0
+    # Ruido del frontal válido: carrera orillas35 (2026-11-11) salto >50 mm entre lecturas válidas 1.7 % (el gemelo
+    # con 60 daba 24-27 %); parado a 228 mm sd 4 mm.
+    long_noise_sigma_mm: float = 15.0
     # Probabilidad de status 0 por lectura y lectura máxima que llega como status 0, por id (0=L 1=R 2=atrás 3=frente).
     # Trasero (2) desconectado en el carro v2 (2026-11-11, el usuario): siempre -1.
-    status_ok_prob_by_id: tuple[float, ...] = (1.0, 1.0, 0.0, 0.4)
+    # orillas35 en carrera: tL -1 6 %, tR -1 2 %, tF -1 89 % (el gemelo daba 0-3 / 0 / 72-78 %).
+    status_ok_prob_by_id: tuple[float, ...] = (0.94, 0.98, 0.0, 0.11)
+    # Debajo de esta distancia real el sensor da status 0 siempre y el ruido de noise_sigma_mm (frontal parado
+    # a 228 mm en orillas35: 0 % de -1, sd 4). 0 = sin zona cercana.
+    near_ok_mm_by_id: tuple[float, ...] = (0.0, 0.0, 0.0, 300.0)
     max_read_mm_by_id: tuple[float, ...] = (4000.0, 4000.0, 4000.0, 1320.0)
     max_range_mm: float = 4000.0
     noise_sigma_mm: float = 5.0

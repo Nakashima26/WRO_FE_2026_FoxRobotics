@@ -182,15 +182,16 @@ class ToF:
             xs, ys = p.short_map_true_mm, p.short_map_read_mm
             mean_d = mean_d + ys[0] - xs[0] if mean_d < xs[0] else float(np.interp(mean_d, xs, ys))
         sigma = p.noise_sigma_mm
+        near = mean_d < self._sensor_value(p.near_ok_mm_by_id, 0.0, sensor_id)
         if sensor_id in p.long_map_ids:
             xs, ys = p.long_map_true_mm, p.long_map_read_mm
             mean_d = mean_d + ys[0] - xs[0] if mean_d < xs[0] else (
                 mean_d + ys[-1] - xs[-1] if mean_d > xs[-1] else float(np.interp(mean_d, xs, ys)))
-            sigma = p.long_noise_sigma_mm
+            sigma = p.noise_sigma_mm if near else p.long_noise_sigma_mm
         noise = self.rng.normal(0.0, sigma)
         out = mean_d * (1.0 + self.rng.normal(0.0, p.noise_rel)) + noise
         # El firmware tira todo lo que no sea status 0 (-1).
-        ok = self._sensor_value(p.status_ok_prob_by_id, 1.0, sensor_id)
+        ok = 1.0 if near else self._sensor_value(p.status_ok_prob_by_id, 1.0, sensor_id)
         if (ok < 1.0 and self.rng.random() >= ok) or out > self._sensor_value(p.max_read_mm_by_id, 1e9, sensor_id):
             self._held_mm[sensor_id] = -1
             return -1
