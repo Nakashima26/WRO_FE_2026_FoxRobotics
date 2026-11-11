@@ -45,6 +45,60 @@ def _wrap_undistort(cap):
         return cap
 
 
+class _Picam2Cap:
+    """Picamera2 con la interfaz de cv2.VideoCapture que usa el runtime (read/isOpened/release/set/get).
+
+    En la Pi 5 el pipeline de GStreamer pedía 1640x1232 BGRx al ISP y lo bajaba a 640x480 con
+    videoscale/videoconvert en el CPU: 245 % de CPU y solo 28 fps entregados (medido 2026-11-11,
+    con el runtime a 336 % y la Pi a 81 °C con el límite térmico activo). Aquí el escalado lo hace
+    el ISP: mismo modo del sensor (1640x1232, mismo campo de visión: afín 1.001 y <0.3 px), mismo
+    tuning y ganancias, 39.9 fps con 5 % de CPU."""
+
+    def __init__(self, tuning, gains, fps):
+        from picamera2 import Picamera2
+        self._cam = Picamera2(tuning=Picamera2.load_tuning_file(tuning))
+        cfg = self._cam.create_video_configuration(
+            main={"size": (640, 480), "format": "RGB888"},   # RGB888 = arreglo BGR de OpenCV
+            raw={"size": (1640, 1232)}, buffer_count=4,
+            controls={"FrameRate": fps, "AwbEnable": False, "ColourGains": gains})
+        self._cam.configure(cfg)
+        self._cam.start()
+        self._open = True
+        print(f"[CAM] Picamera2 640x480 escalado en el ISP (sensor {self._cam.camera_configuration()['raw']['size']}, "
+              f"{fps} fps, ganancias {gains})", flush=True)
+
+    def read(self):
+        if not self._open:
+            return False, None
+        try:
+            return True, self._cam.capture_array("main")
+        except Exception as e:
+            print(f"[CAM] Picamera2 read: {e}", flush=True)
+            return False, None
+
+    def isOpened(self):
+        return self._open
+
+    def release(self):
+        if self._open:
+            self._open = False
+            try:
+                self._cam.stop()
+                self._cam.close()
+            except Exception:
+                pass
+
+    def set(self, prop, value):
+        return False
+
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return 640.0
+        if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return 480.0
+        return 0.0
+
+
 def open_camera(cam_index=0, undistort=True):
     if os.name == "nt":
         cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
@@ -67,6 +121,13 @@ def open_camera(cam_index=0, undistort=True):
         # 21). format=BGRx: en la Pi 5 libcamerasrc sin formato explícito falla con
         # "not-negotiated"; BGRx sale directo del ISP (NV12 cae al CPU y baja fps).
         fps = int(os.environ.get("FOX_CAM_FPS", "40"))
+        # Pi 5: Picamera2 con el escalado en el ISP (ver _Picam2Cap). FOX_CAM_PIPE=gst|old = GStreamer.
+        if gains == "<1.10,1.37>" and os.environ.get("FOX_CAM_PIPE") not in ("gst", "old"):
+            try:
+                cap = _Picam2Cap(tuning_pi5, (1.10, 1.37), fps)
+                return _wrap_undistort(cap) if undistort else cap
+            except Exception as e:
+                print(f"[CAM] AVISO: Picamera2 no abrió ({e}); sigo con GStreamer", flush=True)
         # Escalar antes de convertir: el BGRx de 2 MP baja a 640x480 y recién ahí pasa a BGR (FOX_CAM_PIPE=old: orden viejo).
         conv = ("! videoconvert ! videoscale ! video/x-raw, width=640, height=480, format=BGR "
                 if os.environ.get("FOX_CAM_PIPE") == "old" else
