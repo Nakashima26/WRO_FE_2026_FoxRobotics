@@ -252,6 +252,9 @@ def _sign_from_hit(field, hit: str):
 
 
 def _pose_at(history: "deque[tuple[float, float, float, float]]", t: float) -> tuple[float, float, float]:
+    native_pose = getattr(history, "pose_at", None)
+    if native_pose is not None:
+        return native_pose(t)
     if not history:
         return 0.0, 0.0, 0.0
     if t <= history[0][0]:
@@ -703,18 +706,22 @@ class Sim:
             ),
         )
 
+        def refresh_history():
+            if vs is not None:
+                history.refresh()
+
         if vs is not None:
             def sync_native():
                 nonlocal last_ds, last_yaw_rate
                 last_ds, last_yaw_rate = native_encoder[2], native_encoder[3]
                 enc._frac, enc.count = native_encoder[0], int(native_encoder[1])
-                history.extend(fw.drain_history())
 
             def native_collision(_us):
                 check_collision(_t_s())
 
             native_encoder = fw.enable_native_vehicle(
                 veh, enc, w_max, native_collision, sync_native)
+            history = fw.history_view()
             # Sensor callbacks read the shared vehicle directly. Only the gyro
             # rate and encoder accumulator need their native scalar slots.
             fw.set_callbacks(
@@ -869,6 +876,7 @@ class Sim:
                         t_end = t_k + self.pi_period_s
                         link.set_now_us(int(t_end * 1e6))
                         t_cam = max(0.0, t_k - self.cam_latency_s)
+                        refresh_history()
                         px, py, ph = _pose_at(history, t_cam)
                         t_render0 = time.perf_counter()
                         frame = cam.render_camera(field, px, py, ph)
@@ -948,6 +956,7 @@ class Sim:
                 setattr(C, k, v)
             if log_file:
                 log_file.close()
+            refresh_history()
             fw.close()
 
         metrics = compute_metrics(

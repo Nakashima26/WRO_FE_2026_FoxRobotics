@@ -62,3 +62,40 @@ extern "C" void sil_native_advance(uint64_t us, uint64_t now_us, const double *a
     }
   }
 }
+
+// Borrowed view: Python reads only while setup/loop is suspended.
+extern "C" const double *sil_history_view(size_t *meta) {
+  meta[0] = g_history_count;
+  meta[1] = (g_history_next + kHistoryCapacity - g_history_count) % kHistoryCapacity;
+  meta[2] = kHistoryCapacity;
+  return reinterpret_cast<const double *>(g_history.data());
+}
+
+
+// Same reverse search and uncontracted interpolation as sim._pose_at.
+extern "C" void sil_pose_at(double t, double *out) {
+  if (!g_history_count) {
+    out[0] = out[1] = out[2] = 0.0;
+    return;
+  }
+  size_t start = (g_history_next + kHistoryCapacity - g_history_count) % kHistoryCapacity;
+  const auto &first = g_history[start];
+  const auto &last = g_history[(g_history_next + kHistoryCapacity - 1) % kHistoryCapacity];
+  const PoseSample *p = &last;
+  if (t <= first.t) p = &first;
+  else if (t < last.t) {
+    PoseSample b = last;
+    for (size_t i = g_history_count - 1; i > 0; --i) {
+      const auto &a = g_history[(start + i - 1) % kHistoryCapacity];
+      if (a.t <= t && t <= b.t) {
+        double u = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0.0;
+        out[0] = a.x + u * (b.x - a.x);
+        out[1] = a.y + u * (b.y - a.y);
+        out[2] = a.h + u * (b.h - a.h);
+        return;
+      }
+      b = a;
+    }
+  }
+  out[0] = p->x; out[1] = p->y; out[2] = p->h;
+}
