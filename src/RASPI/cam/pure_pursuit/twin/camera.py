@@ -276,37 +276,36 @@ class CameraModel:
         # cara por cara (mismo resultado de _to_cam y de la profundidad media).
         pts, n_rib, colors = self._scene(track)
         cam_all = self._to_cam(pts, ox, oy, oz, sh, ch).reshape(-1, 4, 3)
-        for i in range(n_rib):
-            self._fill_face(img, cam_all[i], colors[i])
-
-        faces = cam_all[n_rib:]
-        z = faces[:, :, 2]
-        # Una cara toda detrás del plano cercano no pinta nada: se salta (antes
-        # solo las paredes; las demás llegaban a _fill_face y no pintaban).
+        z = cam_all[:, :, 2]
+        # Un quad todo detrás del plano cercano no pinta nada: se salta.
         front = z >= 8.0
-        drawn = front.any(axis=1)
-        depth = z.mean(axis=1)
-        # sorted(..., reverse=True) es estable: empates en el orden original.
-        order = np.argsort(-depth, kind="stable")
-        # Caras enteras por delante: _clip_near las devuelve rotadas un vértice
-        # (empieza en el 1); se proyectan todas juntas.
-        whole = front.all(axis=1)
-        uv = np.zeros((len(faces), 4, 2), dtype=np.int32)
-        ok = np.zeros(len(faces), dtype=bool)
-        if whole.any():
-            sel = np.roll(faces[whole], -1, axis=1)
+        drawn = front.any(axis=1).tolist()
+        # Quads enteros por delante (cintas y caras): _clip_near los devuelve
+        # rotados un vértice (empieza en el 1); se proyectan todos juntos.
+        # _project es por elemento: mismo resultado que quad por quad.
+        whole_a = front.all(axis=1)
+        whole = whole_a.tolist()
+        uv = np.zeros((len(cam_all), 4, 2), dtype=np.int32)
+        ok = [False] * len(cam_all)
+        if any(whole):
+            sel = np.roll(cam_all[whole_a], -1, axis=1)
             puv = self._project(sel.reshape(-1, 3)).reshape(-1, 4, 2)
-            ok[whole] = ~np.any(np.abs(puv) > 20000, axis=(1, 2))
-            uv[whole] = np.round(puv).astype(np.int32)
-        f_colors = colors[n_rib:]
-        for i in order:
+            ok_w = ~np.any(np.abs(puv) > 20000, axis=(1, 2))
+            uv[whole_a] = np.round(puv).astype(np.int32)
+            for i, v in zip(np.flatnonzero(whole_a).tolist(), ok_w.tolist()):
+                ok[i] = v
+        # Cintas en orden; caras de atrás hacia adelante. sorted(..., reverse=True)
+        # es estable: empates en el orden original.
+        depth = z[n_rib:].mean(axis=1)
+        order = (np.argsort(-depth, kind="stable") + n_rib).tolist()
+        for i in [*range(n_rib), *order]:
             if not drawn[i]:
                 continue
             if whole[i]:
                 if ok[i]:
-                    cv2.fillConvexPoly(img, uv[i], f_colors[i])
+                    cv2.fillConvexPoly(img, uv[i], colors[i])
             else:
-                self._fill_face(img, faces[i], f_colors[i])
+                self._fill_face(img, cam_all[i], colors[i])
         return img
 
     def _scene(self, track):
