@@ -641,45 +641,49 @@ class Sim:
                 hist_append((t, x, y, h))
                 if t - last_coll_check >= _COLLISION_INTERVAL_S:
                     last_coll_check = t
-                    hit = collision(
-                        world,
-                        veh.x,
-                        veh.y,
-                        veh.heading_deg,
-                        self.params.vehicle.length_mm,
-                        self.params.vehicle.width_mm,
-                        self.params.vehicle.rear_overhang_mm,
-                        ignore=self.ignore_collisions,
-                    )
-                    if self.ignore_collisions and collision_cause is None:
-                        for cause in self.ignore_collisions:
-                            if cause not in ignored_contacts and collision(
-                                    world, veh.x, veh.y, veh.heading_deg,
-                                    self.params.vehicle.length_mm, self.params.vehicle.width_mm,
-                                    self.params.vehicle.rear_overhang_mm,
-                                    ignore=tuple(c for c in self.ignore_collisions if c != cause),
-                            ) == cause:
-                                ignored_contacts[cause] = {"t": round(t, 3), "cause": cause}
-                        if "pared exterior" in ignored_contacts:
-                            pen = max(max(abs(cx), abs(cy)) - OUTER_HALF_MM for cx, cy in body_corners(
-                                veh.x, veh.y, veh.heading_deg, self.params.vehicle.length_mm,
-                                self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm))
-                            c = ignored_contacts["pared exterior"]
-                            c["max_mm"] = round(max(c.get("max_mm", 0.0), pen), 1)
-                    if hit and collision_cause is None:
-                        touched = _sign_from_hit(field, hit) if self.knock_signs else None
-                        if touched is not None:
-                            field.signs.remove(touched)
-                            world = World(field)
-                            sign_contacts.append({
-                                "t": round(t, 3), "sign": hit,
-                                "x": round(veh.x), "y": round(veh.y),
-                                "heading": round(veh.heading_deg, 1),
-                            })
-                        else:
-                            collision_cause = hit
-                            collision_t = t
-                            stop_reason = "collision"
+                    check_collision(t)
+
+        def check_collision(t):
+            nonlocal collision_cause, collision_t, stop_reason, world
+            hit = collision(
+                world,
+                veh.x,
+                veh.y,
+                veh.heading_deg,
+                self.params.vehicle.length_mm,
+                self.params.vehicle.width_mm,
+                self.params.vehicle.rear_overhang_mm,
+                ignore=self.ignore_collisions,
+            )
+            if self.ignore_collisions and collision_cause is None:
+                for cause in self.ignore_collisions:
+                    if cause not in ignored_contacts and collision(
+                            world, veh.x, veh.y, veh.heading_deg,
+                            self.params.vehicle.length_mm, self.params.vehicle.width_mm,
+                            self.params.vehicle.rear_overhang_mm,
+                            ignore=tuple(c for c in self.ignore_collisions if c != cause),
+                    ) == cause:
+                        ignored_contacts[cause] = {"t": round(t, 3), "cause": cause}
+                if "pared exterior" in ignored_contacts:
+                    pen = max(max(abs(cx), abs(cy)) - OUTER_HALF_MM for cx, cy in body_corners(
+                        veh.x, veh.y, veh.heading_deg, self.params.vehicle.length_mm,
+                        self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm))
+                    c = ignored_contacts["pared exterior"]
+                    c["max_mm"] = round(max(c.get("max_mm", 0.0), pen), 1)
+            if hit and collision_cause is None:
+                touched = _sign_from_hit(field, hit) if self.knock_signs else None
+                if touched is not None:
+                    field.signs.remove(touched)
+                    world = World(field)
+                    sign_contacts.append({
+                        "t": round(t, 3), "sign": hit,
+                        "x": round(veh.x), "y": round(veh.y),
+                        "heading": round(veh.heading_deg, 1),
+                    })
+                else:
+                    collision_cause = hit
+                    collision_t = t
+                    stop_reason = "collision"
 
         def tof_pose() -> Pose:
             # Most firmware reads reuse the ToF sample. Avoid constructing a
@@ -698,6 +702,29 @@ class Sim:
                 idx, world, tof_pose, _t_s()
             ),
         )
+
+        if vs is not None:
+            def sync_native():
+                nonlocal last_ds, last_yaw_rate
+                last_ds, last_yaw_rate = native_encoder[2], native_encoder[3]
+                enc._frac, enc.count = native_encoder[0], int(native_encoder[1])
+                history.extend(fw.drain_history())
+
+            def native_collision(_us):
+                check_collision(_t_s())
+
+            native_encoder = fw.enable_native_vehicle(
+                veh, enc, w_max, native_collision, sync_native)
+            # Sensor callbacks read the shared vehicle directly. Only the gyro
+            # rate and encoder accumulator need their native scalar slots.
+            fw.set_callbacks(
+                advance=advance,
+                sonar=lambda sid: sonar.echo_us(sid, world, tof_pose()),
+                gyro=(lambda: bno.read(veh.heading_deg, _t_s())) if bno is not None
+                else (lambda: gyro.read(native_encoder[3], _t_s())),
+                encoder=lambda: int(native_encoder[1]),
+                tof=lambda idx: tof.read_mm(idx, world, tof_pose, _t_s()),
+            )
 
         stdout_cm = contextlib.nullcontext()
         log_file = None
