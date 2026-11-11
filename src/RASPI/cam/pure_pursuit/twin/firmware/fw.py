@@ -17,6 +17,48 @@ _A1 = 18
 _A2 = 19
 
 
+class _NativeHistory:
+    """Read-only ring view, refreshed only outside firmware execution.
+
+    Keep the library owner alive. No history drain may run while this view is
+    used: the simulator selects either this view or the copying API.
+    """
+    def __init__(self, firmware):
+        self._owner = firmware
+        self._meta = (ctypes.c_size_t * 3)()
+        fn = firmware._lib.sil_history_view
+        fn.argtypes = [ctypes.c_void_p]
+        fn.restype = ctypes.POINTER(ctypes.c_double * 4)
+        self._fn = fn
+        self._pose = (ctypes.c_double * 3)()
+        self._pose_fn = firmware._lib.sil_pose_at
+        self._pose_fn.argtypes = [ctypes.c_double, ctypes.c_void_p]
+        self._pose_fn.restype = None
+        self.refresh()
+
+    def pose_at(self, t):
+        self._pose_fn(t, self._pose)
+        return tuple(self._pose)
+
+    def refresh(self):
+        self._rows = self._fn(self._meta)
+        self._count, self._start, self._capacity = self._meta
+
+    def __len__(self):
+        return self._count
+
+    def __getitem__(self, index):
+        if index < 0:
+            index += self._count
+        if not 0 <= index < self._count:
+            raise IndexError(index)
+        return tuple(self._rows[(self._start + index) % self._capacity])
+
+    def __reversed__(self):
+        for index in range(self._count - 1, -1, -1):
+            yield self[index]
+
+
 class FirmwareSetupError(RuntimeError):
     pass
 
@@ -134,6 +176,9 @@ class FirmwareSIL:
         lib.sil_set_native_vehicle(vehicle._fn, vehicle._state, vehicle._p, e, cb)
         self._native_sync = sync
         return e
+
+    def history_view(self):
+        return _NativeHistory(self)
 
     def drain_history(self):
         n = self._lib.sil_drain_history(None)
