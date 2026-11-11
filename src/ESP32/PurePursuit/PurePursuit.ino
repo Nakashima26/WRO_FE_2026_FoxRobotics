@@ -233,6 +233,12 @@ const int ACK_SALTA_VIEJOS = 0;
 // Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (antes). 2026-10-16: 100 (prepark motor físico 0/100 -> 100/100 junto con LOG_MIN_MS y PARK_ANG_IN_DEG 70 / PARK_POSTE2_MM 60; ver docs/HANDOFF_PARKING.md).
 const int ACK_E_MIN_MS = 100;
 unsigned long loopMaxUs = 0;   // loop más largo desde el último ACK (lpm=), diagnóstico del UART
+// lps=a/b/c/d: máximo por sección desde el ACK anterior (ms): a = BNO+gyro, b = ToF, c = readPiSerial,
+// d = el resto del loop (control, motor, servo, log USB). Para ubicar el lpm=40 del carro v2 (ToF ya descartado: ltf 1.3-1.5).
+unsigned long lpsMaxUs[4] = {0, 0, 0, 0};
+static unsigned long lpsT = 0;
+static unsigned long *lpsFinSerial = nullptr;
+static inline void lpsMarca(int i, unsigned long &t) { unsigned long n = micros(); if (n - t > lpsMaxUs[i]) lpsMaxUs[i] = n - t; t = n; }
 unsigned long ackEUltimoMs = 0;
 // Log periódico (~170 B por loop = ~15 ms a 115200) frena el loop al estacionar; mínimo de ms entre logs SOLO en ESTACIONANDO/ESTACIONANDO_PUNTA. 0 = cada loop (antes).
 const int LOG_MIN_MS = 100;
@@ -3721,6 +3727,12 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",re=");   ackOut.print(rutaUltRte);
     ackOut.print(",lpm=");  ackOut.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
     loopMaxUs = 0;
+    ackOut.print(",lps=");
+    for (int i = 0; i < 4; i++) {
+      if (i) ackOut.print('/');
+      ackOut.print(lpsMaxUs[i] / 1000.0f, 1);
+      lpsMaxUs[i] = 0;
+    }
 #if FOX_TOF && !defined(FOX_SIL)
     // ltf=L/R/B/F: lectura I2C más larga de cada ToF desde el ACK anterior (ms); x = no arrancó.
     ackOut.print(",ltf=");
@@ -4304,7 +4316,11 @@ void loop() {
     static unsigned long prevUs = 0;
     unsigned long nowUs = micros();
     if (prevUs != 0 && nowUs - prevUs > loopMaxUs) loopMaxUs = nowUs - prevUs;
+    static unsigned long finSerialUs = 0;   // el "resto" del loop anterior: de readPiSerial al fin
+    if (finSerialUs != 0 && nowUs - finSerialUs > lpsMaxUs[3]) lpsMaxUs[3] = nowUs - finSerialUs;
     prevUs = nowUs;
+    lpsT = nowUs;
+    lpsFinSerial = &finSerialUs;
   }
 #if defined(FOX_SIL)
   { static bool sembrado = false; if (!sembrado) { sembrado = true; silRutaSeed(); } }   // antes del 1er ACK
@@ -4318,6 +4334,7 @@ void loop() {
   mpu.update();
 #endif
   actualizarGyro();
+  lpsMarca(0, lpsT);
 #if FOX_TOF
 #if defined(FOX_SIL)
   for (int _ti = 0; _ti < TOF_N; _ti++) tofMm[_ti] = sil_tof_mm(_ti);
@@ -4329,7 +4346,10 @@ void loop() {
     distB_filtrada = filtroEMA(tofMm[2] / 10.0f, distB_filtrada < 0 ? tofMm[2] / 10.0f : distB_filtrada);
 #endif
 
+  lpsMarca(1, lpsT);
   readPiSerial();
+  lpsMarca(2, lpsT);
+  *lpsFinSerial = lpsT;
 
   // READY llegó PERO todavía no el primer V2 -> NO rodar. Si no, controlPID()
   // cae en el fallback wall-PID y el carro avanza ~0.5 s sin ver el obstáculo.
