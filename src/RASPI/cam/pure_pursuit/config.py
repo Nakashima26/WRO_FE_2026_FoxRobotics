@@ -1340,7 +1340,7 @@ ROUTE_FIX_LINE_MIN_PIX = 25
 # True = solo pixeles de cinta del frame (sin respaldo de la recta ajustada sostenida).
 ROUTE_FIX_LINE_PIX = True
 # Voto por pixeles solo con el rumbo a <= ANG de la recta y girando <= TURN grados entre la imagen y ahora.
-ROUTE_FIX_PIX_MAX_ANG_DEG = 15.0
+ROUTE_FIX_PIX_MAX_ANG_DEG = 25.0   # 15 -> 25 (2026-11-11): el carro sale del cajón a 15-18° y con 15 tiraba todos los votos (gemelo 40 fps: cajón a ciegas 4/16 -> 2/16, error máx 366 -> 168 mm, 12 giros 10/16 -> 12/16)
 ROUTE_FIX_PIX_MAX_TURN_DEG = 3.0
 # Pixeles solo si la cinta cruza la recta con |n·a| >= esto (≈45°); si no, la recta ajustada de siempre.
 ROUTE_FIX_PIX_MIN_NA = 0.7
@@ -1430,6 +1430,14 @@ ROUTE_FIX_LINE_TOL_MM = None
 ROUTE_FIX_LINE_LAG_FRAMES = 5
 # Localizer: una lectura de distancia que salta más que esto respecto a la anterior del mismo sensor se ignora (eco de transición señal->pared, semilla 32); None = apagado.
 LOC_SENSOR_JUMP_MM = 100.0
+# Reanclaje del localizador: si un mismo ToF da LOC_REANCHOR_N lecturas seguidas fuera del gate de 3σ,
+# todas del mismo signo y con dispersión ≤ LOC_REANCHOR_SPREAD_MM, se abre la P (± LOC_REANCHOR_P_MM)
+# y se acepta. Para el cajón mal fijado (pose ~40 cm corrida a lo largo que el gate nunca dejaba corregir). None = apagado.
+# Apagado: en el gemelo rescata cajones malos (s14 de 0 a 12 giros) pero con cajón bueno reancla contra señales
+# sin mapear y lecturas en el tope de 500 mm (12 giros 12/16 -> 9/16). Falta: solo tras fijar el cajón y solo a lo largo.
+LOC_REANCHOR_N = None
+LOC_REANCHOR_SPREAD_MM = 40.0
+LOC_REANCHOR_P_MM = 400.0
 # Perfil: aceleración lateral menor en curvas muy cerradas (|κ| > TIGHT_KAPPA, 1/mm).
 # Con radio < lookahead (200 mm) el pure pursuit corta hacia adentro (esquinas de la
 # isla, semilla 3). None = apagado (todas las curvas con A_LAT_MM_S2).
