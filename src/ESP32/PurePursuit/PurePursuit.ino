@@ -422,6 +422,12 @@ int32_t leerEncoder() {
 #endif
 #if FOX_TOF
 int tofMm[TOF_N] = {-1, -1, -1, -1};   // 0=L 1=R 2=trasero 3=frontal
+// Diagnóstico del I2C (ltf= en el ACK): lo más que tardó la lectura de cada ToF desde el
+// ACK anterior, en µs. En el carro el loop dura 40 ms en casi todos los ACK (lpm=40.0, igual
+// parado que andando: no es el encoder) y el trasero no responde (tB=-1 siempre); un
+// dataReady() a un sensor que no contesta puede esperar el timeout del Wire (50 ms en 3.3.4).
+bool tofOk[TOF_N] = {false, false, false, false};
+unsigned long tofUsMax[TOF_N] = {0, 0, 0, 0};
 #if !defined(FOX_SIL)
 VL53L1X tofL, tofR, tofB, tofF;
 #endif
@@ -2272,20 +2278,26 @@ void initToF() {
   delay(10);
   // Si uno falla se sigue con los demás (antes un fallo dejaba a los siguientes
   // en reset); el que falló queda en -1.
-  initUnToF(tofL, TOF_XSHUT_L, 0x30, "L", true);
-  initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true);
-  initUnToF(tofB, TOF_XSHUT_B, 0x32, "B", true);
-  initUnToF(tofF, TOF_XSHUT_F, 0x33, "F", false);
+  tofOk[0] = initUnToF(tofL, TOF_XSHUT_L, 0x30, "L", true);
+  tofOk[1] = initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true);
+  tofOk[2] = initUnToF(tofB, TOF_XSHUT_B, 0x32, "B", true);
+  tofOk[3] = initUnToF(tofF, TOF_XSHUT_F, 0x33, "F", false);
 }
 
 void leerToF() {
   VL53L1X *dev[TOF_N] = {&tofL, &tofR, &tofB, &tofF};
   for (int i = 0; i < TOF_N; i++) {
+    // El que falló en initToF() no se consulta: sigue en la dirección por defecto (o no está)
+    // y cada dataReady() serían dos transacciones I2C sin respuesta por loop.
+    if (!tofOk[i]) { tofMm[i] = -1; continue; }
+    unsigned long t0 = micros();
     if (dev[i]->dataReady()) {
       uint16_t mm = dev[i]->read(false);
       uint8_t st = dev[i]->ranging_data.range_status;
       tofMm[i] = (st == 0) ? (int)mm : -1;
     }
+    unsigned long dt = micros() - t0;
+    if (dt > tofUsMax[i]) tofUsMax[i] = dt;
   }
 }
 #endif
@@ -3709,6 +3721,15 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",re=");   ackOut.print(rutaUltRte);
     ackOut.print(",lpm=");  ackOut.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
     loopMaxUs = 0;
+#if FOX_TOF && !defined(FOX_SIL)
+    // ltf=L/R/B/F: lectura I2C más larga de cada ToF desde el ACK anterior (ms); x = no arrancó.
+    ackOut.print(",ltf=");
+    for (int i = 0; i < TOF_N; i++) {
+      if (i) ackOut.print('/');
+      if (tofOk[i]) ackOut.print(tofUsMax[i] / 1000.0f, 1); else ackOut.print('x');
+      tofUsMax[i] = 0;
+    }
+#endif
     ackOut.println();
 #if !defined(FOX_SIL)
     ackOut.enviar();
