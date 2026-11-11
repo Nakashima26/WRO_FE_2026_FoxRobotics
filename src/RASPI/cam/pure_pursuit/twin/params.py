@@ -157,6 +157,18 @@ class MotorParams:
         _prov("motor.scrub_coeff", "medido", "calib 2026-10-21 p8_curva: −11% a servo 15, −2% a 40 (PWM 160)")
         _prov("motor.a_lat_left/right_mm_s2", "medido", "calib 2026-10-21 p8_curva_rapida: 2360-2860 mm/s² según servo")
         _prov("motor.a_max_mm_s2", "supuesto", "mu*fracción en eje trasero*g")
+        # TWIN_VBAT: voltaje de la pila. k/pwm0 se midieron a ~12.0 V; el PWM rinde ∝ V y el PWM de
+        # arranque (fricción fija) sube ∝ 1/V. Comprobado con orillas36 (2026-11-11, pila baja):
+        # real 130 -> 264, 255 -> 722 mm/s; con TWIN_VBAT=11.1 el modelo da 281 / 719.
+        vb = os.environ.get("TWIN_VBAT")
+        if vb:
+            f = float(vb) / 12.0
+            self.k_mm_s_per_pwm *= f
+            self.k_rev_mm_s_per_pwm *= f
+            self.pwm0 /= f
+            if self.pwm0_rev is not None:
+                self.pwm0_rev /= f
+            _prov("motor.v_batt", "medido", f"TWIN_VBAT={vb} V: k x{f:.3f}, pwm0 /{f:.3f}")
 
 
 def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
