@@ -26,7 +26,8 @@ def test_native_vehicle_exact(variant):
         assert tuple(getattr(a,k) for k in _FIELDS)==tuple(getattr(b,k) for k in _FIELDS), (i,cmd)
 
 @pytest.mark.parametrize('variant', range(4))
-def test_sil_native_advance_exact(variant):
+@pytest.mark.parametrize('drain_period', [0, 1, 17])
+def test_sil_native_advance_exact(variant, drain_period):
     """Whole SIL calls, including multi-step delays and sensor boundaries, agree bitwise."""
     import struct
     import numpy as np
@@ -46,7 +47,8 @@ def test_sil_native_advance_exact(variant):
     vehicles = [NativeVehicle(p, 12, -50, 27, v=700) for _ in range(2)]
     encoders = [Encoder(p.encoder, np.random.default_rng(42)) for _ in range(2)]
     firmwares = [FirmwareSIL() for _ in range(2)]
-    histories = [[], []]
+    from collections import deque
+    histories = [deque(maxlen=20000), []]
     collisions = [[], []]
     sensor_reads = [[], []]
     last = [0., 0., 0.]  # ds, yaw, collision time
@@ -75,9 +77,15 @@ def test_sil_native_advance_exact(variant):
         collisions[1].append((firmwares[1].now_us / 1e6, v.x, v.y, v.heading_deg))
 
     def sync():
-        histories[1].extend(firmwares[1].drain_history())
+        if drain_period == 0:
+            histories[1].refresh()
+        elif drain_period == 1:
+            histories[1].extend(firmwares[1].drain_history())
 
     e = firmwares[1].enable_native_vehicle(vehicles[1], encoders[1], maximum, collide, sync)
+
+    if drain_period == 0:
+        histories[1] = firmwares[1].history_view()
 
     def read(i, kind):
         v = vehicles[i]
@@ -108,12 +116,25 @@ def test_sil_native_advance_exact(variant):
             for fw in firmwares:
                 fw.loop()
             assert bits([tuple(vehicles[0]._state)]) == bits([tuple(vehicles[1]._state)])
-            assert bits(histories[0]) == bits(histories[1])
+            if (n + 1) % (drain_period or 17) == 0 or n == 159:
+                if drain_period not in (0, 1):
+                    histories[1].extend(firmwares[1].drain_history())
+                assert bits(histories[0]) == bits(histories[1])
+                if drain_period == 0:
+                    from pure_pursuit.twin.sim import _pose_at
+                    times = [histories[0][0][0] - 1, histories[0][-1][0] + 1]
+                    for row in list(histories[0])[::137]:
+                        times.extend((row[0], row[0] + 0.0000001))
+                    for t in times:
+                        assert bits([_pose_at(histories[0], t)]) == bits([histories[1].pose_at(t)])
+                if drain_period:
+                    for h in histories:
+                        h.clear()
             assert bits(collisions[0]) == bits(collisions[1])
             assert bits(sensor_reads[0]) == bits(sensor_reads[1])
             assert bits([(encoders[0]._frac, encoders[0].count, *last)]) == bits([
                 (e[0], e[1], e[2], e[3], e[10])])
-            for h in histories + collisions + sensor_reads:
+            for h in collisions + sensor_reads:
                 h.clear()
     finally:
         for fw in firmwares:
