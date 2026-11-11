@@ -30,7 +30,13 @@ CAM_FRAME_PATH = "/tmp/wro_cam_frame.jpg"
 class ThreadedFrameGrabber:
 	def __init__(self, cap):
 		self.cap = cap
-		self.lock = threading.Lock()
+		# Condition: read() espera un frame NUEVO (hasta FOX_FRAME_WAIT_S, 0.1 s; 0 = no espera).
+		# Con la cámara por el ISP (2026-11-11) el loop iba a ~60 Hz con la cámara a 40 fps:
+		# procesaba frames repetidos, la Pi llegaba a 84 °C y los hilos de grabación se quedaban
+		# sin CPU (orillas35: 54 frames del HUD y 200 de 545 BEV tirados).
+		self.lock = threading.Condition()
+		self._id_read = 0
+		self.wait_s = float(os.environ.get("FOX_FRAME_WAIT_S", "0.1"))
 		self.frame = None
 		# read() devuelve el ÚLTIMO frame para siempre, aunque la cámara deje de
 		# mandar (cap.read() se cuelga 30 s por intento). frame_id/frame_t dicen
@@ -65,12 +71,16 @@ class ThreadedFrameGrabber:
 				self.frame = frame
 				self.frame_id += 1
 				self.frame_t = time.monotonic()
+				self.lock.notify_all()
 		print("[CAM] Hilo de captura terminado", flush=True)
 
 	def read(self):
 		with self.lock:
+			if self.wait_s > 0 and self.frame_id == self._id_read and not self.stopped:
+				self.lock.wait(self.wait_s)
 			if self.frame is None:
 				return False, None
+			self._id_read = self.frame_id
 			return True, self.frame.copy()
 
 	def freshness(self):
