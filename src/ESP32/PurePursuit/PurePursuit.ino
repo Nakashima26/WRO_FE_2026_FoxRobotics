@@ -620,7 +620,7 @@ const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
 // Solo corre si el carro va en el sentido pedido (o casi parado): al frenar con
 // reversa mientras avanza se deja el PWM tal cual, el lazo no se mete.
 // 0 = PWM directo, como antes.
-#define MOTOR_LAZO_VEL 0
+#define MOTOR_LAZO_VEL 1
 const float LAZO_K_FWD       = 3.82f;   // mm/s por PWM adelante (gemelo MotorParams)
 const float LAZO_PWM0_FWD    = 45.5f;
 const float LAZO_K_REV       = 3.61f;   // reversa
