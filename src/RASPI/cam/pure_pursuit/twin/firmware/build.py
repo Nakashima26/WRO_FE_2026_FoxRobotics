@@ -19,6 +19,7 @@ _INO_GIT = "src/ESP32/PurePursuit/PurePursuit.ino"
 
 _SHIM_SOURCES = (
     _SIL / "sil_core.cpp",
+    _SIL / "sil_vehicle.cpp",
     _SIL / "Arduino.h",
     _SIL / "Wire.h",
     _SIL / "MPU6050_tockn.h",
@@ -147,13 +148,23 @@ def build(
         cmd.extend(["-target", "x86_64-windows-gnu", "-Wl,--export-all-symbols"])
     for k, v in defines.items():
         cmd.append(f"-D{k}={v}")
-    cmd.extend([str(_SIL / "sil_core.cpp"), str(sil_cpp), "-o", str(tmp_out)])
+    # Keep the firmware's original compiler flags. Only physics/encoder require
+    # CPython's uncontracted operations; changing .ino contraction changes traces.
+    native_obj = _BUILD / f"sil_vehicle_{digest}.{os.getpid()}.o"
+    native_cmd = [*_cxx(), "-std=c++17", "-O3", "-ffp-contract=off", "-fPIC",
+                  "-Wno-everything", f"-I{_SIL}", "-c",
+                  str(_SIL / "sil_vehicle.cpp"), "-o", str(native_obj)]
+    if system == "Windows":
+        native_cmd.extend(["-target", "x86_64-windows-gnu"])
+    cmd.extend([str(_SIL / "sil_core.cpp"), str(sil_cpp), str(native_obj), "-o", str(tmp_out)])
 
     try:
         # stdin cerrado: en Windows zig se colgaba heredando el stdin de la terminal.
+        subprocess.run(native_cmd, check=True, stdin=subprocess.DEVNULL)
         subprocess.run(cmd, check=True, stdin=subprocess.DEVNULL)
         _replace_or_keep(tmp_out, out)
     finally:
+        native_obj.unlink(missing_ok=True)
         tmp_out.unlink(missing_ok=True)
         sil_cpp.unlink(missing_ok=True)
     return out
