@@ -1696,6 +1696,14 @@ PARK_AJ float        PARK_PL_ED_CM               = 1.5f;
 PARK_AJ float        PARK_PL_D3_MM               = 45.0f;   // tope de distancia del tramo adelante
 PARK_AJ int          PARK_PL_PWM_REV             = 92;
 PARK_AJ int          PARK_PL_PWM_FWD             = 80;
+// Anti-atasco del plan: si en PARK_PL_ATASCO_MS el encoder no avanzó PARK_PL_ATASCO_MM, sube el PWM
+// PARK_PL_ATASCO_PASO (hasta +PARK_PL_ATASCO_MAX); en cuanto se mueve vuelve al PWM normal. 2026-11-11:
+// con la pila en 11.25 V la reversa a 92 con el volante a tope se quedaba parada (5 mm en 1 s) y el
+// tramo terminaba por TIMEOUT con el carro a medio meter. 0 = apagado.
+PARK_AJ int          PARK_PL_ATASCO_MS           = 250;
+PARK_AJ float        PARK_PL_ATASCO_MM           = 4.0f;
+PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
+PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
 PARK_AJ int          PARK_PL_PAUSA_MS            = 120;     // parado con el volante girando antes de cada tramo nuevo
 PARK_AJ float        PARK_PL_Z1_MM               = 14.0f;   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
 PARK_AJ float        PARK_PL_Z2_MM               = 28.0f;
@@ -6668,6 +6676,20 @@ void loop() {
         escribirServo(parkPlanRectaOn ? centroServo : parkPlanSrv);
         int pwm = (parkPlanDir > 0) ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV;
         if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = 130;
+        {   // anti-atasco (ver PARK_PL_ATASCO_*)
+          static int extra = 0; static float od0 = 0.0f; static unsigned long t0 = 0; static int legPrev = -1;
+          if (legPrev != parkPlanI || millis() - parkFaseMs < 30UL) { extra = 0; od0 = odomMmF; t0 = millis(); legPrev = parkPlanI; }
+          if (PARK_PL_ATASCO_MS > 0 && millis() - t0 >= (unsigned long)PARK_PL_ATASCO_MS) {
+            if (fabsf(odomMmF - od0) < PARK_PL_ATASCO_MM) {
+              extra = min(extra + PARK_PL_ATASCO_PASO, PARK_PL_ATASCO_MAX);
+              Serial.print("PARK atasco: +"); Serial.println(extra);
+            } else {
+              extra = 0;
+            }
+            od0 = odomMmF; t0 = millis();
+          }
+          pwm = min(pwm + extra, 255);
+        }
         setMotor(pwm);
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
