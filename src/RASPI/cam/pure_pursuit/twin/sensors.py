@@ -150,21 +150,19 @@ class ToF:
         origins = np.broadcast_to(origin, dirs.shape)
         dists, mat_i, normals, _obj = world.cast(origins, dirs, max_mm)
 
+        # Vectorizado sobre los rayos; mismas operaciones por elemento que el bucle
+        # anterior (np.dot de 2 = d0*n0 + d1*n1, round mitad-par), así es idéntico.
+        keep = np.flatnonzero((mat_i >= 0) & (dists <= max_mm - 1e-3))
         clusters: dict[tuple[int, int], list[tuple[float, float]]] = {}
-        for i in range(len(angles)):
-            if mat_i[i] < 0:
-                continue
-            d = float(dists[i])
-            if d > max_mm - 1e-3:
-                continue
-            mat = world.material_name(int(mat_i[i]))
-            cos_inc = abs(float(np.dot(dirs[i], normals[i])))
-            cos_inc = min(1.0, max(0.0, cos_inc))
-            refl = p.reflectivity.get(mat, 0.04)
-            signal = refl * cos_inc / (d * d)
-            bucket_d = int(round(d / 50.0))
-            key = (mat_i[i], bucket_d)
-            clusters.setdefault(key, []).append((d, signal))
+        if keep.size:
+            mk, dk = mat_i[keep], dists[keep]
+            dv, nv = dirs[keep], normals[keep]
+            cos_inc = np.clip(np.abs(dv[:, 0] * nv[:, 0] + dv[:, 1] * nv[:, 1]), 0.0, 1.0)
+            refl = np.array([p.reflectivity.get(world.material_name(int(m)), 0.04) for m in mk])
+            signal = refl * cos_inc / (dk * dk)
+            for m, b, d, s in zip(mk.tolist(), np.round(dk / 50.0).astype(np.int64).tolist(),
+                                  dk.tolist(), signal.tolist()):
+                clusters.setdefault((m, b), []).append((d, s))
 
         if not clusters:
             self._held_mm[sensor_id] = -1
