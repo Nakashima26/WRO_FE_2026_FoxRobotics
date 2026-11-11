@@ -656,6 +656,9 @@ class CameraModel:
         return self._to_cam(self._ribbon(*seg, half), ox, oy, oz, sh, ch)
 
     def _clip_near(self, cam_pts, zmin=8.0):
+        # Floats de Python en vez de escalares numpy: mismas operaciones IEEE, mismo resultado.
+        if isinstance(cam_pts, np.ndarray):
+            cam_pts = cam_pts.tolist()
         out = []
         n = len(cam_pts)
         for i in range(n):
@@ -667,7 +670,7 @@ class CameraModel:
                 out.append(b)
             elif a_in != b_in:
                 t = (zmin - a[2]) / (b[2] - a[2])
-                hit = a + t * (b - a)
+                hit = [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])]
                 out.append(hit)
                 if b_in:
                     out.append(b)
