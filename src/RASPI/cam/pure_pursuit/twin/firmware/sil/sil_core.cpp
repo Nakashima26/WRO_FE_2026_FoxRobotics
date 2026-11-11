@@ -74,10 +74,17 @@ static void set_error(const char *msg) {
   g_last_error[sizeof(g_last_error) - 1] = '\0';
 }
 
+extern "C" bool sil_native_enabled();
+extern "C" void sil_native_advance(uint64_t us, uint64_t clock, const double *actuators);
+
 static void sil_advance_internal(uint64_t us) {
   if (us == 0) return;
   now_us += us;
-  if (g_advance_cb) {
+  if (sil_native_enabled()) {
+    double actuators[3];
+    sil_actuators(actuators);
+    sil_native_advance(us, now_us, actuators);
+  } else if (g_advance_cb) {
     if (g_advance_now && g_advance_actuators) {
       *g_advance_now = now_us;
       sil_actuators(g_advance_actuators);
