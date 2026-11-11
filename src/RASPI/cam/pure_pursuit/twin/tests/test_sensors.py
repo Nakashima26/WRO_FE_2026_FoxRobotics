@@ -199,8 +199,9 @@ def test_tof_front_range_4000(rng):
 
 
 def test_tof_front_like_car(rng):
-    """Frontal como en el carro (corridas 2026-11-09): el firmware solo acepta status 0,
-    ~40 % de las lecturas, nunca arriba de ~1.32 m, y de 60 cm en adelante lee ~+20 cm."""
+    """Frontal como en el carro (corridas 2026-11-09 y orillas35 2026-11-11): el firmware solo acepta
+    status 0, ~11 % de las lecturas en carrera, nunca arriba de ~1.32 m, de 60 cm en adelante lee
+    ~+20 cm; de cerca (<30 cm) siempre válido y con poco ruido."""
     params = replace(TwinParams().tof, black_wall_max_mm=_RANGE_TEST_BLACK_WALL_MM)
     forward = params.mounts[3].forward_mm
     far = [ToF(params, np.random.default_rng(i)).read_mm(3, _WallWorld(1500.0 + forward), Pose(0.0, 0.0, 0.0), 0.0)
@@ -209,8 +210,12 @@ def test_tof_front_like_car(rng):
     mid = [ToF(params, np.random.default_rng(i)).read_mm(3, _WallWorld(700.0 + forward), Pose(0.0, 0.0, 0.0), 0.0)
            for i in range(400)]
     ok = [r for r in mid if r > 0]
-    assert 0.3 < len(ok) / len(mid) < 0.5
+    assert 0.05 < len(ok) / len(mid) < 0.2
     assert abs(float(np.median(ok)) - 893.0) < 40.0
+    near = [ToF(params, np.random.default_rng(i)).read_mm(3, _WallWorld(230.0 + forward), Pose(0.0, 0.0, 0.0), 0.0)
+            for i in range(100)]
+    assert all(r > 0 for r in near)
+    assert float(np.std(near)) < 12.0
 
 
 def test_tof_sample_period_per_sensor(rng):
