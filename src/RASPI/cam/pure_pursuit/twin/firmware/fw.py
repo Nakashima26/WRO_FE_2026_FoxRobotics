@@ -42,6 +42,7 @@ class FirmwareSIL:
         shutil.copy2(lib_path, self._tmp.name)
         self._lib = ctypes.CDLL(self._tmp.name)
 
+        self._native_sync = None
         self._advance_cb = None
         self._sonar_cb = None
         self._gyro_cb = None
@@ -115,6 +116,33 @@ class FirmwareSIL:
         self._lib.sil_set_advance_snapshot(self._advance_clock, self._advance_actuators)
         return self._advance_clock, self._advance_actuators
 
+    def enable_native_vehicle(self, vehicle, encoder, max_wheel, collision, sync):
+        """Use the native kernel directly, retaining every shared buffer owner."""
+        ep = encoder.params
+        e = (ctypes.c_double * 11)(encoder._frac, encoder.count, 0, 0,
+            encoder._slip_bias, ep.slip_c_acc_cap, ep.slip_c_acc,
+            ep.slip_c_scrub, ep.counts_per_mm, max_wheel, 0)
+        cb = ctypes.CFUNCTYPE(None, ctypes.c_uint64)(collision)
+        self._native_owners = vehicle, encoder, e, cb
+        lib = self._lib
+        lib.sil_set_native_vehicle.argtypes = [ctypes.c_void_p] * 5
+        lib.sil_set_native_vehicle.restype = None
+        lib.sil_drain_history.argtypes = [ctypes.c_void_p]
+        lib.sil_drain_history.restype = ctypes.c_size_t
+        # ctypes releases the GIL during firmware execution. The kernel accesses
+        # only these instance-owned buffers; callbacks reacquire the GIL normally.
+        lib.sil_set_native_vehicle(vehicle._fn, vehicle._state, vehicle._p, e, cb)
+        self._native_sync = sync
+        return e
+
+    def drain_history(self):
+        n = self._lib.sil_drain_history(None)
+        if not n:
+            return ()
+        rows = ((ctypes.c_double * 4) * n)()
+        self._lib.sil_drain_history(rows)
+        return [tuple(row) for row in rows]
+
     def set_callbacks(
         self,
         advance: Callable[[int], None],
@@ -151,6 +179,8 @@ class FirmwareSIL:
 
     def setup(self) -> None:
         rc = self._lib.sil_setup()
+        if self._native_sync:
+            self._native_sync()
         if rc != 0:
             err = self._lib.sil_last_error()
             msg = err.decode("utf-8") if err else "sil_setup failed"
@@ -158,6 +188,8 @@ class FirmwareSIL:
 
     def loop(self) -> None:
         self._lib.sil_loop()
+        if self._native_sync:
+            self._native_sync()
 
     @property
     def now_us(self) -> int:
