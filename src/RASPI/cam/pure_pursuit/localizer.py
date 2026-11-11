@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import functools
 import math
+import os
 import re
 
 import numpy as np
@@ -117,6 +118,8 @@ class Localizer:
         self.last = {}
         self.n_used = 0
         self.n_rej = 0
+        self.n_reanchor = 0
+        self._rej = {}
         self._prev_z = {}
 
     def set_map(self, seats: dict, unknown, parking: str | None, park_w: float | None = None) -> None:
@@ -276,8 +279,25 @@ class Localizer:
             nu = z - zh
             S = float(H @ self.P @ H + R)
             if nu * nu / S > 9.0:                  # 3 sigma
-                self.n_rej += 1
-                continue
+                # Reanclaje: si el mismo sensor sigue diciendo lo mismo varias lecturas seguidas
+                # (cajón mal fijado: la pose va ~40 cm corrida y el gate tiraba justo la lectura
+                # que la arreglaba), se abre la P y se acepta.
+                n_re = getattr(C, "LOC_REANCHOR_N", None)
+                hist = self._rej.setdefault(key, [])
+                hist.append(nu)
+                del hist[:-int(n_re or 1)]
+                if not (n_re and len(hist) >= int(n_re) and surf == _WALL
+                        and max(hist) - min(hist) <= float(getattr(C, "LOC_REANCHOR_SPREAD_MM", 40.0))
+                        and (min(hist) > 0 or max(hist) < 0)):
+                    self.n_rej += 1
+                    continue
+                pm = float(getattr(C, "LOC_REANCHOR_P_MM", 400.0))
+                self.P[:2, :2] += np.eye(2) * pm * pm
+                S = float(H @ self.P @ H + R)
+                self.n_reanchor += 1
+                print(f"[LOC] reancla {key} nu={nu:+.0f} z={z:.0f} esperado={zh:.0f} "
+                      f"pose=({self.x[0]:.0f},{self.x[1]:.0f})", flush=True)
+            self._rej.pop(key, None)
             K = self.P @ H / S
             self.x = self.x + K * nu
             self.P = (np.eye(3) - np.outer(K, H)) @ self.P
