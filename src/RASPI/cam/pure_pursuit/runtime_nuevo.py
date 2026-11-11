@@ -1327,6 +1327,12 @@ class PPRuntime:
                 frame.shape[1], frame.shape[0], out_fps,
             ).start()
             print(f"[REC] Grabando en {self.output_file}", flush=True)
+        _wh = getattr(self, "_rec_wh", None)
+        if _wh is None:
+            self._rec_wh = _wh = (frame.shape[1], frame.shape[0])
+        if (frame.shape[1], frame.shape[0]) != _wh:
+            # cv2.VideoWriter tira sin avisar los frames de otro tamaño: se ajusta al del primero.
+            frame = cv2.resize(frame, _wh)
         self.video_writer.write(frame.copy())
 
     def _write_cam_frame(self, frame: np.ndarray):
@@ -2521,7 +2527,12 @@ class PPRuntime:
                         bev_small = cv2.resize(bev_debug, (bev_h, bev_h))
                         combined = np.hstack([result.processed_frame, bev_small])
                     else:
-                        combined = result.processed_frame
+                        # Sin BEV este frame (siguiendo la ruta no se hace el warp): panel negro del mismo
+                        # tamaño. Si no, el HUD sale más angosto y el VideoWriter tira el frame sin avisar
+                        # (orillas35/36: el .avi se cortaba a los ~7 s, justo al empezar a seguir la ruta).
+                        _h = result.processed_frame.shape[0]
+                        combined = np.hstack([result.processed_frame,
+                                              np.zeros((_h, _h, 3), dtype=result.processed_frame.dtype)])
                     if (getattr(C, "MAP_VIEW_IN_HUD", False)
                             and self._track_map_active()
                             and combined is not None):
