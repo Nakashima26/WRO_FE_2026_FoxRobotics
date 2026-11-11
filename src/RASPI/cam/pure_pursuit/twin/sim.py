@@ -120,7 +120,9 @@ PRESETS["hw_nuevo"] = {
     # dt p50 44-49 ms, p90 58-61, igual parada que corriendo (no es la DP: es el cuadro).
     # Antes 0.025 (40 fps, sin medir). PI_FPS se queda en 40 como en carrera.json del
     # carro: las ventanas en frames duran lo mismo que allá (cambiarlo es del carro).
-    "pi_period_s": 0.045,
+    # 2026-11-11: la cámara por el ISP (Picamera2) + grabber que espera frame nuevo + PROCESS_EVERY 1
+    # dejan el loop en ~33 Hz de frames nuevos (parado, 83 °C) -> 0.030. Re-medir en carrera.
+    "pi_period_s": 0.030,
     "pi_overrides": {
         **PRESETS["giro_rapido"]["pi_overrides"],
         # La pose del mapa derivaba 150–430 mm (encoder + gyro) sin latas
