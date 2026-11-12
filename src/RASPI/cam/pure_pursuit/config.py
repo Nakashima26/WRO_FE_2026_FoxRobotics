@@ -1055,6 +1055,11 @@ LINE_HORIZ_FALLBACK_MIN_Y = 285.0  # sin curva ni recta: horizontal solo en la b
 # apagarlo cuando ya no haga falta.
 REC_BEV_CLEAN        = True
 REC_BEV_JPEG_QUALITY = 95
+# Cortar el .avi y el _bev.bin cuando el carro ya se movió y luego lleva esto sin moverse
+# (pose px/py del ACK, umbral REC_STOP_MOV_MM). Antes grababa hasta parar el servicio
+# (orillas62: 209 MB). Quieto máximo dentro de una corrida: 2.0 s (62, maniobra del park). None = nunca.
+REC_STOP_QUIETO_S = 5.0
+REC_STOP_MOV_MM   = 20.0
 
 # ─── INICIO — salida del estacionamiento (solo ronda de obstáculos) ──────────
 # Al APRETAR EL BOTÓN (una sola vez) la Pi mide qué fracción del frame es
