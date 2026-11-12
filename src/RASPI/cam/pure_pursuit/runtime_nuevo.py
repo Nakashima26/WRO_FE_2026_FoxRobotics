@@ -464,11 +464,23 @@ class PPRuntime:
 
     def _render_digital_map(self):
         rm = getattr(self, "_rmode", None)
+        empty = None
+        if rm is not None:
+            try:
+                # Igual que RouteMode._resolved pero sin tocar su estado (eso lo hace el plan).
+                from .route_mode import PARKING_FORBIDDEN_SEATS
+                conf = dict(self.digital.confirmed)
+                empty = set(rm.empty) - set(conf)
+                empty |= {(self.digital.parking, s) for s in PARKING_FORBIDDEN_SEATS
+                          if (self.digital.parking, s) not in conf}
+                empty |= rm._rule_empty(conf)
+            except Exception:
+                empty = None
         if rm is not None and rm.route is not None:
             label = "plan DP (subiendo)" if rm.upload else "plan DP"
             return self.digital.render(route_line=self._shown_line(),
-                                       route_closed=rm.route.closed, route_label=label)
-        return self.digital.render()
+                                       route_closed=rm.route.closed, route_label=label, empty=empty)
+        return self.digital.render(empty=empty)
 
     def _route_step(self, armed: bool, frame=None, orange=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
@@ -2541,7 +2553,14 @@ class PPRuntime:
                             and self._track_map_active()
                             and combined is not None):
                         map_h = result.processed_frame.shape[0]
-                        map_panel = self.render_map_panel(map_h)
+                        if getattr(self, "_rmode", None) is not None:
+                            # Modo ruta: el mapa con el que se planea (reglas de asientos), no el SignMap viejo.
+                            try:
+                                map_panel = cv2.resize(self._render_digital_map(), (map_h, map_h))
+                            except Exception:
+                                map_panel = self.render_map_panel(map_h)
+                        else:
+                            map_panel = self.render_map_panel(map_h)
                         combined = np.hstack([combined, map_panel])
 
                 t_disp = time.perf_counter()
