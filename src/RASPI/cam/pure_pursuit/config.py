@@ -1352,7 +1352,7 @@ ROUTE_FIX_LINE_MIN_PIX = 25
 ROUTE_FIX_LINE_PIX = True
 # Voto por pixeles solo con el rumbo a <= ANG de la recta y girando <= TURN grados entre la imagen y ahora.
 ROUTE_FIX_PIX_MAX_ANG_DEG = 25.0   # 15 -> 25 (2026-11-11): el carro sale del cajón a 15-18° y con 15 tiraba todos los votos (gemelo 40 fps: cajón a ciegas 4/16 -> 2/16, error máx 366 -> 168 mm, 12 giros 10/16 -> 12/16)
-ROUTE_FIX_PIX_MAX_TURN_DEG = 3.0
+ROUTE_FIX_PIX_MAX_TURN_DEG = 10.0   # 3 -> 10 (2026-11-12): la naranja aparece cuando el carro aún sale de la S del cajón girando ~1.5°/ACK; en los 5 frames de lag gira 4-9° y con 3 se tiraban todos los votos (orillas59/60: 0 votos -> cajón forzado a la media +348, real ~+230; la 58 pasó 1 voto de 2.9° y salió bien). La línea va casi perpendicular a la recta: el error de rumbo apenas mueve el δ
 # Pixeles solo si la cinta cruza la recta con |n·a| >= esto (≈45°); si no, la recta ajustada de siempre.
 ROUTE_FIX_PIX_MIN_NA = 0.7
 # Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.
