@@ -273,6 +273,12 @@ class ToFParams:
     short_map_true_mm: tuple[float, ...] = (100.0, 200.0, 300.0, 450.0, 600.0, 800.0)
     short_map_read_mm: tuple[float, ...] = (119.0, 217.0, 319.0, 462.0, 550.0, 610.0)
     short_map_ids: tuple[int, ...] = (0, 1, 2)
+    # Curva propia por id (reemplaza la de arriba). Derecho (1): corridas 35-42 del 2026-11-11, real
+    # sacado de la pared de enfrente (pasillo 1000, ancho tL+tR+70 = 985-1016 con el carro centrado):
+    # exacto hasta ~45 cm y luego se queda en 460-500 (55 cm -> 463, 65 -> 484, 75 -> ~500).
+    short_map_by_id: dict[int, tuple[tuple[float, ...], tuple[float, ...]]] = field(
+        default_factory=lambda: {1: ((100.0, 200.0, 300.0, 450.0, 550.0, 650.0, 800.0),
+                                     (119.0, 217.0, 319.0, 455.0, 463.0, 484.0, 500.0))})
     # Frontal Long (calib 2026-10-19 frontal_estatica, pared negra): +32 a 30 cm y ~+20 cm de 60 a 150,
     # con ±7..20 cm de ruido, y casi todo con status 2/7. El firmware (leerToF) solo acepta status 0:
     # en las corridas del 2026-11-09 (14:27, 14:35) el frontal salió -1 el 57-68 % de las lecturas y
