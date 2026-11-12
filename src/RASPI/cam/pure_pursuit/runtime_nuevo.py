@@ -23,6 +23,7 @@ import functools
 import json
 import math
 import os
+import re
 import sys
 import time
 import traceback
@@ -329,6 +330,7 @@ class PPRuntime:
         # Corrección de color por el piso (otra iluminación), ver color_corr.py
         self.color_corr = FloorColorCorrector()
         self.digital = DigitalMap()
+        self._map_est = None
         # Updates del mapa en espera del sentido (ver _update_digital).
         self._dmap_pending: list = []
         # Lado de paso de la 1ª lata al salir del cajón (isal=, ver salida_cajon.py)
@@ -1496,6 +1498,7 @@ class PPRuntime:
         # Mapa digital limpio en GO: lo votado desarmado (carro en la mano,
         # otra pose) no vale, y el ancla del odómetro es el primer ACK armado.
         self.digital = DigitalMap()
+        self._map_est = None
         self._rmode = None
         self._dmap_pending = []
         self.salida = SalidaCajon()
@@ -2020,7 +2023,16 @@ class PPRuntime:
                 if self.bev.is_calibrated and not self._is_turning:
                     feet.extend(seen_above_obstacles(self.bev, positions))
                 if armed:
-                    self._update_digital(serial_ack, feet, line_info.get("Orange"))
+                    # Estacionando (est=E) el mapa ya no vota: atorado de reversa las llantas patinan y la
+                    # odometría corre sin que el carro se mueva (orillas50: ~550 mm parado, el verde W/T1
+                    # de enfrente se votó como W/T2 y le cambió el color al rojo).
+                    _m_est = re.search(r"(?:^|,)est=([A-Z])", serial_ack or "")
+                    if _m_est:
+                        self._map_est = _m_est.group(1)
+                    _orng = line_info.get("Orange")
+                    if _orng and _orng.get("seen") and not _orng.get("dead_reckoned"):
+                        _orng = dict(_orng, _curve=getattr(self.line_tracker, "_curve", None))
+                    self._update_digital(serial_ack, [] if getattr(self, "_map_est", None) == "E" else feet, _orng)
                     self.salida.update(serial_ack, feet)
                 if len(path_points) >= C.MIN_PATH_PTS:
                     if getattr(C, "DIGITAL_MAP_STEER", False) and not self._is_turning:

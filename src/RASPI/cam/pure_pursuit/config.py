@@ -1374,6 +1374,16 @@ ROUTE_HALF_SEEN = True
 # Filas posibles de una señal medio vista: las que quedan a <= esto de la mediana lateral observada
 # (filas a 200 mm: 150 = las dos si la mediana cae en la mitad central del hueco).
 ROUTE_HALF_ROW_TOL_MM = 150.0
+# DigitalMap: corrige a lo largo lo que ve la cámara con la cinta naranja vista contra la de verdad
+# (orillas50: verde E/X2 votado en E/T2 con la pose ~300 mm corrida tras el giro).
+# Votos de latas a más de este ángulo del eje del carro se ignoran (orillas50/52: verde de E/X votado en E/T4
+# saliendo de la esquina). Replays reales 48/50/52: 20° deja todo igual y arregla E/X2; 25° no basta.
+DIGITAL_MAP_VOTE_MAX_BEARING_DEG = 20.0
+DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG = 25.0   # ...solo si además el rumbo difiere de su recta más que esto
+DIGITAL_MAP_LINE_ALONG_FIX = False   # apagado: en el gemelo la medida se va de ~0 a -180 mm al acercarse a la cinta (sesgo de proyección), 2/6 semillas chocan
+DIGITAL_MAP_LINE_FIX_MATCH_MM = 300.0   # distancia media máx. de la cinta vista al segmento de la cinta de verdad
+DIGITAL_MAP_LINE_FIX_MAX_MM = 300.0     # corrección máx. aceptada (la de orillas50 era ~300)
+DIGITAL_MAP_LINE_FIX_MAD_MM = 60.0      # dispersión máx. entre puntos de la cinta
 ROUTE_LAP1_OPEN = False   # vuelta 1: sin asiento sin ver a < ROUTE_SLOWDOWN_MM adelante, sin el tope ROUTE_LAP1_PWM
 # Vuelta 1: cerca de un asiento sin ver, en vez del escalón a ROUTE_UNSEEN_PWM dentro de
 # ROUTE_SLOWDOWN_MM, rampa física: llegar a ROUTE_UNSEEN_PWM a esta distancia (mm) del asiento

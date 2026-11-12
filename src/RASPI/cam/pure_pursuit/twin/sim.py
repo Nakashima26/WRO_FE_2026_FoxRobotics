@@ -484,6 +484,8 @@ class Sim:
         # Generador aparte para la vibración de la cámara: no corre el ruido de los demás sensores.
         cam_rng = np.random.default_rng([self.seed, 0 if _ns is None else int(_ns), 7])
         cam_jitter = float(os.environ.get("TWIN_CAM_JITTER_MM", self.params.camera.jitter_mm))
+        cam_jit_tau = float(os.environ.get("TWIN_CAM_JITTER_TAU_S", self.params.camera.jitter_tau_s))
+        cam_jit = np.zeros(2)
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
         try:
             if self.surprise is not None:
@@ -885,8 +887,11 @@ class Sim:
                         refresh_history()
                         px, py, ph = _pose_at(history, t_cam)
                         if cam_jitter > 0.0:
-                            jx, jy = cam_rng.normal(0.0, cam_jitter, 2)
-                            px, py = px + jx, py + jy
+                            # Gauss-Markov: varía lento como el cabeceo real; ruido blanco por cuadro
+                            # (45 mm de salto) no dejaba que el seguidor de la naranja la diera por estable.
+                            _a = math.exp(-self.pi_period_s / cam_jit_tau) if cam_jit_tau > 0.0 else 0.0
+                            cam_jit = _a * cam_jit + math.sqrt(1.0 - _a * _a) * cam_rng.normal(0.0, cam_jitter, 2)
+                            px, py = px + float(cam_jit[0]), py + float(cam_jit[1])
                         t_render0 = time.perf_counter()
                         frame = cam.render_camera(field, px, py, ph)
                         render_s += time.perf_counter() - t_render0
