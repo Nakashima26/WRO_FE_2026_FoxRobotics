@@ -2346,6 +2346,12 @@ void actualizarOdometria() {
 const bool TOF_LAT_TRAS_SHORT      = true;   // false = todos en Long como antes
 const uint16_t TOF_LAT_TRAS_MS     = 20;     // presupuesto = periodo, modo Short
 const uint16_t TOF_FRENTE_MS       = 33;     // presupuesto = periodo, modo Long
+// ROI de los laterales/trasero (SPADs por lado, 4..16). El default de la librería es 16: con el
+// sensor a la altura del carro el cono ve el piso y lee corto de lejos (estática 2026-10-21, ToF
+// izq. contra pared negra: ROI 16 da −50 mm a 60 cm y −190 a 80; ROI 8 da −8 y −40). Corridas
+// 35–42: tR −111..−214 y tL −68..−95 mm a 57–72 cm. RondaAbierta/SeguirRuta ya usaban 8.
+// 0 = no tocar (default 16). El frontal (Long) se queda en 16.
+const uint8_t  TOF_LAT_TRAS_ROI    = 8;
 
 static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
                       bool corto) {
@@ -2357,6 +2363,7 @@ static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
   const bool usaShort = corto && TOF_LAT_TRAS_SHORT;
   const uint16_t ms = usaShort ? TOF_LAT_TRAS_MS : (corto ? 33 : TOF_FRENTE_MS);
   dev.setDistanceMode(usaShort ? VL53L1X::Short : VL53L1X::Long);
+  if (usaShort && TOF_LAT_TRAS_ROI > 0) dev.setROISize(TOF_LAT_TRAS_ROI, TOF_LAT_TRAS_ROI);
   if (!dev.setMeasurementTimingBudget((uint32_t)ms * 1000UL)) {
     Serial.print("ToF "); Serial.print(nombre); Serial.println(" presupuesto rechazado");
   }
