@@ -185,6 +185,21 @@ Logged in the README: [ERR-08](../README.md#err-08--raspberry-pi-undervoltage-fr
 - **Result:** R/G and B/G = 1.00 ± 0.01 at the center **and** at all four corners. The tuning file and the full procedure, so we can repeat it at the venue, are in [`src/RASPI/cam/camera_tuning/`](../src/RASPI/cam/camera_tuning/README.md).
 - **Status:** Resolved. The HSV thresholds still need checking on real pillars under the new image.
 
+### Car v2 — route mode
+
+#### ERR-30 — The lone green pillar of the third straight was mapped at the start of the straight
+- **Observed:** 2026-11-11, runs orillas50 and orillas52. The lone green pillar in the middle of the third straight (E/X2) was mapped at the start of that straight (E/T2, later E/T4), so the route never passed it on the correct side.
+- **Diagnosis:** We replayed the real Pi logs through `DigitalMap` and printed every vote for that pillar. Votes taken on the straight landed next to X2. Votes taken while the car was still coming out of the NE corner (heading 102–118° against 180° for the straight, pillar 25–35° off the car's axis) landed ~400 mm earlier, near the T2/T4 column. The heading lags during the turn, and an off-axis pillar turns a small heading error into a large position error. There were more of these votes, and the seat hysteresis then kept the wrong seat.
+- **First attempt:** Dropping every vote more than 20° off-axis fixed the real replays, but in the twin it confirmed pillars seen at the entry of a straight too late (S/T1, S/T2): 2 of 3 seeds crashed.
+- **Fix:** A vote more than 20° off-axis, taken while the car is still more than 25° away from that straight's heading, still counts, but it can't confirm the pillar or set its distance (`DIGITAL_MAP_VOTE_MAX_BEARING_DEG`, `DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG`). Commit `a22bb3e0`.
+- **Result:** Replays of real runs 48/50/52: run 52 now maps E/X2, and every other pillar matches the old result. E/X2 is confirmed ~0.5 m before the car reaches it. Twin: 3/3 seeds clean.
+- **Status:** Fixed offline; to be confirmed on the car.
+
+#### ERR-31 — Second green after leaving the parking lot hit when the orange line was not seen
+- **Observed:** 2026-11-11, run orillas51. The car dodged the first green after leaving the lot but hit the second one (N/T2).
+- **Diagnosis:** At the start the car corrects its position from the orange line. In run 51 it saw no line votes (n=0), so it fell back to the mean of the side ToF and was off by +322 mm. After the first corner that error becomes a lateral error, so N/T2 was mapped as N/T4 and the route took the wrong side. In run 52 the line was seen (n=5, correction +128 mm) and the same pillar was dodged.
+- **Status:** Open. The start fix without line votes needs a better fallback.
+
 ---
 
 ## 3. Milestones
