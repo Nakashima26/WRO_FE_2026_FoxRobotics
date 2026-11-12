@@ -481,6 +481,9 @@ class Sim:
         # TWIN_NOISE_SEED: otra realización del ruido de sensores con la misma pista (sin la variable = igual que antes).
         _ns = os.environ.get("TWIN_NOISE_SEED")
         rng = np.random.default_rng(self.seed if _ns is None else [self.seed, int(_ns)])
+        # Generador aparte para la vibración de la cámara: no corre el ruido de los demás sensores.
+        cam_rng = np.random.default_rng([self.seed, 0 if _ns is None else int(_ns), 7])
+        cam_jitter = float(os.environ.get("TWIN_CAM_JITTER_MM", self.params.camera.jitter_mm))
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
         try:
             if self.surprise is not None:
@@ -881,6 +884,9 @@ class Sim:
                         t_cam = max(0.0, t_k - self.cam_latency_s)
                         refresh_history()
                         px, py, ph = _pose_at(history, t_cam)
+                        if cam_jitter > 0.0:
+                            jx, jy = cam_rng.normal(0.0, cam_jitter, 2)
+                            px, py = px + jx, py + jy
                         t_render0 = time.perf_counter()
                         frame = cam.render_camera(field, px, py, ph)
                         render_s += time.perf_counter() - t_render0
