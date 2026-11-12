@@ -1366,7 +1366,9 @@ class DigitalMap:
         return out
 
     def render(self, size: int = 520, *, route_line=None, route_closed=False,
-               route_label=None) -> np.ndarray:
+               route_label=None, empty=None) -> np.ndarray:
+        """empty: asientos {(recta, asiento)} que el modo ruta da por vacíos (vistos o por regla); se marcan con x."""
+        empty = empty or set()
         img = np.full((size, size, 3), (232, 224, 208), np.uint8)
         scale = (size - 24) / _SPAN_MM
 
@@ -1399,6 +1401,8 @@ class DigitalMap:
                 elif col == "Green":
                     solid = (sec, sid) in self.confirmed
                     cv2.circle(img, px(x, y), 5, (0, 170, 0), -1 if solid else 1, cv2.LINE_AA)
+                elif (sec, sid) in empty:
+                    cv2.drawMarker(img, px(x, y), (120, 120, 120), cv2.MARKER_TILTED_CROSS, 8, 1, cv2.LINE_AA)
                 else:
                     cv2.circle(img, px(x, y), 4, (150, 150, 150), 1, cv2.LINE_AA)
 
