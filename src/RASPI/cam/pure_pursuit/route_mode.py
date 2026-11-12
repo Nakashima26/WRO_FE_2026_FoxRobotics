@@ -674,6 +674,33 @@ class RouteMode:
         if getattr(C, "ROUTE_PROV_RULES", False) and prov:
             rule = self._rule_empty(plan_seats)
             plan_unknown = [k for k in plan_unknown if k not in rule]
+        # Medio vista: la fila (exterior/interior, 200 mm) es lo que la visión confunde (N/T3<->N/T1,
+        # S/T4<->S/T2, E/X1<->E/X2), la columna no. Las filas posibles salen de dónde cayeron las
+        # detecciones (mediana lateral, DigitalMap.row_candidates): cerca de una fila, solo esa; entre
+        # las dos, se esquivan ambas con el mismo color (por regla la otra está vacía: nunca dos en la
+        # misma columna). Las reglas de la recta, contadas con una sola señal, descartan la X de en
+        # medio. Nada de eso frena: la ruta ya pasa por el lado bueno sea cual sea la fila.
+        half_seats = set()
+        if getattr(C, "ROUTE_HALF_SEEN", False) and prov:
+            singles = {**conf, **{k: c for k, c in prov.items() if k not in roi_seats}}
+            rule = self._rule_empty(singles)
+            ghosts = {}
+            tol = float(getattr(C, "ROUTE_HALF_ROW_TOL_MM", 150.0))
+            rows = getattr(dm, "row_candidates", None)
+            for (sec, seat), col in prov.items():
+                if (sec, seat) in roi_seats:
+                    continue
+                half_seats.add((sec, seat))
+                cands = rows(sec, seat, col, tol) if rows is not None else [seat]
+                for other in cands:
+                    twin_ = (sec, other)
+                    if other == seat or twin_ in conf or twin_ in empty or prov.get(twin_, col) != col:
+                        continue
+                    ghosts[twin_] = col
+                    half_seats.add(twin_)
+            half_seats |= {k for k in rule if k[0] in {s for s, _ in half_seats}}
+            plan_seats = {**plan_seats, **ghosts}
+            plan_unknown = [k for k in plan_unknown if k not in half_seats]
         extra, extra_key, anchor_replan = None, None, False
         if not self.fixed:
             # Recta del cajón sin el avance: sus asientos no se pueden ubicar;
@@ -772,7 +799,7 @@ class RouteMode:
         slow = int(getattr(C, "ROUTE_SLOW_PWM", 100))
         if self.fixed:
             # Los asientos con color por ROI ya tienen lado: no frenan (ni cuentan para la parada).
-            speed_unknown = [k for k in unknown if k not in roi_seats]
+            speed_unknown = [k for k in unknown if k not in roi_seats and k not in half_seats]
             # Después de la vuelta 1 (tc >= ROUTE_UNSEEN_MAX_TC) lo que falta no frena: la ruta ya lo
             # esquiva como obstáculo (orillas48: N/T3 sin confirmar hasta la vuelta 3, PWM 130 en cada pasada).
             _max_tc = getattr(C, "ROUTE_UNSEEN_MAX_TC", None)
