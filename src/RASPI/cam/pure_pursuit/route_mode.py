@@ -773,7 +773,11 @@ class RouteMode:
         if self.fixed:
             # Los asientos con color por ROI ya tienen lado: no frenan (ni cuentan para la parada).
             speed_unknown = [k for k in unknown if k not in roi_seats]
-            self.rv = self._speed(speed_unknown, (x - ds * ax, y - ds * ay, hd)) if lap1 else None
+            # Después de la vuelta 1 (tc >= ROUTE_UNSEEN_MAX_TC) lo que falta no frena: la ruta ya lo
+            # esquiva como obstáculo (orillas48: N/T3 sin confirmar hasta la vuelta 3, PWM 130 en cada pasada).
+            _max_tc = getattr(C, "ROUTE_UNSEEN_MAX_TC", None)
+            _past = _max_tc is not None and float(getattr(self, "_tc_max", 0) or 0) >= float(_max_tc)
+            self.rv = self._speed(speed_unknown, (x - ds * ax, y - ds * ay, hd)) if (lap1 and not _past) else None
         else:
             # Sin el avance: lento. Con el frontal lejos de la pared del fondo
             # (dF >= 100 cm, sin eco = 200) el perfil manda; al verla, tope ciego.

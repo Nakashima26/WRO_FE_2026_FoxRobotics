@@ -1512,6 +1512,14 @@ ROUTE_CTE_SLOW_MM = 40.0
 ROUTE_STOP_MAX_FRAMES = 80
 # Votos de color con los que un asiento sin confirmar ya cuenta como señal provisional.
 ROUTE_PROVISIONAL_VOTES = 2
+# Desde esta cuenta de esquinas los asientos sin ver ya no bajan la velocidad (la ruta los esquiva
+# igual). orillas48: N/T3 sin confirmar hasta la vuelta 3 y PWM 130 en cada pasada. None = siempre frenan.
+ROUTE_UNSEEN_MAX_TC = 4
+# DigitalMap: confirma un asiento con >= VOTES votos de un color, la detección más cercana a <= DIST_MM
+# del asiento y LEAD votos más que el otro color.
+DIGITAL_MAP_CONFIRM_VOTES = 3
+DIGITAL_MAP_CONFIRM_DIST_MM = 160.0
+DIGITAL_MAP_CONFIRM_LEAD = 2
 # Arranque ciego (start_fix.py): el cajón puede estar en cualquier punto de la
 # recta de salida (pegado a la pared exterior). Se arranca suponiéndolo lo más
 # atrás posible y el avance se fija con los sonares (pared del fondo a ≤119 cm).
