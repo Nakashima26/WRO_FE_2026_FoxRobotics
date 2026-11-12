@@ -12,6 +12,27 @@ cv2.setNumThreads(fox_cv_threads)
 
 _LENS_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pure_pursuit", "lens_calib.npz")
 
+# Exposición FIJA (Picamera2). Con la automática, dentro del cajón (pared rosa oscura) la cámara sube la
+# exposición y al salir el piso sale quemado ~1 s (orillas57: la cinta naranja no se vio a tiempo y el cajón
+# se forzó 12 cm mal). El archivo lo escribe pure_pursuit/mide_exposicion.py con el carro en la pista.
+# FOX_CAM_EXPO: ruta del json; "" o "0" = automática. Sin archivo = automática.
+_EXPO_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camera_tuning", "exposicion.json")
+
+
+def exposicion_fija():
+    """{"ExposureTime": us, "AnalogueGain": g} del json, o None (automática)."""
+    path = os.environ.get("FOX_CAM_EXPO", _EXPO_DEFAULT)
+    if path in ("", "0") or not os.path.exists(path):
+        return None
+    try:
+        import json
+        with open(path) as f:
+            d = json.load(f)
+        return {"ExposureTime": int(d["ExposureTime"]), "AnalogueGain": float(d["AnalogueGain"])}
+    except Exception as e:   # un archivo roto no debe tumbar la carrera
+        print(f"[CAM] AVISO: no se pudo leer {path} ({e}); exposición automática", flush=True)
+        return None
+
 
 class _UndistortCap:
     """Envuelve el VideoCapture y endereza cada frame con la calibración de lente."""
@@ -54,18 +75,22 @@ class _Picam2Cap:
     el ISP: mismo modo del sensor (1640x1232, mismo campo de visión: afín 1.001 y <0.3 px), mismo
     tuning y ganancias, 39.9 fps con 5 % de CPU."""
 
-    def __init__(self, tuning, gains, fps):
+    def __init__(self, tuning, gains, fps, expo=None):
         from picamera2 import Picamera2
         self._cam = Picamera2(tuning=Picamera2.load_tuning_file(tuning))
+        controls = {"FrameRate": fps, "AwbEnable": False, "ColourGains": gains}
+        if expo:
+            controls.update({"AeEnable": False, **expo})
         cfg = self._cam.create_video_configuration(
             main={"size": (640, 480), "format": "RGB888"},   # RGB888 = arreglo BGR de OpenCV
-            raw={"size": (1640, 1232)}, buffer_count=4,
-            controls={"FrameRate": fps, "AwbEnable": False, "ColourGains": gains})
+            raw={"size": (1640, 1232)}, buffer_count=4, controls=controls)
         self._cam.configure(cfg)
         self._cam.start()
         self._open = True
+        ae = (f"exposición FIJA {expo['ExposureTime']} us × {expo['AnalogueGain']:.2f}" if expo
+              else "exposición automática")
         print(f"[CAM] Picamera2 640x480 escalado en el ISP (sensor {self._cam.camera_configuration()['raw']['size']}, "
-              f"{fps} fps, ganancias {gains})", flush=True)
+              f"{fps} fps, ganancias {gains}, {ae})", flush=True)
 
     def read(self):
         if not self._open:
@@ -124,7 +149,7 @@ def open_camera(cam_index=0, undistort=True):
         # Pi 5: Picamera2 con el escalado en el ISP (ver _Picam2Cap). FOX_CAM_PIPE=gst|old = GStreamer.
         if gains == "<1.10,1.37>" and os.environ.get("FOX_CAM_PIPE") not in ("gst", "old"):
             try:
-                cap = _Picam2Cap(tuning_pi5, (1.10, 1.37), fps)
+                cap = _Picam2Cap(tuning_pi5, (1.10, 1.37), fps, exposicion_fija())
                 return _wrap_undistort(cap) if undistort else cap
             except Exception as e:
                 print(f"[CAM] AVISO: Picamera2 no abrió ({e}); sigo con GStreamer", flush=True)
