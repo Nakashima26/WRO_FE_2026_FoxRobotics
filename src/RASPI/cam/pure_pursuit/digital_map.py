@@ -180,6 +180,7 @@ class DigitalMap:
         self._od: float | None = None
         self._tc = 0
         self._votes: dict[tuple[str, str], dict[str, int]] = {}
+        self._row_obs: dict[tuple[str, str, str], list[float]] = {}
         self.confirmed: dict[tuple[str, str], str] = {}
         self._best: dict[tuple[str, str], float] = {}
         if self.direction:
@@ -464,6 +465,11 @@ class DigitalMap:
                 a, b = near[0], near[1]
                 pick = a if abs(a[4] - a[3]) <= abs(b[4] - b[3]) else b
                 dist, sec, sid, fr, sr, fa, sa = pick
+            # Fila observada (coordenada lateral de la recta) antes de pegarla a un asiento:
+            # route_mode la usa para saber qué filas de la columna son posibles (señal medio vista).
+            obs = self._row_obs.setdefault((sec, _COL[sid], color), [])
+            obs.append(fr)
+            del obs[:-30]
             stuck = self._stick_seat(sec, sid, color, wx, wy)
             if stuck != sid:
                 sid = stuck
@@ -494,6 +500,22 @@ class DigitalMap:
                 self._latched[sec] = (sa, side)
             elif side < prev[1]:
                 self._latched[sec] = (prev[0], side)
+
+    def row_candidates(self, sec: str, sid: str, color: str, tol_mm: float) -> list[str]:
+        """Asientos de la columna de sid cuya fila queda a <= tol_mm de la mediana lateral observada
+        para ese color (las dos si cayó entre filas). Sin observaciones, solo sid."""
+        obs = self._row_obs.get((sec, _COL[sid], color))
+        if not obs:
+            return [sid]
+        m = float(np.median(obs))
+        out = []
+        for other, ocol in _COL.items():
+            if ocol != _COL[sid]:
+                continue
+            ox, oy = self._seat_xy(sec, other)
+            if abs(self._section_frame(ox, oy, sec)[1] - m) <= tol_mm:
+                out.append(other)
+        return out or [sid]
 
     def _keep_closer_row(self, sec: str, sid: str, color: str) -> None:
         """T1 y T3 son la misma altura, solo cambia la fila. Se queda la más cercana."""

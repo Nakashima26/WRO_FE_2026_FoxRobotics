@@ -1368,6 +1368,12 @@ ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_
 ROUTE_LAP1_PWM = 120
 # Aplica las reglas de la recta también con el color provisional: un replan por señal en vez de dos.
 ROUTE_PROV_RULES = False
+# Señal medio vista (color provisional, sin confirmar): la ruta esquiva también la otra fila de su
+# columna con el mismo color, descarta por regla la X de en medio, y esos asientos ya no frenan.
+ROUTE_HALF_SEEN = True
+# Filas posibles de una señal medio vista: las que quedan a <= esto de la mediana lateral observada
+# (filas a 200 mm: 150 = las dos si la mediana cae en la mitad central del hueco).
+ROUTE_HALF_ROW_TOL_MM = 150.0
 ROUTE_LAP1_OPEN = False   # vuelta 1: sin asiento sin ver a < ROUTE_SLOWDOWN_MM adelante, sin el tope ROUTE_LAP1_PWM
 # Vuelta 1: cerca de un asiento sin ver, en vez del escalón a ROUTE_UNSEEN_PWM dentro de
 # ROUTE_SLOWDOWN_MM, rampa física: llegar a ROUTE_UNSEEN_PWM a esta distancia (mm) del asiento
