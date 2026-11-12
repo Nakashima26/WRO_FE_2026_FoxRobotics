@@ -355,8 +355,12 @@ class CameraParams:
     # Vibración de la cámara: cada cuadro se dibuja desde la pose movida N(0, jitter_mm) en x/y.
     # Medido 2026-11-11 reproduciendo orillas48 por el DigitalMap: dentro de una misma pasada los votos de
     # una lata se dispersan ~68 mm (radial) en el carro y ~20 en el gemelo -> sqrt(68²-20²)/sqrt(2) ≈ 45.
-    # TWIN_CAM_JITTER_MM lo cambia (0 = como antes).
-    jitter_mm: float = 45.0
+    # TWIN_CAM_JITTER_MM lo cambia. Apagado (0): moviendo la cámara entera, por cuadro el seguidor de la
+    # naranja nunca la daba por estable (0/1338 cuadros) y lento (tau 0.3 s) chocaba N/T2 en la 1a recta;
+    # la dispersión real es de las latas, no de toda la imagen.
+    jitter_mm: float = 0.0
+    # Correlación en el tiempo de la vibración (TWIN_CAM_JITTER_TAU_S). 0 = ruido blanco por cuadro.
+    jitter_tau_s: float = 0.3
 
     def __post_init__(self) -> None:
         _prov("camera.hfov", "medido", "NoIR ancho ~120° (README); el PnP del .npz no se usa")
