@@ -1,0 +1,7 @@
+{
+ "ExposureTime": 20483,
+ "AnalogueGain": 1.5,
+ "_medido": "2026-11-12 13:19:34",
+ "_escala": 1.0,
+ "_nota": "pista del taller con la automatica fuera del cajon; en el cajon la automatica sube a 24953 us x 2.78 (2.3x) y al salir quema el piso. Rosa en el cajon con esta fija: 0.52 (umbral 0.28). Re-medir en la sede: python3 -m pure_pursuit.mide_exposicion --guardar"
+}
