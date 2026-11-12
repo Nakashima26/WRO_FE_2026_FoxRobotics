@@ -352,10 +352,16 @@ class CameraParams:
     equidistant: bool = False
     wall_height_mm: float = 100.0
     sign_height_mm: float = 100.0
+    # Vibración de la cámara: cada cuadro se dibuja desde la pose movida N(0, jitter_mm) en x/y.
+    # Medido 2026-11-11 reproduciendo orillas48 por el DigitalMap: dentro de una misma pasada los votos de
+    # una lata se dispersan ~68 mm (radial) en el carro y ~20 en el gemelo -> sqrt(68²-20²)/sqrt(2) ≈ 45.
+    # TWIN_CAM_JITTER_MM lo cambia (0 = como antes).
+    jitter_mm: float = 45.0
 
     def __post_init__(self) -> None:
         _prov("camera.hfov", "medido", "NoIR ancho ~120° (README); el PnP del .npz no se usa")
         _prov("camera.tilt_deg", "medido", "45° hacia el piso, confirmado por usuario")
+        _prov("camera.jitter_mm", "medido", "dispersión de votos por pasada, orillas48 vs gemelo (2026-11-11)")
         _prov("camera.height_mm", "supuesto", "97 mm = 90 + 7 (LiPo vs Pi4), medir con regla")
         _prov(
             "camera.forward_from_rear_axle_mm",
