@@ -32,6 +32,7 @@ from .wro_field import (
     SEATS,
     SECTIONS_CW,
     _barrier_corners,
+    orange_segments,
     _heading,
     section_to_world,
     stall_start_xy,
@@ -43,6 +44,9 @@ _FRONT_MOUNT_MM = C.SENSOR_MOUNTS["us_front"][1]    # sonar frontal, desde el ej
 _REAR_MOUNT_MM = -C.SENSOR_MOUNTS["tof_rear"][1]    # ToF trasero, detrás del eje
 # La hoja BEV nace en el eje delantero; la pose del mapa es el eje trasero.
 _BEV_AHEAD_MM = float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
+_VOTE_MAX_DEG = float(getattr(C, "DIGITAL_MAP_VOTE_MAX_BEARING_DEG", 90.0))
+_VOTE_MISALIGN_DEG = float(getattr(C, "DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG", 25.0))
+_VOTE_TAN_MAX = math.tan(math.radians(_VOTE_MAX_DEG)) if _VOTE_MAX_DEG < 89.0 else float("inf")
 _CAM_AHEAD_MM = float(getattr(C, "CAMERA_FWD_MM", 140.0))  # cámara, desde el eje trasero
 # El pie de la lata es la cara que mira a la cámara; el centro queda detrás.
 _FOOT_TO_CENTER_MM = float(getattr(C, "SIGN_FOOT_TO_CENTER_MM", 25.0))
@@ -181,6 +185,11 @@ class DigitalMap:
         self._tc = 0
         self._votes: dict[tuple[str, str], dict[str, int]] = {}
         self._row_obs: dict[tuple[str, str, str], list[float]] = {}
+        # Corrección a lo largo por la cinta naranja (DIGITAL_MAP_LINE_ALONG_FIX): vector (x, y) que se suma a
+        # lo que ve la cámara, medido contra la cinta de verdad; vale solo en la recta donde se midió.
+        self._line_fix: tuple[float, float] | None = None
+        self._line_fix_tc = -9
+        self._line_fix_hist: list[float] = []
         self.confirmed: dict[tuple[str, str], str] = {}
         self._best: dict[tuple[str, str], float] = {}
         if self.direction:
@@ -264,6 +273,7 @@ class DigitalMap:
     def replay_deferred(self, dx: float, dy: float) -> int:
         """Arranque ciego resuelto: vota lo guardado con la pose corrida (dx, dy)."""
         buf, self._deferred = self._deferred or [], None
+        self._line_fix, self._line_fix_hist = None, []
         saved = (self.pose_xy, self._view_heading, self._orange_y, self.section, self._tc, self.in_stall)
         for feet, pose, vh, oy, sec, tc, stall in buf:
             self.pose_xy = (pose[0] + dx, pose[1] + dy)
@@ -310,6 +320,7 @@ class DigitalMap:
             if est in ("S", "C", "R"):
                 self._wall_fix(ack)
         self._note_orange(orange)
+        self._note_line_fix(orange)
         if not self.in_stall:
             self.along_mm, self.lat_mm = self._section_frame(
                 self.pose_xy[0], self.pose_xy[1], self.section)
@@ -386,6 +397,82 @@ class DigitalMap:
         # La cinta pegada al carro es el final de esta recta: toca girar.
         self._at_corner = fwd < 350.0
 
+    def _note_line_fix(self, orange: dict | None) -> None:
+        """La cinta naranja vista en el BEV contra la de verdad: cuánto va corrida la pose a lo largo de la
+        recta. Las columnas de asientos están a 500 mm: con la pose ~300 mm corrida tras el giro (orillas50,
+        el verde de E/X2 se votó en E/T2) una lata brinca de columna; la distancia lata-cinta en la imagen no
+        depende de la pose. La cinta va diagonal (30/60° del carril): un error lateral entra x cot(ángulo)."""
+        if not getattr(C, "DIGITAL_MAP_LINE_ALONG_FIX", False) or self.in_stall or self._odom0 is None:
+            return
+        # Arranque ciego sin resolver: la pose todavía no tiene el avance del cajón (gemelo: +141 en la
+        # recta del cajón que luego sobraba al corregir el marco).
+        if self._deferred is not None:
+            return
+        if not orange or not orange.get("seen") or orange.get("dead_reckoned"):
+            return
+        cv = orange.get("_curve")
+        if not cv or self.direction is None:
+            return
+        mx, my = cv["mu"]
+        ux, uy = cv["u"]
+        a, b, c = cv["c"]
+        t0, t1 = cv["t"]
+        ts = np.linspace(t0, t1, 15)
+        ss = a * ts * ts + b * ts + c
+        bxs = mx + ts * ux - ss * uy
+        bys = my + ts * uy + ss * ux
+        px, py = self.pose_xy
+        h = math.radians(self._view_heading)
+        pts = []
+        for bx, by in zip(bxs, bys):
+            lat = (bx - C.ROBOT_BEV_X) * C.MM_PER_PX
+            fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX + _BEV_AHEAD_MM
+            if fwd < 150.0 or fwd > 900.0:
+                continue
+            pts.append((px + fwd * math.sin(h) + lat * math.cos(h), py + fwd * math.cos(h) - lat * math.sin(h)))
+        if len(pts) < 5:
+            return
+        _x0, _y0, sn, cs = _lane_frame(self.section, self.direction)
+        best = None
+        for (qx, qy), (rx, ry) in orange_segments():
+            vx, vy = rx - qx, ry - qy
+            ln = math.hypot(vx, vy)
+            ex, ey = vx / ln, vy / ln
+            nx, ny = -ey, ex
+            den = nx * sn + ny * cs
+            if abs(den) < 0.3:
+                continue
+            # Distancia al SEGMENTO (no a la recta infinita: la de otra esquina pasaba cerca, gemelo
+            # semilla 4 daba -357/+456 con la pose buena).
+            seg = []
+            for x, y in pts:
+                t = min(max((x - qx) * ex + (y - qy) * ey, 0.0), ln)
+                seg.append(math.hypot(x - (qx + t * ex), y - (qy + t * ey)))
+            mean_abs = float(np.mean(seg))
+            if best is None or mean_abs < best[0]:
+                perp = [nx * (x - qx) + ny * (y - qy) for x, y in pts]
+                best = (mean_abs, [-p_ / den for p_ in perp])
+        if best is None or best[0] > float(getattr(C, "DIGITAL_MAP_LINE_FIX_MATCH_MM", 300.0)):
+            return
+        ds = np.asarray(best[1])
+        d = float(np.median(ds))
+        # Puntos de la cinta que no cuadran entre sí (curva mal ajustada, otra mancha naranja): fuera.
+        if float(np.median(np.abs(ds - d))) > float(getattr(C, "DIGITAL_MAP_LINE_FIX_MAD_MM", 60.0)):
+            return
+        lim = float(getattr(C, "DIGITAL_MAP_LINE_FIX_MAX_MM", 300.0))
+        if abs(d) > lim:
+            return
+        if self._tc != self._line_fix_tc:
+            self._line_fix_hist = []
+        self._line_fix_hist.append(d)
+        del self._line_fix_hist[:-8]
+        dm = float(np.median(self._line_fix_hist))
+        if self._line_fix_tc != self._tc or self._line_fix is None or abs(dm - getattr(self, "_line_fix_last", 0.0)) > 30.0:
+            print(f"[DMLINE] tc={self._tc} sec={self.section} along_fix={dm:+.0f} mm", flush=True)
+            self._line_fix_last = dm
+        self._line_fix = (dm * sn, dm * cs)
+        self._line_fix_tc = self._tc
+
     def _along_of(self, x: float, y: float, section: str) -> float:
         x0, y0, sn, cs = _lane_frame(section, self.direction)
         dx, dy = x - x0, y - y0
@@ -435,12 +522,17 @@ class DigitalMap:
             # Hoja -> eje trasero, y del pie al centro de la lata (sobre el
             # rayo de la cámara). Sin esto la lata caía ~1 fila más cerca.
             fwd += _BEV_AHEAD_MM
+            side = abs(lat) > fwd * _VOTE_TAN_MAX
             ray = math.hypot(fwd - _CAM_AHEAD_MM, lat)
             if ray > 1e-6:
                 fwd += _FOOT_TO_CENTER_MM * (fwd - _CAM_AHEAD_MM) / ray
                 lat += _FOOT_TO_CENTER_MM * lat / ray
             wx = px + fwd * math.sin(h) + lat * math.cos(h)
             wy = py + fwd * math.cos(h) - lat * math.sin(h)
+            # Solo mientras el carro sigue en la recta donde se midió: tras el giro el localizador ya movió la
+            # pose y el vector viejo cae en el lateral de la recta nueva (gemelo semilla 2: S/T3 -> S/T1, choque).
+            if self._line_fix is not None and self._tc == self._line_fix_tc:
+                wx, wy = wx + self._line_fix[0], wy + self._line_fix[1]
             # Delante de la naranja sigue esta recta. Pasada la cinta, es la siguiente.
             past = self._orange_y is not None and by < self._orange_y - 12.0
             ranked = []
@@ -465,6 +557,17 @@ class DigitalMap:
                 a, b = near[0], near[1]
                 pick = a if abs(a[4] - a[3]) <= abs(b[4] - b[3]) else b
                 dist, sec, sid, fr, sr, fa, sa = pick
+            # Lata muy de lado con el carro todavía cruzado respecto a su recta (orillas50/52: el verde solo de
+            # E/X visto a 25-35° saliendo de la esquina NE caía ~400 mm antes, en E/T2/T4; el rumbo va atrasado
+            # en el giro): el voto cuenta pero no confirma ni da distancia. Tirarlo retrasaba N/T2 y S/T1.
+            if side:
+                ga0, _ = self._section_frame(wx, wy, sec)
+                gx = self._section_frame(wx + 1.0, wy, sec)[0] - ga0
+                gy = self._section_frame(wx, wy + 1.0, sec)[0] - ga0
+                mis = abs((math.degrees(h - math.atan2(gx, gy)) + 180.0) % 360.0 - 180.0)
+                weak = mis > _VOTE_MISALIGN_DEG
+            else:
+                weak = False
             # Fila observada (coordenada lateral de la recta) antes de pegarla a un asiento:
             # route_mode la usa para saber qué filas de la columna son posibles (señal medio vista).
             obs = self._row_obs.setdefault((sec, _COL[sid], color), [])
@@ -483,11 +586,12 @@ class DigitalMap:
                 self._live.append((sec, sa, side))
             self._pull_known(wx, wy, color)
             key = (sec, sid)
-            self._best[key] = min(self._best.get(key, 9999.0), dist)
+            if not weak:
+                self._best[key] = min(self._best.get(key, 9999.0), dist)
             bucket = self._votes.setdefault(key, {"Red": 0, "Green": 0})
             bucket[color] += 1
             other = "Red" if color == "Green" else "Green"
-            if (bucket[color] >= int(getattr(C, "DIGITAL_MAP_CONFIRM_VOTES", 3))
+            if (not weak and bucket[color] >= int(getattr(C, "DIGITAL_MAP_CONFIRM_VOTES", 3))
                     and self._best[key] <= float(getattr(C, "DIGITAL_MAP_CONFIRM_DIST_MM", 160.0))
                     and bucket[color] >= bucket[other] + int(getattr(C, "DIGITAL_MAP_CONFIRM_LEAD", 2))
                     and self._seat_ok(sec, sid, color, wx, wy)):
