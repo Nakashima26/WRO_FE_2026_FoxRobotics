@@ -2352,6 +2352,10 @@ const uint16_t TOF_FRENTE_MS       = 33;     // presupuesto = periodo, modo Long
 // 35–42: tR −111..−214 y tL −68..−95 mm a 57–72 cm. RondaAbierta/SeguirRuta ya usaban 8.
 // 0 = no tocar (default 16). El frontal (Long) se queda en 16.
 const uint8_t  TOF_LAT_TRAS_ROI    = 8;
+// Aceptar status 2 en los Short (ver leerToF). Tope por si sin pared (esquina abierta) da algo raro:
+// el Short no alcanza mucho más de ~1.3 m y en estática a 80 cm aún daba la distancia buena.
+const bool     TOF_LAT_ACEPTA_ST2  = true;
+const uint16_t TOF_LAT_ST2_MAX_MM  = 900;
 
 static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
                       bool corto) {
@@ -2393,7 +2397,13 @@ void leerToF() {
     if (dev[i]->dataReady()) {
       uint16_t mm = dev[i]->read(false);
       uint8_t st = dev[i]->ranging_data.range_status;
-      tofMm[i] = (st == 0) ? (int)mm : -1;
+      // Laterales/trasero (Short, i < 3): el status 2 (poca señal) también es la distancia correcta
+      // (estática 2026-10-21, NOTAS_TOF.md: a 60-80 cm TODO sale status 2 con −8/−40 mm de error).
+      // Solo status 0 dejaba 4-12 % de lecturas válidas con ROI 8 (2026-11-12). El frontal (Long)
+      // sigue solo con 0: su status 2 lee ~+20 cm.
+      bool corto = (i < 3) && TOF_LAT_TRAS_SHORT;
+      bool ok = (st == 0) || (corto && TOF_LAT_ACEPTA_ST2 && st == 2 && mm <= TOF_LAT_ST2_MAX_MM);
+      tofMm[i] = ok ? (int)mm : -1;
     }
     unsigned long dt = micros() - t0;
     if (dt > tofUsMax[i]) tofUsMax[i] = dt;
