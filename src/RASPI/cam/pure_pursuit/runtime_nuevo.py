@@ -1319,6 +1319,46 @@ class PPRuntime:
             print(f"[CAM-CHECK] FALLA intento {intento}: {why} -> reabro la cámara.", flush=True)
             self._reopen_camera()
 
+    def _rec_cortado(self, ack: str | None) -> bool:
+        """True cuando ya se cortó la grabación: el carro se movió y luego lleva
+        REC_STOP_QUIETO_S sin moverse (o sin ACK). Antes seguía grabando hasta
+        parar el servicio: orillas62 terminó a los 49 s y el .avi llegó a 209 MB."""
+        if getattr(self, "_rec_fin", False):
+            return True
+        quieto_s = getattr(C, "REC_STOP_QUIETO_S", None)
+        if not quieto_s or not self.cfg.record_orillas:
+            return False
+        now = time.monotonic()
+        # Movimiento por la pose del encoder (px/py del ACK; vel= llega siempre en 0).
+        pos = None
+        if ack and "px=" in ack and "py=" in ack:
+            try:
+                pos = (float(ack.split("px=", 1)[1].split(",", 1)[0]),
+                       float(ack.split("py=", 1)[1].split(",", 1)[0]))
+            except ValueError:
+                pos = None
+        if pos is not None:
+            ancla = getattr(self, "_rec_ancla", None)
+            if ancla is None:
+                self._rec_ancla = pos
+            elif math.hypot(pos[0] - ancla[0], pos[1] - ancla[1]) >= float(getattr(C, "REC_STOP_MOV_MM", 20.0)):
+                self._rec_ancla = pos
+                self._rec_t_mov = now
+                return False
+        t_mov = getattr(self, "_rec_t_mov", None)
+        if t_mov is None or now - t_mov < float(quieto_s):
+            return False
+        self._rec_fin = True
+        if self.video_writer is not None:
+            self.video_writer.stop()
+            self.video_writer = None
+        if self.bev_recorder is not None:
+            self.bev_recorder.stop()
+            self.bev_recorder = None
+        print(f"[REC] Grabación cortada: {float(quieto_s):.0f} s sin moverse "
+              f"({self.record_count} frames).", flush=True)
+        return True
+
     def _maybe_record(self, frame: np.ndarray, fps: float,
                       bev: np.ndarray | None = None):
         if not self.cfg.record_orillas:
@@ -2522,7 +2562,7 @@ class PPRuntime:
                 # o ventana. Armarlo en TODOS costaba ~14 ms/frame (~18% del loop a 14 fps). Los
                 # 'want_*' espian los contadores SIN incrementarlos (_maybe_record/_write_cam_frame
                 # los incrementan igual que antes), asi que el frame que se escribe es el mismo.
-                _do_rec = (should_record is None or should_record())
+                _do_rec = (should_record is None or should_record()) and not self._rec_cortado(getattr(self, "_prev_ack", None))
                 _want_cam = ((self.cam_frame_count + 1) % max(1, self.cfg.cam_frame_every_n)) == 0
                 _want_rec = (_do_rec and self.cfg.record_orillas
                              and ((self.record_count + 1) % max(1, self.cfg.record_every_n)) == 0)
