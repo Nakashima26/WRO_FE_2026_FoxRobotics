@@ -1062,8 +1062,15 @@ REC_BEV_JPEG_QUALITY = 95
 # la cámara tira el tono hacia el azul por su blue-gain 1.5x). Es un chequeo de
 # "casi todo el frame es de este tono", no una detección fina. Calibrar fino con:
 #   python -m pure_pursuit.pick_color --image <frame_dentro_del_cajon>.jpg
-PARK_PINK_HSV       = [(np.array([135, 45, 40]), np.array([175, 255, 255]))]
+# 2026-11-11 (orillas43-45): con luz cálida la pared salió en H 176-178 (en la
+# 41 era 155), 1% en rango -> arranque normal sin salir del cajón. Se amplía
+# hasta 179 y 0-3 (vuelta del tono). Para que un rojo cercano no cuente, el
+# rosa además debe cubrir PARK_PINK_COLS_MIN de las columnas (la pared ocupa
+# todo el ancho; en las corridas 35/36/41/44 ningún frame en marcha pasó 0.06).
+PARK_PINK_HSV       = [(np.array([135, 45, 40]), np.array([179, 255, 255])),
+                       (np.array([0, 45, 40]),   np.array([3, 255, 255]))]
 PARK_PINK_RATIO_MIN = 0.28   # fracción del ROI que debe ser magenta
+PARK_PINK_COLS_MIN  = 0.60   # fracción de columnas con >=20% de rosa; si no, ratio=0
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
 PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
