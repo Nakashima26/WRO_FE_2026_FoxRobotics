@@ -141,11 +141,12 @@ def test_tof_black_wall_range(rng):
 
 
 def test_tof_short_map_measured(rng):
-    """Short ROI 16 en pared negra (calib 2026-10-21): +19 cerca, 800 -> 610 (ve el piso)."""
+    """Short ROI 16: +19 cerca y de lejos ve el piso. El derecho (id 1) tiene su curva de las
+    corridas del 2026-11-11: se queda en ~500 (el izquierdo, calib 2026-10-21, en 610)."""
     params = replace(TwinParams().tof, noise_sigma_mm=0.0, noise_rel=0.0)
     world = _EastWallWorld(OUTER_HALF_MM)
     lateral = params.mounts[1].right_mm
-    for dist, want in ((300.0, 319), (800.0, 610), (1100.0, 610)):
+    for dist, want in ((300.0, 319), (550.0, 463), (800.0, 500), (1100.0, 500)):
         r = ToF(params, rng).read_mm(1, world, Pose(OUTER_HALF_MM - dist - lateral, 0.0, 0.0), 0.0)
         assert abs(r - want) < 15, (dist, r)
 

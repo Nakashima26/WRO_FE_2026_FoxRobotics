@@ -179,7 +179,7 @@ class ToF:
             return -1
 
         if sensor_id in p.short_map_ids:
-            xs, ys = p.short_map_true_mm, p.short_map_read_mm
+            xs, ys = p.short_map_by_id.get(sensor_id, (p.short_map_true_mm, p.short_map_read_mm))
             mean_d = mean_d + ys[0] - xs[0] if mean_d < xs[0] else float(np.interp(mean_d, xs, ys))
         sigma = p.noise_sigma_mm
         near = mean_d < self._sensor_value(p.near_ok_mm_by_id, 0.0, sensor_id)

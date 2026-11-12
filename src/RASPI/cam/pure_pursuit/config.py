@@ -140,7 +140,11 @@ US_DESDE_TOF = True
 # la recta leen 30-50 cm) casi nunca corrigen: en la 13:36 la pose iba ~20 cm corrida en la recta
 # norte y el rojo N/X2 cayó a 19 cm de su asiento (no entró al mapa) y lo chocó. Laterales hasta
 # 500 (Short ROI 16: <2 cm hasta 45, -5 a 60); frontal/trasero en 240 (Long: +20 cm más allá de 50).
-LOC_TOF_MAX_MM = {"tL": 500.0, "tR": 500.0, "tF": 240.0, "tB": 240.0}
+# 2026-11-11 (corridas 35-42): el derecho real se queda en 460-500 desde ~45 cm (55 cm lee 463, 65 lee
+# 484): ve el piso con el ROI de 16. Con 500 esas lecturas entraban y corrían la pose 10-25 cm hacia la
+# derecha (roces en la sección 2). Izquierdo: 55 cm lee 526. Gemelo campo 36 con esa curva: 500/500
+# termina 2/7, 480/450 termina 7/7.
+LOC_TOF_MAX_MM = {"tL": 480.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
 # Ruido de proceso lineal del localizador (mm² por mm recorrido); None = el de antes. Ver localizer._predict.
 LOC_Q_XY_PER_MM = 2.0   # gemelo (s19/s7/s23, encoder 1.00 y 1.04): 2 -> 12+12+3 y 12+12+2 vueltas-esquina; sin esto con 1.04: 1+1+1
 # Procedencia, para el twin (describe()) y para quien mida.
