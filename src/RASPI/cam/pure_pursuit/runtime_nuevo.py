@@ -218,6 +218,10 @@ def _park_pink(frame_bgr):
     if m is None:
         return 0.0, None
     ratio = float(np.count_nonzero(m)) / float(m.size)
+    # La pared cubre todo el ancho; un signo rojo cercano no.
+    cols = np.count_nonzero(m, axis=0) / float(m.shape[0])
+    if float(np.mean(cols >= 0.2)) < float(getattr(C, "PARK_PINK_COLS_MIN", 0.0)):
+        ratio = 0.0
     full  = np.zeros((h, w), np.uint8)
     full[y0:, :] = m
     return ratio, full
