@@ -481,8 +481,9 @@ class DigitalMap:
             bucket = self._votes.setdefault(key, {"Red": 0, "Green": 0})
             bucket[color] += 1
             other = "Red" if color == "Green" else "Green"
-            if (bucket[color] >= 3 and self._best[key] <= 160.0
-                    and bucket[color] >= bucket[other] + 2
+            if (bucket[color] >= int(getattr(C, "DIGITAL_MAP_CONFIRM_VOTES", 3))
+                    and self._best[key] <= float(getattr(C, "DIGITAL_MAP_CONFIRM_DIST_MM", 160.0))
+                    and bucket[color] >= bucket[other] + int(getattr(C, "DIGITAL_MAP_CONFIRM_LEAD", 2))
                     and self._seat_ok(sec, sid, color, wx, wy)):
                 self._keep_closer_row(sec, sid, color)
         for sec, sa, side in self._live:
