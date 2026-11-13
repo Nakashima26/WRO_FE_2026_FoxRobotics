@@ -635,7 +635,7 @@ class RouteMode:
                 if q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0)):
                     delta = float(np.median(self._line_d[-int(n_dec):]))
             forced = False
-            if delta is None and self._past_straight(dm, pose):
+            if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
                 # decidan, el histograma queda plano cerca de lo supuesto).
                 delta = self.fix.mean()
@@ -1118,6 +1118,17 @@ class RouteMode:
         pwm = v_allow / K + pwm0
         return int(round(min(max(pwm, lo), top)))
 
+    def _force_wait(self, pose) -> bool:
+        """Cinta ya a la vista pero sin votos (aún más allá de los 600 mm de la ventana): el cajón
+        ancho la deja 500+ mm después del final supuesto de la recta y forzar daba la media del sonar
+        (gemelo s3/s7: -80 mm, 12 giros no). Espera hasta ROUTE_FIX_FORCE_WAIT_MM de avance."""
+        wmm = float(getattr(C, "ROUTE_FIX_FORCE_WAIT_MM", 0.0))
+        o = self.orange
+        if wmm <= 0.0 or self._line_d or not (o and o.get("seen") and not o.get("dead_reckoned")):
+            return False
+        w0 = self.__dict__.setdefault("_wait0", (pose[0], pose[1]))
+        return math.hypot(pose[0] - w0[0], pose[1] - w0[1]) < wmm
+
     def _past_straight(self, dm, pose) -> bool:
         """El frente del carro ya llegó (en el marco supuesto) al final de la recta del cajón."""
         _h, w = world_to_section(dm.parking, pose[0], pose[1])
@@ -1131,9 +1142,11 @@ class RouteMode:
         un δ, y el voto es la mediana. Si no, el punto de la recta ajustada en la
         columna central del BEV."""
         o = self.orange
-        if not o or not o.get("seen") or o.get("dead_reckoned"):
+        pix = o.get("_pix") if o else None
+        # Con pixeles crudos del frame no hace falta que el tracker ya haya persistido la línea
+        if not o or o.get("dead_reckoned") or not (o.get("seen") or (
+                pix is not None and getattr(C, "ROUTE_FIX_PIX_RAW", False))):
             return
-        pix = o.get("_pix")
         if pix is not None and len(pix) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
             if self._pix_vote(dm, pose, np.asarray(pix, float)):
                 return
