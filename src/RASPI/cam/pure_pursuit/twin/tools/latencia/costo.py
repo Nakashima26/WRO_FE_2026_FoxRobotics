@@ -106,5 +106,6 @@ atexit.register(report)
 seed, out = sys.argv[1], sys.argv[2]
 _cfg = json.loads(open("pure_pursuit/twin/tools/carrera_bench.json").read())
 _cfg.setdefault("pi", {}).update(json.loads(os.environ.get("TWIN_PI_EXTRA", "{}")))  # p. ej. {"ROUTE_PLAN_ASYNC": true}
+_cfg.setdefault("fw", {}).update(json.loads(os.environ.get("TWIN_FW_OVER", "{}")))  # p. ej. {"PARK_PL_W_DET": "145"}
 sys.argv = ["drive.py", seed, out, "ruta_perfil", json.dumps(_cfg), "--solo-cajon"]
 runpy.run_path("pure_pursuit/twin/tools/drive.py", run_name="__main__")
