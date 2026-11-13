@@ -962,6 +962,7 @@ const float INICIO_R_CONTRA_MM         = 130.0f; // radio efectivo de la contrav
 const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto (red de seguridad)
 const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
+const int  INICIO_TARDE_MIN_DEG    = 25;   // isal=2 llega en la contravuelta (fase 3) con |ang| >= esto: vuelve al recto (0 = no)
 const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
 const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
 const int  INICIO_CONTRA_FIN_DEG       = 32;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
@@ -4660,6 +4661,15 @@ void loop() {
 
       // ── Fase 1: SWING — saca la nariz hacia el interior ────────────────────
       // isal=2 llega a medio swing (la Pi asienta la lata a ~28°): la S se abre.
+      // Tarde (ya en la contravuelta, fase 3, con rumbo aún abierto): vuelve al recto y sigue hasta el lateral de isal=2.
+      if (inicioFase == 3 && piSalida == 2 && !inicioAdentro && INICIO_TARDE_MIN_DEG > 0 && deltaIni >= (float)INICIO_TARDE_MIN_DEG) {
+        inicioAdentro   = true;
+        inicioFase      = 2;
+        inicioFaseMs    = millis();
+        inicioOdomRecto = odomMmF;
+        Serial.print("INICIO isal=2 TARDE: vuelve al recto ang="); Serial.println(anguloGyro, 1);
+        break;
+      }
       if (inicioFase <= 2 && piSalida == 2 && !inicioAdentro) {
         inicioAdentro = true;
         Serial.print("INICIO isal=2 (adentro) en fase "); Serial.print(inicioFase);
