@@ -1431,7 +1431,7 @@ ROUTE_PROFILE_PWM0 = 25.0
 # Perfil v3 (None = igual que antes). MIN_PWM: piso real del perfil; las curvas cerradas
 # (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
 ROUTE_PROFILE_MIN_PWM = None
-ROUTE_L23_MIN_PWM = 255    # piso del perfil en las vueltas 2-3 (tc 4..11): sin frenar por curvatura (n1-3: vueltas 2+3 -0.41 s, pared min 11.8 mm); None = ROUTE_PROFILE_MIN_PWM
+ROUTE_L23_MIN_PWM = 170    # piso del perfil en vueltas 2-3 (tc 4..11). Con el lazo sin tope en 2-3 (255 = no frenar) chocaban señales; 170 frena cerca de señales/isla. None = ROUTE_PROFILE_MIN_PWM
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
 ROUTE_PROFILE_SIGN_NEAR_MM = None
@@ -1707,3 +1707,6 @@ SURPRISE_MIN_CONTOUR_AREA = 200.0  # la señal de 50 mm debe verse antes que el 
 # Pares (distancia longitudinal desde el origen BEV, mm; alto del bbox, px),
 # ordenados. Vacío: geometría H + montaje de cámara. Nunca extrapola la tabla.
 SURPRISE_NORMAL_HEIGHT_SAMPLES = ()
+# Vueltas 2-3 (tc 4..11): frenado/agarre del perfil propios. None = los de ROUTE_PROFILE_*.
+ROUTE_L23_A_BRAKE_MM_S2 = None
+ROUTE_L23_A_LAT_MM_S2 = None
