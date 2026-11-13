@@ -1044,6 +1044,9 @@ class RouteMode:
         tight_on = False
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
+        if l23:   # vueltas 2-3: frenado propio (sin tope del lazo el carro llega a ~830 mm/s)
+            a_brk = float(getattr(C, "ROUTE_L23_A_BRAKE_MM_S2", None) or a_brk)
+            a_lat = float(getattr(C, "ROUTE_L23_A_LAT_MM_S2", None) or a_lat)
         win = int(C.ROUTE_PROFILE_KAPPA_WIN)
         # Adelanto por latencia a la velocidad máxima (conservador).
         lead = v_max * float(C.ROUTE_PROFILE_LATENCY_S)
