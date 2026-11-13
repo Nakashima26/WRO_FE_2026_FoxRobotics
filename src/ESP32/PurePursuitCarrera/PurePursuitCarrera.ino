@@ -1690,7 +1690,7 @@ PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje 
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
 PARK_AJ int          PARK_PL_TILT_H              = 0;       // 1 = la altura del eje por sonar del escaneo normal usa la inclinacion (empeoro n1 s11 y n3 s20)
 PARK_AJ int          PARK_PL_TILT                = 1;       // 1 = corrige el anclaje de w por la inclinacion de la nariz al detectar el poste 2
-PARK_AJ int          PARK_REV_DIR                = 1;       // 1 = cajon al inicio y el carro va por adentro (iba a hacer U): sigue recto, pasa el cajon y entra de reversa en S sin U
+PARK_AJ int          PARK_REV_DIR                = 0;       // (12.5 V: 0/7 con 1, la reversa en S choca en todas las h) 1 = cajon al inicio y el carro va por adentro (iba a hacer U): sigue recto, pasa el cajon y entra de reversa en S sin U
 PARK_AJ float        PARK_REV_W_TOMA             = 150.0f;  // toma el mando de la Pi con el eje trasero en este w (marco del plan; 264 = cara de la madera de adelante)
 PARK_AJ float        PARK_REV_TH1                = 60.0f;   // angulo de la recta de la reversa: fija en que w para (mas h = mas lejos)
 PARK_AJ float        PARK_REV_KH                 = 0.06f;   // grados de rumbo hacia la pared por mm de h sobre PARK_REV_H0
