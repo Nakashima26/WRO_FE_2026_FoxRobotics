@@ -264,21 +264,22 @@ class ToFMount:
 
 @dataclass
 class ToFParams:
-    half_fov_deg: float = 13.5
+    # ROI 8x8 en los 4 (firmware 8af0b2a): cono ~13-14° total (NOTAS_TOF.md). Con ROI 16 eran 13.5.
+    half_fov_deg: float = 7.0
     ray_step_deg: float = 1.5
     # Pared negra visible a 80 cm en Short y a 150 cm en Long (calib 2026-10-21 tof); 250 era del VL53L0X.
     black_wall_max_mm: float = 1500.0
     # Lectura medida contra distancia real, pared negra, Short ROI 16 (lo que usa el firmware en L/R/atrás):
     # +19 mm cerca y desde ~60 cm el cono ve el piso (800 -> 610, se satura). Solo para los ids de abajo.
     short_map_true_mm: tuple[float, ...] = (100.0, 200.0, 300.0, 450.0, 600.0, 800.0)
-    short_map_read_mm: tuple[float, ...] = (119.0, 217.0, 319.0, 462.0, 550.0, 610.0)
+    # ROI 8 (firmware desde 8af0b2a + status 2 hasta 900 desde 889aa0c): lateral izq Short ROI 8 50 ms, calib 2026-10-21.
+    short_map_read_mm: tuple[float, ...] = (96.0, 195.0, 297.0, 450.0, 592.0, 760.0)
     short_map_ids: tuple[int, ...] = (0, 1, 2)
     # Curva propia por id (reemplaza la de arriba). Derecho (1): corridas 35-42 del 2026-11-11, real
     # sacado de la pared de enfrente (pasillo 1000, ancho tL+tR+70 = 985-1016 con el carro centrado):
     # exacto hasta ~45 cm y luego se queda en 460-500 (55 cm -> 463, 65 -> 484, 75 -> ~500).
     short_map_by_id: dict[int, tuple[tuple[float, ...], tuple[float, ...]]] = field(
-        default_factory=lambda: {1: ((100.0, 200.0, 300.0, 450.0, 550.0, 650.0, 800.0),
-                                     (119.0, 217.0, 319.0, 455.0, 463.0, 484.0, 500.0))})
+        default_factory=dict)  # el sesgo del derecho (460-500 desde 45 cm) era de ROI 16; con ROI 8 sin medir aún
     # Frontal Long (calib 2026-10-19 frontal_estatica, pared negra): +32 a 30 cm y ~+20 cm de 60 a 150,
     # con ±7..20 cm de ruido, y casi todo con status 2/7. El firmware (leerToF) solo acepta status 0:
     # en las corridas del 2026-11-09 (14:27, 14:35) el frontal salió -1 el 57-68 % de las lecturas y
@@ -292,7 +293,8 @@ class ToFParams:
     # Probabilidad de status 0 por lectura y lectura máxima que llega como status 0, por id (0=L 1=R 2=atrás 3=frente).
     # Trasero (2) desconectado en el carro v2 (2026-11-11, el usuario): siempre -1.
     # orillas35 en carrera: tL -1 6 %, tR -1 2 %, tF -1 89 % (el gemelo daba 0-3 / 0 / 72-78 %).
-    status_ok_prob_by_id: tuple[float, ...] = (0.94, 0.98, 0.0, 0.11)
+    # Trasero revivido (2026-11-12): misma probabilidad que el izquierdo, sin medir en carrera.
+    status_ok_prob_by_id: tuple[float, ...] = (0.94, 0.98, 0.94, 0.11)
     # Debajo de esta distancia real el sensor da status 0 siempre y el ruido de noise_sigma_mm (frontal parado
     # a 228 mm en orillas35: 0 % de -1, sd 4). 0 = sin zona cercana.
     near_ok_mm_by_id: tuple[float, ...] = (0.0, 0.0, 0.0, 300.0)

@@ -141,12 +141,11 @@ def test_tof_black_wall_range(rng):
 
 
 def test_tof_short_map_measured(rng):
-    """Short ROI 16: +19 cerca y de lejos ve el piso. El derecho (id 1) tiene su curva de las
-    corridas del 2026-11-11: se queda en ~500 (el izquierdo, calib 2026-10-21, en 610)."""
+    """Short ROI 8 (firmware 8af0b2a): < 1 cm hasta 60 cm y -4 cm a 80 (calib 2026-10-21)."""
     params = replace(TwinParams().tof, noise_sigma_mm=0.0, noise_rel=0.0)
     world = _EastWallWorld(OUTER_HALF_MM)
     lateral = params.mounts[1].right_mm
-    for dist, want in ((300.0, 319), (550.0, 463), (800.0, 500), (1100.0, 500)):
+    for dist, want in ((300.0, 297), (600.0, 592), (800.0, 760)):
         r = ToF(params, rng).read_mm(1, world, Pose(OUTER_HALF_MM - dist - lateral, 0.0, 0.0), 0.0)
         assert abs(r - want) < 15, (dist, r)
 
@@ -158,7 +157,8 @@ def test_tof_red_sign(rng):
     world = World(field)
     sign = next(s for s in field.signs if s.color == "Red")
     x_rear = sign.x + 400.0
-    pose = Pose(x_rear, sign.y, 0.0)
+    # El sensor va forward_mm delante del centro; con ROI 8 (±7°) hay que alinearlo con la lata.
+    pose = Pose(x_rear, sign.y - params.tof.mounts[0].forward_mm, 0.0)
     r = tof.read_mm(0, world, pose, 1.0)
     assert r > 200
 
