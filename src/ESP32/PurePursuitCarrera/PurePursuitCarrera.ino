@@ -1217,7 +1217,7 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 // mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
 // arriba quedan para el carro sin encoder y como timeouts de seguridad.
 const bool          PARK_POR_ENCODER          = true;
-PARK_AJ float         PARK_POSTE2_MM            = 80.0f;  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
+PARK_AJ float         PARK_POSTE2_MM            = 135.0f;  // 80 -> 135: el ToF ve el poste 55 mm antes que el sonar, el eje trasero para donde siempre (w0 ~285)  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
 PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14; 2026-10-22: 100 -> 110. Con hueco 264 y U a 200, 100 deja la semilla 18 a 8 mm de la madera de enfrente; 120 choca en los dos postes; 110 termina 24/24
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
@@ -1283,6 +1283,8 @@ PARK_AJ float         PARK_ATRAS_FINAL_CM       = 3.10;
 // pared/poste lateral) y 6 cm disparaba el corte casi al arrancar el swing
 // (medido: swing cortado en pleno giro, nunca llega ni a la fase B). Un
 // umbral propio y más chico es el "de verdad ya va a topar", no "se acercó".
+// ToF trasero: cm que la lectura queda DELANTE de la esquina de la cola (CAD v2: -19.6 contra cola -21.8 = 0.22; el carro v1 con ToF metido eran 2.2). Medir en el carro.
+PARK_AJ float         PARK_TOF_COLA_CM          = 0.22f;
 PARK_AJ float         PARK_REV_ATRAS_MIN_CM     = 2.0f;   // corte de seguridad propio de los swings A/C (ver nota arriba)
 PARK_AJ float         PARK_REV_AJUSTE_MM        = 0.0f;   // avance(+)/retroceso(-) tras poste 2, antes del swing A
 const unsigned long PARK_REV_AJUSTE_MAX_MS    = 1200;    // tope de seguridad de la fase 30 (sin encoder o atorado)
@@ -1672,8 +1674,8 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 //   1 reversa EXT hasta T1 (nariz alta, ~75), 2 reversa INT hasta T2 (~24), 3 adelante EXT hasta T3 (~12), 4 reversa INT hasta ~0.
 // theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
 const bool           PARK_PLAN_ON                = true;
-PARK_AJ float        PARK_PL_W_DET               = 200.0f;  // w del eje trasero cuando el sonar empieza a ver la madera de adelante
-PARK_AJ float        PARK_PL_W_DET_U             = 185.0f;  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_W_DET               = 145.0f;  // 2026-11-12: 200 -> 145 (ToF lateral v2 a 110.6 mm del eje, el sonar a 56.3: ve la madera 54 mm antes); w del eje trasero cuando el sonar empieza a ver la madera de adelante
+PARK_AJ float        PARK_PL_W_DET_U             = 130.0f;  // 185 -> 130, igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
@@ -6799,7 +6801,7 @@ void loop() {
         // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
         if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
           float yaw = th * 0.0174533f;
-          float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw));
+          float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - PARK_TOF_COLA_CM - 6.3f * sinf(yaw));
           if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
         }
         if (i == 0 && PARK_PL_RECTA) {
@@ -7009,7 +7011,7 @@ void loop() {
         float yawCorte = (servoDesdePared == SERVO_MIN_DEG) ? 30.0f : 36.0f;
         if (!atrasPegado && distB_filtrada > 0.0f && difHeading <= yawCorte) {
           float yaw = difHeading * 0.0174533f;
-          float esquinaCm = distB_filtrada * cosf(yaw) - 2.2f - 6.3f * sinf(yaw);
+          float esquinaCm = distB_filtrada * cosf(yaw) - PARK_TOF_COLA_CM - 6.3f * sinf(yaw);
           if (esquinaCm <= 2.5f) atrasPegado = true;
         }
         if (alineado || pegado || timeout || atorado || atrasPegado) {
