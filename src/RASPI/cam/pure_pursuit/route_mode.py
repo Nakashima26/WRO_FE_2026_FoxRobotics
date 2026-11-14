@@ -245,6 +245,8 @@ class RouteMode:
         self.esp_shift = 0.0         # marco de la ruta activa en el ESP
         self.upload_shift = 0.0      # marco de la ruta que se está subiendo
         self.hold = False            # detenido hasta que la ruta nueva llegue al ESP
+        self._bend = 0.0
+        self._bend_n = 0             # cuadros con la ruta del prefijo girada
         self._def_seen = 0
         self._pre_dets: list = []    # (w, color, dist a la cámara) en la fila interior
         self._pre_poses: list = []
@@ -637,7 +639,8 @@ class RouteMode:
                 if q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0)):
                     delta = float(np.median(self._line_d[-int(n_dec):]))
             forced = False
-            if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
+            if (delta is None and self._past_straight(dm, pose) and not self._force_wait(pose)
+                    and not (not self._line_d and 0 < self._bend_n < int(getattr(C, "ROUTE_BEND_WAIT_FRAMES", 0)))):
                 # Sin pico al final de la recta: la media (sin lecturas que
                 # decidan, el histograma queda plano cerca de lo supuesto).
                 delta = self.fix.mean()
@@ -819,8 +822,10 @@ class RouteMode:
             sgn_ = 1.0 if dm.direction == "CW" else -1.0
             _h_, w_ = world_to_section(dm.parking, pose[0], pose[1])
             left = (1900.0 - (w_ + RR._FRONT_MM)) if sgn_ > 0 else ((w_ + sgn_ * RR._FRONT_MM) - 1100.0)
-            if left <= float(getattr(C, "ROUTE_BEND_MM", 500.0)):
+            mm_ = getattr(C, "ROUTE_BEND_MM_CW", None) if sgn_ > 0 else None
+            if left <= float(getattr(C, "ROUTE_BEND_MM", 500.0) if mm_ is None else mm_):
                 self._bend = -sgn_ * float(bdeg)   # CW gira a un lado, CCW al otro (hacia la cinta)
+                self._bend_n += 1
         if self.follower is None:
             return None, "", None
 

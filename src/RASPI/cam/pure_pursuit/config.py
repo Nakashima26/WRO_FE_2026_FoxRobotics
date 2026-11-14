@@ -1340,6 +1340,8 @@ ROUTE_BLIND_PWM = None   # tope antes de fijar el avance del cajón (arranque ci
 ROUTE_PREFIX_PWM = 130
 ROUTE_BEND_DEG = 8.0   # prefijo: sin votos de la cinta y a <= ROUTE_BEND_MM del final supuesto, gira la ruta mandada al ESP estos grados (alrededor del carro)
 ROUTE_BEND_MM = 500.0
+ROUTE_BEND_MM_CW = None   # si no es None, ROUTE_BEND_MM solo en CW
+ROUTE_BEND_WAIT_FRAMES = 0   # no forzar el fix al final de la recta hasta que la ruta girada lleve estos cuadros (0 = no espera)
 ROUTE_PREFIX_STOP_CM = 40.0
 ROUTE_PREFIX_STOP_FRAMES = 20
 ROUTE_FIX_STUCK_DF_CM = 12.0
