@@ -1715,6 +1715,14 @@ ROUTE_L23_A_LAT_MM_S2 = 4000   # vueltas 2-3: aceleración lateral del perfil (l
 ROUTE_L23_K_MM_S_PER_PWM = 3.82   # vueltas 2-3: K del perfil = LAZO_K_FWD del ESP (3.82); None = el de la ruta
 ROUTE_L23_SIGN_MM = 150.0         # vueltas 2-3: fin de la rampa de la señal (la base 192.5)
 ROUTE_L23_SIGN_NEAR_MM = 130.0    # vueltas 2-3: a menos de esto, piso (la base 172.5)
+ROUTE_L23_OUTER_SIGN_MM = None    # vueltas 2-3, señales de la fila exterior (X1/X2): fin de su rampa de velocidad
+ROUTE_L23_OUTER_NEAR_MM = 300.0   # a menos de esto, el piso ROUTE_L23_OUTER_PWM
+ROUTE_L23_OUTER_PWM = 150
+ROUTE_FULL_SOFT_CLEAR_MM = 100.0   # holgura blanda del plan con el mapa completo (_prm_for)
+ROUTE_FULL_HARD_CLEAR_MM = None   # None = ROUTE_HARD_CLEAR_MM
+ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil (None = ROUTE_PROFILE_LATENCY_S)
+ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón
+ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
 
 # Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
