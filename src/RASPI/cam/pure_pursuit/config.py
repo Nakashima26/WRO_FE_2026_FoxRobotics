@@ -1726,3 +1726,8 @@ ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil
 ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón
 ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
+
+# Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
+ROUTE_FINAL_D_MM = 700.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)
+ROUTE_FINAL_LEAD_MM = 1300.0
+ROUTE_FINAL_W = 20.0
