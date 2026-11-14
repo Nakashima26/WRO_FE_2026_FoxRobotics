@@ -1153,6 +1153,26 @@ class RouteMode:
             f = np.clip((di - isl_near) / max(isl_mm - isl_near, 1.0), 0.0, 1.0)
             v_isl = v_min + (v_base - v_min) * f
             v_c = np.where(di < isl_mm, np.minimum(v_c, v_isl), v_c)
+        if l23 and signs is not None and len(signs) and float(C.ROUTE_POSE_ENVELOPE_MM) > 0.0:
+            # Error sostenido del seguidor: decae gradualmente y no reacciona
+            # a una sola medida ToF. Muestrear ambos extremos laterales y de rumbo.
+            cte = float(self.follower.cte)
+            residual = min(abs(cte), 200.0)
+            previous = getattr(self, "_pose_envelope_error", residual)
+            error = max(residual, previous * 0.97)
+            self._pose_envelope_error = error
+            radius = float(C.ROUTE_POSE_ENVELOPE_MM) + error * 0.35
+            h = np.radians(r.heading_deg[j])
+            gap = np.full(len(j), 1e9)
+            for offset in (-radius, radius):
+                px = r.x[j] + (cte + offset) * np.cos(h)
+                py = r.y[j] - (cte + offset) * np.sin(h)
+                for dh in (-float(C.ROUTE_POSE_ENVELOPE_DEG), float(C.ROUTE_POSE_ENVELOPE_DEG)):
+                    g = RR._rect_dist_pose(signs[:, 0], signs[:, 1], px, py,
+                                           h + math.radians(dh)).min(axis=-1)
+                    gap = np.minimum(gap, g - SIGN_MM * 0.5 * math.sqrt(2.0))
+            v_safe = K * (float(C.ROUTE_POSE_ENVELOPE_PWM) - pwm0)
+            v_c = np.where(gap < 45.0, np.minimum(v_c, v_safe), v_c)
         allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
         inside = np.nonzero(dist <= span)[0]
         k_min = inside[int(np.argmin(allowed[inside]))]
