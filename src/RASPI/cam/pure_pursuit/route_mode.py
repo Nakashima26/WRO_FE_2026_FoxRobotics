@@ -702,6 +702,18 @@ class RouteMode:
             half_seats |= {k for k in rule if k[0] in {s for s, _ in half_seats}}
             plan_seats = {**plan_seats, **ghosts}
             plan_unknown = [k for k in plan_unknown if k not in half_seats]
+        if getattr(C, "ROUTE_MAP_FREEZE", False):
+            # Vueltas 2-3 (tc >= 4): lo que ya tenía color (confirmado, provisional o fantasma de fila) no vuelve a vacío ni
+            # a desconocido para el planificador; solo cambia de color si el mapa actual lo dice. Un solo punto: da igual por qué se vació.
+            tcn = max(float(getattr(self, "_tc_max", 0) or 0), float(_ack_num(ack or "", "tc") or 0))
+            if tcn >= 4:
+                fz = self.__dict__.setdefault("_map_freeze", {})
+                for k, col in plan_seats.items():
+                    fz[k] = col
+                back = {k: col for k, col in fz.items() if k not in plan_seats and k[0] != dm.parking}
+                if back:
+                    plan_seats = {**plan_seats, **back}
+                    plan_unknown = [k for k in plan_unknown if k not in back]
         extra, extra_key, anchor_replan = None, None, False
         if not self.fixed:
             # Recta del cajón sin el avance: sus asientos no se pueden ubicar;
