@@ -383,6 +383,8 @@ long  poseY    = 0;
 // desplazamiento lateral (|ds*sin| < 0.5 -> 0) y sesgaba odomMm. Los long de
 // arriba son solo lroundf() de estos (lo que sale en el ACK y usa el parking).
 float odomMmF  = 0.0f;
+// Integracion independiente: no recibe correcciones de pose de la Pi.
+float parkLocalX = 0.0f, parkLocalY = 0.0f, parkLocalYawPrev = 0.0f;
 float poseXf   = 0.0f;
 float poseYf   = 0.0f;
 float odomYawPrevDeg = 0.0f;
@@ -1480,6 +1482,9 @@ bool          parkParedEsIzquierda  = false;
 int           parkCiclos            = 0;
 
 unsigned long parkEntryMs           = 0;
+PARK_AJ int PARK_POSTE_IDENT_SEP = 0;
+float parkPosteOdom = 0.0f, parkPosteYaw = 0.0f;
+bool parkPosteFisico = false, parkPosteFlanco = false;
 int           parkScanSubFase       = 0;
 bool          parkBajadaPre         = false;  // poste 1 confirmado antes de PARK_ARMADO_MS
 unsigned long parkBajadaPreMs       = 0;
@@ -2319,6 +2324,10 @@ void actualizarOdometria() {
   odomVfilt += (v_cmd - odomVfilt) * alpha;
   ds = odomVfilt * dt;
 #endif
+float parkYawMid = 0.5f * (anguloTotal + parkLocalYawPrev) * DEG_TO_RAD;
+  parkLocalYawPrev = anguloTotal;
+  parkLocalX += ds * cosf(parkYawMid);
+  parkLocalY += ds * sinf(parkYawMid);
 #if FOX_ENCODER
   // Rumbo medio del tick (punto medio): menos error que el rumbo final en curva.
   float yawMidRad = 0.5f * (anguloTotal + odomYawPrevDeg) * PI / 180.0f;
@@ -2656,6 +2665,7 @@ void resetParkScan() {
   parkEntryMs          = millis();
   parkCiclos           = 0;
   parkScanSubFase      = 0;
+  parkPosteFisico = false; parkPosteFlanco = false;
   parkBase             = 0.0f;
   parkBaseN            = 0;
   parkCaidaCnt         = 0;
@@ -3421,6 +3431,9 @@ float rutaExtTapeteCm() {
 // Marco canonico: w = mm a lo largo de la marcha desde la cara interior de la madera de atras (hueco 264, madera 2 en
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
+PARK_AJ int PARK_PL_GUARD0 = 0; // protege entrada y retrocede su arco antes de replanear
+bool parkPlanRecover = false;
+float parkPlanRecoverClr = 0.0f;
 bool parkPlanRectaOn = false;
 bool parkDetPorPose = false, parkIgnOk = false;
 float parkIgnAlong = 0.0f;
@@ -3439,6 +3452,9 @@ float parkThCarril() {
   return (direccionIzquierda == parkDirecto) ? e : -e;
 }
 float parkDetTh = 0.0f;   // theta al detectar el poste 2
+PARK_AJ int PARK_PL_LOCAL_ODOM = 0;
+float parkLocalAnchorAlong = NAN, parkLocalAnchorH = NAN;
+float parkLocalX0, parkLocalY0, parkLocalW0, parkLocalH0, parkLocalYaw0, parkLocalTh0;
 void parkPlanPose(float &w, float &h) {
   w = (parkDirecto ? PARK_PL_W_DET : PARK_PL_W_DET_U) + (parkDirecto ? 1.0f : -1.0f) * (alongSalidaMm() - parkDetAlong);
   // El sonar mira a la pared: con la nariz inclinada theta el haz cruza la madera (a h=200) corrido (h_sonar-200)*tan(theta).
@@ -3446,6 +3462,22 @@ void parkPlanPose(float &w, float &h) {
   // El cono del sonar ve la madera antes cuanto mas lejos pasa: W_DET se midio a h~350.
   w -= PARK_PL_CONO * (parkDetHSon - 350.0f);
   h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
+  if (PARK_PL_LOCAL_ODOM) {
+    if (isnan(parkLocalAnchorAlong) || parkLocalAnchorAlong != parkDetAlong || parkLocalAnchorH != parkDetHSon) {
+      parkLocalAnchorAlong = parkDetAlong; parkLocalAnchorH = parkDetHSon;
+      parkLocalX0 = parkLocalX; parkLocalY0 = parkLocalY;
+      parkLocalW0 = w; parkLocalH0 = h; parkLocalYaw0 = anguloTotal * DEG_TO_RAD;
+      parkLocalTh0 = parkThCarril();
+      if (isnan(parkLocalTh0)) parkLocalTh0 = parkDetTh;
+      parkLocalTh0 *= DEG_TO_RAD;
+    }
+    float dx = parkLocalX - parkLocalX0, dy = parkLocalY - parkLocalY0;
+    float f = dx * cosf(parkLocalYaw0) + dy * sinf(parkLocalYaw0);
+    float l = -dx * sinf(parkLocalYaw0) + dy * cosf(parkLocalYaw0);
+    float side = (direccionIzquierda == parkDirecto) ? 1.0f : -1.0f;
+    w = parkLocalW0 + f * cosf(parkLocalTh0) - side * l * sinf(parkLocalTh0);
+    h = parkLocalH0 + f * sinf(parkLocalTh0) + side * l * cosf(parkLocalTh0);
+  }
 }
 static float parkPtSeg(float px, float py, float ax, float ay, float bx, float by) {
   float dx = bx - ax, dy = by - ay, t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
@@ -6134,9 +6166,22 @@ void loop() {
                       && (parkRosaVisto || !PARK_REQUIERE_PI || PARK_TEST_MANO);
         bool armada = poseOk && (tEn >= PARK_ARMADO_MS);
 
+        // Identidad fisica: cada flanco conserva encoder y rumbo; pka solo desempata.
+        bool nuevoPoste = bajada && posteConfirmado && !parkPosteFlanco;
+        float sepPoste = parkPosteFisico ? fabsf((float)odomMm - parkPosteOdom) * cosf((anguloGyro - parkPosteYaw) * DEG_TO_RAD * 0.5f) : 0.0f;
+        bool sepCompatible = parkPosteFisico && sepPoste >= PARK_POSTE_SEP_CM * 10.0f - 65.0f
+                                              && sepPoste <= PARK_POSTE_SEP_CM * 10.0f + 65.0f;
+        if (PARK_POSTE_IDENT_SEP) {
+          if (nuevoPoste && !parkPosteFisico && baseLista) {
+            parkPosteFisico = true; parkPosteOdom = (float)odomMm; parkPosteYaw = anguloGyro;
+          }
+          if (nuevoPoste) parkPosteFlanco = true;
+          if (despejado) parkPosteFlanco = false;
+        }
         // Sin U: la primera madera se puede perder (la ruta llega a la pared tarde, p.ej. senal roja de entrada).
         // Una bajada confirmada justo donde la Pi dice que esta la madera de adelante ES el poste 2.
         if (parkDirecto && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
+            && (!PARK_POSTE_IDENT_SEP || sepCompatible)
             && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
           Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
           parkDetPorPose = true;
@@ -6216,7 +6261,7 @@ void loop() {
           // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
-          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado);
+          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado && (!PARK_POSTE_IDENT_SEP || sepCompatible));
 
           // SOLO caída de sónar. La Pi manda park=2 al ver magenta lejos
           // (recta final, ~1 s tras entrar a ESTACIONANDO) y el timeout de
@@ -6759,7 +6804,7 @@ void loop() {
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
-          if (i == 0)      { parkPlanDir = -1; parkPlanSrv = servoHaciaPared; }
+          if (i == 0)      { parkPlanDir = parkPlanRecover ? 1 : -1; parkPlanSrv = servoHaciaPared; }
           else if (i == 1) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
           else if (i == 2) { parkPlanDir = -1; parkPlanSrv = centroServo; }
           else if (i == 3) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
@@ -6774,7 +6819,7 @@ void loop() {
           motorCoast();
           escribirServo(parkPlanSrv);
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
-            if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
+            if (parkPlanI == 0 && !parkPlanRecover && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
               float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
@@ -6850,6 +6895,21 @@ void loop() {
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
+        if (PARK_PL_GUARD0 && i == 0) {
+          if (parkPlanRecover) {
+            fin = clr >= parkPlanRecoverClr + 12.0f || mm >= 45.0f || tseg >= 1200UL;
+            why = "RECUPERA";
+          } else {
+            // Barrido residual de 12 mm al retirar PWM; incluye el giro del arco.
+            float tr = th * DEG_TO_RAD;
+            float stopTh = th + (parkPlanRectaOn ? 0.0f : 12.0f / PARK_PL_RI / DEG_TO_RAD);
+            float stopClr = parkPlanHolgura(pw - 12.0f * cosf(tr), ph - 12.0f * sinf(tr), stopTh);
+            if (cerca || (stopClr <= PARK_PL_M_MM && stopClr < clr)) {
+              fin = true; why = "HOLGURA0";
+              parkPlanRecoverClr = clr;
+            }
+          }
+        }
         if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
@@ -6858,7 +6918,13 @@ void loop() {
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
           Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          if (PARK_PL_GUARD0 && i == 0 && !parkPlanRecover && why[0] == 'H') {
+            parkPlanRecover = true; // deshacer primero; no pasar al arco INT pegado a madera
+          } else if (parkPlanRecover) {
+            parkPlanRecover = false;
+            parkPlanI = 2; // recuperada la holgura, continuar con zigzag acotado
+          } else parkPlanI++;
+          parkPlanRectaOn = false; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
             finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");
