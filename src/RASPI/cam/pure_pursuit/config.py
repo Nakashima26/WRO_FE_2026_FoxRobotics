@@ -1711,4 +1711,6 @@ SURPRISE_NORMAL_HEIGHT_SAMPLES = ()
 ROUTE_L23_A_BRAKE_MM_S2 = None
 ROUTE_L23_A_LAT_MM_S2 = 3500   # vueltas 2-3: aceleración lateral del perfil (la base 2767)
 ROUTE_L23_K_MM_S_PER_PWM = 3.82   # vueltas 2-3: K del perfil = LAZO_K_FWD del ESP (3.82); None = el de la ruta
+ROUTE_L23_SIGN_MM = 150.0         # vueltas 2-3: fin de la rampa de la señal (la base 192.5)
+ROUTE_L23_SIGN_NEAR_MM = 130.0    # vueltas 2-3: a menos de esto, piso (la base 172.5)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
