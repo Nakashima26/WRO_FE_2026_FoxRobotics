@@ -1657,6 +1657,8 @@ PARK_AJ long         PARK_SINU_CORRE_MM          = 200;
 PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
 PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
+PARK_AJ long         PARK_SCAN_P1_PWM            = 0;       // >0: PWM del escaneo tras ver el poste 1, durante PARK_SCAN_P1_MM
+PARK_AJ long         PARK_SCAN_P1_MM             = 120;
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
@@ -1736,6 +1738,7 @@ PARK_AJ int          PARK_PL_ATASCO_MS           = 250;
 PARK_AJ float        PARK_PL_ATASCO_MM           = 4.0f;
 PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
 PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
+PARK_AJ int          PARK_PL_PAUSA_MISMO_MS      = 120;     // pausa antes de un tramo con el mismo sentido que el anterior (el motor no invierte)
 PARK_AJ int          PARK_PL_PAUSA_MS            = 120;     // parado con el volante girando antes de cada tramo nuevo
 PARK_AJ float        PARK_PL_Z1_MM               = 21.0f;   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
 PARK_AJ float        PARK_PL_Z2_MM               = 42.0f;
@@ -2697,7 +2700,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SCAN_P1_PWM); SIL_AJ(PARK_SCAN_P1_MM);  SIL_AJ(PARK_PL_PAUSA_MISMO_MS);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -3418,6 +3421,8 @@ float rutaExtTapeteCm() {
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
 bool parkPlanRectaOn = false;
 bool parkDetPorPose = false, parkIgnOk = false;
+int parkPlanDirPrev = 0;   // sentido del tramo anterior del plan
+long parkP1Odom = 0;   // odometro al ver el poste 1 (PARK_SCAN_P1_PWM)
 float parkIgnAlong = 0.0f;
 float parkDetAlong = 0.0f, parkDetHPose = 0.0f, parkDetHSon = 350.0f;
 float parkHPoseMm() {
@@ -6159,6 +6164,7 @@ void loop() {
           if (bajada && armada && posteConfirmado) {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
+            parkP1Odom       = odomMm;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -6328,6 +6334,8 @@ void loop() {
           // Sin U: cerca de la madera de adelante, lento, para que el instante en que el sonar la ve fije bien la posicion (error ~ v * 50 ms).
           if (parkDirecto && !isnan(rutaPka) && !rapido && alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM - (float)PARK_SINU_LENTO_MM)
             pwmEsc = PARK_SINU_PWM_B2;
+          // Entre el poste 1 y el 2 (264 mm) el sonar no decide nada hasta cerca del poste 2: mas rapido los primeros PARK_SCAN_P1_MM.
+          if (PARK_SCAN_P1_PWM > 0 && parkScanSubFase >= 1 && parkP1Odom > 0 && (odomMm - parkP1Odom) < PARK_SCAN_P1_MM) pwmEsc = max(pwmEsc, (int)PARK_SCAN_P1_PWM);
           setMotorTope(rapido ? (int)PARK_SCAN_RAPIDO_PWM : pwmEsc, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
 
@@ -6768,7 +6776,7 @@ void loop() {
           }
           motorCoast();
           escribirServo(parkPlanSrv);
-          if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
+          if (millis() - parkFaseMs >= (unsigned long)(parkPlanDir == parkPlanDirPrev ? PARK_PL_PAUSA_MISMO_MS : PARK_PL_PAUSA_MS)) {
             if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
               float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
@@ -6776,6 +6784,7 @@ void loop() {
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
             }
+            parkPlanDirPrev = parkPlanDir;
             parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
             if (parkPlanDir > 0) motorAdelante(); else motorReversa();
             Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
