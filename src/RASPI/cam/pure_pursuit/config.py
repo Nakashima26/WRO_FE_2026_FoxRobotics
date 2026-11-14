@@ -1716,3 +1716,8 @@ ROUTE_L23_K_MM_S_PER_PWM = 3.82   # vueltas 2-3: K del perfil = LAZO_K_FWD del E
 ROUTE_L23_SIGN_MM = 150.0         # vueltas 2-3: fin de la rampa de la señal (la base 192.5)
 ROUTE_L23_SIGN_NEAR_MM = 130.0    # vueltas 2-3: a menos de esto, piso (la base 172.5)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
+
+# Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
+ROUTE_FINAL_D_MM = 640.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared
+ROUTE_FINAL_LEAD_MM = 1300.0
+ROUTE_FINAL_W = 20.0
