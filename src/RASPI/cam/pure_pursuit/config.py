@@ -1713,4 +1713,7 @@ ROUTE_L23_A_LAT_MM_S2 = 4000   # vueltas 2-3: aceleración lateral del perfil (l
 ROUTE_L23_K_MM_S_PER_PWM = 3.82   # vueltas 2-3: K del perfil = LAZO_K_FWD del ESP (3.82); None = el de la ruta
 ROUTE_L23_SIGN_MM = 150.0         # vueltas 2-3: fin de la rampa de la señal (la base 192.5)
 ROUTE_L23_SIGN_NEAR_MM = 130.0    # vueltas 2-3: a menos de esto, piso (la base 172.5)
+ROUTE_L23_OUTER_SIGN_MM = 400.0   # vueltas 2-3, señales de la fila exterior (X1/X2): fin de su rampa de velocidad
+ROUTE_L23_OUTER_NEAR_MM = 300.0   # a menos de esto, el piso ROUTE_L23_OUTER_PWM
+ROUTE_L23_OUTER_PWM = 150
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
