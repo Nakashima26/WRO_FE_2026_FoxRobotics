@@ -808,7 +808,9 @@ class RouteMode:
                 self._delay_plan = None
                 self._job_key = None
         if self._job is not None and not self._job.is_alive():
-            if self._job_out is not None:
+            stale = (C.ROUTE_REJECT_STALE and float(getattr(self, "_tc_max", 0) or 0) < 4
+                     and self._plan_stale(self._job_conf, plan_seats, pose))
+            if self._job_out is not None and not stale:
                 self._adopt(self._job_out, self._job_key, dict(self._job_conf), self._job_unknown, empty, dm,
                             self._job_shift, getattr(self, "_job_hold", False))
             self._job = None
@@ -1418,6 +1420,20 @@ class RouteMode:
         tx = dm.pose_xy[0] - (p0x * fx + p0y * lx)
         ty = dm.pose_xy[1] - (p0x * fy + p0y * ly)
         return tx + px * fx + py * lx, ty + px * fy + py * ly, (th - yaw) % 360.0
+
+    def _plan_stale(self, planned, current, pose):
+        """Una observación lejana no invalida el trabajo; un color nuevo cercano sí."""
+        x, y, hd = pose
+        angle = math.radians(hd)
+        fx, fy = math.sin(angle), math.cos(angle)
+        for key, color in current.items():
+            if planned.get(key) == color:
+                continue
+            sx, sy = section_to_world(key[0], *SEATS[key[1]])
+            dx, dy = sx - x, sy - y
+            if dx * fx + dy * fy > -150.0 and math.hypot(dx, dy) < C.ROUTE_STALE_HORIZON_MM:
+                return True
+        return False
 
     def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None, hug=None) -> None:
         self._job_conf = conf

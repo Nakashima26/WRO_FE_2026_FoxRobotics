@@ -1724,3 +1724,7 @@ ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil
 ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón
 ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
+
+# Rechazar planes que omiten colores nuevos dentro del horizonte inmediato.
+ROUTE_REJECT_STALE = False
+ROUTE_STALE_HORIZON_MM = 1300.0
