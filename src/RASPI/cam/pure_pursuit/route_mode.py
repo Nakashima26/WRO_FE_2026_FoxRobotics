@@ -116,7 +116,8 @@ def _prm_for(unknown):
     prm = _route_params()
     if not unknown:
         prm.soft_clear_mm = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
-        prm.hard_clear_mm = float(getattr(C, "ROUTE_FULL_HARD_CLEAR_MM", prm.hard_clear_mm))
+        if getattr(C, "ROUTE_FULL_HARD_CLEAR_MM", None) is not None:
+            prm.hard_clear_mm = float(C.ROUTE_FULL_HARD_CLEAR_MM)
     return prm
 
 
