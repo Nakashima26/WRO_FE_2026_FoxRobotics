@@ -1718,5 +1718,8 @@ ROUTE_L23_SIGN_NEAR_MM = 130.0    # vueltas 2-3: a menos de esto, piso (la base 
 ROUTE_L23_OUTER_SIGN_MM = None    # vueltas 2-3, señales de la fila exterior (X1/X2): fin de su rampa de velocidad
 ROUTE_L23_OUTER_NEAR_MM = 300.0   # a menos de esto, el piso ROUTE_L23_OUTER_PWM
 ROUTE_L23_OUTER_PWM = 150
+ROUTE_FULL_SOFT_CLEAR_MM = 100.0   # holgura blanda del plan con el mapa completo (_prm_for)
+ROUTE_FULL_HARD_CLEAR_MM = None   # None = ROUTE_HARD_CLEAR_MM
+ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil (None = ROUTE_PROFILE_LATENCY_S)
 ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
