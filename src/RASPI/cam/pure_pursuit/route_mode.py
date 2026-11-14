@@ -115,7 +115,8 @@ def _prm_for(unknown):
     """
     prm = _route_params()
     if not unknown:
-        prm.soft_clear_mm = 100.0
+        prm.soft_clear_mm = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
+        prm.hard_clear_mm = float(getattr(C, "ROUTE_FULL_HARD_CLEAR_MM", prm.hard_clear_mm))
     return prm
 
 
