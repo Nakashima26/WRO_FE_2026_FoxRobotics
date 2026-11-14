@@ -991,6 +991,8 @@ int inicioPwm() { return (piSenalSalida && INICIO_PWM_SENAL > 0) ? INICIO_PWM_SE
 void setMotorTope(int velocidad, int tope);
 void inicioMotor(int v) { setMotorTope(v, 255); }   // la salida no se recorta a MOTOR_MAX (155 en ruta): recta/arcos pueden ir más rápido
 bool  inicioAdentro = false;   // la S de esta salida va al carril interior (latch antes de la fase 3)
+bool  inicioTarde   = false;   // isal=2 llegó en la contravuelta: la fase 1 vuelve a tope hasta casi 90°
+const int INICIO_TARDE_OVERSHOOT_DEG = 4;   // corte del servo en ese swing tardío (inercia chica: solo faltan ~18°)
 bool  inicio3pHecho = false;   // la reversa de corrección (fase 11) solo una vez
 float inicioY0 = 0.0f, inicioOdom0 = 0.0f, inicioOdomRecto = 0.0f; // poseYf / odomMmF al INIT y al entrar a la fase 2
 unsigned long inicioFaseMs = 0;              // inicio de la fase actual (timers/rampa)
@@ -4644,6 +4646,7 @@ void loop() {
         inicioFase     = 1;
         inicioAngPico  = 0.0f;
         inicioAdentro  = false;
+        inicioTarde    = false;
         inicioY0       = poseYf;
         inicioOdom0    = odomMmF;
         inicio3pHecho  = false;
@@ -4671,8 +4674,11 @@ void loop() {
       // Tarde (ya en la contravuelta, fase 3, con rumbo aún abierto): vuelve al recto y sigue hasta el lateral de isal=2.
       if (inicioFase == 3 && piSalida == 2 && !inicioAdentro && INICIO_TARDE_MIN_DEG > 0 && deltaIni >= (float)INICIO_TARDE_MIN_DEG) {
         inicioAdentro   = true;
-        inicioFase      = 2;
-        inicioFaseMs    = millis();
+        // Seguir recto a ~72° corre el carro ~0.3 mm a lo largo por cada mm de lateral (n1/s2 y s43 rozan la T1 roja);
+        // mejor terminar el giro a ~90° y ahí sí recto.
+        inicioTarde     = INICIO_TARDE_OVERSHOOT_DEG >= 0;
+        inicioFase      = inicioTarde ? 1 : 2;
+        inicioFaseMs    = inicioTarde ? millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS : millis();
         inicioOdomRecto = odomMmF;
         Serial.print("INICIO isal=2 TARDE: vuelve al recto ang="); Serial.println(anguloGyro, 1);
         break;
@@ -4697,7 +4703,7 @@ void loop() {
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);   // full hacia el lado de salida
         inicioMotor(vel);
         int angSwing = inicioAdentro ? INICIO_ANG_ADENTRO_DEG : INICIO_ANG_OUT_DEG;
-        bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? (inicioGirarDer ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_ADENTRO_OVERSHOOT_IZQ_DEG) : INICIO_OVERSHOOT_DEG)));
+        bool swingListo   = (deltaIni >= (float)(angSwing - (inicioAdentro ? (inicioTarde ? INICIO_TARDE_OVERSHOOT_DEG : inicioGirarDer ? INICIO_ADENTRO_OVERSHOOT_DEG : INICIO_ADENTRO_OVERSHOOT_IZQ_DEG) : INICIO_OVERSHOOT_DEG)));
         bool swingTimeout = (millis() - inicioFaseMs >= INICIO_SWING_TIMEOUT_MS);
         float ang3p = inicioGirarDer ? INICIO_3P_ANG_DEG : INICIO_3P_ANG_IZQ_DEG;
         if (!swingListo && !inicio3pHecho && ang3p > 0 && deltaIni >= ang3p) {
