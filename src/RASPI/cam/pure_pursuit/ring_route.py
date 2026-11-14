@@ -471,6 +471,38 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
             continue
         cf = clear.reshape(-1)
         cf[idx] = np.minimum(cf[idx], dsg)
+    # La primera señal de cada recta exige un corredor ANTES de la señal.
+    # Proyectar la pose de cada transición hasta esa puerta limita también
+    # el rumbo: llegar al lado correcto con dirección contraria no basta.
+    gate_mm = float(C.ROUTE_EXIT_GATE_MM)
+    if gate_mm > 0.0:
+        for ks, sec in enumerate(secs):
+            row = []
+            for (sn, seat), color in seats.items():
+                if sn == sec.name and seat in SEATS:
+                    px, py = section_to_world(sn, *SEATS[seat])
+                    u, dp = sec.frame(px, py)
+                    row.append((u, dp, color))
+            if not row:
+                continue
+            u, dp, color = min(row)
+            if u > 1650.0:
+                continue
+            st = int(round((ks * _SEC_SIGMA + max(0.0, u - 1000.0 - gate_mm)) /
+                           (4.0 * _SEC_SIGMA / n))) % n
+            go_in = (color == "Red") == (direction == "CW")
+            margin = _HALF_W + SIGN_MM * 0.5 + prm.hard_clear_mm + float(C.ROUTE_EXIT_GATE_POSE_MM)
+            fwd = shd[st] * sec.f[0] + chd[st] * sec.f[1]
+            lateral = -(shd[st] * sec.n_in[0] + chd[st] * sec.n_in[1])
+            pu = (xx[st] - sec.c0[0]) * sec.f[0] + (yy[st] - sec.c0[1]) * sec.f[1]
+            pd = _REF_D - ((xx[st] - sec.c0[0]) * sec.n_in[0] +
+                           (yy[st] - sec.c0[1]) * sec.n_in[1])
+            projected = pd + np.maximum(u - pu, 0.0) * lateral / np.maximum(fwd, 0.2)
+            ok = (projected < dp - margin) if go_in else (projected > dp + margin)
+            ok &= fwd >= math.cos(math.radians(float(C.ROUTE_EXIT_GATE_HEADING_DEG)))
+            # Si no existe puerta en la malla se conserva el plan original.
+            if np.any(ok & (clear[st] >= prm.hard_clear_mm)):
+                clear[st] = np.where(ok, clear[st], -1.0)
     bad = clear < prm.hard_clear_mm
     # w·clip((soft - clear)/soft, 0)² en un solo buffer (mismas operaciones por elemento)
     pen = np.subtract(prm.soft_clear_mm, clear)
