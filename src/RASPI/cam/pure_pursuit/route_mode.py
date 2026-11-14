@@ -1052,7 +1052,10 @@ class RouteMode:
             a_lat = float(getattr(C, "ROUTE_L23_A_LAT_MM_S2", None) or a_lat)
         win = int(C.ROUTE_PROFILE_KAPPA_WIN)
         # Adelanto por latencia a la velocidad máxima (conservador).
-        lead = v_max * float(C.ROUTE_PROFILE_LATENCY_S)
+        lat_s = float(C.ROUTE_PROFILE_LATENCY_S)
+        if l23 and getattr(C, "ROUTE_L23_LATENCY_S", None) is not None:
+            lat_s = float(C.ROUTE_L23_LATENCY_S)   # vueltas 2-3: menos adelanto = suelta el freno antes
+        lead = v_max * lat_s
         span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
         step = r.length_mm / n
         m = int(span / step) + 1
