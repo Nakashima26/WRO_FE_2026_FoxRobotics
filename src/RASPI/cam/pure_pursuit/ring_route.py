@@ -471,7 +471,41 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
             continue
         cf = clear.reshape(-1)
         cf[idx] = np.minimum(cf[idx], dsg)
-    bad = clear < prm.hard_clear_mm
+    # La primera señal de cada recta exige un corredor ANTES de la señal.
+    # Proyectar la pose de cada transición hasta esa puerta limita también
+    # el rumbo: llegar al lado correcto con dirección contraria no basta.
+    ungated_bad = clear < prm.hard_clear_mm
+    gated_bad = ungated_bad.copy()
+    gate_mm = float(C.ROUTE_EXIT_GATE_MM)
+    if gate_mm > 0.0:
+        for ks, sec in enumerate(secs):
+            row = []
+            for (sn, seat), color in seats.items():
+                if sn == sec.name and seat in SEATS:
+                    px, py = section_to_world(sn, *SEATS[seat])
+                    u, dp = sec.frame(px, py)
+                    row.append((u, dp, color))
+            if not row:
+                continue
+            u, dp, color = min(row)
+            if u > 1650.0:
+                continue
+            st = int(round((ks * _SEC_SIGMA + max(0.0, u - 1000.0 - gate_mm)) /
+                           (4.0 * _SEC_SIGMA / n))) % n
+            go_in = (color == "Red") == (direction == "CW")
+            margin = _HALF_W + SIGN_MM * 0.5 + prm.hard_clear_mm + float(C.ROUTE_EXIT_GATE_POSE_MM)
+            fwd = shd[st] * sec.f[0] + chd[st] * sec.f[1]
+            lateral = -(shd[st] * sec.n_in[0] + chd[st] * sec.n_in[1])
+            pu = (xx[st] - sec.c0[0]) * sec.f[0] + (yy[st] - sec.c0[1]) * sec.f[1]
+            pd = _REF_D - ((xx[st] - sec.c0[0]) * sec.n_in[0] +
+                           (yy[st] - sec.c0[1]) * sec.n_in[1])
+            projected = pd + np.clip(u - pu - _FRONT_MM, 0.0, 80.0) * lateral / np.maximum(fwd, 0.2)
+            ok = (projected < dp - margin) if go_in else (projected > dp + margin)
+            ok &= fwd >= math.cos(math.radians(float(C.ROUTE_EXIT_GATE_HEADING_DEG)))
+            # Si no existe puerta en la malla se conserva el plan original.
+            if np.any(ok & (clear[st] >= prm.hard_clear_mm)):
+                gated_bad[st] |= ~ok
+    bad = gated_bad
     # w·clip((soft - clear)/soft, 0)² en un solo buffer (mismas operaciones por elemento)
     pen = np.subtract(prm.soft_clear_mm, clear)
     pen /= prm.soft_clear_mm
@@ -531,8 +565,13 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
             a = -0.5 * _LANE_MM + (((k - k_par + n // 2) % n) - n // 2) * dsig
             if a0 <= a <= a1:
                 pen[k] += row
-    return _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock, park_w, extra, hug,
-                  t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
+    route = _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock, park_w, extra, hug,
+                   t0, n, m, D, P, O, V, pen, bonus, bad, side_rules, pillars)
+    if gate_mm > 0.0 and not route.feasible:
+        route = _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor, lock, park_w, extra, hug,
+                       t0, n, m, D, P, O, V, pen, bonus, ungated_bad, side_rules, pillars)
+        route.report["exit_gate_fallback"] = True
+    return route
 
 
 def _shorter(lock: dict, n: int) -> dict:
@@ -685,16 +724,93 @@ def _solve(direction, seats, parking, prm, start_section, laps, unknown, anchor,
     d_lap = D[mid].astype(float)
     xy = O + d_lap[:, None] * V
     route = _resample(xy, prm.step_mm, direction)
+    los_mm = float(C.ROUTE_BODY_LOS_MM)
+    if feasible and los_mm > 0.0 and not unknown and not anchor and not extra:
+        route = _body_los(xy, route, pillars, parking, park_w, prm, los_mm, lock)
     route.report = check(route, pillars, parking, park_w)
     route.report["feasible"] = bool(feasible)
     route.report["junction_dd"] = float(abs(D[di[2 * n]] - D[di[n]])) if laps >= 3 else 0.0
     route.report["solve_ms"] = (time.perf_counter() - t0) * 1000.0
+    if hasattr(route, "los_controls"):
+        d_lap = np.sum((route.los_controls - O) * V, axis=1)
     route.d_stations = d_lap
     route.pillars = pillars
     route.station_O = O
     route.station_V = V
     route.feasible = bool(feasible)
     return route
+
+
+def _body_los(xy, original, pillars, parking, park_w, prm, max_span, lock=None):
+    """Acortar controles libres; validar el barrido de la spline resultante.
+
+    Se conservan las puertas de señales y las tangentes de entrada/salida.
+    La curva final, no solamente la cuerda, debe conservar holgura y lado.
+    """
+    points = xy.copy()
+    n = len(points)
+    protected = np.zeros(n, dtype=bool)
+    for px, py, _ in pillars:
+        protected |= np.hypot(points[:, 0] - px, points[:, 1] - py) < 300.0
+    # La B-spline cúbica usa controles vecinos: conservar también dos
+    # estaciones a cada lado del prefijo que sigue ejecutando el ESP.
+    for k in (lock or {}):
+        for delta in range(-2, 3):
+            protected[(int(k) + delta) % n] = True
+    changed = False
+    a = 1
+    while a < n - 3:
+        if protected[a]:
+            a += 1
+            continue
+        chosen = None
+        for b in range(a + 2, min(n - 1, a + 20)):
+            seg = points[a:b + 1]
+            lengths = np.linalg.norm(np.diff(seg, axis=0), axis=1)
+            arc = float(lengths.sum())
+            if arc > max_span or protected[a:b + 1].any():
+                break
+            chord = points[b] - points[a]
+            direct = float(np.linalg.norm(chord))
+            if direct < 1.0 or arc - direct < 0.5:
+                continue
+            unit = chord / direct
+            tangents = (points[a] - points[a - 1], points[b + 1] - points[b])
+            if any(float(t @ unit) / max(float(np.linalg.norm(t)), 1e-9) < math.cos(math.radians(25.0)) for t in tangents):
+                continue
+            chosen = (b, np.r_[0.0, np.cumsum(lengths)] / arc, chord)
+        if chosen is None:
+            a += 1
+            continue
+        b, fractions, chord = chosen
+        saved = points[a:b + 1].copy()
+        points[a:b + 1] = points[a] + fractions[:, None] * chord
+        trial = _resample(points, prm.step_mm, original.direction)
+        report = check(trial, pillars, parking, park_w)
+        min_radius = min(prm.r_min_mm, 1.0 / max(float(np.abs(original.kappa).max()), 1e-9))
+        if report["r_min_mm"] < min_radius or any(
+                report.get(key, 1e9) < prm.hard_clear_mm
+                for key in ("wall_mm", "island_mm", "sign_mm", "barrier_mm")):
+            points[a:b + 1] = saved
+        else:
+            changed = True
+        a = b + 1
+    if not changed:
+        return original
+    candidate = _resample(points, prm.step_mm, original.direction)
+    rep = check(candidate, pillars, parking, park_w)
+    if candidate.length_mm >= original.length_mm or rep["r_min_mm"] < min(prm.r_min_mm, 1.0 / max(float(np.abs(original.kappa).max()), 1e-9)):
+        return original
+    if any(rep.get(key, 1e9) < prm.hard_clear_mm for key in ("wall_mm", "island_mm", "sign_mm", "barrier_mm")):
+        return original
+    for px, py, color in pillars:
+        i = int(np.argmin(np.hypot(candidate.x - px, candidate.y - py)))
+        h = math.radians(candidate.heading_deg[i])
+        right = (px - candidate.x[i]) * math.cos(h) - (py - candidate.y[i]) * math.sin(h)
+        if (right < 0.0) != (color == "Red"):
+            return original
+    candidate.los_controls = points
+    return candidate
 
 
 def station_of(route: Route, x: float, y: float) -> int:
