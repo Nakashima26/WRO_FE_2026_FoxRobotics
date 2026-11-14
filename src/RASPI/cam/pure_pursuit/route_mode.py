@@ -813,6 +813,14 @@ class RouteMode:
                             self._job_shift, getattr(self, "_job_hold", False))
             self._job = None
             self._job_key = None
+        self._bend = 0.0
+        bdeg = getattr(C, "ROUTE_BEND_DEG", None)
+        if bdeg and not self.fixed and not self._line_d:
+            sgn_ = 1.0 if dm.direction == "CW" else -1.0
+            _h_, w_ = world_to_section(dm.parking, pose[0], pose[1])
+            left = (1900.0 - (w_ + RR._FRONT_MM)) if sgn_ > 0 else ((w_ + sgn_ * RR._FRONT_MM) - 1100.0)
+            if left <= float(getattr(C, "ROUTE_BEND_MM", 500.0)):
+                self._bend = -sgn_ * float(bdeg)   # CW gira a un lado, CCW al otro (hacia la cinta)
         if self.follower is None:
             return None, "", None
 
@@ -1541,7 +1549,16 @@ class RouteMode:
         if tf is None:
             return ""
         tx, ty, th = tf
-        # La ruta activa del ESP puede estar en el marco anterior al arranque
+        bd = getattr(self, "_bend", 0.0)
+        if bd and not self.fixed and self.loc.odom is not None:
+            # Cinta sin ver cerca del final supuesto de la recta: se gira la ruta bd grados alrededor del carro
+            # (misma posición, otro rumbo) para que la cámara la tenga en el FOV.
+            px, py, _yaw = self.loc.odom
+            th = th + bd
+            r = math.radians(th)
+            fx, fy, lx, ly = math.sin(r), math.cos(r), -math.cos(r), math.sin(r)
+            tx = self.loc.x[0] - (px * fx + py * lx)
+            ty = self.loc.x[1] - (px * fy + py * ly)
         # ciego resuelto: se le da la transformación de ESE marco.
         ds = self.shift - self.esp_shift
         tx -= ds * self.axis[0]
