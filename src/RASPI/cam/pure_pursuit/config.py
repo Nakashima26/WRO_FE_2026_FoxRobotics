@@ -1378,6 +1378,8 @@ ROUTE_PROV_RULES = False
 # Señal medio vista (color provisional, sin confirmar): la ruta esquiva también la otra fila de su
 # columna con el mismo color, descarta por regla la X de en medio, y esos asientos ya no frenan.
 ROUTE_HALF_SEEN = True
+ROUTE_CONF_GHOST_TC = 4   # vuelta 1 (tc < esto): la señal confirmada también esquiva la otra fila de su columna si la mediana lateral cae a <= ROUTE_CONF_GHOST_TOL_MM; None = apagado
+ROUTE_CONF_GHOST_TOL_MM = 150.0
 # Filas posibles de una señal medio vista: las que quedan a <= esto de la mediana lateral observada
 # (filas a 200 mm: 150 = las dos si la mediana cae en la mitad central del hueco).
 ROUTE_HALF_ROW_TOL_MM = 150.0

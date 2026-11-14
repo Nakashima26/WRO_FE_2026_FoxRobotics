@@ -701,6 +701,20 @@ class RouteMode:
             half_seats |= {k for k in rule if k[0] in {s for s, _ in half_seats}}
             plan_seats = {**plan_seats, **ghosts}
             plan_unknown = [k for k in plan_unknown if k not in half_seats]
+        gtc = getattr(C, "ROUTE_CONF_GHOST_TC", None)
+        if gtc is not None and float(getattr(self, "_tc_max", 0) or 0) < float(gtc) and getattr(dm, "row_candidates", None):
+            # Vuelta 1: una señal confirmada con la pose aún corrida (W/T1 por W/T3, s35) puede estar en la otra fila de su
+            # columna; si la mediana lateral observada también cae cerca de ella, la ruta esquiva las dos con el mismo color.
+            ghosts2 = {}
+            for (sec, seat), col in conf.items():
+                for other in dm.row_candidates(sec, seat, col, float(getattr(C, "ROUTE_CONF_GHOST_TOL_MM", 150.0))):
+                    tw = (sec, other)
+                    if other != seat and tw not in conf and tw not in plan_seats:
+                        ghosts2[tw] = col
+            if ghosts2:
+                half_seats |= set(ghosts2)
+                plan_seats = {**plan_seats, **ghosts2}
+                plan_unknown = [k for k in plan_unknown if k not in ghosts2]
         extra, extra_key, anchor_replan = None, None, False
         if not self.fixed:
             # Recta del cajón sin el avance: sus asientos no se pueden ubicar;
