@@ -1719,6 +1719,8 @@ ROUTE_L23_OUTER_SIGN_MM = None    # vueltas 2-3, señales de la fila exterior (X
 ROUTE_L23_OUTER_NEAR_MM = 300.0   # a menos de esto, el piso ROUTE_L23_OUTER_PWM
 ROUTE_L23_OUTER_PWM = 150
 ROUTE_FULL_SOFT_CLEAR_MM = 100.0   # holgura blanda del plan con el mapa completo (_prm_for)
+ROUTE_FULL_W_KAPPA = None         # peso de curvatura del plan con el mapa completo (None = ROUTE_W_KAPPA)
+ROUTE_FULL_W_CLEAR = 2.0          # peso de holgura del plan con el mapa completo
 ROUTE_FULL_HARD_CLEAR_MM = None   # None = ROUTE_HARD_CLEAR_MM
 ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil (None = ROUTE_PROFILE_LATENCY_S)
 ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón

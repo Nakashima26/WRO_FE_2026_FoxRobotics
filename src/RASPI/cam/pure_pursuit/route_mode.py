@@ -116,6 +116,10 @@ def _prm_for(unknown):
     prm = _route_params()
     if not unknown:
         prm.soft_clear_mm = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
+        for k in ("w_kappa", "w_clear"):   # mapa completo: ROUTE_FULL_W_KAPPA / ROUTE_FULL_W_CLEAR pisan el peso
+            v = getattr(C, "ROUTE_FULL_" + k.upper(), None)
+            if v is not None:
+                setattr(prm, k, float(v))
         if getattr(C, "ROUTE_FULL_HARD_CLEAR_MM", None) is not None:
             prm.hard_clear_mm = float(C.ROUTE_FULL_HARD_CLEAR_MM)
     return prm
