@@ -1654,7 +1654,9 @@ PARK_AJ float        PARK_SINU_DEC_TOL_CM        = 12.0f;
 PARK_AJ long         PARK_SINU_CORRE_MM          = 200;
 PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
 PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
-bool sinUActivo() { return PARK_SIN_U && (isnan(rutaPka) || rutaPka >= (float)PARK_SINU_PKA_MIN_MM || parkSinUDec != 2); }
+PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
+PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
+bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
 PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
 PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
@@ -1671,7 +1673,7 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 145.0f;  // 2026-11-12: 200 -> 145 (ToF lateral v2 a 110.6 mm del eje, el sonar a 56.3: ve la madera 54 mm antes); w del eje trasero cuando el sonar empieza a ver la madera de adelante
-PARK_AJ float        PARK_PL_W_DET_U             = 130.0f;  // 185 -> 130, igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_W_DET_U             = 138.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
@@ -2693,7 +2695,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -2967,6 +2969,7 @@ void vigilarSinU() {
   // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
   bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
   if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
+  if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) { parkSinUDec = 2; Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return; }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
   if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
   parkUturnPendiente = false;
@@ -2998,8 +3001,8 @@ void vigilarUturn(long distL, long distR, long distF) {
   // de asentarse en la recta — no lo confundas con la esquina 13.
   if (recorrido <= PARK_UTURN_ARRANQUE_MM) return;
   if (piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0) {
-    bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM;
     float along = alongSalidaMm();
+    bool fondoR = distF > 0 && distF <= PARK_UTURN_DF_FORZAR_CM && along >= (float)PARK_UTURN_FONDO_ALONG_MIN;   // una senal de frente a mitad de recta no es la pared del fondo
     float umbralU = (float)PARK_UTURN_RUTA_ALONG_MM;
     if (PARK_UTURN_ADELANTO_MM > 0 && min(distL, distR) >= PARK_UTURN_ADELANTO_EXT_CM) umbralU = min(umbralU, (float)PARK_UTURN_ADELANTO_MM);   // hueco ya abierto: el radio de la U sale igual que a 500
     if (PARK_UTURN_RUTA_PKA_MM > 0 && !isnan(rutaPka)) umbralU = max(umbralU, rutaPka + (float)PARK_UTURN_RUTA_PKA_MM);   // la U no cae encima de la madera del cajón
