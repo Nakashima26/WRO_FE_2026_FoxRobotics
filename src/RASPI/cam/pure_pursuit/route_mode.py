@@ -711,7 +711,7 @@ class RouteMode:
                 fz = self.__dict__.setdefault("_map_freeze", {})
                 for k, col in plan_seats.items():
                     fz[k] = col
-                back = {k: col for k, col in fz.items() if k not in plan_seats and k[0] != dm.parking}
+                back = {k: col for k, col in fz.items() if k not in plan_seats and (k[0] != dm.parking or getattr(C, "ROUTE_MAP_FREEZE_PARK", False))}
                 if back:
                     plan_seats = {**plan_seats, **back}
                     plan_unknown = [k for k in plan_unknown if k not in back]
