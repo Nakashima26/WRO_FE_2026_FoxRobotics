@@ -1690,6 +1690,7 @@ PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al 
 PARK_AJ float        PARK_PL_WF                  = 47.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
 PARK_AJ float        PARK_PL_WF_U                = 39.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
+PARK_AJ float        PARK_PL_LEAD_RATE_S         = 0.0f;    // 0 conserva adelanto fijo; segundos de giro residual al centrar
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
 PARK_AJ int          PARK_PL_TILT_H              = 0;       // 1 = la altura del eje por sonar del escaneo normal usa la inclinacion (empeoro n1 s11 y n3 s20)
@@ -6826,7 +6827,16 @@ void loop() {
           if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
         }
         if (i == 0 && PARK_PL_RECTA) {
-          if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
+          float corteT1 = parkPlanT1;
+          if (PARK_PL_LEAD_RATE_S > 0.0f) {
+            float leadFijo = (parkDetHSon > PARK_REV_ALTA_H) ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD;
+            float rateTh = -haciaPared * gyroRate;
+            if (PARK_PL_THLANE && !isnan(parkThCarril()))
+              rateTh = (direccionIzquierda == parkDirecto) ? gyroRate : -gyroRate;
+            float leadPred = constrain(max(rateTh, 0.0f) * PARK_PL_LEAD_RATE_S, 8.0f, 22.0f);
+            corteT1 += leadFijo - leadPred;
+          }
+          if (!parkPlanRectaOn && th >= corteT1) parkPlanRectaOn = true;
           if (parkPlanRectaOn) {
             float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
             fin = ph <= thr; why = "RECTA";
