@@ -115,7 +115,8 @@ def _prm_for(unknown):
     """
     prm = _route_params()
     if not unknown:
-        prm.soft_clear_mm = 100.0
+        prm.soft_clear_mm = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
+        prm.hard_clear_mm = float(getattr(C, "ROUTE_FULL_HARD_CLEAR_MM", prm.hard_clear_mm))
     return prm
 
 
@@ -1104,6 +1105,15 @@ class RouteMode:
                     v_sign = np.where(dd < near, v_t + (v_min - v_t) * g, v_sign)
                     tight_on = True
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
+            osm = getattr(C, "ROUTE_L23_OUTER_SIGN_MM", None)
+            outer = signs[np.maximum(np.abs(signs[:, 0]), np.abs(signs[:, 1])) >= 1000.0] if (l23 and osm is not None) else ()
+            if len(outer):
+                # Señales de la fila exterior (X1/X2, a ~1100 mm): entre ellas y la pared quedan ~140 mm por lado, a tope de velocidad se rozan.
+                dd_o = np.hypot(pxy[:, None, 0] - outer[None, :, 0], pxy[:, None, 1] - outer[None, :, 1]).min(axis=1)
+                on, osm = float(C.ROUTE_L23_OUTER_NEAR_MM), float(osm)
+                v_om = K * (float(C.ROUTE_L23_OUTER_PWM) - pwm0)
+                v_o = v_om + (v_base - v_om) * np.clip((dd_o - on) / max(osm - on, 1.0), 0.0, 1.0)
+                v_c = np.where(dd_o < osm, np.minimum(v_c, v_o), v_c)
         if getattr(C, "ROUTE_PROFILE_ISLAND_MM", None) is not None:
             # Cerca de las esquinas de la isla: misma rampa que las señales (v_min -> base).
             h = float(INNER_HALF_MM)
