@@ -1709,6 +1709,6 @@ SURPRISE_MIN_CONTOUR_AREA = 200.0  # la señal de 50 mm debe verse antes que el 
 SURPRISE_NORMAL_HEIGHT_SAMPLES = ()
 # Vueltas 2-3 (tc 4..11): frenado/agarre del perfil propios. None = los de ROUTE_PROFILE_*.
 ROUTE_L23_A_BRAKE_MM_S2 = None
-ROUTE_L23_A_LAT_MM_S2 = None
+ROUTE_L23_A_LAT_MM_S2 = 3500   # vueltas 2-3: aceleración lateral del perfil (la base 2767)
 ROUTE_L23_K_MM_S_PER_PWM = 3.82   # vueltas 2-3: K del perfil = LAZO_K_FWD del ESP (3.82); None = el de la ruta
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
