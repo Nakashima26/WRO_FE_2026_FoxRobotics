@@ -1,3 +1,10 @@
+# STOP cxpark_s3_1113 — terminada (no se canceló ni se repite aquí)
+
+Tipo: ESTACIONAMIENTO (carrera completa desde el cajón con estacionamiento), banco con latencia (costo.py/uno.sh, FF 2.8 / FD 3.8, primer plan 1.95 s, VBAT 12.5, ROUTE_PLAN_ASYNC, 96 carreras, P=7).
+
+**Estado (seguimiento 2026-11-13 19:21:40 PST): TERMINADA antes de la orden de cancelación, reloj 482.6 s. INVÁLIDA para comparar:** Corrió con la caja saturada (decenas de tandas en paralelo): **reloj y tasa de éxito NO válidos para comparar**; sustituida por la repetición aislada cxpark_r*_1113 (ver resultados/cxpark_estado_r1.md). Repetición aislada correspondiente: cxpark_rs3_1113.
+
+---
 # cxpark_s3_1113 — tipo: carrera completa desde el cajón con estacionamiento en el banco NUEVO con latencia (costo.py, 3 vueltas, FF 2.8 / FD 3.8, primer plan 1.95 s), `TWIN_VBAT=12.5`, firmware `{"PARK_POSTE_IDENT_SEP":"1"}`, extra `{"ROUTE_PLAN_ASYNC": true}`, ruido 1-2 x semillas 1-48 (96 carreras), P=7, commit 65ff3d9 (rama grok/t/cxpark_s3_1113)
 
 Tandas anteriores del mismo tipo (mismo banco, FF/FD y ROUTE_PLAN_ASYNC; b1/b2 = base sin override de firmware, g1 = PARK_PL_GUARD0=1, o2 = PARK_PL_LOCAL_ODOM=1), para comparar totales: cxpark_b1_1113: 70/96 ok  media 37.92  mediana 37.58  mejor 33.48; cxpark_o2_1113: 75/96 ok  media 37.91  mediana 37.48  mejor 33.45. Esta tanda pudo coincidir en la caja con otras tandas, así que el reloj no es del todo comparable.
