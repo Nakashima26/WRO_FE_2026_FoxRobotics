@@ -245,6 +245,8 @@ class RouteMode:
         self.esp_shift = 0.0         # marco de la ruta activa en el ESP
         self.upload_shift = 0.0      # marco de la ruta que se está subiendo
         self.hold = False            # detenido hasta que la ruta nueva llegue al ESP
+        self._clr_seen = 0           # corredor despejado: entradas de dm._deferred ya vistas
+        self._clr_n = 0
         self._def_seen = 0
         self._pre_dets: list = []    # (w, color, dist a la cámara) en la fila interior
         self._pre_poses: list = []
@@ -837,13 +839,33 @@ class RouteMode:
             # Sin el avance: lento. Con el frontal lejos de la pared del fondo
             # (dF >= 100 cm, sin eco = 200) el perfil manda; al verla, tope ciego.
             d_f = _ack_num(ack or "", "dF")
+            clr = getattr(C, "ROUTE_CLEAR_PWM", None)
+            clear = False
+            if clr is not None:
+                # Corredor despejado (marco del carro): sin ninguna detección de color a < ROUTE_CLEAR_AHEAD_MM
+                # adelante y ROUTE_CLEAR_LAT_MM de lado durante ROUTE_CLEAR_FRAMES cuadros seguidos -> tope ROUTE_CLEAR_PWM.
+                buf = dm._deferred or []
+                hit = False
+                for ent in buf[self._clr_seen:]:
+                    for bx, by, _col in ent[0]:
+                        f_ = (float(C.ROBOT_BEV_Y) - by) * C.MM_PER_PX
+                        l_ = (bx - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
+                        if 0.0 <= f_ <= float(getattr(C, "ROUTE_CLEAR_AHEAD_MM", 700.0)) and abs(l_) <= float(getattr(C, "ROUTE_CLEAR_LAT_MM", 300.0)):
+                            hit = True
+                self._clr_seen = len(buf)
+                self._clr_n = 0 if hit else self._clr_n + 1
+                clear = self._clr_n >= int(getattr(C, "ROUTE_CLEAR_FRAMES", 3))
             if not (d_f is not None and d_f >= 100.0):
                 blind = getattr(C, "ROUTE_BLIND_PWM", None)
                 self.rv = slow if blind is None else int(blind)
+                if clear:
+                    self.rv = max(self.rv, int(clr))
             # 2026-11-09 (corrida 13:26): sin el cajón ubicado la cámara no entra al mapa y la ruta
             # cruzó por el primer verde a rv 216. Tope de salida y alto si el frontal ve algo cerca.
             pre = getattr(C, "ROUTE_PREFIX_PWM", None)
             if pre is not None:
+                if clear:
+                    pre = max(int(pre), int(clr))
                 self.rv = int(pre) if self.rv is None else min(self.rv, int(pre))
             stop_cm = getattr(C, "ROUTE_PREFIX_STOP_CM", None)
             if stop_cm is not None and d_f is not None and 0.0 < d_f < float(stop_cm):

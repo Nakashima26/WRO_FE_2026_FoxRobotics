@@ -1338,6 +1338,10 @@ ROUTE_BLIND_PWM = None   # tope antes de fijar el avance del cajón (arranque ci
 # tramo, alto (rv=0, hasta ROUTE_PREFIX_STOP_FRAMES cuadros; luego ROUTE_SLOW_PWM) si el frontal ve algo a
 # menos de ROUTE_PREFIX_STOP_CM, y sin evidencia para el cajón con el frontal pegado (odometría patinando).
 ROUTE_PREFIX_PWM = 130
+ROUTE_CLEAR_PWM = None   # tramo ciego: con el corredor despejado ROUTE_CLEAR_FRAMES cuadros seguidos sube el tope (BLIND y PREFIX) a esto; None = apagado
+ROUTE_CLEAR_FRAMES = 3
+ROUTE_CLEAR_AHEAD_MM = 700.0
+ROUTE_CLEAR_LAT_MM = 300.0
 ROUTE_PREFIX_STOP_CM = 40.0
 ROUTE_PREFIX_STOP_FRAMES = 20
 ROUTE_FIX_STUCK_DF_CM = 12.0
