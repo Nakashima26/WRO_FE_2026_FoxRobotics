@@ -1716,4 +1716,5 @@ ROUTE_L23_SIGN_NEAR_MM = 130.0    # vueltas 2-3: a menos de esto, piso (la base 
 ROUTE_L23_OUTER_SIGN_MM = 400.0   # vueltas 2-3, señales de la fila exterior (X1/X2): fin de su rampa de velocidad
 ROUTE_L23_OUTER_NEAR_MM = 300.0   # a menos de esto, el piso ROUTE_L23_OUTER_PWM
 ROUTE_L23_OUTER_PWM = 150
+ROUTE_MAP_FREEZE = False          # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
