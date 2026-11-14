@@ -852,6 +852,10 @@ class RouteMode:
                 self.rv = cap if self.rv is None else min(self.rv, cap)
             elif d_f is not None and d_f > 0.0:
                 self._pre_stop = 0
+        if C.ROUTE_MANEUVER_DEBT and self.fixed and lap1 and float(getattr(self, "_tc_max", 0) or 0) < 4:
+            debt = self._maneuver_cap(plan_seats, pose, dm.direction)
+            if debt is not None:
+                self.rv = debt if self.rv is None else min(self.rv, debt)
         if abs(self.follower.cte) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
             # lejos de la ruta (recién replaneada o perturbado): lento hasta volver
             cte_cap = _pwm("ROUTE_CTE_PWM")
@@ -1447,6 +1451,35 @@ class RouteMode:
               f"sign={rep.get('sign_mm', 0):.0f} wall={rep.get('wall_mm', 0):.0f} "
               f"isla={rep.get('island_mm', 0):.0f} Rmin={rep.get('r_min_mm', 0):.0f} "
               f"L={route.length_mm:.0f} {rep.get('solve_ms', 0):.0f}ms", flush=True)
+
+    def _maneuver_cap(self, seats, pose, direction):
+        """Conservar la deuda hasta alcanzar el lado físico exigido, aunque ya tenga color."""
+        x, y, hd = pose
+        angle = math.radians(hd)
+        fx, fy = math.sin(angle), math.cos(angle)
+        cap = None
+        clearance = SIGN_MM / 2.0 + C.ROBOT_WIDTH_MM / 2.0 + C.ROUTE_MANEUVER_MARGIN_MM
+        for (sec, seat), color in seats.items():
+            sx, sy = section_to_world(sec, *SEATS[seat])
+            ahead = (sx - x) * fx + (sy - y) * fy
+            if not 180.0 < ahead < 1100.0:
+                continue
+            # Normal radial de esta recta; evita confundir la siguiente recta en una esquina.
+            nx, ny = ((math.copysign(1.0, sx), 0.0) if abs(sx) > abs(sy)
+                      else (0.0, math.copysign(1.0, sy)))
+            if abs(fx * nx + fy * ny) > 0.5:
+                continue
+            inward = (color == "Red") == (direction == "CW")
+            side = -1.0 if inward else 1.0
+            remaining = clearance - side * ((x - sx) * nx + (y - sy) * ny)
+            if remaining <= 0:
+                continue
+            # Cambio lateral con aceleración y desaceleración; resta el avance del morro.
+            maneuver_s = 2.0 * math.sqrt(remaining / C.ROUTE_MANEUVER_A_LAT_MM_S2)
+            velocity = max(0.0, ahead - 180.0) / max(maneuver_s, 0.05)
+            pwm = max(100, int(C.ROUTE_PROFILE_PWM0 + velocity / C.ROUTE_PROFILE_K_MM_S_PER_PWM))
+            cap = pwm if cap is None else min(cap, pwm)
+        return cap
 
     def _speed(self, unknown, pose) -> int | None:
         """PWM máximo según lo que falta por ver.
