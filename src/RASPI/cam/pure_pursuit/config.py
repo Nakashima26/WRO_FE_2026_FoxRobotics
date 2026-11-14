@@ -1724,3 +1724,12 @@ ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil
 ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón
 ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
+
+# Experimentos v23: puerta previa y envolvente del seguimiento.
+ROUTE_EXIT_GATE_MM = 0.0
+ROUTE_EXIT_GATE_POSE_MM = 50.0
+ROUTE_EXIT_GATE_HEADING_DEG = 25.0
+ROUTE_POSE_ENVELOPE_MM = 0.0
+ROUTE_POSE_ENVELOPE_DEG = 4.0
+ROUTE_POSE_ENVELOPE_PWM = 160
+ROUTE_BODY_LOS_MM = 0.0
