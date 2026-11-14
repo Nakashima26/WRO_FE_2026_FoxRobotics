@@ -1,3 +1,8 @@
+// GENERADO por exportar_carrera.py desde ruta_perfil + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
+#define FOX_ENCODER 1
+#define FOX_TOF 1
+#define PI_BAUD 460800
+#define USB_BAUD 460800
 /*
  * PurePursuit.ino — WRO Future Engineers
  * Firmware ESP32 con soporte de protocolo V2 (Pure Pursuit desde Raspberry Pi).
@@ -110,7 +115,7 @@ uint32_t bnoMalos=0;
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
 const bool rondaObstaculos  = true;    // false = giro continuo de siempre (ronda abierta)
-const int TURNS_PER_RACE = 4;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
+const int TURNS_PER_RACE = 12;   // 12 = carrera real (3 vueltas). 4 = TEST de 1 vuelta y a estacionar.
 
 // ── ESTACIONAMIENTO: ÚNICO switch ─────────────────────────────────────────────
 // Antes eran PARK_ENABLED + PARK_DE_PUNTA + PARK_MODO_PARALELO y había que mover
@@ -279,7 +284,7 @@ const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
-const int RUTA_PWM_MAX = 0;
+const int RUTA_PWM_MAX = 255;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
@@ -485,7 +490,7 @@ const int  MANIOBRA_VEL_MIN  = 80;     // PWM de arranque de la rampa (evita el 
 const float CRUCERO_WALL_BLEND = 0.8f; // en CRUCERO: cuánto del wall PID se mezcla para CENTRAR
                                        // en el carril (0 = solo heading, 1 = wall PID completo).
                                        // Solo aplica mientras ambas paredes existen.
-const unsigned long MANIOBRA_FRENO_MS      = 300;   // coast (A1=A2=LOW) antes/después de invertir dirección
+const unsigned long MANIOBRA_FRENO_MS      = 47;   // coast (A1=A2=LOW) antes/después de invertir dirección
                                                     // — SIN esto el puente H se fríe por "plugging" (invertir
                                                     // con el motor girando). Reventó un TB6612 así (2026-09-01).
 const unsigned long MANIOBRA_RAMP_MS       = 60;    // subir el PWM de reversa de a poco. Corto a
@@ -562,7 +567,7 @@ const int CRUCERO_MUY_CERCA_DEBOUNCE = 2; // ídem, cuando dF ya <= FRONT_TURN_R
                                           // frente): confirma en 2 lecturas para disparar cerca de 25 cm
 
 // ── GIRO_RAPIDO (alternativa a MANIOBRA por tramos) ───────────────────────────
-const int GIRO_RAPIDO_MODO       = 0;    // 0=off 1=siempre 2=solo si Pi manda gr=1
+const int GIRO_RAPIDO_MODO       = 1;    // 0=off 1=siempre 2=solo si Pi manda gr=1
 // Asientos (wro_field.SEATS): tres filas a lo largo de la recta, en ±500 y 0 mm
 // del centro. La pared del fondo está a 1500 mm, así que la última fila —la
 // última donde puede haber una lata— queda a 100 cm. Se giran 5 cm después,
@@ -571,7 +576,7 @@ const int GR_ULTIMA_FILA_CM      = 100;
 const int GR_MARGEN_ESQUIVA_CM   = 5;
 const int GR_FRONT_CM            = GR_ULTIMA_FILA_CM - GR_MARGEN_ESQUIVA_CM; // 95
 // Más adentro de esto el arco saldría pegado a la pared: se hace MANIOBRA.
-const int GR_VENTANA_CM          = 55;   // dispara entre 40 y 95 cm
+const int GR_VENTANA_CM          = 75;   // dispara entre 40 y 95 cm
 const int GR_MIN_FRONT_CM        = 20;
 // |anguloGyro| bajo el cual la recta ya está tomada (se zerea al cerrar el giro).
 const float GR_RECTO_DEG         = 12.0f;
@@ -600,7 +605,7 @@ const int GR_ABORT_CM            = 12;
 // en la boca de la recta siguiente: hay que girar tarde, por debajo de la
 // ventana del giro rápido). En SIGUIENDO con prio, si el gyro ya rotó esto hacia
 // el lado de la pista, se cuenta como esquina. 0 = off (carro real).
-const float GIRO_PI_CUENTA_DEG   = 0.0f;
+const float GIRO_PI_CUENTA_DEG   = 70.0f;
 
 // ── Odometría (Pi) ────────────────────────────────────────────────────────────
 const float ODOM_PWM_K           = 3.5f;
@@ -667,8 +672,8 @@ const int CRUCERO_YIELD_ANG_DEG = 30;  // |anguloGyro| máx. para esa salida (an
 // se hace coast + servo centro y se espera a que |ΔanguloGyro/Δt| baje del
 // umbral por N samples (o venza el timeout).
 const unsigned long MANIOBRA_SETTLE_SAMPLE_MS  = 40;    // cada cuánto se mide la velocidad angular
-const float         MANIOBRA_SETTLE_RATE_DPS   = 30.0f; // deg/s por debajo de esto = "ya no rota"
-const int           MANIOBRA_SETTLE_QUIETO_N   = 3;     // samples lentos SEGUIDOS para cerrar (~120 ms)
+const float         MANIOBRA_SETTLE_RATE_DPS   = 60; // deg/s por debajo de esto = "ya no rota"
+const int           MANIOBRA_SETTLE_QUIETO_N   = 2;     // samples lentos SEGUIDOS para cerrar (~120 ms)
 const unsigned long MANIOBRA_SETTLE_TIMEOUT_MS = 600;   // tope duro: cierra igual aunque no se aquiete
 
 // Fase 4 (retroceso-post): la reversa a ciegas (servo centrado) giraba el carro
@@ -900,13 +905,13 @@ const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_G
 // más corto (la pared) fija a la vez el lado de salida Y la dirección de giro de
 // toda la pista (se latchea como hace GIRANDO en la 1ª esquina).
 // TODOS estos números son de ARRANQUE — hay que tunearlos en el tapete.
-const int  INICIO_PWM                  = 95;   // PWM de avance durante la maniobra (ruta: 195 por config; ver inicioMotor)
-const int  INICIO_PWM_SENAL            = 0;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
+const int  INICIO_PWM                  = 195;   // PWM de avance durante la maniobra (ruta: 195 por config; ver inicioMotor)
+const int  INICIO_PWM_SENAL            = 180;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
 const int  INICIO_ADENTRO_OVERSHOOT_IZQ_DEG = 28; // salida IZQ con isal=2 (a 53 grados la inercia a la izquierda pasa mas: 16 choca la senal T1 en el 136)
-const int  INICIO_ADENTRO_OVERSHOOT_DEG = 8;  // ídem para el giro de 90° (isal=2): a mayor PWM la inercia pasa más de 90° y la contravuelta se come la fila de señales
+const int  INICIO_ADENTRO_OVERSHOOT_DEG = 16;  // ídem para el giro de 90° (isal=2): a mayor PWM la inercia pasa más de 90° y la contravuelta se come la fila de señales
 const int  INICIO_OVERSHOOT_DEG        = 15;    // corta el servo antes; la inercia completa (0 = sin corte)
 const unsigned long INICIO_SWING_TIMEOUT_MS   = 3000; // red de seguridad de la fase 1 (si no llega al
                                                      //  ángulo — patina / topa la pared del cajón —
@@ -963,8 +968,8 @@ const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto
 const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
 const int  INICIO_TARDE_MIN_DEG    = 25;   // isal=2 llega en la contravuelta (fase 3) con |ang| >= esto: vuelve al recto (0 = no)
-const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
-const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
+const int  INICIO_RECTO_PWM            = 255;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
+const float INICIO_RECTO_LEAD_S        = 0.15f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
 const int  INICIO_CONTRA_FIN_DEG       = 32;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
 const float INICIO_CONTRA_CIERRE_S     = 0.085f; // solo isal=2: |ω de cierre|×esto. La caja de 90° a PWM 180 se pasa de 0 y entra a la fila interior
 const int  INICIO_SETTLE_QUIETO_N      = 0;      // fase 6: samples quietos para cerrar la salida; 0 = entrega a SIGUIENDO al terminar la contravuelta (no tira la inercia)
@@ -1041,7 +1046,7 @@ const bool          PARK_ESPERA_PI           = false;
 const unsigned long PARK_BUSCANDO_TIMEOUT_MS = 4000;  // solo con PARK_ESPERA_PI=true: red de
                                                       // seguridad si la Pi nunca ve el cajón
                                                       // (10 s a ~30 cm/s eran 3 m, más que la recta)
-const int           PARK_APPROACH_PWM        = 100;   // PWM en recta de aproximación al cajón
+const int           PARK_APPROACH_PWM        = 80;   // PWM en recta de aproximación al cajón
 PARK_AJ int           PARK_ANG_IN_DEG          = 70;    // tope del ángulo de entrada (ver PARK_RADIO_CM); 2026-10-04 maniobra del mapa (runs/geo2.py), zona limpia 60-66; 2026-10-16: 63 -> 70 con motor físico (docs/HANDOFF_PARKING.md)
 PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la maniobra ya no mete el carro
 // 2026-09-15, runs 1008-1010: con 3 el ángulo total salía 59-66° en vez de 57.
@@ -1050,7 +1055,7 @@ PARK_AJ int           PARK_ANG_MIN_IN_DEG      = 35;    // piso: por debajo la m
 // pared exterior, la contravuelta se quedaba sin poder girar y timeouteaba, y el
 // carro terminaba 24-42° chueco (antes terminaba a 9-16°).
 PARK_AJ int           PARK_OVERSHOOT_DEG       = 9;     // corte anticipado para absorber inercia (deg)
-const int           PARK_REV_PWM             = 85;    // PWM de marcha atrás — suave para control preciso
+const int           PARK_REV_PWM             = 92;    // PWM de marcha atrás — suave para control preciso
 // Carrito = 22 cm, cajón = 33 cm (1.5*L). Margen libre total = 11 cm. Centrado de
 // diseño: ~5 cm al poste de enfrente, ~6 cm atrás (ver PARK_CENTER_HI_CM).
 
@@ -1062,7 +1067,7 @@ const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
 const float         PARK_KD_RATE              = 0.30f;
 const int           PARK_SERVO_MAX            = 35;
-const int           PARK_PWM                  = 95;
+const int           PARK_PWM                  = 87;
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
@@ -1073,7 +1078,7 @@ const int           PARK_CAIDA_N              = 2;
 const int           PARK_GAP_N                = 2;
 const int           PARK_REBASE_N             = 20;
 const int           PARK_PARED_MAX_CM         = 55;
-const unsigned long PARK_ARMADO_MS            = 600;
+const unsigned long PARK_ARMADO_MS            = 407;
 const float         PARK_ARMADO_ANG_DEG       = 15.0f;
 const bool          PARK_REQUIERE_PI          = false;
 const unsigned long PARK_TIMEOUT_MS           = 10000;
@@ -1243,7 +1248,7 @@ PARK_AJ float         PARK_ATRAS_MIN_CM         = 6.0f;   // 2026-10-04: corta l
 // planeada con el mapa (runs/geo2.py) corta la contravuelta con ToF atrás ~6 cm
 // y endereza en la fase 13 hasta ~2.5 cm. Con un solo umbral la fase 13 se
 // cortaba al arrancar (distB ya bajo PARK_ATRAS_MIN_CM).
-PARK_AJ float         PARK_ATRAS_FINAL_CM       = 2.5f;
+PARK_AJ float         PARK_ATRAS_FINAL_CM       = 3.10;
 
 // T15b2 (t15b2_esquina13, "patrón 3"): fase 8 (FULL INTERNO) corta por
 // PARK_ATRAS_MIN_CM con el carro todavía girando fuerte (medido: ~80 deg/s,
@@ -1356,7 +1361,7 @@ PARK_AJ int           PARK_CENTER_HI_CM         = 5;    // 2026-10-04: 6 -> 5 (p
 // PARK_FWD_MS sigue acotando por si la pared nunca aparece.
 // PARA REVERTIR: PARK_CENTER_DEB = 1.
 const int           PARK_CENTER_DEB           = 3;
-const int           PARK_CENTER_PWM_PAR       = 75;
+const int           PARK_CENTER_PWM_PAR       = 80;
 // Fase 8 corta ~30° con ~180 mm/s de reversa y la cola a ~9 mm de la pared.
 // PWM 80 frena a ~1900 mm/s² y se come el hueco (para en ~7 mm). A 180 el
 // objetivo ya pega con a_max (~4300 mm/s²): v²/2a ≈ 4 mm, la cola no cierra.
@@ -1572,8 +1577,8 @@ bool          cajonParedDetectada    = false;
 // PARK_PUNTA_AJUSTE_MS > 0; si cae sobre el poste lejano -> PARK_PUNTA_AJUSTE_MS < 0.
 // (El modo de estacionamiento y PARK_MEDIA_VUELTA se eligen arriba del todo.)
 // Media vuelta (fases 20-23, en ESTACIONANDO y en ESTACIONANDO_PUNTA)
-const int           PARK_RETORNO_PWM           = 95;
-const int           PARK_RETORNO_PWM_MIN       = 80;     // arranque de la rampa
+const int           PARK_RETORNO_PWM           = 92;
+const int           PARK_RETORNO_PWM_MIN       = 70;     // arranque de la rampa
 const unsigned long PARK_RETORNO_RAMP_MS       = 120;
 const unsigned long PARK_RETORNO_AVANCE_MS     = 450;    // solo el estacionamiento en paralelo
 const int           PARK_RETORNO_OVERSHOOT_DEG = 10;     // corta antes del ángulo; la inercia completa
@@ -1589,23 +1594,23 @@ const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el a
 PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 // Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
 // a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
-PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 0;
+PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 40;
 PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
-PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 0;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
-PARK_AJ long         PARK_PEGADO_CICLA          = 0;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
-PARK_AJ long         PARK_UTURN_TOPE            = 0;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
-PARK_AJ long         PARK_SCAN_TOPE             = 0;   // tope PWM propio del escaneo rápido; 0 = MOTOR_MAX
+PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 1;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
+PARK_AJ long         PARK_PEGADO_CICLA          = 1;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
+PARK_AJ long         PARK_UTURN_TOPE            = 200;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
+PARK_AJ long         PARK_SCAN_TOPE             = 255;   // tope PWM propio del escaneo rápido; 0 = MOTOR_MAX
 // PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
-PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 160;
-PARK_AJ long         PARK_UTURN_PWM             = 160;
+PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 255;
+PARK_AJ long         PARK_UTURN_PWM             = 200;
 // Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
 // madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
-PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 200;
-PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 400;
+PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 255;
+PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 370;
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
@@ -1632,10 +1637,10 @@ PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
 // disparaba a mitad de la recta). >0 = mm a lo largo de la sección de salida desde
 // su centro, en el sentido de la marcha (la isla termina en 500). 0 = como antes.
 // > 0 también habilita estacionar en modo ruta (la U ignora prio=1 de la ruta). Apagado por defecto: el modo ruta es solo 3 vueltas.
-PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 0;
+PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 500;
 PARK_AJ long         PARK_UTURN_ADELANTO_MM      = 450;  // U adelantada: desde este along (< PARK_UTURN_RUTA_ALONG_MM) dispara si AMBOS sonares ya ven hueco >= ADELANTO_EXT_CM (la isla ya terminó); 0 = apagado
 PARK_AJ long         PARK_UTURN_ADELANTO_EXT_CM  = 70;
-PARK_AJ long         PARK_UTURN_RUTA_PKA_MM      = 0;   // piso extra de la U en ruta: along >= pka + esto (madera del cajón más adelante, pka= de la Pi); 0 = apagado
+PARK_AJ long         PARK_UTURN_RUTA_PKA_MM      = 120;   // piso extra de la U en ruta: along >= pka + esto (madera del cajón más adelante, pka= de la Pi); 0 = apagado
 // Modo RUTA: además del along, la U espera a que el carro vaya casi recto al carril (|anguloGyro| <= esto); si dispara
 // girado (esquivando) el ToF no ve la pared y el radio sale mal. 0 = sin compuerta.
 PARK_AJ long         PARK_UTURN_RUTA_ANG_MAX     = 0;   // 2026-10-16: 15 empeoró (U tarde o nunca: ruta 28 -> 20/41)
@@ -1789,7 +1794,7 @@ const unsigned long PARK_RETORNO_REV_CCW_MS    = 1200;   // regreso con pared a 
 // de enfrente ignorando el primer poste. Se iguala al valor de CCW, que ya está
 // probado. Si en pista resulta que el CW necesita otro tiempo, se separa aquí.
 const unsigned long PARK_RETORNO_REV_CW_MS     = 1200;   // regreso con pared a la DER (carrera CW)
-const int           PARK_RETORNO_REV_PWM       = 90;
+const int           PARK_RETORNO_REV_PWM       = 88;
 // ── La reversa del regreso también sigue la PARED, no solo el gyro ──────────
 // Ver el bloque de la fase 22. false = comportamiento anterior (solo rumbo a 0).
 // 2026-09-16 APAGADO tras la run 1031. El signo era correcto (el carro sí pasó de
@@ -1812,7 +1817,7 @@ const unsigned long PARK_RETORNO_REV_RECTO_MS  = 350;
 // revés), cambia esto a +1 y queda arreglado — no toques nada más.
 const int           PARK_RETORNO_REV_SIGNO     = -1;
 // Wall follower
-const int           PARK_PUNTA_PWM             = 95;     // PWM de la recta final
+const int           PARK_PUNTA_PWM             = 155;     // PWM de la recta final
 const float         PARK_PUNTA_PARED_CM        = 31.0f;  // distancia a mantener de la pared exterior (lectura del sonar)
                                                          // 2026-09-15: 30 -> 35 (orillas949 se enchuecaba hacia la pared) -> 33
                                                          // (orillas950 con 35 se saltó el 1er poste: eco débil más lejos)
@@ -1982,7 +1987,7 @@ int contadorPanicL = 0, contadorPanicR = 0;
 // Antes del PRIMER giro el carro va lento: la aproximación va más tranquila
 // (menos yaw del PID de centrado), el lateral lee limpio y detectarEsquina
 // confirma a tiempo. Después del giro 1 -> velocidad normal.
-const int VEL_INICIAL = 110;
+const int VEL_INICIAL = 158;
 
 // ── Carrera ───────────────────────────────────────────────────────────────────
 int  turnsCompleted      = 0;
@@ -1998,7 +2003,7 @@ const bool MODO_CONTINUO = false;
 // que maneja igual que SIGUIENDO (visión + PID) pero SIN buscar esquinas y solo
 // durante TERMINANDO_MS, para meterse en el área de salida y ahí sí frenar.
 // Sube/baja este tiempo según la distancia que falte hasta la zona de salida.
-const unsigned long TERMINANDO_MS = 1000;
+const unsigned long TERMINANDO_MS = 0;
 // Modo RUTA: la cuenta 12 cae a ~70° de la última curva, a veces antes de la diagonal; tras
 // TERMINANDO_MS se sigue hasta estar en la sección de salida a este margen de la diagonal (tope MAX_MS).
 const float TERMINANDO_RUTA_MARGEN_MM = 100.0f;
@@ -2041,7 +2046,7 @@ int rampaPWM(unsigned long t, unsigned long rampMs, int pwmMin, int pwm) {
 // OJO: setMotor() recorta TODO a esto. SIGUIENDO/CRUCERO/RECUPERANDO piden
 // MOTOR_MAX (antes decían 180 y salían a 120), y los 165/145 del pivote FWD
 // también salen a 120: la velocidad de crucero se cambia AQUÍ.
-const int MOTOR_MAX = rondaObstaculos ? 120 : 180;
+const int MOTOR_MAX = 155;
 
 // ── Rampa de arranque en REVERSA (2026-09-16) ───────────────────────────────
 // Toda reversa arrancaba de golpe al PWM pedido y el carro derrapaba: la rueda
@@ -3416,6 +3421,9 @@ float rutaExtTapeteCm() {
 // Marco canonico: w = mm a lo largo de la marcha desde la cara interior de la madera de atras (hueco 264, madera 2 en
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
+PARK_AJ int PARK_PL_GUARD0 = 0; // protege entrada y retrocede su arco antes de replanear
+bool parkPlanRecover = false;
+float parkPlanRecoverClr = 0.0f;
 bool parkPlanRectaOn = false;
 bool parkDetPorPose = false, parkIgnOk = false;
 float parkIgnAlong = 0.0f;
@@ -6754,7 +6762,7 @@ void loop() {
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
-          if (i == 0)      { parkPlanDir = -1; parkPlanSrv = servoHaciaPared; }
+          if (i == 0)      { parkPlanDir = parkPlanRecover ? 1 : -1; parkPlanSrv = servoHaciaPared; }
           else if (i == 1) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
           else if (i == 2) { parkPlanDir = -1; parkPlanSrv = centroServo; }
           else if (i == 3) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
@@ -6769,7 +6777,7 @@ void loop() {
           motorCoast();
           escribirServo(parkPlanSrv);
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
-            if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
+            if (parkPlanI == 0 && !parkPlanRecover && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
               float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
@@ -6845,6 +6853,21 @@ void loop() {
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
+        if (PARK_PL_GUARD0 && i == 0) {
+          if (parkPlanRecover) {
+            fin = clr >= parkPlanRecoverClr + 12.0f || mm >= 45.0f || tseg >= 1200UL;
+            why = "RECUPERA";
+          } else {
+            // Barrido residual de 12 mm al retirar PWM; incluye el giro del arco.
+            float tr = th * DEG_TO_RAD;
+            float stopTh = th + (parkPlanRectaOn ? 0.0f : 12.0f / PARK_PL_RI / DEG_TO_RAD);
+            float stopClr = parkPlanHolgura(pw - 12.0f * cosf(tr), ph - 12.0f * sinf(tr), stopTh);
+            if (cerca || (stopClr <= PARK_PL_M_MM && stopClr < clr)) {
+              fin = true; why = "HOLGURA0";
+              parkPlanRecoverClr = clr;
+            }
+          }
+        }
         if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
@@ -6853,7 +6876,13 @@ void loop() {
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
           Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          if (PARK_PL_GUARD0 && i == 0 && !parkPlanRecover && why[0] == 'H') {
+            parkPlanRecover = true; // deshacer primero; no pasar al arco INT pegado a madera
+          } else if (parkPlanRecover) {
+            parkPlanRecover = false;
+            parkPlanI = 2; // recuperada la holgura, continuar con zigzag acotado
+          } else parkPlanI++;
+          parkPlanRectaOn = false; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
             finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");

@@ -3421,6 +3421,9 @@ float rutaExtTapeteCm() {
 // Marco canonico: w = mm a lo largo de la marcha desde la cara interior de la madera de atras (hueco 264, madera 2 en
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
+PARK_AJ int PARK_PL_GUARD0 = 0; // protege entrada y retrocede su arco antes de replanear
+bool parkPlanRecover = false;
+float parkPlanRecoverClr = 0.0f;
 bool parkPlanRectaOn = false;
 bool parkDetPorPose = false, parkIgnOk = false;
 float parkIgnAlong = 0.0f;
@@ -6759,7 +6762,7 @@ void loop() {
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
-          if (i == 0)      { parkPlanDir = -1; parkPlanSrv = servoHaciaPared; }
+          if (i == 0)      { parkPlanDir = parkPlanRecover ? 1 : -1; parkPlanSrv = servoHaciaPared; }
           else if (i == 1) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
           else if (i == 2) { parkPlanDir = -1; parkPlanSrv = centroServo; }
           else if (i == 3) { parkPlanDir = -1; parkPlanSrv = servoDesdePared; }
@@ -6774,7 +6777,7 @@ void loop() {
           motorCoast();
           escribirServo(parkPlanSrv);
           if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
-            if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
+            if (parkPlanI == 0 && !parkPlanRecover && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
               float t = parkPlanT1Solve(w0, h0, th, parkDirecto ? PARK_PL_WF + (parkRevModo ? PARK_REV_DWF : 0.0f) : PARK_PL_WF_U, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
@@ -6850,6 +6853,21 @@ void loop() {
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
+        if (PARK_PL_GUARD0 && i == 0) {
+          if (parkPlanRecover) {
+            fin = clr >= parkPlanRecoverClr + 12.0f || mm >= 45.0f || tseg >= 1200UL;
+            why = "RECUPERA";
+          } else {
+            // Barrido residual de 12 mm al retirar PWM; incluye el giro del arco.
+            float tr = th * DEG_TO_RAD;
+            float stopTh = th + (parkPlanRectaOn ? 0.0f : 12.0f / PARK_PL_RI / DEG_TO_RAD);
+            float stopClr = parkPlanHolgura(pw - 12.0f * cosf(tr), ph - 12.0f * sinf(tr), stopTh);
+            if (cerca || (stopClr <= PARK_PL_M_MM && stopClr < clr)) {
+              fin = true; why = "HOLGURA0";
+              parkPlanRecoverClr = clr;
+            }
+          }
+        }
         if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
@@ -6858,7 +6876,13 @@ void loop() {
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
           Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          if (PARK_PL_GUARD0 && i == 0 && !parkPlanRecover && why[0] == 'H') {
+            parkPlanRecover = true; // deshacer primero; no pasar al arco INT pegado a madera
+          } else if (parkPlanRecover) {
+            parkPlanRecover = false;
+            parkPlanI = 2; // recuperada la holgura, continuar con zigzag acotado
+          } else parkPlanI++;
+          parkPlanRectaOn = false; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
             finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");
