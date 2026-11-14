@@ -1518,6 +1518,7 @@ ROUTE_PLAN_DELAY_S = None
 ROUTE_PENDING_PWM = None
 # Estaciones (~75 mm c/u) delante del carro que una replaneación deja iguales.
 ROUTE_LOCK_STATIONS = 7
+ROUTE_LAP1_LOCK_STATIONS = 7  # prefijo continuo de vuelta 1; banco permite acortarlo
 # Segundos que el prefijo fijo se adelanta (a la velocidad del tope actual) por lo que tarda el plan. None = desde el carro.
 ROUTE_LOCK_LEAD_S = None
 # Tras subir una ruta nueva al ESP (RTE): tope de PWM durante ROUTE_SWAP_FRAMES frames. None = sin tope.

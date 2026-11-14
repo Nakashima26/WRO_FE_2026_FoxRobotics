@@ -767,6 +767,8 @@ class RouteMode:
                 k0 = RR.station_of(self.route, pose[0], pose[1])
                 nst = len(self.route.d_stations)
                 nl = int(getattr(C, "ROUTE_LOCK_STATIONS", 7))
+                if float(getattr(self, "_tc_max", 0) or 0) < 4:
+                    nl = int(C.ROUTE_LAP1_LOCK_STATIONS)
                 lead = getattr(C, "ROUTE_LOCK_LEAD_S", None)
                 if lead is not None:
                     # El plan se adopta ~lead s despues: el prefijo fijo empieza donde estara el carro, no donde esta.
