@@ -1061,7 +1061,7 @@ const int           PARK_REV_PWM             = 92;    // PWM de marcha atrás �
 
 
 // Paralelo 10 pts — scan poste1/hueco/poste2 + maniobra en reversa (wiggle)
-PARK_AJ float         PARK_PARED_CM             = 28.0f;
+PARK_AJ float         PARK_PARED_CM             = 23.0f;
 const float         PARK_KPOS                 = 0.5f;
 const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
