@@ -1431,7 +1431,7 @@ ROUTE_PROFILE_PWM0 = 25.0
 # Perfil v3 (None = igual que antes). MIN_PWM: piso real del perfil; las curvas cerradas
 # (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
 ROUTE_PROFILE_MIN_PWM = None
-ROUTE_L23_MIN_PWM = 170    # piso del perfil en vueltas 2-3 (tc 4..11). Con el lazo sin tope en 2-3 (255 = no frenar) chocaban señales; 170 frena cerca de señales/isla. None = ROUTE_PROFILE_MIN_PWM
+ROUTE_L23_MIN_PWM = 190    # piso del perfil en vueltas 2-3 (tc 4..11). Con el lazo sin tope en 2-3 (255 = no frenar) chocaban señales; 170 frena cerca de señales/isla. None = ROUTE_PROFILE_MIN_PWM
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
 ROUTE_PROFILE_SIGN_NEAR_MM = None
@@ -1710,3 +1710,5 @@ SURPRISE_NORMAL_HEIGHT_SAMPLES = ()
 # Vueltas 2-3 (tc 4..11): frenado/agarre del perfil propios. None = los de ROUTE_PROFILE_*.
 ROUTE_L23_A_BRAKE_MM_S2 = None
 ROUTE_L23_A_LAT_MM_S2 = None
+ROUTE_L23_K_MM_S_PER_PWM = 3.82   # vueltas 2-3: K del perfil = LAZO_K_FWD del ESP (3.82); None = el de la ruta
+ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD

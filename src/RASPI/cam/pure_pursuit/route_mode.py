@@ -1031,6 +1031,9 @@ class RouteMode:
         n = len(r.kappa)
         K = float(C.ROUTE_PROFILE_K_MM_S_PER_PWM)
         pwm0 = float(C.ROUTE_PROFILE_PWM0)
+        if l23 and getattr(C, "ROUTE_L23_K_MM_S_PER_PWM", None) is not None:
+            K = float(C.ROUTE_L23_K_MM_S_PER_PWM)       # vueltas 2-3: el PWM lo lee el lazo del ESP (LAZO_K/PWM0_FWD)
+            pwm0 = float(C.ROUTE_L23_PWM0)
         base = int(C.ROUTE_PROFILE_BASE_PWM)
         top = int(C.ROUTE_PROFILE_MAX_PWM)
         v_base = K * (base - pwm0)
