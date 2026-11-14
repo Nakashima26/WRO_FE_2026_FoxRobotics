@@ -115,7 +115,9 @@ def _prm_for(unknown):
     """
     prm = _route_params()
     if not unknown:
-        prm.soft_clear_mm = 100.0
+        prm.soft_clear_mm = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
+        if getattr(C, "ROUTE_FULL_HARD_CLEAR_MM", None) is not None:
+            prm.hard_clear_mm = float(C.ROUTE_FULL_HARD_CLEAR_MM)
     return prm
 
 
@@ -701,6 +703,18 @@ class RouteMode:
             half_seats |= {k for k in rule if k[0] in {s for s, _ in half_seats}}
             plan_seats = {**plan_seats, **ghosts}
             plan_unknown = [k for k in plan_unknown if k not in half_seats]
+        if getattr(C, "ROUTE_MAP_FREEZE", False):
+            # Vueltas 2-3 (tc >= 4): lo que ya tenía color (confirmado, provisional o fantasma de fila) no vuelve a vacío ni
+            # a desconocido para el planificador; solo cambia de color si el mapa actual lo dice. Un solo punto: da igual por qué se vació.
+            tcn = max(float(getattr(self, "_tc_max", 0) or 0), float(_ack_num(ack or "", "tc") or 0))
+            if tcn >= 4:
+                fz = self.__dict__.setdefault("_map_freeze", {})
+                for k, col in plan_seats.items():
+                    fz[k] = col
+                back = {k: col for k, col in fz.items() if k not in plan_seats and (k[0] != dm.parking or getattr(C, "ROUTE_MAP_FREEZE_PARK", False))}
+                if back:
+                    plan_seats = {**plan_seats, **back}
+                    plan_unknown = [k for k in plan_unknown if k not in back]
         gtc = getattr(C, "ROUTE_CONF_GHOST_TC", None)
         if gtc is not None and float(getattr(self, "_tc_max", 0) or 0) < float(gtc) and getattr(dm, "row_candidates", None):
             # Vuelta 1: una señal confirmada con la pose aún corrida (W/T1 por W/T3, s35) puede estar en la otra fila de su
@@ -1118,6 +1132,15 @@ class RouteMode:
                     v_sign = np.where(dd < near, v_t + (v_min - v_t) * g, v_sign)
                     tight_on = True
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
+            osm = getattr(C, "ROUTE_L23_OUTER_SIGN_MM", None)
+            outer = signs[np.maximum(np.abs(signs[:, 0]), np.abs(signs[:, 1])) >= 1000.0] if (l23 and osm is not None) else ()
+            if len(outer):
+                # Señales de la fila exterior (X1/X2, a ~1100 mm): entre ellas y la pared quedan ~140 mm por lado, a tope de velocidad se rozan.
+                dd_o = np.hypot(pxy[:, None, 0] - outer[None, :, 0], pxy[:, None, 1] - outer[None, :, 1]).min(axis=1)
+                on, osm = float(C.ROUTE_L23_OUTER_NEAR_MM), float(osm)
+                v_om = K * (float(C.ROUTE_L23_OUTER_PWM) - pwm0)
+                v_o = v_om + (v_base - v_om) * np.clip((dd_o - on) / max(osm - on, 1.0), 0.0, 1.0)
+                v_c = np.where(dd_o < osm, np.minimum(v_c, v_o), v_c)
         if getattr(C, "ROUTE_PROFILE_ISLAND_MM", None) is not None:
             # Cerca de las esquinas de la isla: misma rampa que las señales (v_min -> base).
             h = float(INNER_HALF_MM)
