@@ -5,7 +5,7 @@
 | [`stl/`](stl/) | Printed parts, ready to slice (PLA, 0.2 mm layers; gears and rack at 100 % infill) |
 | [`cad/`](cad/) | SolidWorks source: every `.SLDPRT` + `Vehicle_V2.SLDASM` |
 | [`step/`](step/) | One `.step` per printed part — opens in any CAD without SolidWorks (the full assembly is `cad/Vehicle_V2.SLDASM`) |
-| [`renders/`](renders/) | Front, back, left, right, top, bottom + isometric |
+| [`renders/`](renders/) | Front, back, left, right, top, bottom, isometric + `turntable.gif` |
 
 Purchased parts (Raspberry Pi 5, VL53L1X/TOF400C, N20 motor, battery, PCBs RevB_1/RevB_2) are only in the STEP assembly, not in `stl/`.
 
@@ -36,6 +36,8 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 | UltrasonicSupport_V2 | 1 | [`UltrasonicSupport_V2.stl`](stl/UltrasonicSupport_V2.stl) |
 
 ## Renders
+
+<p align="center"><img src="renders/turntable.gif" width="420" alt="v2 car, full CAD assembly rotating"></p>
 
 | Front | Back | Left | Right |
 |:---:|:---:|:---:|:---:|

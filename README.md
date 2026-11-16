@@ -202,6 +202,8 @@ Every structural part is 3D-printed in PLA (SUNLU) on a Bambu Lab A1 and designe
 
 v2 CAD is in [`models/v2/`](models/v2/): SolidWorks parts + assembly in [`cad/`](models/v2/cad/), one STEP per part in [`step/`](models/v2/step/) and printable STL in [`stl/`](models/v2/stl/), with the parts list in [`models/v2/README.md`](models/v2/README.md). Renders of the full assembly are in [`models/v2/renders/`](models/v2/renders/). The top-level `models/` folder is the v1 car.
 
+<p align="center"><img src="models/v2/renders/turntable.gif" width="420" alt="v2 car, full CAD assembly rotating"></p>
+
 | Isometric | Top | Bottom |
 |:---:|:---:|:---:|
 | <img src="models/v2/renders/isometric.png" height="230"> | <img src="models/v2/renders/top.png" height="230"> | <img src="models/v2/renders/bottom.png" height="230"> |
