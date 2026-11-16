@@ -200,7 +200,7 @@ The **Raspberry Pi 5** answers *where should the car go*: it sees the pillars an
 
 Every structural part is 3D-printed in PLA (SUNLU) on a Bambu Lab A1 and designed in SolidWorks. The wheels and axles are LEGO parts: LEGO axles keep their dimensions far better than printed shafts, which flex and misalign under load.
 
-**[TODO: add the v2 SolidWorks parts/assembly to `models/v2/CAD/`, printable STL/3MF to `models/v2/STL/` and a few renders to `models/v2/renders/`. The current `models/` folder is the v1 car.]**
+v2 CAD is in [`models/v2/`](models/v2/): SolidWorks parts + assembly in [`cad/`](models/v2/cad/), one STEP per part in [`step/`](models/v2/step/) and printable STL in [`stl/`](models/v2/stl/), with the parts list in [`models/v2/README.md`](models/v2/README.md). **[TODO: renders in `models/v2/renders/`.]** The top-level `models/` folder is the v1 car.
 
 For v2 we rebuilt the chassis around two problems measured on v1:
 
@@ -849,7 +849,7 @@ The dated, phase-by-phase story is in the [Engineering Journal](ENGINEERING_JOUR
 
 ## 12.1 Build the car
 
-1. **Print the parts** — v2 CAD and STL in `models/v2/` **[TODO: upload]**; gear profiles in [`Mecanica/Engranes/`](Mecanica/Engranes/). PLA, 0.2 mm layers; gears and rack at 100 % infill.
+1. **Print the parts** — STL in [`models/v2/stl/`](models/v2/stl/) (parts list and quantities in [`models/v2/README.md`](models/v2/README.md)); gear profiles in [`Mecanica/Engranes/`](Mecanica/Engranes/). PLA, 0.2 mm layers; gears and rack at 100 % infill.
 2. **Order the PCBs** — Gerbers from the KiCad projects [`electrical/WRO_RevB_1/`](electrical/WRO_RevB_1/) (logic) and [`electrical/WRO_RevB_2/`](electrical/WRO_RevB_2/) (power): KiCad → Plot → Gerber + drill. Schematics in PDF: [`electrical/export/`](electrical/export/).
 3. **Assemble** following [§5.5](#55-assembly-order-v2). **Before mounting the Pi:** with the boards stacked in the marked orientation and the battery connected, measure 5.0–5.2 V on `TO_PI` pins 7/8, 5 V on the servo header and 3.3 V on the sensor header.
 4. **Components** — see the [cost report](#15-cost-report) for the full list.
@@ -967,7 +967,7 @@ WRO_FE_2026_FoxRobotics/
 │   ├── export/                      ← schematics PDF/SVG + 3D renders
 │   └── WRO_RevA/                    ← v1 board
 ├── Mecanica/Engranes/               ← involute gear generator + DXF profiles
-├── models/                          ← v1 CAD/STL/renders; v2 in models/v2/ [TODO]
+├── models/                          ← v1 CAD/STL/renders; v2 in models/v2/ (cad, step, stl)
 ├── scripts/                         ← run report, Bluetooth route bench, ToF static test
 ├── deploy/systemd/                  ← Pi autostart service
 ├── v-photos/  (v2/ = current car)   t-photos/   video/
