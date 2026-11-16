@@ -22,19 +22,20 @@ jobs:
       - name: Pull latest changes
         run: |
           ssh -i ~/.ssh/github_actions ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} \
-            "cd /home/user/FoxRobotics && git pull origin main"
+            "cd /home/user/FoxRobotics && git pull --ff-only origin main"
 
       - name: Restart services
         # wro-runtime: NUNCA 'restart' -> traba la camara CSI (LED apagado, atascada).
-        # Usar stop + sleep 4 + start. wro-vnc si tolera restart.
+        # Usar stop + sleep 4 + start. La Pi 5 no tiene wro-vnc (Wayland; vista en vivo = cam_web.py):
+        # antes "restart wro-vnc && ..." fallaba ahi y wro-runtime nunca se reiniciaba.
         run: |
           ssh -i ~/.ssh/github_actions ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} \
-            "sudo systemctl restart wro-vnc.service && sudo systemctl stop wro-runtime.service && sleep 4 && sudo systemctl start wro-runtime.service"
+            "sudo systemctl stop wro-runtime.service && sleep 4 && sudo systemctl start wro-runtime.service"
 
       - name: Verify services
         run: |
           ssh -i ~/.ssh/github_actions ${{ secrets.PI_USER }}@${{ secrets.PI_HOST }} \
-            "sudo systemctl status wro-vnc.service && sudo systemctl status wro-runtime.service"
+            "sudo systemctl --no-pager status wro-runtime.service"
 
       - name: Notify deployment
         if: success()
