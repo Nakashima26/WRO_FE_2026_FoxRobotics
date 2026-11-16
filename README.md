@@ -24,7 +24,7 @@ The WRO Future Engineers rules (Appendix C) score documentation in five criteria
 |---|---|
 | **1. Mobility and Mechanical Design** — torque/speed reasoning, trade-offs, iterations | [§5 Mobility](#5-mobility-and-mechanical-design): gear-ratio study with measured speeds, Ackermann steering redesign with measured turning radii, chassis layout v1 → v2 |
 | **2. Power and Sensor Architecture** — power budget, wiring, sensor placement, calibration, failure points | [§6 Power and sensors](#6-power-and-sensor-architecture): power tree, budget, two-board PCB with schematics, pin map, sensor placement against field geometry, calibration procedures, electrical failures we hit and their fixes |
-| **3. Software Architecture and Obstacle Strategy** — state machine, justified algorithms, edge cases, tuning metrics | [§7 Software](#7-software-architecture) and [§8 Obstacle strategy](#8-obstacle-management--route-mode): module map, data flow and timing, ESP32 state machine, route planner (dynamic programming), EKF localization, pure pursuit on the ESP32, blind start, parking; [§9 Digital twin](#9-digital-twin--software-in-the-loop-simulator) |
+| **3. Software Architecture and Obstacle Strategy** — state machine, justified algorithms, edge cases, tuning metrics | [§7 Software](#7-software-architecture) and [§8 Obstacle strategy](#8-obstacle-management--route-mode): module map, data flow and timing, ESP32 state machine, route planner (dynamic programming), EKF localization, pure pursuit on the ESP32, blind start, parking, 2026 surprise pillar ([§8.8](#88-2026-extra-task--the-surprise-pillar)); [§9 Digital twin](#9-digital-twin--software-in-the-loop-simulator) |
 | **4. Systems Thinking and Engineering Decisions** — constraints, "we chose X instead of Y because…", risks | [§3 v1 → v2](#3-from-v1-to-v2--what-the-national-final-taught-us), [§11 Systems thinking](#11-systems-thinking-and-engineering-decisions): constraints, trade-off table, risk and failure-mode table, decision log |
 | **5. Reproducibility and GitHub Quality** — structure, commits, testing workflow, versioning | [§10 Testing](#10-testing-and-validation), [§12 Build and run](#12-how-to-build-and-run), [§13 Repository](#13-repository-structure), [releases](docs/releases.md) (`v1.0-nacional` → `v2.0-internacional`) |
 
@@ -70,7 +70,7 @@ We are a team from Baja California, México. FoxRobotics placed **1st at the WRO
 
 # 2. The Challenge and Our Goals
 
-The car must drive **three laps** autonomously around a 3 × 3 m field whose inner walls move between rounds (**Open Challenge**), and, in the **Obstacle Challenge**, also pass red pillars on the right and green pillars on the left, start from a parking lot and park in it at the end. Score ranks first; time only breaks ties.
+The car must drive **three laps** autonomously around a 3 × 3 m field whose inner walls move between rounds (**Open Challenge**), and, in the **Obstacle Challenge**, also pass red pillars on the right and green pillars on the left, start from a parking lot and park in it at the end. Score ranks first; time only breaks ties. In 2026 the Obstacle Challenge also has an optional **extra task**: one pillar changes color and height, and the car must obey its original color (§8.8).
 
 **Our goal for the international final:** keep the reliability that won the national final, and remove the limits that made v1 slow and fragile (§3). Concretely:
 
@@ -667,6 +667,48 @@ At the national final the judges moved the parking lot along the start straight.
 
 Twin result with the lot at a random position: **41/42 clean, median lot error 13 mm** (the old code that assumed a fixed lot: 7/42).
 
+## 8.8 2026 extra task — the surprise pillar
+
+**The rule** ([WRO 2026 Future Engineers Extra Task](https://wro-association.org/wp-content/uploads/WRO-2026-Future-Engineers-Extra-Task.pdf), published 2026-11-09). The attempt is optional and declared before the round. One pillar, never the first one on the route, is replaced by a pillar of the **opposite color** that is **50 mm or 150 mm tall** instead of 100 mm (same 50 × 50 mm base). The car must pass it on the side of its **original** color, i.e. the opposite of what it sees. Each correct pass earns 5 points, up to 15; a pass on the wrong side ends the attempt.
+
+**Idea.** Color alone cannot solve this: the special pillar is a perfectly normal red or green pillar. The only thing that gives it away is its **height**, so the Pi measures each pillar's height in the image and swaps the driving color when the height is not 100 mm. Everything after that is unchanged: the digital map, the planner (§8.4) and the ESP32 receive the *driving* color, so the route, the protocol and the firmware stay the same. The detection keeps both colors (seen and driving) in the log.
+
+**How the height is measured** ([`surprise.py`](src/RASPI/cam/pure_pursuit/surprise.py)):
+
+| Option | Why we did not use it / why we did |
+|---|---|
+| Height/width ratio of the blob | Rejected. In 735 rendered views (3 heights × 7 distances × 5 car angles × 7 viewing directions), the ratio of the three classes **overlapped**: the square base looks wider when seen from a corner, and perspective changes the top. |
+| Height in pixels alone | Rejected. A 50 mm pillar close to the camera looks taller than a 150 mm one far away. |
+| **Pixel height compared with a normal 100 mm pillar at the same floor distance** | **Used.** The pillar's foot sits on the floor, so the bird's-eye-view homography (§6.4) gives its distance; the expected pixel height of a *normal* pillar at that distance comes from a calibration table (photos of one 100 mm pillar at several distances, [`calibrar_sorpresa.py`](src/RASPI/cam/pure_pursuit/calibrar_sorpresa.py)) or, before calibrating, from the camera geometry. In the same 735 views the measured/expected ratio separated cleanly: **0.50–0.61** (50 mm), **0.985–1.05** (100 mm), **1.51–1.54** (150 mm). |
+
+Only the pillar's **foot** goes through the floor homography; the height is measured in the camera image, so the body of the pillar is never warped as if it lay on the floor.
+
+**Edge cases.**
+- **Confirmation.** A special pillar needs **3 consistent frames** and visible floor under its base (so the top of a pillar seen over a wall is not taken as a short pillar). A well-measured normal pillar is accepted at once, so the car does not react later than in a normal round.
+- **Cropped pillars.** A pillar cut by the image edge is never re-classified from the partial view; the car keeps the class already confirmed, and the map keeps its position.
+- **Memory.** The class is stored per seat (§8.2), so laps 2 and 3 reuse it. GO clears it.
+- **No extrapolation.** Outside the distances covered by the calibration table no new special class is created.
+- **Small pillar.** The 50 mm pillar has a smaller blob than the normal minimum area, so a smaller area is accepted only if it is consistent with 50 mm.
+
+**Switching it on.** Off by default (`SURPRISE_RULE = False`), so a normal round runs exactly the normal code. For a declared attempt: `runtime_nuevo --surprise-rule`, or `"SURPRISE_RULE": true` in `carrera.json`. The runtime refuses to start the attempt without a calibrated camera.
+
+**Results in the digital twin** (2026-11-10; the twin renders the special pillar at its real height and a judge scores the passes on the original color):
+
+| Test | Result |
+|---|---|
+| Normal round with the feature present but off (24 fields × 2 noise seeds) | **48/48 identical** to the reference |
+| Surprise pillar, 24 fields × 2 heights | **35/48 scored the full 15 points**, 1/48 scored 10 |
+| Passes on the wrong side of the special pillar | **0** |
+| Full race with parking, surprise mode on | 6/48 (normal-mode controls on the same fields: 4/24) |
+| Unit tests | 390 passed (both colors and directions, three heights, distance, cropping, memory across laps and GO, judge) |
+
+**Open before declaring the attempt.**
+1. **Calibrate with real photos** of a normal pillar at several distances on the car (no real table yet), then check with real 50 mm and 150 mm pillars.
+2. **Three regressions in the twin:** on two fields the car hits the parking walls only when surprise mode is on, and on one field (150 mm) it hits a normal pillar after 10 corners. In all three the special pillar itself was classified correctly; the cause is in the route or the parking, not in the classifier.
+3. Decide per round, with these results, whether the 15 points are worth the risk to the main score.
+
+Design notes and the full twin study: [`docs/notes/SURPRISE_RULE_2026.md`](docs/notes/SURPRISE_RULE_2026.md) (Spanish).
+
 ---
 # 9. Digital Twin — software-in-the-loop simulator
 
@@ -799,6 +841,7 @@ flowchart LR
 - **Parking is not finished yet.** The car leaves the lot, completes the race and runs the parking sequence, but it has not yet ended **fully inside** the lot on the v2 car. We are tuning the arc–straight–arc maneuver (§7.4) to make it both complete and as fast as possible.
 - **Consistency of the full round.** Clean 3-lap rounds with a correct map exist (runs 41, 48), but not every run yet completes all 3 laps with every pillar mapped correctly; the open mapping cases are the two above. The validation matrix above will be filled once this is consistent.
 - **Front ToF** is reliable only to ~80 cm on the black wall; it is never used for the lot fix.
+- **Surprise pillar (§8.8)** is validated only in the twin: it still needs a calibration table from real photos and three twin regressions (parking and one pillar) fixed before we declare the attempt.
 - **Pi 5 temperature** without a fan (~80 °C) — cooling pending (§6.5).
 - **Twin parking** is the least realistic part of the simulator; parking constants are confirmed on the car.
 
