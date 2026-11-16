@@ -1,0 +1,55 @@
+{
+  "created": "2026-10-22T13:08:01",
+  "vbat_V": null,
+  "note": "tapete, 160/1 alternado, PWM 150",
+  "files": [
+    {
+      "file": "lock_p150_s160_r01.csv",
+      "cmd": "PWM 150 5000 160",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p150_s001_r01.csv",
+      "cmd": "PWM 150 5000 1",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p150_s160_r01.csv",
+      "cmd": "PWM 150 5000 160",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p150_s001_r01.csv",
+      "cmd": "PWM 150 5000 1",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p150_s160_r01.csv",
+      "cmd": "PWM 150 5000 160",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p150_s001_r01.csv",
+      "cmd": "PWM 150 5000 1",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

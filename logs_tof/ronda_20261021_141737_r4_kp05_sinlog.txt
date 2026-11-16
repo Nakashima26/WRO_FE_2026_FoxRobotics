@@ -1,0 +1,66 @@
+-> ARRANCA
+Giro 1 izquierda  (L:130 R:51 F:90)
+!! IZQ fantasma 113 cm (st=2) descartado: tenía 156, luego 75 (st=2)
+Giro completado 1/12
+!! IZQ fantasma 153 cm (st=2) descartado: tenía 200, luego 19 (st=7)
+!! IZQ fantasma 19 cm (st=7) descartado: tenía 200, luego 111 (st=0)
+!! FREN fantasma 126 cm (st=2) descartado: tenía 180, luego 171 (st=2)
+RECTA 1: hold 55% esq 44% lejos 0% | int sin dato 22% | int en hold 20 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 2 izquierda  (L:186 R:86 F:49)
+!! IZQ fantasma 151 cm (st=2) descartado: tenía 200, luego 77 (st=2)
+Giro completado 2/12
+RECTA 2: hold 88% esq 11% lejos 0% | int sin dato 0% | int en hold 12 cm (obj 28) | trim +0.0 | pausa max 41 ms
+Giro 3 izquierda  (L:128 R:34 F:95)
+!! IZQ fantasma 137 cm (st=2) descartado: tenía 200, luego 182 (st=2)
+Giro completado 3/12
+!! IZQ fantasma 69 cm (st=7) descartado: tenía 142, luego 25 (st=0)
+!! FREN fantasma 80 cm (st=2) descartado: tenía 143, luego 188 (st=2)
+!! FREN fantasma 119 cm (st=2) descartado: tenía 200, luego 168 (st=2)
+!! FREN fantasma 117 cm (st=2) descartado: tenía 165, luego 196 (st=2)
+RECTA 3: hold 58% esq 30% lejos 10% | int sin dato 2% | int en hold 28 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 4 izquierda  (L:197 R:80 F:86)
+Giro completado 4/12
+!! FREN fantasma 121 cm (st=2) descartado: tenía 170, luego 163 (st=2)
+!! FREN fantasma 108 cm (st=2) descartado: tenía 164, luego 148 (st=2)
+RECTA 4: hold 77% esq 12% lejos 9% | int sin dato 0% | int en hold 38 cm (obj 28) | trim +0.0 | pausa max 81 ms
+Giro 5 izquierda  (L:126 R:69 F:78)
+Giro completado 5/12
+!! FREN fantasma 101 cm (st=2) descartado: tenía 178, luego 156 (st=2)
+!! IZQ fantasma 29 cm (st=7) descartado: tenía 200, luego 116 (st=0)
+RECTA 5: hold 67% esq 27% lejos 4% | int sin dato 11% | int en hold 32 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 6 izquierda  (L:197 R:75 F:46)
+!! IZQ fantasma 138 cm (st=2) descartado: tenía 200, luego 73 (st=2)
+!! IZQ fantasma 73 cm (st=2) descartado: tenía 200, luego 37 (st=7)
+Giro completado 6/12
+RECTA 6: hold 68% esq 20% lejos 10% | int sin dato 0% | int en hold 18 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 7 izquierda  (L:143 R:28 F:83)
+Giro completado 7/12
+RECTA 7: hold 62% esq 37% lejos 0% | int sin dato 2% | int en hold 39 cm (obj 28) | trim +0.0 | pausa max 41 ms
+Giro 8 izquierda  (L:195 R:73 F:68)
+!! IZQ fantasma 133 cm (st=2) descartado: tenía 200, luego 230 (st=2)
+!! IZQ fantasma 125 cm (st=2) descartado: tenía 200, luego 219 (st=2)
+Giro completado 8/12
+!! IZQ fantasma 99 cm (st=2) descartado: tenía 200, luego 63 (st=2)
+!! FREN fantasma 87 cm (st=2) descartado: tenía 145, luego 133 (st=2)
+RECTA 8: hold 79% esq 17% lejos 3% | int sin dato 10% | int en hold 49 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 9 izquierda  (L:105 R:66 F:86)
+!! IZQ fantasma 131 cm (st=2) descartado: tenía 188, luego 52 (st=7)
+Giro completado 9/12
+!! IZQ fantasma 33 cm (st=0) descartado: tenía 200, luego 129 (st=0)
+RECTA 9: hold 65% esq 32% lejos 2% | int sin dato 16% | int en hold 36 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 10 izquierda  (L:200 R:71 F:45)
+!! IZQ fantasma 122 cm (st=2) descartado: tenía 200, luego 76 (st=2)
+!! IZQ fantasma 76 cm (st=2) descartado: tenía 200, luego 36 (st=7)
+Giro completado 10/12
+RECTA 10: hold 66% esq 25% lejos 7% | int sin dato 0% | int en hold 17 cm (obj 28) | trim +0.0 | pausa max 123 ms
+Giro 11 izquierda  (L:130 R:28 F:94)
+Giro completado 11/12
+!! IZQ fantasma 83 cm (st=7) descartado: tenía 124, luego 31 (st=7)
+!! FREN fantasma 118 cm (st=2) descartado: tenía 165, luego 176 (st=2)
+!! FREN fantasma 98 cm (st=2) descartado: tenía 150, luego 162 (st=2)
+RECTA 11: hold 68% esq 28% lejos 2% | int sin dato 2% | int en hold 36 cm (obj 28) | trim +0.0 | pausa max 124 ms
+Giro 12 izquierda  (L:200 R:76 F:93)
+Giro completado 12/12
+-> TERMINANDO (1000 ms)
+RECTA 12: hold 77% esq 16% lejos 5% | int sin dato 0% | int en hold 29 cm (obj 28) | trim +0.0 | pausa max 124 ms
+TERMINADO: 12 giros en 31.7 s

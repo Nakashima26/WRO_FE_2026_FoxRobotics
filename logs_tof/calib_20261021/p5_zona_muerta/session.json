@@ -1,0 +1,55 @@
+{
+  "created": "2026-10-21T12:26:51",
+  "vbat_V": 12.5,
+  "note": "deadband 30->80 paso 1 hold 250 (la guia usa 5->50; este carro no arranca antes de ~50)",
+  "files": [
+    {
+      "file": "dead_fwd_r01.csv",
+      "cmd": "RAMP 30 80 1 250",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "dead_rev_r01.csv",
+      "cmd": "RAMP -30 -80 -1 250",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "dead_fwd_r02.csv",
+      "cmd": "RAMP 30 80 1 250",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "dead_rev_r02.csv",
+      "cmd": "RAMP -30 -80 -1 250",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "dead_fwd_r03.csv",
+      "cmd": "RAMP 30 80 1 250",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "dead_rev_r03.csv",
+      "cmd": "RAMP -30 -80 -1 250",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

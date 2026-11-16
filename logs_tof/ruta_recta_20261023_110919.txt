@@ -1,0 +1,163 @@
+# PC tipo=recta cerrada=0 paso=20.000 vueltas=1 salida=500,500,0.0 pwm=180 pwm_curva=120 lookahead=200
+# PC titulo recta 2000 mm | pwm 180/120 lookahead 200
+R,500.0,500.0
+R,520.0,500.0
+R,540.0,500.0
+R,560.0,500.0
+R,580.0,500.0
+R,600.0,500.0
+R,620.0,500.0
+R,640.0,500.0
+R,660.0,500.0
+R,680.0,500.0
+R,700.0,500.0
+R,720.0,500.0
+R,740.0,500.0
+R,760.0,500.0
+R,780.0,500.0
+R,800.0,500.0
+R,820.0,500.0
+R,840.0,500.0
+R,860.0,500.0
+R,880.0,500.0
+R,900.0,500.0
+R,920.0,500.0
+R,940.0,500.0
+R,960.0,500.0
+R,980.0,500.0
+R,1000.0,500.0
+R,1020.0,500.0
+R,1040.0,500.0
+R,1060.0,500.0
+R,1080.0,500.0
+R,1100.0,500.0
+R,1120.0,500.0
+R,1140.0,500.0
+R,1160.0,500.0
+R,1180.0,500.0
+R,1200.0,500.0
+R,1220.0,500.0
+R,1240.0,500.0
+R,1260.0,500.0
+R,1280.0,500.0
+R,1300.0,500.0
+R,1320.0,500.0
+R,1340.0,500.0
+R,1360.0,500.0
+R,1380.0,500.0
+R,1400.0,500.0
+R,1420.0,500.0
+R,1440.0,500.0
+R,1460.0,500.0
+R,1480.0,500.0
+R,1500.0,500.0
+R,1520.0,500.0
+R,1540.0,500.0
+R,1560.0,500.0
+R,1580.0,500.0
+R,1600.0,500.0
+R,1620.0,500.0
+R,1640.0,500.0
+R,1660.0,500.0
+R,1680.0,500.0
+R,1700.0,500.0
+R,1720.0,500.0
+R,1740.0,500.0
+R,1760.0,500.0
+R,1780.0,500.0
+R,1800.0,500.0
+R,1820.0,500.0
+R,1840.0,500.0
+R,1860.0,500.0
+R,1880.0,500.0
+R,1900.0,500.0
+R,1920.0,500.0
+R,1940.0,500.0
+R,1960.0,500.0
+R,1980.0,500.0
+R,2000.0,500.0
+R,2020.0,500.0
+R,2040.0,500.0
+R,2060.0,500.0
+R,2080.0,500.0
+R,2100.0,500.0
+R,2120.0,500.0
+R,2140.0,500.0
+R,2160.0,500.0
+R,2180.0,500.0
+R,2200.0,500.0
+R,2220.0,500.0
+R,2240.0,500.0
+R,2260.0,500.0
+R,2280.0,500.0
+R,2300.0,500.0
+R,2320.0,500.0
+R,2340.0,500.0
+R,2360.0,500.0
+R,2380.0,500.0
+R,2400.0,500.0
+R,2420.0,500.0
+R,2440.0,500.0
+R,2460.0,500.0
+R,2480.0,500.0
+R,2500.0,500.0
+# listo: ruta n=0, manda 'g' para arrancar | encoder 0 mm | ToF 2582 st 2
+# ruta OK n=101 paso=20.0 cerrada=0 largo=2000 mm
+# salida x=500 y=500 th=0.0 pwm=180/120 vueltas=1 lookahead=200
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2761 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2098 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2754 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2318 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1252 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1633 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1539 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1424 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1597 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1598 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1671 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1309 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1369 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1418 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2221 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1825 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1338 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2425 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2494 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2372 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1417 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1963 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2295 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1445 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2357 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1723 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1368 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1197 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1886 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2687 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 3111 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1629 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1921 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1736 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1937 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1817 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1820 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1223 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1799 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1816 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1396 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1134 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1454 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2149 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2368 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1239 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 986 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2126 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1825 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1943 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1152 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1887 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1649 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 985 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 1885 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 605 st 2
+# listo: ruta n=101, manda 'g' para arrancar | encoder 0 mm | ToF 2022 st 2

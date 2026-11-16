@@ -1,0 +1,376 @@
+ESPERANDO  L: 50 R: 50 F:113 | crudo L: 50/7 R: 50/7 F:132/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 50 F:134 | crudo L: 50/7 R: 51/7 F:154/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 50 F:129 | crudo L: 49/7 R: 51/7 F:149/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 53 R: 50 F:126 | crudo L: 53/2 R: 50/7 F:146/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 50 F:132 | crudo L: 49/7 R: 50/7 F:154/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 50 F:107 | crudo L: 51/7 R: 51/7 F:125/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 50 F:132 | crudo L: 51/7 R: 51/7 F:155/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 51 R: 50 F:114 | crudo L: 52/2 R: 50/7 F:132/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 52 F:132 | crudo L: 50/7 R: 53/7 F:154/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 50 F:131 | crudo L: 49/7 R: 50/7 F:153/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 50 F:126 | crudo L: 48/7 R: 51/7 F:146/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 50 F:130 | crudo L: 49/2 R: 51/7 F:151/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 57 R: 50 F:126 | crudo L: 58/2 R: 50/7 F:148/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 54 R: 50 F:131 | crudo L: 55/2 R: 50/7 F:148/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 51 R: 50 F:127 | crudo L: 51/7 R: 50/7 F:150/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 50 F:130 | crudo L: 48/7 R: 51/7 F:153/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 50 F:121 | crudo L: 49/7 R: 51/7 F:141/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 49 F:129 | crudo L: 48/7 R: 49/7 F:148/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 53 R: 50 F:128 | crudo L: 54/2 R: 51/7 F:150/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 50 F:132 | crudo L: 50/7 R: 50/7 F:154/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 50 F:126 | crudo L: 48/7 R: 50/7 F:147/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 55 R: 50 F:136 | crudo L: 56/2 R: 50/7 F:157/2 | ang:    0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 51 R: 50 F:123 | crudo L: 51/7 R: 51/7 F:143/2 | ang:    0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 51 F:125 | crudo L: 48/7 R: 52/2 F:146/2 | ang:    0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 49 F:118 | crudo L: 51/2 R: 49/7 F:136/2 | ang:    0.0 obj:    0.0 des:  0.0 tasa:   0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 50 F:128 | crudo L: 51/2 R: 51/7 F:149/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.1 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 50 F:129 | crudo L: 50/7 R: 51/7 F:150/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 52 R: 52 F:122 | crudo L: 53/2 R: 53/7 F:143/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 52 F:136 | crudo L: 49/7 R: 52/7 F:160/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 51 F:135 | crudo L: 51/7 R: 51/7 F:158/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 52 F:127 | crudo L: 48/2 R: 53/7 F:148/2 | ang:   -0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 () pwm:  0 | giros:0/12 
+-> ARRANCA
+SIGUIENDO  L: 49 R: 50 F:134 | crudo L: 50/7 R: 50/7 F:154/2 | ang:    0.0 obj:    0.0 des:  0.0 tasa:  -0.0 | servo: 75 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 49 R: 50 F:137 | crudo L: 48/7 R: 51/7 F:161/2 | ang:    0.8 obj:    0.0 des:  0.0 tasa:  24.8 | servo: 75 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 48 R: 52 F:130 | crudo L: 49/7 R: 52/7 F:153/2 | ang:    1.7 obj:    0.0 des:  0.0 tasa:   0.2 | servo: 73 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 56 R: 52 F:120 | crudo L: 57/2 R: 53/7 F:140/2 | ang:    1.5 obj:    0.0 des:  0.0 tasa:  -3.9 | servo: 74 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 50 R: 51 F:126 | crudo L: 49/7 R: 51/7 F:145/2 | ang:    1.1 obj:    0.0 des:  0.0 tasa:  -4.4 | servo: 74 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 49 R: 51 F:113 | crudo L: 49/7 R: 51/7 F:131/2 | ang:    0.9 obj:    0.0 des:  0.0 tasa:  -0.2 | servo: 74 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 49 R: 51 F:117 | crudo L: 49/7 R: 51/7 F:138/2 | ang:    0.4 obj:    0.0 des:  0.0 tasa:  -8.4 | servo: 75 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 50 R: 58 F: 94 | crudo L: 51/7 R: 59/2 F:111/2 | ang:    0.1 obj:    0.0 des:  0.0 tasa:   1.7 | servo: 75 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L: 69 R: 51 F: 96 | crudo L: 73/2 R: 51/7 F:116/2 | ang:   -0.5 obj:    0.0 des:  0.0 tasa:  -5.4 | servo: 75 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L:109 R: 59 F: 99 | crudo L:107/2 R: 60/2 F:120/2 | ang:   -1.2 obj:    0.0 des:  0.0 tasa:  -8.5 | servo: 76 (rumbo) pwm:180 | giros:0/12 
+SIGUIENDO  L:191 R: 54 F: 90 | crudo L:191/2 R: 54/7 F:110/2 | ang:   -1.5 obj:    0.0 des:  0.0 tasa:  -1.1 | servo: 76 (rumbo) pwm:180 | giros:0/12 
+Giro 1 izquierda  (L:191 R:50 F:85)
+GIRANDO    L: 89 R: 50 F: 85 | crudo L: 89/2 R: 50/7 F:105/2 | ang:   -2.2 obj:    0.0 des:  0.0 tasa:  -6.9 | servo:156 (rumbo) pwm:180 | giros:0/12 IZQ
+GIRANDO    L:180 R: 49 F: 80 | crudo L:180/2 R: 49/2 F:101/2 | ang:    4.1 obj:    0.0 des:  0.0 tasa: 124.1 | servo:156 (rumbo) pwm:180 | giros:0/12 IZQ
+GIRANDO    L:130 R: 79 F: 82 | crudo L:130/2 R: 85/2 F:105/2 | ang:   22.5 obj:    0.0 des:  0.0 tasa: 177.7 | servo:156 (rumbo) pwm:180 | giros:0/12 IZQ
+GIRANDO    L: 65 R: 97 F: 91 | crudo L: 65/2 R:101/2 F:111/2 | ang:   39.8 obj:    0.0 des:  0.0 tasa: 168.1 | servo:156 (rumbo) pwm:180 | giros:0/12 IZQ
+GIRANDO    L: 86 R:124 F:118 | crudo L: 87/2 R:127/2 F:140/2 | ang:   56.1 obj:    0.0 des:  0.0 tasa: 159.7 | servo:156 (rumbo) pwm:180 | giros:0/12 IZQ
+GIRANDO    L:140 R:141 F:163 | crudo L:140/2 R:101/2 F:206/2 | ang:   68.8 obj:    0.0 des:  0.0 tasa: 132.1 | servo:144 (rumbo) pwm:180 | giros:0/12 IZQ
+Giro completado 1/12
+SIGUIENDO  L:109 R: 91 F:141 | crudo L:108/2 R: 91/2 F:158/2 | ang:   87.1 obj:   90.0 des:  0.0 tasa: 168.6 | servo: 78 (esq) pwm:255 | giros:1/12 IZQ
+!! FREN fantasma 72 cm (st=2) descartado: tenía 138, luego 150 (st=2)
+SIGUIENDO  L:177 R: 93 F:159 | crudo L:178/2 R: 95/2 F:181/2 | ang:   96.9 obj:   90.0 des:  0.0 tasa:   2.5 | servo: 69 (esq) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L:200 R: 97 F:139 | crudo L:203/2 R: 98/2 F:156/2 | ang:   95.7 obj:   90.0 des:  0.0 tasa: -18.4 | servo: 70 (esq) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L:171 R: 93 F:136 | crudo L:170/2 R: 94/2 F:218/2 | ang:   93.5 obj:   90.0 des:  0.0 tasa: -25.6 | servo: 72 (esq) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L:170 R: 93 F:137 | crudo L: 37/7 R: 93/2 F:160/2 | ang:   91.1 obj:   90.0 des:  0.0 tasa: -23.9 | servo: 74 (esq) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 20 R: 96 F:139 | crudo L: 20/0 R: 97/2 F:212/2 | ang:   88.9 obj:   90.0 des: -2.0 tasa: -17.8 | servo: 75 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 20 R: 89 F:117 | crudo L: 21/0 R: 87/2 F:234/2 | ang:   87.3 obj:   90.0 des: -2.1 tasa: -15.8 | servo: 75 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 21 R: 97 F:138 | crudo L: 22/0 R: 99/2 F:162/2 | ang:   85.5 obj:   90.0 des: -1.8 tasa: -16.5 | servo: 77 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 23 R: 88 F:153 | crudo L: 24/0 R: 89/2 F:169/2 | ang:   84.3 obj:   90.0 des: -1.2 tasa: -10.5 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 24 R: 88 F:162 | crudo L: 25/0 R: 88/2 F:183/2 | ang:   84.5 obj:   90.0 des: -0.9 tasa:   1.5 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 25 R: 82 F:172 | crudo L: 26/0 R: 83/2 F:194/2 | ang:   84.8 obj:   90.0 des: -0.6 tasa:   5.2 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 27 R: 83 F:169 | crudo L: 28/0 R: 84/2 F:223/2 | ang:   85.1 obj:   90.0 des: -0.1 tasa:   4.6 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 28 R: 93 F:163 | crudo L: 29/7 R: 95/2 F:246/2 | ang:   85.5 obj:   90.0 des:  0.2 tasa:   3.1 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+!! FREN fantasma 113 cm (st=2) descartado: tenía 163, luego 150 (st=2)
+SIGUIENDO  L: 29 R: 79 F:151 | crudo L: 30/7 R: 79/2 F:170/2 | ang:   85.5 obj:   90.0 des:  0.6 tasa:   0.0 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 30 R: 81 F:143 | crudo L: 31/7 R: 81/2 F:162/2 | ang:   85.6 obj:   90.0 des:  0.9 tasa:  -0.2 | servo: 80 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 31 R: 78 F:112 | crudo L: 32/7 R: 79/2 F:212/2 | ang:   85.9 obj:   90.0 des:  1.2 tasa:   6.5 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L: 39 R: 83 F:169 | crudo L: 41/2 R: 84/2 F:194/2 | ang:   87.0 obj:   90.0 des:  2.3 tasa:  10.8 | servo: 79 (hold) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L:200 R: 79 F:110 | crudo L:222/2 R: 80/2 F:130/2 | ang:   88.2 obj:   90.0 des:  2.3 tasa:  12.5 | servo: 80 (esq) pwm:255 | giros:1/12 IZQ
+SIGUIENDO  L:200 R: 78 F:112 | crudo L:220/2 R: 79/2 F:136/2 | ang:   89.2 obj:   90.0 des:  0.3 tasa:  12.6 | servo: 77 (esq) pwm:255 | giros:1/12 IZQ
+RECTA 1: hold 64% esq 35% lejos 0% | int sin dato 12% | int en hold 27 cm (obj 28) | trim +0.2
+Giro 2 izquierda  (L:198 R:77 F:94)
+GIRANDO    L:198 R: 77 F: 94 | crudo L:208/2 R: 78/2 F:114/2 | ang:   90.0 obj:   90.0 des:  0.2 tasa:  10.0 | servo: 75 (esq) pwm:255 | giros:1/12 IZQ
+GIRANDO    L:199 R: 75 F: 62 | crudo L:152/2 R: 75/2 F: 79/2 | ang:   90.2 obj:   90.0 des:  0.2 tasa:   1.4 | servo:156 (esq) pwm:210 | giros:1/12 IZQ
+!! IZQ fantasma 152 cm (st=2) descartado: tenía 200, luego 218 (st=2)
+!! IZQ fantasma 153 cm (st=2) descartado: tenía 200, luego 239 (st=2)
+GIRANDO    L:199 R: 77 F: 67 | crudo L:239/2 R: 78/2 F: 89/2 | ang:  102.1 obj:   90.0 des:  0.2 tasa: 170.9 | servo:156 (esq) pwm:210 | giros:1/12 IZQ
+GIRANDO    L:191 R: 90 F: 69 | crudo L:190/2 R: 92/2 F: 91/2 | ang:  124.7 obj:   90.0 des:  0.2 tasa: 241.7 | servo:156 (esq) pwm:210 | giros:1/12 IZQ
+GIRANDO    L:169 R:103 F:156 | crudo L: 91/2 R:104/2 F:176/2 | ang:  146.5 obj:   90.0 des:  0.2 tasa: 209.9 | servo:156 (esq) pwm:200 | giros:1/12 IZQ
+GIRANDO    L: 58 R:105 F:156 | crudo L: 58/2 R:106/2 F:288/2 | ang:  160.3 obj:   90.0 des:  0.2 tasa: 172.3 | servo:139 (esq) pwm:220 | giros:1/12 IZQ
+Giro completado 2/12
+SIGUIENDO  L: 48 R: 79 F:156 | crudo L: 47/0 R: 75/2 F:241/2 | ang:  175.1 obj:  180.0 des:  2.0 tasa: 157.9 | servo: 80 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L:164 R: 70 F:200 | crudo L:170/2 R: 71/2 F:231/2 | ang:  190.8 obj:  180.0 des:  0.2 tasa:   0.3 | servo: 65 (esq) pwm:255 | giros:2/12 IZQ
+!! IZQ fantasma 85 cm (st=2) descartado: tenía 170, luego 35 (st=0)
+SIGUIENDO  L:169 R: 71 F:174 | crudo L: 35/0 R: 71/2 F:194/2 | ang:  188.0 obj:  180.0 des:  0.2 tasa: -52.0 | servo: 68 (esq) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 36 R: 70 F:170 | crudo L: 36/0 R: 71/2 F:223/2 | ang:  182.2 obj:  180.0 des:  1.8 tasa: -13.5 | servo: 73 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 39 R: 76 F:170 | crudo L: 40/7 R: 77/2 F:208/2 | ang:  178.2 obj:  180.0 des:  3.7 tasa: -16.0 | servo: 80 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 40 R: 69 F:169 | crudo L: 41/7 R: 70/2 F:189/2 | ang:  178.3 obj:  180.0 des:  4.1 tasa:   6.0 | servo: 80 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 42 R: 72 F:154 | crudo L: 43/7 R: 73/2 F:172/2 | ang:  179.0 obj:  180.0 des:  4.6 tasa:   8.4 | servo: 80 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 43 R: 65 F:152 | crudo L: 44/7 R: 65/2 F:172/2 | ang:  180.0 obj:  180.0 des:  5.0 tasa:  11.8 | servo: 79 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 45 R: 68 F:146 | crudo L: 46/2 R: 69/2 F:164/2 | ang:  181.3 obj:  180.0 des:  5.6 tasa:   8.1 | servo: 78 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 45 R: 58 F:134 | crudo L: 45/7 R: 58/2 F:154/2 | ang:  182.1 obj:  180.0 des:  5.5 tasa:   5.3 | servo: 78 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 46 R: 57 F:117 | crudo L: 47/2 R: 58/2 F:136/2 | ang:  182.6 obj:  180.0 des:  6.2 tasa:   4.4 | servo: 78 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 45 R: 63 F:114 | crudo L: 45/7 R: 64/2 F:133/2 | ang:  183.2 obj:  180.0 des:  5.8 tasa:   4.4 | servo: 77 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L: 46 R: 60 F:106 | crudo L: 47/7 R: 61/2 F:126/2 | ang:  184.0 obj:  180.0 des:  6.5 tasa:   6.7 | servo: 77 (hold) pwm:255 | giros:2/12 IZQ
+SIGUIENDO  L:199 R: 55 F: 99 | crudo L:134/2 R: 54/2 F:118/2 | ang:  184.5 obj:  180.0 des:  6.5 tasa:   6.1 | servo: 77 (esq) pwm:255 | giros:2/12 IZQ
+!! IZQ fantasma 134 cm (st=2) descartado: tenía 199, luego 81 (st=2)
+RECTA 2: hold 75% esq 25% lejos 0% | int sin dato 0% | int en hold 45 cm (obj 28) | trim +0.8
+Giro 3 izquierda  (L:199 R:54 F:97)
+!! IZQ fantasma 81 cm (st=2) descartado: tenía 199, luego 143 (st=2)
+GIRANDO    L:199 R: 53 F: 91 | crudo L:143/2 R: 53/7 F:110/2 | ang:  185.1 obj:  180.0 des:  5.5 tasa:   6.9 | servo:156 (esq) pwm:210 | giros:2/12 IZQ
+GIRANDO    L: 96 R: 55 F: 81 | crudo L: 93/2 R: 56/7 F:101/2 | ang:  188.3 obj:  180.0 des:  5.5 tasa:  91.3 | servo:156 (esq) pwm:210 | giros:2/12 IZQ
+GIRANDO    L:200 R: 70 F: 87 | crudo L:343/2 R: 72/2 F:109/2 | ang:  207.4 obj:  180.0 des:  5.5 tasa: 224.9 | servo:156 (esq) pwm:210 | giros:2/12 IZQ
+GIRANDO    L: 63 R: 93 F: 99 | crudo L: 63/2 R: 95/2 F:122/2 | ang:  230.8 obj:  180.0 des:  5.5 tasa: 227.3 | servo:156 (esq) pwm:200 | giros:2/12 IZQ
+GIRANDO    L: 84 R:104 F:145 | crudo L: 87/2 R:104/2 F:165/2 | ang:  249.3 obj:  180.0 des:  5.5 tasa: 179.1 | servo:142 (esq) pwm:200 | giros:2/12 IZQ
+Giro completado 3/12
+SIGUIENDO  L:118 R: 93 F:171 | crudo L:118/2 R: 92/2 F:193/2 | ang:  274.8 obj:  270.0 des:  0.8 tasa:  66.6 | servo: 70 (esq) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L:129 R: 86 F:170 | crudo L:134/2 R: 87/2 F:190/2 | ang:  277.7 obj:  270.0 des:  0.8 tasa: -23.2 | servo: 69 (esq) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 93 R: 83 F:170 | crudo L: 93/2 R: 83/2 F:148/2 | ang:  275.2 obj:  270.0 des:  0.8 tasa: -28.5 | servo: 71 (lejos) pwm:255 | giros:3/12 IZQ
+!! FREN fantasma 128 cm (st=2) descartado: tenía 170, luego 171 (st=2)
+SIGUIENDO  L: 93 R: 85 F:153 | crudo L: 24/0 R: 85/2 F:171/2 | ang:  272.6 obj:  270.0 des:  0.8 tasa: -24.4 | servo: 74 (lejos) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 26 R:100 F:151 | crudo L: 26/0 R:103/2 F:226/2 | ang:  270.4 obj:  270.0 des:  0.2 tasa: -22.4 | servo: 75 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 28 R: 96 F:146 | crudo L: 29/7 R: 98/2 F:243/2 | ang:  268.7 obj:  270.0 des:  1.0 tasa: -13.3 | servo: 76 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 29 R: 80 F:142 | crudo L: 30/7 R: 80/2 F:232/2 | ang:  267.5 obj:  270.0 des:  1.4 tasa:  -8.3 | servo: 78 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 31 R: 82 F:142 | crudo L: 32/7 R: 81/2 F:160/2 | ang:  267.4 obj:  270.0 des:  2.0 tasa:   2.1 | servo: 79 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 34 R: 84 F:142 | crudo L: 35/7 R: 84/2 F:230/2 | ang:  267.7 obj:  270.0 des:  2.9 tasa:  -1.1 | servo: 80 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 35 R: 74 F:135 | crudo L: 36/7 R: 72/2 F:152/2 | ang:  268.2 obj:  270.0 des:  3.2 tasa:   6.4 | servo: 80 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 37 R: 76 F:140 | crudo L: 38/7 R: 77/2 F:156/2 | ang:  268.8 obj:  270.0 des:  3.9 tasa:   7.2 | servo: 79 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 37 R: 79 F:140 | crudo L: 38/7 R: 79/2 F:161/2 | ang:  269.5 obj:  270.0 des:  4.0 tasa:   6.7 | servo: 79 (hold) pwm:255 | giros:3/12 IZQ
+!! FREN fantasma 86 cm (st=2) descartado: tenía 141, luego 131 (st=2)
+SIGUIENDO  L: 44 R: 77 F:132 | crudo L: 45/2 R: 78/2 F:151/2 | ang:  270.7 obj:  270.0 des:  5.8 tasa:  14.1 | servo: 79 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 43 R: 70 F:118 | crudo L: 43/7 R: 69/2 F:136/2 | ang:  271.2 obj:  270.0 des:  5.8 tasa:  12.0 | servo: 79 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 41 R: 61 F:148 | crudo L: 41/7 R: 60/2 F:216/2 | ang:  272.3 obj:  270.0 des:  5.3 tasa:   9.8 | servo: 78 (hold) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L: 46 R: 69 F:148 | crudo L: 47/2 R: 69/2 F:123/2 | ang:  273.2 obj:  270.0 des:  6.6 tasa:   5.4 | servo: 77 (hold) pwm:255 | giros:3/12 IZQ
+!! FREN fantasma 103 cm (st=2) descartado: tenía 149, luego 205 (st=2)
+SIGUIENDO  L:170 R: 58 F:129 | crudo L:170/2 R: 57/7 F:146/2 | ang:  273.8 obj:  270.0 des:  6.2 tasa:  10.5 | servo: 78 (esq) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L:200 R: 62 F:118 | crudo L:215/2 R: 63/2 F:140/2 | ang:  274.2 obj:  270.0 des:  4.2 tasa:   6.9 | servo: 75 (esq) pwm:255 | giros:3/12 IZQ
+SIGUIENDO  L:183 R: 62 F: 89 | crudo L:181/2 R: 64/2 F:105/2 | ang:  274.9 obj:  270.0 des:  2.2 tasa:   4.8 | servo: 74 (esq) pwm:120 | giros:3/12 IZQ
+RECTA 3: hold 63% esq 26% lejos 10% | int sin dato 5% | int en hold 37 cm (obj 28) | trim +1.5
+Giro 4 izquierda  (L:170 R:63 F:64)
+GIRANDO    L:155 R: 57 F: 74 | crudo L:153/2 R: 56/2 F: 96/2 | ang:  275.0 obj:  270.0 des:  1.5 tasa:  -5.6 | servo:156 (esq) pwm:210 | giros:3/12 IZQ
+GIRANDO    L:196 R: 63 F: 63 | crudo L:196/2 R: 64/2 F: 85/2 | ang:  277.7 obj:  270.0 des:  1.5 tasa:  92.5 | servo:156 (esq) pwm:210 | giros:3/12 IZQ
+!! IZQ fantasma 144 cm (st=2) descartado: tenía 196, luego 233 (st=2)
+GIRANDO    L:199 R: 72 F: 52 | crudo L:233/2 R: 73/2 F: 71/2 | ang:  295.6 obj:  270.0 des:  1.5 tasa: 222.4 | servo:156 (esq) pwm:210 | giros:3/12 IZQ
+GIRANDO    L:199 R: 95 F: 73 | crudo L:117/2 R: 98/2 F: 98/2 | ang:  316.4 obj:  270.0 des:  1.5 tasa: 209.9 | servo:156 (esq) pwm:200 | giros:3/12 IZQ
+GIRANDO    L: 75 R:116 F:136 | crudo L: 71/2 R:117/2 F:202/2 | ang:  335.3 obj:  270.0 des:  1.5 tasa: 185.4 | servo:155 (esq) pwm:200 | giros:3/12 IZQ
+GIRANDO    L: 60 R: 70 F:136 | crudo L: 58/7 R: 68/2 F:238/2 | ang:  352.9 obj:  270.0 des:  1.5 tasa:  98.8 | servo: 99 (esq) pwm:220 | giros:3/12 IZQ
+Giro completado 4/12
+SIGUIENDO  L:122 R: 64 F:200 | crudo L:123/2 R: 65/2 F:209/2 | ang:  368.1 obj:  360.0 des:  1.5 tasa:  27.6 | servo: 69 (esq) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 87 R: 68 F:200 | crudo L: 86/2 R: 69/2 F:205/2 | ang:  365.5 obj:  360.0 des:  1.5 tasa: -22.7 | servo: 72 (lejos) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 86 R: 68 F:167 | crudo L: 43/7 R: 68/2 F:182/2 | ang:  363.1 obj:  360.0 des:  1.5 tasa: -18.8 | servo: 74 (lejos) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 47 R: 63 F:162 | crudo L: 47/7 R: 63/2 F:203/2 | ang:  361.3 obj:  360.0 des:  3.5 tasa: -17.3 | servo: 76 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 46 R: 57 F:171 | crudo L: 46/7 R: 56/2 F:193/2 | ang:  359.7 obj:  360.0 des:  6.3 tasa:  -8.8 | servo: 80 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 54 R: 60 F:165 | crudo L: 55/2 R: 59/2 F:188/2 | ang:  359.5 obj:  360.0 des:  8.7 tasa:   6.7 | servo: 82 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 51 R: 53 F:157 | crudo L: 50/2 R: 54/7 F:176/2 | ang:  362.7 obj:  360.0 des:  8.7 tasa:   6.1 | servo: 82 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 52 R: 53 F:150 | crudo L: 52/7 R: 53/7 F:170/2 | ang:  365.7 obj:  360.0 des:  8.9 tasa:  18.5 | servo: 79 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 51 R: 51 F:128 | crudo L: 51/2 R: 51/7 F:145/2 | ang:  367.8 obj:  360.0 des:  8.7 tasa:  16.1 | servo: 76 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 51 R: 49 F:129 | crudo L: 52/7 R: 49/7 F:149/2 | ang:  369.1 obj:  360.0 des:  9.1 tasa:  10.2 | servo: 75 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 55 R: 50 F:127 | crudo L: 56/2 R: 51/7 F:149/2 | ang:  369.6 obj:  360.0 des: 10.3 tasa:   5.7 | servo: 75 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 49 R: 51 F:116 | crudo L: 49/7 R: 52/7 F:136/2 | ang:  370.0 obj:  360.0 des:  8.5 tasa:   3.5 | servo: 75 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 50 R: 51 F:108 | crudo L: 51/7 R: 51/7 F:130/2 | ang:  370.1 obj:  360.0 des:  9.1 tasa:   2.6 | servo: 74 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L: 50 R: 55 F: 99 | crudo L: 51/2 R: 56/2 F:119/2 | ang:  370.0 obj:  360.0 des:  9.4 tasa:  -0.9 | servo: 75 (hold) pwm:255 | giros:4/12 IZQ
+SIGUIENDO  L:120 R: 52 F: 97 | crudo L:120/2 R: 52/2 F:117/2 | ang:  369.9 obj:  360.0 des:  8.5 tasa:  -0.9 | servo: 75 (esq) pwm:255 | giros:4/12 IZQ
+RECTA 4: hold 74% esq 12% lejos 12% | int sin dato 0% | int en hold 52 cm (obj 28) | trim +2.6
+Giro 5 izquierda  (L:120 R:50 F:85)
+GIRANDO    L:109 R: 50 F: 78 | crudo L:108/2 R: 50/7 F: 97/2 | ang:  369.6 obj:  360.0 des:  7.5 tasa:  -1.2 | servo:156 (esq) pwm:210 | giros:4/12 IZQ
+GIRANDO    L: 97 R: 53 F: 70 | crudo L: 95/2 R: 53/7 F: 90/2 | ang:  373.7 obj:  360.0 des:  7.5 tasa: 102.4 | servo:156 (esq) pwm:210 | giros:4/12 IZQ
+GIRANDO    L:103 R: 71 F: 77 | crudo L: 99/2 R: 72/2 F: 99/2 | ang:  393.7 obj:  360.0 des:  7.5 tasa: 226.6 | servo:156 (esq) pwm:210 | giros:4/12 IZQ
+GIRANDO    L: 70 R:157 F:113 | crudo L: 67/2 R:157/2 F:139/2 | ang:  416.1 obj:  360.0 des:  7.5 tasa: 216.1 | servo:156 (esq) pwm:200 | giros:4/12 IZQ
+GIRANDO    L:108 R: 99 F:107 | crudo L:112/2 R: 99/2 F:127/2 | ang:  431.9 obj:  360.0 des:  7.5 tasa: 141.6 | servo:134 (esq) pwm:220 | giros:4/12 IZQ
+Giro completado 5/12
+SIGUIENDO  L:194 R: 84 F:107 | crudo L:194/2 R: 82/2 F:252/2 | ang:  446.4 obj:  450.0 des:  2.0 tasa:  74.6 | servo: 79 (esq) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L:194 R: 97 F:153 | crudo L:219/2 R: 99/2 F:201/2 | ang:  461.0 obj:  450.0 des:  2.6 tasa:   7.9 | servo: 67 (esq) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L:199 R: 83 F:151 | crudo L:222/2 R: 82/2 F:229/2 | ang:  458.7 obj:  450.0 des:  2.6 tasa: -35.5 | servo: 69 (esq) pwm:255 | giros:5/12 IZQ
+!! IZQ fantasma 149 cm (st=2) descartado: tenía 200, luego 93 (st=2)
+SIGUIENDO  L:199 R: 80 F:151 | crudo L: 93/2 R: 80/2 F:217/2 | ang:  455.4 obj:  450.0 des:  2.6 tasa: -21.5 | servo: 73 (esq) pwm:255 | giros:5/12 IZQ
+!! IZQ fantasma 93 cm (st=2) descartado: tenía 200, luego 26 (st=0)
+SIGUIENDO  L: 30 R: 93 F:167 | crudo L: 30/7 R: 94/2 F:193/2 | ang:  450.9 obj:  450.0 des:  3.2 tasa: -21.4 | servo: 76 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 31 R: 85 F:172 | crudo L: 32/7 R: 86/2 F: 95/2 | ang:  449.5 obj:  450.0 des:  3.7 tasa:  -3.4 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+!! FREN fantasma 75 cm (st=2) descartado: tenía 173, luego 183 (st=2)
+SIGUIENDO  L: 32 R: 85 F:172 | crudo L: 33/7 R: 86/2 F:238/2 | ang:  449.8 obj:  450.0 des:  4.0 tasa:   5.0 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 34 R: 77 F:171 | crudo L: 35/7 R: 76/2 F:191/2 | ang:  450.4 obj:  450.0 des:  4.6 tasa:   3.2 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+!! FREN fantasma 115 cm (st=2) descartado: tenía 171, luego 179 (st=2)
+SIGUIENDO  L: 36 R: 75 F:177 | crudo L: 37/7 R: 76/2 F:199/2 | ang:  450.8 obj:  450.0 des:  5.2 tasa:   8.1 | servo: 78 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 37 R: 74 F:155 | crudo L: 38/7 R: 75/2 F:171/2 | ang:  451.2 obj:  450.0 des:  5.5 tasa:   1.7 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 38 R: 74 F:171 | crudo L: 39/7 R: 75/2 F:151/2 | ang:  451.5 obj:  450.0 des:  5.9 tasa:   2.3 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 39 R: 68 F:145 | crudo L: 40/7 R: 68/2 F:167/2 | ang:  451.8 obj:  450.0 des:  6.3 tasa:   3.0 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 39 R: 74 F:172 | crudo L: 40/7 R: 74/2 F:196/2 | ang:  452.3 obj:  450.0 des:  6.5 tasa:   1.1 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+!! FREN fantasma 120 cm (st=2) descartado: tenía 176, luego 161 (st=2)
+SIGUIENDO  L: 39 R: 72 F:163 | crudo L: 40/7 R: 73/2 F:181/2 | ang:  452.5 obj:  450.0 des:  6.6 tasa:   3.0 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L: 40 R: 60 F:146 | crudo L: 41/7 R: 60/2 F:169/2 | ang:  452.5 obj:  450.0 des:  6.9 tasa:  -0.6 | servo: 79 (hold) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L:200 R: 62 F:141 | crudo L:223/2 R: 62/2 F:161/2 | ang:  452.9 obj:  450.0 des:  4.9 tasa:   5.8 | servo: 78 (esq) pwm:255 | giros:5/12 IZQ
+SIGUIENDO  L:200 R: 67 F: 92 | crudo L:204/2 R: 68/2 F:112/2 | ang:  453.4 obj:  450.0 des:  3.1 tasa:  10.8 | servo: 75 (esq) pwm:255 | giros:5/12 IZQ
+RECTA 5: hold 61% esq 35% lejos 2% | int sin dato 26% | int en hold 37 cm (obj 28) | trim +3.1
+Giro 6 izquierda  (L:200 R:67 F:95)
+GIRANDO    L:200 R: 63 F: 90 | crudo L:151/2 R: 63/2 F:110/2 | ang:  453.7 obj:  450.0 des:  3.1 tasa:  -0.5 | servo:156 (esq) pwm:210 | giros:5/12 IZQ
+!! IZQ fantasma 151 cm (st=2) descartado: tenía 200, luego 202 (st=2)
+GIRANDO    L:200 R: 61 F: 83 | crudo L:235/2 R: 61/2 F:105/2 | ang:  458.7 obj:  450.0 des:  3.1 tasa: 114.5 | servo:156 (esq) pwm:210 | giros:5/12 IZQ
+GIRANDO    L:200 R: 61 F: 69 | crudo L:128/2 R: 61/2 F: 88/2 | ang:  478.8 obj:  450.0 des:  3.1 tasa: 226.6 | servo:156 (esq) pwm:210 | giros:5/12 IZQ
+!! IZQ fantasma 128 cm (st=2) descartado: tenía 200, luego 91 (st=2)
+GIRANDO    L: 73 R: 61 F:115 | crudo L: 73/2 R: 61/2 F:141/2 | ang:  501.7 obj:  450.0 des:  3.1 tasa: 211.5 | servo:156 (esq) pwm:200 | giros:5/12 IZQ
+GIRANDO    L: 52 R: 61 F:163 | crudo L: 49/2 R: 61/2 F:291/2 | ang:  518.1 obj:  450.0 des:  3.1 tasa: 195.8 | servo:146 (esq) pwm:200 | giros:5/12 IZQ
+Giro completado 6/12
+SIGUIENDO  L:112 R: 61 F:174 | crudo L:112/2 R: 61/2 F:196/2 | ang:  538.1 obj:  540.0 des:  2.0 tasa:  70.4 | servo: 77 (esq) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L:104 R: 61 F:175 | crudo L:103/2 R: 61/2 F:236/2 | ang:  548.9 obj:  540.0 des:  3.1 tasa: -18.9 | servo: 70 (esq) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 96 R: 61 F:199 | crudo L: 45/7 R: 61/2 F:213/2 | ang:  544.8 obj:  540.0 des:  3.1 tasa:  -8.5 | servo: 74 (lejos) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 30 R: 61 F:180 | crudo L: 31/7 R: 61/2 F:197/2 | ang:  541.8 obj:  540.0 des:  3.9 tasa: -16.7 | servo: 76 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 32 R: 61 F:178 | crudo L: 33/7 R: 61/2 F:199/2 | ang:  540.6 obj:  540.0 des:  4.5 tasa: -12.0 | servo: 78 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 36 R: 61 F:153 | crudo L: 37/7 R: 61/2 F:202/2 | ang:  540.3 obj:  540.0 des:  5.5 tasa:   0.9 | servo: 79 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 36 R: 61 F:177 | crudo L: 37/7 R: 61/2 F:200/2 | ang:  540.6 obj:  540.0 des:  5.8 tasa:   6.0 | servo: 80 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 38 R: 61 F:163 | crudo L: 39/7 R: 61/2 F:183/2 | ang:  541.4 obj:  540.0 des:  6.3 tasa:   6.6 | servo: 79 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 38 R: 61 F:167 | crudo L: 39/7 R: 61/2 F:188/2 | ang:  542.4 obj:  540.0 des:  6.4 tasa:  10.5 | servo: 78 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 41 R: 61 F:146 | crudo L: 42/7 R: 61/2 F:165/2 | ang:  543.5 obj:  540.0 des:  7.4 tasa:   7.8 | servo: 78 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 41 R: 61 F:138 | crudo L: 41/7 R: 61/2 F:156/2 | ang:  544.6 obj:  540.0 des:  7.2 tasa:  10.5 | servo: 77 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 42 R: 61 F:125 | crudo L: 43/7 R: 61/2 F:146/2 | ang:  545.2 obj:  540.0 des:  7.9 tasa:   5.7 | servo: 77 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 42 R: 61 F:121 | crudo L: 43/7 R: 61/2 F:141/2 | ang:  545.7 obj:  540.0 des:  8.0 tasa:   6.6 | servo: 77 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 42 R: 61 F:115 | crudo L: 43/7 R: 61/2 F:135/2 | ang:  545.9 obj:  540.0 des:  8.1 tasa:   5.8 | servo: 77 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L: 71 R: 61 F:101 | crudo L: 76/2 R: 61/2 F:119/2 | ang:  546.4 obj:  540.0 des: 10.0 tasa:   5.8 | servo: 77 (hold) pwm:255 | giros:6/12 IZQ
+SIGUIENDO  L:128 R: 61 F: 95 | crudo L:125/2 R: 61/2 F:114/2 | ang:  546.4 obj:  540.0 des:  8.0 tasa:  -0.8 | servo: 77 (esq) pwm:255 | giros:6/12 IZQ
+RECTA 6: hold 75% esq 18% lejos 6% | int sin dato 3% | int en hold 40 cm (obj 28) | trim +3.7
+Giro 7 izquierda  (L:200 R:61 F:89)
+GIRANDO    L:183 R: 61 F: 84 | crudo L:181/2 R: 61/2 F:104/2 | ang:  546.8 obj:  540.0 des:  7.0 tasa:   4.6 | servo:156 (esq) pwm:210 | giros:6/12 IZQ
+!! IZQ fantasma 113 cm (st=2) descartado: tenía 181, luego 151 (st=2)
+GIRANDO    L:155 R: 61 F: 80 | crudo L:151/2 R: 61/2 F:101/2 | ang:  554.6 obj:  540.0 des:  7.0 tasa: 149.0 | servo:156 (esq) pwm:210 | giros:6/12 IZQ
+GIRANDO    L: 91 R: 61 F: 79 | crudo L: 88/2 R: 61/2 F: 99/2 | ang:  575.8 obj:  540.0 des:  7.0 tasa: 222.6 | servo:156 (esq) pwm:210 | giros:6/12 IZQ
+GIRANDO    L: 63 R: 61 F:116 | crudo L: 59/7 R: 61/2 F:141/2 | ang:  598.0 obj:  540.0 des:  7.0 tasa: 210.0 | servo:156 (esq) pwm:200 | giros:6/12 IZQ
+GIRANDO    L: 97 R: 61 F:173 | crudo L:100/2 R: 61/2 F:212/2 | ang:  621.0 obj:  540.0 des:  7.0 tasa:  94.9 | servo:104 (esq) pwm:220 | giros:6/12 IZQ
+Giro completado 7/12
+SIGUIENDO  L:160 R: 61 F:173 | crudo L:162/2 R: 61/2 F:225/2 | ang:  639.8 obj:  630.0 des:  3.6 tasa:  31.2 | servo: 68 (esq) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L:132 R: 61 F:152 | crudo L:132/2 R: 61/2 F:238/2 | ang:  638.7 obj:  630.0 des:  3.7 tasa: -20.8 | servo: 71 (esq) pwm:255 | giros:7/12 IZQ
+!! FREN fantasma 35 cm (st=2) descartado: tenía 124, luego 180 (st=2)
+SIGUIENDO  L:124 R: 61 F:180 | crudo L: 48/7 R: 61/2 F:200/2 | ang:  634.9 obj:  630.0 des:  3.7 tasa: -13.0 | servo: 74 (esq) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 26 R: 61 F:141 | crudo L: 26/7 R: 61/2 F: 37/2 | ang:  632.8 obj:  630.0 des:  3.1 tasa: -21.9 | servo: 75 (hold) pwm:255 | giros:7/12 IZQ
+!! FREN fantasma 17 cm (st=2) descartado: tenía 141, luego 167 (st=2)
+SIGUIENDO  L: 29 R: 61 F:166 | crudo L: 30/7 R: 61/2 F:122/2 | ang:  631.1 obj:  630.0 des:  4.2 tasa: -12.8 | servo: 77 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 30 R: 61 F:130 | crudo L: 31/7 R: 61/2 F:103/2 | ang:  630.1 obj:  630.0 des:  4.6 tasa:  -5.4 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+!! FREN fantasma 83 cm (st=2) descartado: tenía 130, luego 142 (st=2)
+SIGUIENDO  L: 33 R: 61 F:141 | crudo L: 34/7 R: 61/2 F:213/2 | ang:  630.3 obj:  630.0 des:  5.4 tasa:   4.1 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 33 R: 61 F:140 | crudo L: 34/0 R: 61/2 F:114/2 | ang:  630.7 obj:  630.0 des:  5.5 tasa:   1.1 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+!! FREN fantasma 94 cm (st=2) descartado: tenía 140, luego 221 (st=2)
+SIGUIENDO  L: 35 R: 61 F:140 | crudo L: 36/7 R: 61/2 F:224/2 | ang:  630.8 obj:  630.0 des:  6.0 tasa:   3.3 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 35 R: 61 F:147 | crudo L: 36/0 R: 61/2 F:201/2 | ang:  631.1 obj:  630.0 des:  6.1 tasa:  -0.8 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 40 R: 61 F:175 | crudo L: 41/7 R: 61/2 F:217/2 | ang:  632.0 obj:  630.0 des:  7.2 tasa:   9.2 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 42 R: 61 F:175 | crudo L: 43/7 R: 61/2 F:122/2 | ang:  632.7 obj:  630.0 des:  8.4 tasa:   5.6 | servo: 80 (hold) pwm:255 | giros:7/12 IZQ
+!! FREN fantasma 102 cm (st=2) descartado: tenía 175, luego 170 (st=2)
+SIGUIENDO  L: 41 R: 61 F:170 | crudo L: 41/7 R: 61/2 F:106/2 | ang:  633.4 obj:  630.0 des:  8.0 tasa:   9.3 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L: 41 R: 61 F:117 | crudo L: 42/7 R: 61/2 F:234/2 | ang:  634.0 obj:  630.0 des:  8.3 tasa:   7.1 | servo: 79 (hold) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L:116 R: 61 F:165 | crudo L:116/2 R: 61/2 F:124/2 | ang:  634.7 obj:  630.0 des:  6.9 tasa:   2.5 | servo: 78 (esq) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L:185 R: 61 F: 98 | crudo L:185/2 R: 61/2 F:115/2 | ang:  635.3 obj:  630.0 des:  4.9 tasa:   0.9 | servo: 75 (esq) pwm:255 | giros:7/12 IZQ
+SIGUIENDO  L:199 R: 61 F:102 | crudo L:153/2 R: 61/2 F:122/2 | ang:  635.8 obj:  630.0 des:  4.2 tasa:   6.1 | servo: 74 (esq) pwm:255 | giros:7/12 IZQ
+RECTA 7: hold 63% esq 36% lejos 0% | int sin dato 5% | int en hold 35 cm (obj 28) | trim +4.2
+Giro 8 izquierda  (L:173 R:61 F:94)
+GIRANDO    L:173 R: 61 F: 94 | crudo L:175/2 R: 61/2 F:118/2 | ang:  635.7 obj:  630.0 des:  4.2 tasa:  -4.0 | servo: 74 (esq) pwm:255 | giros:7/12 IZQ
+!! IZQ fantasma 119 cm (st=2) descartado: tenía 175, luego 156 (st=2)
+GIRANDO    L:158 R: 61 F: 83 | crudo L:156/2 R: 61/2 F:105/2 | ang:  635.5 obj:  630.0 des:  4.2 tasa:  -1.9 | servo:156 (esq) pwm:210 | giros:7/12 IZQ
+GIRANDO    L:141 R: 61 F: 52 | crudo L:141/2 R: 61/2 F: 70/2 | ang:  647.5 obj:  630.0 des:  4.2 tasa: 181.7 | servo:156 (esq) pwm:210 | giros:7/12 IZQ
+GIRANDO    L:194 R: 61 F:126 | crudo L:194/2 R: 61/2 F:145/2 | ang:  668.6 obj:  630.0 des:  4.2 tasa: 203.8 | servo:156 (esq) pwm:210 | giros:7/12 IZQ
+GIRANDO    L: 75 R: 61 F:176 | crudo L: 73/2 R: 61/2 F:198/2 | ang:  687.6 obj:  630.0 des:  4.2 tasa: 189.8 | servo:156 (esq) pwm:200 | giros:7/12 IZQ
+GIRANDO    L: 59 R: 61 F:176 | crudo L: 59/2 R: 61/2 F:246/2 | ang:  703.2 obj:  630.0 des:  4.2 tasa: 117.4 | servo:129 (esq) pwm:220 | giros:7/12 IZQ
+Giro completado 8/12
+SIGUIENDO  L:150 R: 61 F:176 | crudo L:150/2 R: 61/2 F:281/2 | ang:  716.9 obj:  720.0 des:  2.0 tasa:  67.7 | servo: 78 (esq) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L:122 R: 61 F:196 | crudo L:122/2 R: 61/2 F:223/2 | ang:  729.4 obj:  720.0 des:  4.0 tasa:  -0.0 | servo: 69 (esq) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L:109 R: 61 F:180 | crudo L:109/2 R: 61/2 F:216/2 | ang:  727.3 obj:  720.0 des:  4.2 tasa: -19.2 | servo: 72 (esq) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 39 R: 61 F:180 | crudo L: 39/7 R: 61/2 F:213/2 | ang:  724.8 obj:  720.0 des:  5.2 tasa: -26.1 | servo: 75 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 41 R: 61 F:172 | crudo L: 42/7 R: 61/2 F:193/2 | ang:  722.7 obj:  720.0 des:  7.3 tasa: -13.1 | servo: 78 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 42 R: 61 F:176 | crudo L: 43/7 R: 61/2 F:198/2 | ang:  722.4 obj:  720.0 des:  8.7 tasa:  -1.5 | servo: 80 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 45 R: 61 F:156 | crudo L: 46/7 R: 61/2 F:179/2 | ang:  723.7 obj:  720.0 des:  9.6 tasa:   1.6 | servo: 80 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 45 R: 61 F:148 | crudo L: 45/7 R: 61/2 F:168/2 | ang:  725.3 obj:  720.0 des:  9.3 tasa:  13.3 | servo: 79 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 45 R: 61 F:148 | crudo L: 45/7 R: 61/2 F:167/2 | ang:  726.4 obj:  720.0 des:  9.3 tasa:  11.9 | servo: 77 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 45 R: 61 F:147 | crudo L: 45/7 R: 61/2 F:168/2 | ang:  727.6 obj:  720.0 des:  9.4 tasa:  16.4 | servo: 76 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 46 R: 61 F:122 | crudo L: 46/7 R: 61/2 F:141/2 | ang:  728.3 obj:  720.0 des: 10.1 tasa:   5.9 | servo: 77 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 46 R: 61 F:127 | crudo L: 47/7 R: 61/2 F:148/2 | ang:  729.7 obj:  720.0 des: 10.3 tasa:  12.8 | servo: 75 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 46 R: 61 F:118 | crudo L: 47/7 R: 61/2 F:137/2 | ang:  730.3 obj:  720.0 des: 10.5 tasa:  -0.2 | servo: 75 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 46 R: 61 F: 97 | crudo L: 46/7 R: 61/2 F:115/2 | ang:  730.7 obj:  720.0 des: 10.4 tasa:   5.2 | servo: 75 (hold) pwm:255 | giros:8/12 IZQ
+SIGUIENDO  L: 46 R: 61 F: 91 | crudo L: 46/0 R: 61/2 F:110/2 | ang:  730.8 obj:  720.0 des: 10.5 tasa:  -1.0 | servo: 75 (hold) pwm:255 | giros:8/12 IZQ
+RECTA 8: hold 74% esq 25% lejos 0% | int sin dato 0% | int en hold 45 cm (obj 28) | trim +5.1
+Giro 9 izquierda  (L:117 R:61 F:88)
+GIRANDO    L:117 R: 61 F: 88 | crudo L:114/2 R: 61/2 F:108/2 | ang:  731.0 obj:  720.0 des:  8.5 tasa:   2.9 | servo: 74 (esq) pwm:120 | giros:8/12 IZQ
+GIRANDO    L:153 R: 61 F: 80 | crudo L:153/2 R: 61/2 F:100/2 | ang:  731.2 obj:  720.0 des:  8.5 tasa:  -1.3 | servo:156 (esq) pwm:210 | giros:8/12 IZQ
+GIRANDO    L:127 R: 61 F: 78 | crudo L:128/2 R: 61/2 F: 98/2 | ang:  739.3 obj:  720.0 des:  8.5 tasa: 149.7 | servo:156 (esq) pwm:210 | giros:8/12 IZQ
+GIRANDO    L: 89 R: 61 F: 80 | crudo L: 85/2 R: 61/2 F:102/2 | ang:  759.7 obj:  720.0 des:  8.5 tasa: 213.3 | servo:156 (esq) pwm:210 | giros:8/12 IZQ
+GIRANDO    L: 64 R: 61 F:107 | crudo L: 65/2 R: 61/2 F:131/2 | ang:  781.0 obj:  720.0 des:  8.5 tasa: 181.1 | servo:156 (esq) pwm:200 | giros:8/12 IZQ
+GIRANDO    L: 88 R: 61 F:154 | crudo L: 87/2 R: 61/2 F:219/2 | ang:  798.5 obj:  720.0 des:  8.5 tasa:  90.5 | servo:112 (esq) pwm:220 | giros:8/12 IZQ
+Giro completado 9/12
+SIGUIENDO  L: 90 R: 61 F:154 | crudo L: 91/2 R: 61/2 F:270/2 | ang:  806.6 obj:  810.0 des:  2.0 tasa:  62.9 | servo: 78 (lejos) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L:187 R: 61 F:154 | crudo L:185/2 R: 61/2 F: 98/2 | ang:  818.0 obj:  810.0 des:  4.4 tasa:  11.8 | servo: 70 (esq) pwm:255 | giros:9/12 IZQ
+!! FREN fantasma 78 cm (st=2) descartado: tenía 154, luego 221 (st=2)
+SIGUIENDO  L:112 R: 61 F:200 | crudo L:112/2 R: 61/2 F:171/2 | ang:  816.1 obj:  810.0 des:  5.1 tasa: -22.5 | servo: 75 (esq) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L:112 R: 61 F:167 | crudo L: 28/7 R: 61/2 F:224/2 | ang:  813.9 obj:  810.0 des:  5.1 tasa: -17.5 | servo: 76 (esq) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 26 R: 61 F:132 | crudo L: 26/0 R: 61/2 F:152/2 | ang:  812.3 obj:  810.0 des:  4.5 tasa: -12.6 | servo: 77 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 28 R: 61 F:132 | crudo L: 29/0 R: 61/2 F:271/2 | ang:  811.2 obj:  810.0 des:  5.3 tasa:  -6.1 | servo: 78 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 30 R: 61 F:177 | crudo L: 31/7 R: 61/2 F:197/2 | ang:  811.2 obj:  810.0 des:  5.9 tasa:   3.3 | servo: 79 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 30 R: 61 F:152 | crudo L: 31/7 R: 61/2 F:168/2 | ang:  811.5 obj:  810.0 des:  6.0 tasa:   2.7 | servo: 79 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 31 R: 61 F:174 | crudo L: 32/7 R: 61/2 F:196/2 | ang:  812.1 obj:  810.0 des:  6.3 tasa:   3.2 | servo: 78 (hold) pwm:255 | giros:9/12 IZQ
+!! FREN fantasma 126 cm (st=2) descartado: tenía 176, luego 243 (st=2)
+SIGUIENDO  L: 32 R: 61 F:175 | crudo L: 33/7 R: 61/2 F:263/2 | ang:  812.6 obj:  810.0 des:  6.6 tasa:   5.6 | servo: 78 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 34 R: 61 F:168 | crudo L: 35/7 R: 61/2 F:190/2 | ang:  812.9 obj:  810.0 des:  7.3 tasa:   1.9 | servo: 79 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 34 R: 61 F:169 | crudo L: 35/7 R: 61/2 F:226/2 | ang:  813.5 obj:  810.0 des:  7.3 tasa:   7.1 | servo: 78 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 35 R: 61 F:174 | crudo L: 36/7 R: 61/2 F:199/2 | ang:  813.8 obj:  810.0 des:  7.7 tasa:   5.1 | servo: 78 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 35 R: 61 F:179 | crudo L: 36/7 R: 61/2 F:200/2 | ang:  814.0 obj:  810.0 des:  7.8 tasa:   0.6 | servo: 78 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L: 38 R: 61 F:123 | crudo L: 39/7 R: 61/2 F:143/2 | ang:  814.2 obj:  810.0 des:  8.7 tasa:   4.8 | servo: 79 (hold) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L:200 R: 61 F:120 | crudo L:209/2 R: 61/2 F:137/2 | ang:  814.9 obj:  810.0 des:  8.3 tasa:   8.7 | servo: 79 (esq) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L:195 R: 61 F:112 | crudo L:211/2 R: 61/2 F:132/2 | ang:  815.8 obj:  810.0 des:  6.3 tasa:  10.2 | servo: 76 (esq) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L:178 R: 61 F:159 | crudo L:175/2 R: 61/2 F:109/2 | ang:  816.5 obj:  810.0 des:  5.5 tasa:   5.0 | servo: 75 (esq) pwm:255 | giros:9/12 IZQ
+SIGUIENDO  L:199 R: 61 F: 80 | crudo L:207/2 R: 61/2 F: 96/2 | ang:  816.6 obj:  810.0 des:  5.5 tasa:  -1.1 | servo: 74 (esq) pwm:120 | giros:9/12 IZQ
+RECTA 9: hold 60% esq 36% lejos 2% | int sin dato 21% | int en hold 33 cm (obj 28) | trim +5.5
+Giro 10 izquierda  (L:199 R:61 F:77)
+GIRANDO    L:194 R: 61 F: 73 | crudo L:194/2 R: 61/2 F: 93/2 | ang:  816.9 obj:  810.0 des:  5.5 tasa:   3.5 | servo:156 (esq) pwm:210 | giros:9/12 IZQ
+GIRANDO    L:199 R: 61 F: 56 | crudo L:246/2 R: 61/2 F: 75/2 | ang:  820.6 obj:  810.0 des:  5.5 tasa: 104.8 | servo:156 (esq) pwm:210 | giros:9/12 IZQ
+GIRANDO    L:199 R: 61 F: 52 | crudo L:143/2 R: 61/2 F: 74/2 | ang:  839.4 obj:  810.0 des:  5.5 tasa: 216.7 | servo:156 (esq) pwm:210 | giros:9/12 IZQ
+!! IZQ fantasma 143 cm (st=2) descartado: tenía 200, luego 187 (st=2)
+GIRANDO    L:170 R: 61 F: 63 | crudo L:167/2 R: 61/2 F: 83/2 | ang:  859.7 obj:  810.0 des:  5.5 tasa: 192.0 | servo:156 (esq) pwm:200 | giros:9/12 IZQ
+!! IZQ fantasma 121 cm (st=2) descartado: tenía 167, luego 82 (st=2)
+GIRANDO    L:167 R: 61 F:126 | crudo L: 82/2 R: 61/2 F:150/2 | ang:  877.3 obj:  810.0 des:  5.5 tasa: 174.6 | servo:149 (esq) pwm:200 | giros:9/12 IZQ
+Giro completado 10/12
+SIGUIENDO  L:105 R: 61 F:129 | crudo L:105/2 R: 61/2 F:227/2 | ang:  899.3 obj:  900.0 des:  2.0 tasa: 242.5 | servo: 75 (esq) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 96 R: 61 F:200 | crudo L: 92/2 R: 61/2 F:225/2 | ang:  906.3 obj:  900.0 des:  5.2 tasa:  16.1 | servo: 73 (lejos) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 91 R: 61 F:200 | crudo L: 47/7 R: 61/2 F:219/2 | ang:  904.6 obj:  900.0 des:  5.5 tasa: -14.1 | servo: 75 (lejos) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 48 R: 61 F:200 | crudo L: 48/7 R: 61/2 F:215/2 | ang:  903.7 obj:  900.0 des:  7.5 tasa:  -7.6 | servo: 77 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 49 R: 61 F:200 | crudo L: 50/7 R: 61/2 F:215/2 | ang:  903.1 obj:  900.0 des:  9.5 tasa:  -2.6 | servo: 80 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 57 R: 61 F:179 | crudo L: 59/2 R: 61/2 F:196/2 | ang:  903.5 obj:  900.0 des: 11.5 tasa:   8.9 | servo: 81 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 63 R: 61 F:169 | crudo L: 64/2 R: 61/2 F:188/2 | ang:  904.6 obj:  900.0 des: 13.5 tasa:  15.7 | servo: 82 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 60 R: 61 F:162 | crudo L: 61/2 R: 61/2 F:182/2 | ang:  907.5 obj:  900.0 des: 15.0 tasa:  49.1 | servo: 82 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 51 R: 61 F:165 | crudo L: 51/2 R: 61/2 F:185/2 | ang:  910.0 obj:  900.0 des: 12.6 tasa:  19.0 | servo: 78 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 61 R: 61 F:146 | crudo L: 63/2 R: 61/2 F:166/2 | ang:  912.1 obj:  900.0 des: 13.7 tasa:  10.4 | servo: 75 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 51 R: 61 F:134 | crudo L: 51/7 R: 61/2 F:153/2 | ang:  912.5 obj:  900.0 des: 12.7 tasa:  -2.9 | servo: 75 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 52 R: 61 F:130 | crudo L: 53/2 R: 61/2 F:149/2 | ang:  912.7 obj:  900.0 des: 13.4 tasa:   3.8 | servo: 75 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 52 R: 61 F:119 | crudo L: 51/7 R: 61/2 F:139/2 | ang:  913.0 obj:  900.0 des: 13.4 tasa:   3.0 | servo: 76 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 55 R: 61 F:113 | crudo L: 56/2 R: 61/2 F:133/2 | ang:  913.4 obj:  900.0 des: 14.4 tasa:   2.5 | servo: 75 (hold) pwm:255 | giros:10/12 IZQ
+SIGUIENDO  L: 60 R: 61 F: 94 | crudo L: 62/2 R: 61/2 F:112/2 | ang:  913.1 obj:  900.0 des: 14.0 tasa:   0.6 | servo: 75 (hold) pwm:255 | giros:10/12 IZQ
+RECTA 10: hold 77% esq 12% lejos 9% | int sin dato 0% | int en hold 55 cm (obj 28) | trim +6.1
+Giro 11 izquierda  (L:127 R:61 F:97)
+GIRANDO    L:127 R: 61 F: 97 | crudo L:128/2 R: 61/2 F:117/2 | ang:  913.4 obj:  900.0 des: 12.0 tasa:   1.2 | servo: 75 (esq) pwm:255 | giros:10/12 IZQ
+GIRANDO    L:157 R: 61 F: 87 | crudo L:157/2 R: 61/2 F:107/2 | ang:  913.4 obj:  900.0 des: 12.0 tasa:   0.9 | servo:156 (esq) pwm:210 | giros:10/12 IZQ
+GIRANDO    L:151 R: 61 F: 75 | crudo L:106/2 R: 61/2 F: 94/2 | ang:  925.2 obj:  900.0 des: 12.0 tasa: 178.7 | servo:156 (esq) pwm:210 | giros:10/12 IZQ
+!! IZQ fantasma 106 cm (st=2) descartado: tenía 151, luego 165 (st=2)
+GIRANDO    L:164 R: 61 F:112 | crudo L:165/2 R: 61/2 F:133/2 | ang:  947.9 obj:  900.0 des: 12.0 tasa: 236.5 | servo:156 (esq) pwm:200 | giros:10/12 IZQ
+GIRANDO    L: 71 R: 61 F:168 | crudo L: 71/2 R: 61/2 F:188/2 | ang:  967.4 obj:  900.0 des: 12.0 tasa: 206.2 | servo:148 (esq) pwm:200 | giros:10/12 IZQ
+Giro completado 11/12
+SIGUIENDO  L:200 R: 61 F:168 | crudo L:213/2 R: 61/2 F:289/2 | ang:  988.4 obj:  990.0 des:  2.0 tasa: 359.2 | servo: 76 (esq) pwm:255 | giros:11/12 IZQ
+!! IZQ fantasma 107 cm (st=2) descartado: tenía 200, luego 143 (st=2)
+SIGUIENDO  L:155 R: 61 F:168 | crudo L:155/2 R: 61/2 F:136/2 | ang: 1000.5 obj:  990.0 des:  4.0 tasa:   4.1 | servo: 68 (esq) pwm:255 | giros:11/12 IZQ
+!! FREN fantasma 116 cm (st=2) descartado: tenía 168, luego 161 (st=2)
+SIGUIENDO  L:100 R: 61 F:161 | crudo L: 95/2 R: 61/2 F:217/2 | ang:  997.4 obj:  990.0 des:  6.1 tasa: -57.6 | servo: 73 (esq) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 95 R: 61 F:175 | crudo L: 34/7 R: 61/2 F:198/2 | ang:  994.6 obj:  990.0 des:  6.1 tasa: -41.6 | servo: 76 (lejos) pwm:255 | giros:11/12 IZQ
+!! FREN fantasma 128 cm (st=2) descartado: tenía 178, luego 165 (st=2)
+SIGUIENDO  L: 28 R: 61 F:166 | crudo L: 28/0 R: 61/2 F:185/2 | ang:  993.4 obj:  990.0 des:  6.1 tasa:  -7.4 | servo: 77 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 28 R: 61 F:155 | crudo L: 28/0 R: 61/2 F:174/2 | ang:  992.6 obj:  990.0 des:  6.1 tasa:  -5.4 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 31 R: 61 F:158 | crudo L: 32/7 R: 61/2 F:179/2 | ang:  992.7 obj:  990.0 des:  7.3 tasa:  -1.3 | servo: 79 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 33 R: 61 F:130 | crudo L: 34/7 R: 61/2 F:327/2 | ang:  993.1 obj:  990.0 des:  7.8 tasa:   7.1 | servo: 79 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 33 R: 61 F:130 | crudo L: 33/7 R: 61/2 F:305/2 | ang:  993.7 obj:  990.0 des:  7.7 tasa:   4.7 | servo: 79 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 33 R: 61 F:129 | crudo L: 34/7 R: 61/2 F:221/2 | ang:  994.2 obj:  990.0 des:  7.9 tasa:   6.3 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 35 R: 61 F:129 | crudo L: 36/7 R: 61/2 F:252/2 | ang:  994.4 obj:  990.0 des:  8.5 tasa:   5.5 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 35 R: 61 F:141 | crudo L: 36/7 R: 61/2 F:215/2 | ang:  994.9 obj:  990.0 des:  8.6 tasa:   3.1 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 36 R: 61 F:143 | crudo L: 37/7 R: 61/2 F:402/2 | ang:  995.5 obj:  990.0 des:  9.0 tasa:   1.7 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 38 R: 61 F:120 | crudo L: 39/7 R: 61/2 F:139/2 | ang:  995.8 obj:  990.0 des:  9.6 tasa:   5.0 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 39 R: 61 F:134 | crudo L: 40/7 R: 61/2 F:156/2 | ang:  996.4 obj:  990.0 des: 10.1 tasa:   4.3 | servo: 78 (hold) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L: 38 R: 61 F:156 | crudo L: 38/7 R: 61/2 F:177/2 | ang:  996.9 obj:  990.0 des:  9.6 tasa:   8.6 | servo: 77 (hold) pwm:255 | giros:11/12 IZQ
+!! FREN fantasma 88 cm (st=2) descartado: tenía 157, luego 125 (st=2)
+SIGUIENDO  L:126 R: 61 F:129 | crudo L:126/2 R: 61/2 F:145/2 | ang:  997.0 obj:  990.0 des:  9.6 tasa:   0.4 | servo: 78 (esq) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L:197 R: 61 F:173 | crudo L:135/2 R: 61/2 F:193/2 | ang:  997.4 obj:  990.0 des:  7.6 tasa:   6.1 | servo: 76 (esq) pwm:255 | giros:11/12 IZQ
+SIGUIENDO  L:149 R: 61 F: 86 | crudo L:149/2 R: 61/2 F:106/2 | ang:  997.6 obj:  990.0 des:  6.6 tasa:   5.3 | servo: 75 (esq) pwm:120 | giros:11/12 IZQ
+RECTA 11: hold 65% esq 28% lejos 5% | int sin dato 5% | int en hold 35 cm (obj 28) | trim +6.6
+Giro 12 izquierda  (L:149 R:61 F:74)
+!! IZQ fantasma 97 cm (st=2) descartado: tenía 149, luego 229 (st=2)
+GIRANDO    L:200 R: 61 F: 79 | crudo L:229/2 R: 61/2 F:100/2 | ang:  998.2 obj:  990.0 des:  6.6 tasa:   4.0 | servo:156 (esq) pwm:210 | giros:11/12 IZQ
+GIRANDO    L:177 R: 61 F: 63 | crudo L:173/2 R: 61/2 F: 83/2 | ang: 1001.9 obj:  990.0 des:  6.6 tasa: 106.5 | servo:156 (esq) pwm:210 | giros:11/12 IZQ
+GIRANDO    L:172 R: 61 F: 55 | crudo L:173/2 R: 61/2 F: 75/2 | ang: 1021.2 obj:  990.0 des:  6.6 tasa: 212.1 | servo:156 (esq) pwm:210 | giros:11/12 IZQ
+GIRANDO    L:158 R: 61 F: 76 | crudo L:107/2 R: 61/2 F:217/2 | ang: 1040.6 obj:  990.0 des:  6.6 tasa: 175.3 | servo:156 (esq) pwm:200 | giros:11/12 IZQ
+GIRANDO    L: 76 R: 61 F: 76 | crudo L: 73/2 R: 61/2 F:232/2 | ang: 1057.0 obj:  990.0 des:  6.6 tasa: 170.7 | servo:149 (esq) pwm:200 | giros:11/12 IZQ
+Giro completado 12/12
+-> TERMINANDO (1000 ms)
+TERMINANDO L: 91 R: 61 F: 76 | crudo L: 96/2 R: 61/2 F:233/2 | ang: 1081.0 obj: 1080.0 des:  2.0 tasa: 246.6 | servo: 74 (lejos) pwm:255 | giros:12/12 IZQ
+TERMINANDO L:105 R: 61 F:200 | crudo L:100/2 R: 61/2 F:224/2 | ang: 1087.2 obj: 1080.0 des:  4.0 tasa: -12.9 | servo: 71 (esq) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 42 R: 61 F:183 | crudo L: 42/7 R: 61/2 F:213/2 | ang: 1085.7 obj: 1080.0 des:  6.8 tasa: -29.5 | servo: 75 (hold) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 42 R: 61 F:180 | crudo L: 43/7 R: 61/2 F:200/2 | ang: 1083.8 obj: 1080.0 des:  9.2 tasa: -41.4 | servo: 79 (hold) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 44 R: 61 F:178 | crudo L: 45/7 R: 61/2 F:198/2 | ang: 1082.6 obj: 1080.0 des: 11.2 tasa:   3.1 | servo: 82 (hold) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 52 R: 61 F:164 | crudo L: 53/2 R: 61/2 F:182/2 | ang: 1083.9 obj: 1080.0 des: 13.4 tasa:   6.4 | servo: 83 (hold) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 49 R: 61 F:154 | crudo L: 49/2 R: 61/2 F:174/2 | ang: 1085.7 obj: 1080.0 des: 12.9 tasa:  23.8 | servo: 82 (hold) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 49 R: 61 F:159 | crudo L: 50/7 R: 61/2 F:179/2 | ang: 1087.2 obj: 1080.0 des: 13.2 tasa:  19.1 | servo: 80 (hold) pwm:255 | giros:12/12 IZQ
+TERMINANDO L: 47 R: 61 F:171 | crudo L: 47/7 R: 61/2 F:195/2 | ang: 1089.3 obj: 1080.0 des: 12.3 tasa:  24.3 | servo: 78 (hold) pwm:255 | giros:12/12 IZQ
+RECTA 12: hold 78% esq 15% lejos 5% | int sin dato 0% | int en hold 47 cm (obj 28) | trim +6.6
+TERMINADO: 12 giros en 29.6 s
+TERMINADO  L: 47 R: 61 F:144 | crudo L: 48/7 R: 61/2 F:164/2 | ang: 1091.0 obj: 1080.0 des: 12.6 tasa:  16.5 | servo: 75 (hold) pwm:255 | giros:12/12 IZQ
