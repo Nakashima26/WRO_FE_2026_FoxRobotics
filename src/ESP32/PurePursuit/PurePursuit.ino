@@ -3278,6 +3278,84 @@ long leerDistancia(int trig, int echo) {
 #endif
 }
 
+// ── HC-SR04 reales como comprobación cruzada del ToF (2026-11-16) ────────────
+// Los 3 HC-SR04 (L, R, F) siguen montados y ruteados en la RevB_2 (ECHO con level
+// shifter). Con FOX_TOF, leerDistancia() de arriba NO los lee: saca L/R/F del ToF.
+// Este bloque los lee de verdad, sin bloquear el loop, para comparar ToF contra
+// ultrasónico en el log: el ToF se equivoca con el color/material de la pared
+// (negro lejos), el ultrasónico con ecos y su cono ancho; si coinciden, la lectura
+// es confiable. Por ahora SOLO se reporta (us= en el ACK), no entra en el control.
+//
+// Cómo mide sin pulseIn(): dispara un sensor a la vez (US_PERIODO_US entre disparos,
+// para que el eco de uno no lo oiga el siguiente) y una interrupción CHANGE en su ECHO
+// toma la hora del flanco de subida y la de bajada. 3 sensores × 30 ms ≈ 11 Hz cada uno.
+// usMm[i] en mm desde el sensor; -1 = sin eco en la ventana (> ~4 m o eco perdido).
+#ifndef FOX_US
+#define FOX_US 1
+#endif
+#if FOX_US && !defined(FOX_SIL)
+#define US_N 3   // 0=L 1=R 2=frontal
+const uint8_t US_TRIG[US_N] = {TRIG_L, TRIG_R, TRIG_F};
+const uint8_t US_ECHO[US_N] = {ECHO_L, ECHO_R, ECHO_F};
+const unsigned long US_PERIODO_US = 30000;   // 30 ms: ida y vuelta de ~5 m de aire; la pista mide 3 m
+const int US_MIN_MM = 20, US_MAX_MM = 4000;   // rango del HC-SR04
+volatile unsigned long usSubeUs[US_N] = {0, 0, 0};
+volatile unsigned long usAnchoUs[US_N] = {0, 0, 0};
+volatile uint8_t       usFlancos[US_N] = {2, 2, 2};   // 0 = espera subida, 1 = espera bajada, 2 = cerrado
+int           usMm[US_N]       = {-1, -1, -1};
+unsigned long usMsLectura[US_N] = {0, 0, 0};
+uint8_t       usActual   = 0;
+unsigned long usDisparoUs = 0;
+bool          usEnVuelo  = false;
+
+// La 1a interrupción tras el disparo es la subida del ECHO y la 2a la bajada: contar
+// flancos evita leer el nivel del pin dentro de la ISR. Con 90 ms entre disparos del
+// mismo sensor, su ECHO ya bajó (sin eco el HC-SR04 lo suelta a los ~38 ms).
+void IRAM_ATTR usFlanco(int i) {
+  unsigned long t = micros();
+  if (usFlancos[i] == 0)      { usSubeUs[i] = t; usFlancos[i] = 1; }
+  else if (usFlancos[i] == 1) { usAnchoUs[i] = t - usSubeUs[i]; usFlancos[i] = 2; }
+}
+void IRAM_ATTR usIsrL() { usFlanco(0); }
+void IRAM_ATTR usIsrR() { usFlanco(1); }
+void IRAM_ATTR usIsrF() { usFlanco(2); }
+
+void usIniciar() {
+  for (int i = 0; i < US_N; i++) { digitalWrite(US_TRIG[i], LOW); usAnchoUs[i] = 0; usFlancos[i] = 2; }
+  attachInterrupt(digitalPinToInterrupt(ECHO_L), usIsrL, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ECHO_R), usIsrR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ECHO_F), usIsrF, CHANGE);
+}
+
+// Llamar en cada loop: cierra la medición en vuelo cuando pasó su ventana y dispara
+// el siguiente sensor. Cuesta ~10 µs (el pulso de TRIG) solo cuando dispara.
+void usTick() {
+  unsigned long ahora = micros();
+  if (usEnVuelo && ahora - usDisparoUs < US_PERIODO_US) return;
+  if (usEnVuelo) {
+    int i = usActual;
+    noInterrupts();
+    bool cerrado = (usFlancos[i] == 2);
+    unsigned long ancho = usAnchoUs[i];
+    usFlancos[i] = 2;
+    interrupts();
+    int mm = cerrado ? (int)lroundf(ancho * 0.1715f) : -1;   // 343 m/s, ida y vuelta
+    usMm[i] = (mm >= US_MIN_MM && mm <= US_MAX_MM) ? mm : -1;
+    usMsLectura[i] = millis();
+    usActual = (usActual + 1) % US_N;
+  }
+  int i = usActual;
+  noInterrupts();
+  usAnchoUs[i] = 0; usFlancos[i] = 0;
+  interrupts();
+  digitalWrite(US_TRIG[i], HIGH);
+  delayMicroseconds(10);
+  digitalWrite(US_TRIG[i], LOW);
+  usDisparoUs = micros();
+  usEnVuelo = true;
+}
+#endif
+
 float filtroEMA(float nueva, float anterior) {
   return alpha * nueva + (1.0 - alpha) * anterior;
 }
@@ -3799,6 +3877,15 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",tR=");   ackOut.print(tofMm[1]);
     ackOut.print(",tB=");   ackOut.print(tofMm[2]);
     ackOut.print(",tF=");   ackOut.print(tofMm[3]);
+#if FOX_US && !defined(FOX_SIL)
+    // uL/uR/uF: HC-SR04 en mm desde el sensor (-1 sin eco), para compararlos con
+    // tL/tR/tF en el mismo ACK. Ojo: el sonar lateral va 28.3 mm más afuera que el
+    // ToF y el frontal 6.2 mm más adelante (config.SENSOR_MOUNTS). Solo en el carro:
+    // el SIL no los imprime, así que el ACK del twin no cambia de largo.
+    ackOut.print(",uL=");   ackOut.print(usMm[0]);
+    ackOut.print(",uR=");   ackOut.print(usMm[1]);
+    ackOut.print(",uF=");   ackOut.print(usMm[2]);
+#endif
 #else
     // Sin tF a propósito: el ACK del carro actual queda byte a byte igual (el
     // largo del ACK mueve los tiempos de UART). La Pi trata tF ausente = sin lectura.
@@ -4347,6 +4434,9 @@ void setup() {
   pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
   pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
   pinMode(TRIG_F, OUTPUT); pinMode(ECHO_F, INPUT);
+#if FOX_US && !defined(FOX_SIL)
+  usIniciar();
+#endif
 
   pinMode(A1, OUTPUT); pinMode(A2, OUTPUT);
   digitalWrite(A1, HIGH); digitalWrite(A2, LOW);
@@ -4442,6 +4532,9 @@ void loop() {
   // Trasero (índice 2) en cm, EMA igual que los HC-SR04 (ver distB_filtrada).
   if (tofMm[2] > 0)
     distB_filtrada = filtroEMA(tofMm[2] / 10.0f, distB_filtrada < 0 ? tofMm[2] / 10.0f : distB_filtrada);
+#endif
+#if FOX_US && !defined(FOX_SIL)
+  usTick();   // HC-SR04 de comparación: solo reporta (us= en el ACK)
 #endif
 
   lpsMarca(1, lpsT);
