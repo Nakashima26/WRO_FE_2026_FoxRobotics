@@ -35,6 +35,8 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 | UltrasonicSupportHalf_V2 | 1 | [`UltrasonicSupportHalf_V2.stl`](stl/UltrasonicSupportHalf_V2.stl) |
 | UltrasonicSupport_V2 | 1 | [`UltrasonicSupport_V2.stl`](stl/UltrasonicSupport_V2.stl) |
 
+> **Ultrasonic supports.** `UltrasonicSupportFront`, `UltrasonicSupportHalf_V2` and `UltrasonicSupport_V2` hold three HC-SR04. The v2 car drives on its four ToF sensors; the ultrasonics stay mounted as a cross-check of the ToF readings (see the main README, §6.4 "Ultrasonic cross-check").
+
 ## Renders
 
 <p align="center"><img src="renders/turntable.gif" width="420" alt="v2 car, full CAD assembly rotating"></p>

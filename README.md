@@ -104,7 +104,7 @@ The [v1 documentation](docs/v1-national/README.md) describes the national-final 
 | 1 | The obstacle round was slow: the car **stopped before every corner** and did a forward arc or a reverse pivot | v1 steered reactively from the camera; it never knew where it was on the field, so it could not plan a corner through the pillars | **Route mode**: the Pi builds a map of the pillars, plans a full lap as a curve in millimeters and the ESP32 follows it with odometry | [§8](#8-obstacle-management--route-mode) |
 | 2 | Maneuvers changed with the battery charge: a fresh pack over-rotated the dodges (ERR-11) | Open-loop motor (no encoder) | Gear motor **with encoder** + speed loop on the ESP32 | [§5.2](#52-drivetrain--gear-ratio-chosen-from-measured-speed), [§7.4](#74-esp32-firmware-and-state-machine) |
 | 3 | Heading drifted: 6.5 % low over 12 corners and −7.5° after each corner maneuver (ERR-23) | MPU-6050 rate integrated on a busy loop | **BNO085** with on-chip fusion (100 Hz) | [§6.4](#64-sensors--selection-placement-and-calibration) |
-| 4 | Phantom walls from the front ultrasonic in ~20 % of straight frames (ERR-19) | Wide acoustic lobe, multipath | **4 × VL53L1X ToF** with a narrow, software-set field of view; ultrasonics removed | [§6.4](#64-sensors--selection-placement-and-calibration) |
+| 4 | Phantom walls from the front ultrasonic in ~20 % of straight frames (ERR-19) | Wide acoustic lobe, multipath | **4 × VL53L1X ToF** with a narrow, software-set field of view as the distance sensors; the 3 HC-SR04 stay mounted only as a cross-check (§6.4) | [§6.4](#64-sensors--selection-placement-and-calibration) |
 | 5 | The car was long (≈240 mm with the parking-exit extension) and turned wide (R ≈ 208 mm) | Motor perpendicular to the axle, Pi in the middle, anti-Ackermann linkage | **Shorter chassis (176 mm)**, motor parallel to the axle, Ackermann linkage, bigger pinion → **R ≈ 123–134 mm measured** | [§5](#5-mobility-and-mechanical-design) |
 | 6 | The Pi 4 ran at 14–18 fps and hit 84 °C with thermal throttling | Vision is compute-bound; the Pi was enclosed | **Raspberry Pi 5** on top of the car; hardware image scaling → ~40 fps | [§6.5](#65-main-computer--raspberry-pi-5) |
 | 7 | Hand-wired harness and a single-floor board shaped around the Pi 4 | No room for new sensors | **Two-board stacked PCB (RevB)**: power board + logic board | [§6.3](#63-pcb-revb--two-stacked-boards) |
@@ -360,10 +360,11 @@ flowchart TD
 | | SG90 servo | 0.25 A | 0.70 A | Running / stall |
 | | TB6612 logic, encoder, level shifter | 0.02 A | 0.03 A | Datasheets |
 | | 3.3 V regulator → 4 × VL53L1X + BNO085 | 0.09 A | 0.18 A | ~20 mA each ranging (40 mA peak) + 13 mA |
-| | **Rail total** | **0.44 A** | **1.16 A** | 23 % of the 5 A peak rating |
+| | 3 × HC-SR04 (cross-check) | 0.045 A | 0.045 A | 15 mA each (datasheet) |
+| | **Rail total** | **0.49 A** | **1.21 A** | 24 % of the 5 A peak rating |
 | **Battery** | Drive motor via TB6612 | ~0.3 A cruising (no-load 0.1 A) | 1.6 A stall @ 12 V (vendor) | TB6612: 1.2 A continuous, 3.2 A peak per channel — a stall is above the continuous rating but under the peak, so it is only acceptable for short events; the anti-stall check in §7.4 notices a stopped wheel within 250 ms |
 
-**Battery current.** With ~90 % buck efficiency, both 5 V rails at design peak draw 5 V × (2.45 + 1.16) A / 0.9 ≈ 20 W, i.e. ≈ 1.8 A from the 11.1 V pack, plus the motor. The 2200 mAh pack lasts well over 30 minutes at that worst case against a 3-minute round, so **capacity is not the constraint; voltage is.** The speed loop (§5.2) removes most of the voltage dependence, and we still check the pack before each round (good window 11.7–12.2 V).
+**Battery current.** With ~90 % buck efficiency, both 5 V rails at design peak draw 5 V × (2.45 + 1.21) A / 0.9 ≈ 20 W, i.e. ≈ 1.8 A from the 11.1 V pack, plus the motor. The 2200 mAh pack lasts well over 30 minutes at that worst case against a 3-minute round, so **capacity is not the constraint; voltage is.** The speed loop (§5.2) removes most of the voltage dependence, and we still check the pack before each round (good window 11.7–12.2 V).
 
 **Pi supply check.** `vcgencmd get_throttled` must read `0x0` under full load. On the battery the Pi rail measured **5.07 V at idle, throttled `0x0`**.
 
@@ -373,7 +374,7 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 
 | Board | Contents | Why on this board |
 |---|---|---|
-| **RevB_2 — power** (bottom) | Battery input, MINI560 #1 and #2 with their capacitors, TB6612FNG carrier, encoder connector with 4k7 pull-ups, 4 ToF connectors (I²C + XSHUT), footprints for 3 ultrasonic sensors (unused in v2) | Keeps the switching regulators and the motor currents, with their heat and noise, away from the logic; heaviest board, so it sits low |
+| **RevB_2 — power** (bottom) | Battery input, MINI560 #1 and #2 with their capacitors, TB6612FNG carrier, encoder connector with 4k7 pull-ups, 4 ToF connectors (I²C + XSHUT), 3 HC-SR04 connectors (TRIG + level-shifted ECHO) for the ToF cross-check | Keeps the switching regulators and the motor currents, with their heat and noise, away from the logic; heaviest board, so it sits low |
 | **RevB_1 — logic** (top) | ESP32 DevKitC, power switch + bulk capacitors, level shifter, BNO085 header, servo header, 3.3 V regulator header, `TO_PI` connector (UART, start button, READY LED, 5 V for the Pi), PWR and READY LEDs | All connectors the team touches between runs are on top and reachable |
 
 | | Logic board RevB_1 | Power board RevB_2 |
@@ -398,6 +399,8 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 | UART to the Pi | 17 (RX) / 16 (TX) | Pi GPIO 14 / 15 (`/dev/ttyAMA0`) | 460 800 baud, `Serial2` started from core 0 |
 | Start button | — (Pi GPIO 17) | SW1 `EXEC_PRGM` on the logic board → `TO_PI` pin 6 | Read by the Pi |
 | READY LED | — (Pi GPIO 27) | D2 on the logic board → `TO_PI` pin 5 | Driven by the Pi |
+| HC-SR04 left / right / front TRIG | 27 / 26 / 14 | HC-SR04 TRIG | 10 µs pulse, one sensor at a time |
+| HC-SR04 left / right / front ECHO | 32 / 35 / 33 | HC-SR04 ECHO via the level shifter | 5 V → 3.3 V; read with a CHANGE interrupt |
 
 ## 6.4 Sensors — selection, placement and calibration
 
@@ -409,6 +412,7 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 | **VL53L1X ToF ×4** | Distance to walls and the parking-lot walls | Narrow optical cone with a software-set region of interest (no echoes like the ultrasonic, ERR-19); 4 sensors can range in parallel | ~50 mm high (the walls are 100 mm high), level. Front: wall ahead (corners, start fix). Left/right: walls of the straight (localization). Rear: parking and reversing |
 | **BNO085** | Yaw (heading) | Sensor fusion on the chip with continuous bias calibration; no integration on our busy loop | Near the center of rotation, so centripetal acceleration stays out of the fused heading |
 | **Encoder** 12 CPR | Distance and speed | Closed-loop speed and odometry | On the motor; read by hardware (PCNT) |
+| **HC-SR04 ×3** (cross-check) | Distance to the walls (left, right, front) | Fails for different reasons than the ToF: sound does not care about the wall's color, light does not care about echoes. Used to check the ToF, not to drive (see below) | Same sides as the ToF; the side sensors 28.3 mm further out, the front one 6.2 mm further forward |
 
 ### VL53L1X — making a ToF see a black wall
 
@@ -422,6 +426,17 @@ The inner walls are black, which absorbs most of the 940 nm light. What we measu
 | A sensor can freeze (same value) or fail at boot | Firmware skips a sensor that failed init and reports it (`ltf=` field in the ACK); in the open-round firmware a reading stale for > 300 ms re-initializes that sensor through its XSHUT pin |
 
 Timing: left/right/rear in **Short** mode with a 20 ms budget; front in **Long** mode with 33 ms. The ACK to the Pi reports the worst I²C time per sensor, so a slow sensor shows up in the log, not as a mystery in the driving.
+
+### Ultrasonic cross-check (in progress)
+
+The ToF and the ultrasonic fail in opposite situations. The ToF measures light, so a black wall far away returns little signal and the reading goes long or short (table above). The HC-SR04 measures sound: the wall color does not matter, but its wide cone picks up pillars and multipath echoes (ERR-19 in v1). When both agree, the reading is trustworthy; when they disagree, one of them is wrong and that reading should not move the pose.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | Non-blocking read in `PurePursuit.ino`: one sensor fired every 30 ms (so one sensor's echo is not heard by the next), echo timed with a CHANGE interrupt instead of `pulseIn()` (which would block the loop up to 25 ms). ~11 Hz per sensor, ~10 µs of loop time per ping | Written, not yet on the car |
+| 2 | Both readings in every ACK (`tL/tR/tF` next to `uL/uR/uF`), recorded in the journal; [`scripts/compara_tof_us.py`](scripts/compara_tof_us.py) reports, per sensor and distance band, the median ToF − US difference and how often they disagree | Written, not yet on the car |
+| 3 | Static test like the ToF one: black and white wall at 30 / 60 / 80 / 120 cm, both sensors in one table | Pending (needs the car) |
+| 4 | If the data supports it: the EKF drops a ToF reading that disagrees with the ultrasonic by more than the measured threshold, and the front ultrasonic covers 80–200 cm, where the front ToF is unreliable | Pending |
 
 ### BNO085
 
@@ -808,7 +823,7 @@ flowchart LR
 |---|---|---|
 | Plan a full **route** and follow it with odometry | Reactive steering from the image (v1) | Twin: 1/21 → 69/69 clean races; real car: clean 12-corner races (41, 48) without stopping at corners |
 | Route follower on the **ESP32** | Steering computed on the Pi | The pose reached the Pi 4–6 frames late; on the ESP32 the follower runs at loop rate on current odometry |
-| **ToF only** (4 × VL53L1X) in v2 | Keep the HC-SR04 ultrasonics too | Ultrasonic phantoms in ~20 % of straight frames (ERR-19); with ROI 8 and status rules the ToF read the black wall within −8/−40 mm at 60/80 cm. Fewer sensors = less wiring and loop time |
+| **ToF as the distance sensor**, HC-SR04 only as a cross-check | Ultrasonics as the main sensor (v1), or ToF alone | Ultrasonic phantoms in ~20 % of straight frames (ERR-19) rule them out as the main sensor; with ROI 8 and status rules the ToF read the black wall within −8/−40 mm at 60/80 cm. But the ToF's weak spot (dark walls, far away) is exactly where sound works, so we keep the ultrasonics to check it instead of trusting one physics |
 | **BNO085** fused yaw over UART-RVC | MPU-6050 integration; BNO over I²C | MPU heading 6.5 % low, −7.5° per corner; RVC keeps the IMU off the busy ToF I²C bus and needs no library |
 | **Encoder read by PCNT hardware** | Interrupts | Interrupts lost 25–65 % of counts under motor load on the floor; PCNT: 1 m push → 1008–1043 mm |
 | **1.25 : 1** gearing | 2 : 1 (v1) or 1.5 : 1 | Corners are grip-limited (2.5–2.8 m/s²); speed is only useful on straights: 514 → ~800 mm/s |
