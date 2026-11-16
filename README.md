@@ -515,13 +515,13 @@ sequenceDiagram
   CAM->>PI: frame 640×480 (~25 ms period)
   PI->>PI: color correction, red/green/magenta masks
   PI->>PI: BEV + corner lines
-  ESP-->>PI: ACK (pose px,py,yaw; ToF L/R/F/B; state; turn count; diagnostics)
+  ESP-->>PI: ACK: pose px,py,yaw · ToF L/R/F/B · state · turn count · diagnostics
   PI->>PI: localizer: predict with odometry, correct with ToF ray-casts
   PI->>PI: digital map: vote detections into seats (with the pose 5 frames old)
   PI->>PI: route mode: resolve seats → re-plan if needed (background thread)
   PI->>ESP: V2 line: rt=1, map transform rtx/rty/rth, allowed speed rv, flags  *XX
   PI->>ESP: RTB / RTP×n / RTE (only when the route changed)
-  ESP->>ESP: every loop: odometry → pure pursuit → servo; speed loop → motor
+  ESP->>ESP: every loop: odometry → pure pursuit → servo, speed loop → motor
 ```
 
 Measured on the Pi 5: **23.5 ms mean per cycle (p95 32 ms)**; a re-plan takes 59–70 ms in a background thread, so a new route never blocks a frame. The camera image is older than the latest ACK, so map votes use the pose from 5 frames earlier (`ROUTE_FIX_LINE_LAG_FRAMES`).
