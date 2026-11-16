@@ -200,7 +200,11 @@ The **Raspberry Pi 5** answers *where should the car go*: it sees the pillars an
 
 Every structural part is 3D-printed in PLA (SUNLU) on a Bambu Lab A1 and designed in SolidWorks. The wheels and axles are LEGO parts: LEGO axles keep their dimensions far better than printed shafts, which flex and misalign under load.
 
-v2 CAD is in [`models/v2/`](models/v2/): SolidWorks parts + assembly in [`cad/`](models/v2/cad/), one STEP per part in [`step/`](models/v2/step/) and printable STL in [`stl/`](models/v2/stl/), with the parts list in [`models/v2/README.md`](models/v2/README.md). **[TODO: renders in `models/v2/renders/`.]** The top-level `models/` folder is the v1 car.
+v2 CAD is in [`models/v2/`](models/v2/): SolidWorks parts + assembly in [`cad/`](models/v2/cad/), one STEP per part in [`step/`](models/v2/step/) and printable STL in [`stl/`](models/v2/stl/), with the parts list in [`models/v2/README.md`](models/v2/README.md). Renders of the full assembly are in [`models/v2/renders/`](models/v2/renders/). The top-level `models/` folder is the v1 car.
+
+| Isometric | Top | Bottom |
+|:---:|:---:|:---:|
+| <img src="models/v2/renders/isometric.png" height="230"> | <img src="models/v2/renders/top.png" height="230"> | <img src="models/v2/renders/bottom.png" height="230"> |
 
 For v2 we rebuilt the chassis around two problems measured on v1:
 
@@ -967,7 +971,7 @@ WRO_FE_2026_FoxRobotics/
 │   ├── export/                      ← schematics PDF/SVG + 3D renders
 │   └── WRO_RevA/                    ← v1 board
 ├── Mecanica/Engranes/               ← involute gear generator + DXF profiles
-├── models/                          ← v1 CAD/STL/renders; v2 in models/v2/ (cad, step, stl)
+├── models/                          ← v1 CAD/STL/renders; v2 in models/v2/ (cad, step, stl, renders)
 ├── scripts/                         ← run report, Bluetooth route bench, ToF static test
 ├── deploy/systemd/                  ← Pi autostart service
 ├── v-photos/  (v2/ = current car)   t-photos/   video/
