@@ -37,7 +37,7 @@ Each competition corresponds to one release. A release is a git tag on the exact
 
 ## v2.0-internacional — in progress
 
-Changes since `v1.0-nacional` (details in the [README](../README.md#13-what-changed-for-the-international-final-v2) and the [engineering log](engineering-log.md)):
+Changes since `v1.0-nacional` (details in the [README](../README.md#3-from-v1-to-v2--what-the-national-final-taught-us) and the [engineering log](engineering-log.md)):
 
 | Area | Change | Status |
 |---|---|---|

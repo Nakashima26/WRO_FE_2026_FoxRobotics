@@ -1,6 +1,6 @@
 # Testing and Validation
 
-This document describes how we test the robot, what we measure, and the results we have so far. Results are tied to a code version (commit) so they can be reproduced. A failed run is kept in the record, because it tells us what to change next. Decisions and failures found through these tests are in the README failure log ([§5.5](../README.md#55-failure--incident-log), ERR-01 to ERR-09) and in the [engineering log](engineering-log.md) (ERR-10 onward).
+This document describes how we test the robot, what we measure, and the results we have so far. Results are tied to a code version (commit) so they can be reproduced. A failed run is kept in the record, because it tells us what to change next. Decisions and failures found through these tests are in the README failure log ([§5.5](v1-national/README.md#55-failure--incident-log), ERR-01 to ERR-09) and in the [engineering log](engineering-log.md) (ERR-10 onward).
 
 ## 1. What every run produces
 
