@@ -1,7 +1,7 @@
 Repo `C:\Users\jbanda\Documents\GitHub\WRO_FE_2026_FoxRobotics`, digital twin del robot Fox (WRO FE 2026).
 Trabaja desde la rama `t15b2` (worktree `.claude/worktrees/t15b2`, HEAD 0e3f6f1 o posterior).
 
-Lee primero `docs/HANDOFF.md` completo (estado, reglas duras, Mac). Lee `docs/twin_plan.md` solo por secciones
+Lee primero `docs/notes/HANDOFF.md` completo (estado, reglas duras, Mac). Lee `docs/notes/twin_plan.md` solo por secciones
 con grep/tail (es largo). En cada comando bash antepone
 `export PATH="/c/Users/jbanda/AppData/Local/Programs/Git/usr/bin:/c/Users/jbanda/AppData/Local/Programs/Git/mingw64/bin:/c/Users/jbanda/AppData/Local/Programs/Git/cmd:$PATH";`
 
@@ -57,5 +57,5 @@ Reglas de trabajo:
 - Avísame de cada hallazgo o cambio de plan; no esperes al final.
 - Yo hago push desde GitHub Desktop.
 
-> 2026-10-10: leer primero docs/HANDOFF.md (Estado 2026-10-10) y docs/PLAN_v2.md; el estado de 2026-10-05 de abajo es histórico.
+> 2026-10-10: leer primero docs/notes/HANDOFF.md (Estado 2026-10-10) y docs/notes/PLAN_v2.md; el estado de 2026-10-05 de abajo es histórico.
 

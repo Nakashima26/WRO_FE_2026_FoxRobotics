@@ -389,7 +389,7 @@ Full redesign of the chassis to make the car shorter, around the new parts ([REA
 We also started reworking the steering for the shorter car (finished in Phase 11) and worked out how to fit everything.
 
 ### 2026-10-02 → 10-06 — Digital twin (Jesse) — **branch** `digital-twin`, not on `main`
-A **software-in-the-loop simulator** of the whole car. It runs the real Pi code (`runtime_nuevo.py`) and the real ESP32 firmware, compiled for the PC, against a simulated field with randomized pillar layouts (one "seed" per layout). Each run produces the same logs as the real car. Highlights, with the full record in the branch's `docs/twin_plan.md`:
+A **software-in-the-loop simulator** of the whole car. It runs the real Pi code (`runtime_nuevo.py`) and the real ESP32 firmware, compiled for the PC, against a simulated field with randomized pillar layouts (one "seed" per layout). Each run produces the same logs as the real car. Highlights, with the full record in the branch's `docs/notes/twin_plan.md`:
 - **First batch of 7 layouts:** 4 hit a green pillar 1–3 s after a right turn. One was traced frame by frame to a rule that released the "wait before turning" block too early when a green sat in the first column of the next straight.
 - **v2 hardware preset (`hw_nuevo`):** encoder, 4 ToF, BNO085 model, the new dimensions, and the Raspberry Pi 5. Frame-based settings were made independent of the frame rate (`df84b28`, `25de149`).
 - **Parallel parking planned with the map of the field:** 91/100 successful parks over a harness of start positions, and 98/100 when grazing the outer wall is allowed (`58a1338`, `87532bb`).

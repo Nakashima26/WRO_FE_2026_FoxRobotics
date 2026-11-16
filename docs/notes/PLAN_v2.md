@@ -5,7 +5,7 @@ que el usuario vea el carro o la simulación. El código lo escriben subagentes 
 (archivo, función, comportamiento, comando de prueba) y el planner verifica ejecutando las pruebas. Corridas
 pesadas en la Mac (`ssh jesse@192.168.68.59`, solo `~/Projects/fox_v2_*`), una vez por celda, seeds fijas, nunca
 Mac contra Windows. Todo en worktrees; no editar los de otras sesiones (`t15*`, `t16*`, `t17*`).
-Contexto completo en `docs/HANDOFF.md` ("Estado 2026-10-10").
+Contexto completo en `docs/notes/HANDOFF.md` ("Estado 2026-10-10").
 
 ## Hecho y verificado (rama `fox/seed-3170839-red-object`)
 - [x] Geometría v2 del GLB en `config.py` (largo/ancho/voladizos/vía, montajes de sensores, giro 44.54° equivalente).

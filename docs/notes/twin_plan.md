@@ -456,7 +456,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
   - Por color: rojo 7, verde 5.
   - Ningún choque viene de pasar por el lado equivocado.
 - **Ruido:** la carrera no es bit-reproducible entre procesos (la seed 2 alterna entre cajón e isla). Esto contradice la afirmación de T16 de que es "determinista"; está pendiente encontrar la causa.
-- Reglas de trabajo nuevas y el plan de tres frentes en `docs/HANDOFF.md` y `docs/PROMPT_SIGUIENTE.md`.
+- Reglas de trabajo nuevas y el plan de tres frentes en `docs/notes/HANDOFF.md` y `docs/notes/PROMPT_SIGUIENTE.md`.
 
 ### T16infra — sentido del mapa desde el ESP, verdad del twin apagable, `paridad.py` (2026-10-05, rama t16infra)
 - **Una sola fuente para el sentido:** el `dir=` del ACK (R = CW, L = CCW).
@@ -487,7 +487,7 @@ Problema: ~7 s reales por s simulado (28 fps + render en tramos + CPU compartida
 ### 2026-10-10 — v2 integrada en ox/seed-3170839-red-object
 Resumen de la integración del carro v2 (geometría del GLB, servo 19..161, ToF por sensor, BNO por UART-RVC, cámara a 40 fps,
 U con EXT_OBJ=28, planificador de ruta apagado) y de los análisis (STM32/Gazebo/Nav2/SLAM/LQR descartados). Detalle,
-cifras y pendientes en docs/HANDOFF.md ("Estado 2026-10-10") y la lista de tareas en docs/PLAN_v2.md.
+cifras y pendientes en docs/notes/HANDOFF.md ("Estado 2026-10-10") y la lista de tareas en docs/notes/PLAN_v2.md.
 
 ### 2026-10-12 — línea A*/DP por carta (vueltas 2–3, sin parking)
 Offline: `racing_line_astar.py` + CLI `twin/tools/line_card.py`. Unidad = una carta (recta + esquina); métrica

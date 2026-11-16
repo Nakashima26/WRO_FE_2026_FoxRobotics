@@ -1,10 +1,10 @@
 # Handoff — digital twin Fox (rama `digital-twin`)
 
 > **Estado 2026-11-07:** todo el trabajo del twin, modo ruta, U y paralelo está en `main`.
-> Empieza por `docs/HANDOFF_PERFIL.md` («Estado 2026-11-07»: números actuales, tiempos medidos en
-> la Pi 5 y banco con latencia) y `docs/HANDOFF_PARKING.md`. Lo de abajo es historial de la rama `digital-twin`.
+> Empieza por `docs/notes/HANDOFF_PERFIL.md` («Estado 2026-11-07»: números actuales, tiempos medidos en
+> la Pi 5 y banco con latencia) y `docs/notes/HANDOFF_PARKING.md`. Lo de abajo es historial de la rama `digital-twin`.
 
-Punto de entrada para una sesión nueva. El detalle histórico está en `docs/twin_plan.md`
+Punto de entrada para una sesión nueva. El detalle histórico está en `docs/notes/twin_plan.md`
 (léelo por secciones con grep, no completo: es largo).
 
 ## Cómo trabajar (preferencia del usuario)
@@ -12,7 +12,7 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   verifica lo que reportan en el código/logs antes de aceptarlo, fusiona y documenta.
 - Subagentes en **worktree aislado** cuando tocan los mismos archivos que otro; tope de **10 jobs**
   cada uno (22 hilos de CPU compartidos); presupuesto de iteraciones explícito.
-- Cada cambio que se queda: commit + entrada en `docs/twin_plan.md`. No commitear `runs/` ni `_build/`.
+- Cada cambio que se queda: commit + entrada en `docs/notes/twin_plan.md`. No commitear `runs/` ni `_build/`.
 - Leer logs con grep/resúmenes, nunca completos (tokens).
 - Español; términos técnicos en inglés.
 
@@ -73,7 +73,7 @@ Punto de entrada para una sesión nueva. El detalle histórico está en `docs/tw
   python del script o llamar drive.py directo); `summ3.py runs/<tag> <seeds>` resume.
 
 ## Estado 2026-10-10 (rama `fox/seed-3170839-red-object`, HEAD b1833b0, NO pusheada)
-Plan escrito con lista de tareas: `docs/PLAN_v2.md`. Lo de abajo es lo VERIFICADO; lo marcado "supuesto" o
+Plan escrito con lista de tareas: `docs/notes/PLAN_v2.md`. Lo de abajo es lo VERIFICADO; lo marcado "supuesto" o
 "sin medir" no lo está. Las cifras del twin son de la Mac (arm64), nunca comparar con Windows.
 
 **Geometría v2** (fuente: `VehicleDirTest_V2.glb` del usuario + README de `origin/main` 8117629)

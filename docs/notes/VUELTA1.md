@@ -1,7 +1,7 @@
 # Vuelta 1 de obstáculos: menos frenos (twin)
 
 Estado: twin, rama `claude/vuelta1-6f4816`, **nada probado en el carro**. Todo apagado por defecto.
-Modelo de motor del twin lineal y optimista: cifras provisionales hasta calibrar (`docs/PLAN_TIEMPO.md`, Fase 0).
+Modelo de motor del twin lineal y optimista: cifras provisionales hasta calibrar (`docs/notes/PLAN_TIEMPO.md`, Fase 0).
 
 ## Dónde se iba el tiempo (seed 1, ruido 1, base)
 
