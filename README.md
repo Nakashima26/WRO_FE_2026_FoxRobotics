@@ -684,7 +684,7 @@ With v1, every idea had to be tested on the real track: one run, one video, one 
 | Sensors | ToF with per-sensor valid-status probabilities and the front Long-mode bias, BNO085 noise, encoder counts | Modeled from measurements |
 | Field | Random pillar layouts following the rulebook (checked against the official randomizer), random parking-lot position, both directions | From the rules |
 
-Code: [`src/RASPI/cam/pure_pursuit/twin/`](src/RASPI/cam/pure_pursuit/twin/) — entry point `python -m pure_pursuit.chassis_twin`, plan and history in [`docs/twin_plan.md`](docs/twin_plan.md) and [`docs/HANDOFF.md`](docs/HANDOFF.md).
+Code: [`src/RASPI/cam/pure_pursuit/twin/`](src/RASPI/cam/pure_pursuit/twin/) — entry point `python -m pure_pursuit.chassis_twin`, plan and history in [`docs/notes/twin_plan.md`](docs/notes/twin_plan.md) and [`docs/notes/HANDOFF.md`](docs/notes/HANDOFF.md).
 
 **[TODO: add a screenshot or GIF of the twin viewer (camera panel + map panel with the planned route) to `docs/img/twin.png`.]**
 
@@ -866,6 +866,8 @@ flowchart LR
 | 2026-11-04 → 11-07 | PCB assembled; first full-system tests; UART and power problems found and fixed |
 | 2026-11-11 | First clean route-mode races on the real car (runs 41, 48) |
 | 2026-11-12 | Fixed exposure, lot-fix robustness |
+| 2026-11-16 | Documentation for the international final; v2 CAD published (parts, STEP, STL, renders); HC-SR04 cross-check of the ToF added to the firmware (not yet on the car) |
+| next | Parking fully inside the lot; consistent 3-lap rounds; open round with route mode; validation matrices (§10.3–§10.4); tag `v2.0-internacional` |
 
 The dated, phase-by-phase story is in the [Engineering Journal](ENGINEERING_JOURNAL.md); every decision (DEC-xx) and incident (ERR-xx) with its evidence is in the [engineering log](docs/engineering-log.md).
 
@@ -923,7 +925,7 @@ pip install -r requirements.txt          # skips the apt packages on the Pi
 
 ## 12.4 Calibration at a new venue (≈ 20 minutes)
 
-All from `src/RASPI/cam/`. Full guide: [`pure_pursuit/INSTRUCCIONES.md`](src/RASPI/cam/pure_pursuit/INSTRUCCIONES.md) and [`docs/CALIBRACION.md`](docs/CALIBRACION.md).
+All from `src/RASPI/cam/`. Full guide: [`pure_pursuit/INSTRUCCIONES.md`](src/RASPI/cam/pure_pursuit/INSTRUCCIONES.md) and [`docs/notes/CALIBRACION.md`](docs/notes/CALIBRACION.md).
 
 | Step | Command | What it sets |
 |---|---|---|
@@ -948,13 +950,24 @@ python -m pure_pursuit.runtime_nuevo --serial-port /dev/ttyAMA0 --no-window --re
 ## 12.6 Run the digital twin (PC)
 
 ```bash
-python -m venv .venv-sim && .venv-sim/Scripts/pip install -r src/RASPI/cam/requirements-sim.txt ziglang
+# once (Python 3.11+); on macOS/Linux use .venv-sim/bin/ instead of .venv-sim/Scripts/
+python -m venv .venv-sim
+.venv-sim/Scripts/pip install -r src/RASPI/cam/requirements-sim.txt ziglang
+
 cd src/RASPI/cam
-# Windows: set FOX_CXX to "<repo>/.venv-sim/Scripts/python.exe -m ziglang c++"
+export PYTHONUTF8=1                       # Windows consoles: the logs print non-ASCII characters
+export TWIN_PI_UART_US_PER_BYTE=21.7      # 460 800 baud, as on the car (the default models 115 200)
+export FOX_CXX="python -m ziglang c++"    # Windows: use zig even if another c++ (e.g. MinGW) is on the PATH
+
+# watch one race in the viewer (camera, BEV and map with the planned route)
 python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1
+
+# headless: print the metrics only, or save the viewer as a GIF
+python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --no-show
+python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --save-gif race.gif
 ```
 
-The first build of the firmware library takes ~3 minutes; it is cached per firmware hash.
+The first build of the firmware library takes ~3 minutes; it is cached per firmware hash. Each run ends with a `[TWIN] stop=… metrics={…}` line (finished, collisions, lap times, park result). The race configuration tuned on the bench passes extra `--pi KEY=VALUE` overrides; the full command lines of each bench are in [`docs/notes/HANDOFF_PERFIL.md`](docs/notes/HANDOFF_PERFIL.md).
 
 ---
 
@@ -970,7 +983,7 @@ WRO_FE_2026_FoxRobotics/
 │   ├── testing.md               ← testing workflow and checklists
 │   ├── releases.md              ← one release per event (v1.0-nacional, v2.0-internacional)
 │   ├── route-following-bench.md ← ESP32 route-following bench and measured dynamics
-│   ├── MODO_RUTA.md, twin_plan.md, HANDOFF*.md, PLAN_*.md   ← working notes (Spanish)
+│   └── notes/                   ← internal working notes in Spanish (hand-offs, plans, to-dos), kept as written
 ├── src/
 │   ├── ESP32/
 │   │   ├── PurePursuit/             ← main firmware (development)
@@ -993,8 +1006,12 @@ WRO_FE_2026_FoxRobotics/
 │   └── WRO_RevA/                    ← v1 board
 ├── Mecanica/Engranes/               ← involute gear generator + DXF profiles
 ├── models/                          ← v1 CAD/STL/renders; v2 in models/v2/ (cad, step, stl, renders)
-├── scripts/                         ← run report, Bluetooth route bench, ToF static test
-├── deploy/systemd/                  ← Pi autostart service
+├── schemes/                         ← index of the schematics (v2 → electrical/export/, v1 images)
+├── logs_tof/                        ← raw ESP32 logs behind the measured tables (encoder, servo arcs, braking, grip, ToF, calibration laps)
+├── scripts/                         ← run report, ToF vs ultrasonic comparison, Bluetooth route bench, lap analysis
+├── remote/                          ← live camera view from the Pi in a browser (bench only, never during a run)
+├── deploy/systemd/                  ← Pi autostart service (wro-runtime)
+├── .github/workflows/deploy-pi.yml  ← every push to main is pulled on the Pi and the service restarted (stop + 4 s + start)
 ├── v-photos/  (v2/ = current car)   t-photos/   video/
 └── requirements.txt
 ```
