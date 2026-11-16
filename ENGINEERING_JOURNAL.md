@@ -434,20 +434,89 @@ Found on the way: the main loop doesn't wait for a new camera frame, so at 40 fp
 
 ---
 
-## Open items (as of 2026-10-07)
+## Phase 12 — New car on the track, route mode, PCB RevB (2026-10-08 → 10-24)
 
-| Item | Milestone | State |
-|---|---|---|
-| Frame rate on the Pi 5: cap the loop or move per-frame settings to seconds | M15 | Open; done on the twin branch, not yet on `main` |
-| Re-check the red/green/orange/magenta thresholds under the new camera calibration | M15 | Open |
-| Encoder, BNO085 and ToF in the race firmware (ToF and BNO log-only first) | M16 | Bench-tested; twin model on branch |
-| BNO085 heading with the motor running at standstill (magnetometer check) | M16 | Pending |
-| Two-floor PCB designed, fabricated, wired; v2 wiring diagram | M16 | In design |
-| v2 CAD/STL and renders into `models/`; measure the printed car (size, weight, turning radius) | M16 | Pending |
-| Merge the `digital-twin` work into `main` | M16 | On branch |
-| Validation matrix for v2: both directions, 3 consecutive clean runs | M16 | Not started |
-| Tag `v1.0-nacional`; tag `v2.0-internacional` before the event | — | Pending |
-| Documentation deadline | — | 2026-11-24 |
+### 2026-10-13 — Route mode (**branch**, twin)
+- The obstacle round was redesigned around a **map of pillar seats** instead of reacting to each pillar: the camera votes on the seats, a dynamic-programming planner computes the whole lap, and pure pursuit on the ESP32 follows it ([README §8](README.md#8-obstacle-management--route-mode)).
+- An EKF localizer (encoder + gyro + ToF ray-cast against the map) and a lap-1 discovery mode for seats not yet seen.
+- Twin result: 69/69 races on known maps and 21/21 with lap-1 discovery. The old line builder (`_build_line`) passed 1/21 on the same seeds.
+
+### 2026-10-14 → 10-19 — Open Challenge on the new car
+- `RondaAbierta.ino`: ESP32 only, ToF wall following + BNO085 heading, PID at the BNO rate, smooth turn exit, ToF ROI 8.
+- **12/12 corners, both directions, 29.6–29.9 s**, no Pi involved.
+- Encoder interrupts lost ~25% of the counts on the floor → moved to the ESP32 hardware pulse counter (PCNT).
+
+### 2026-10-15 → 10-17 — PCB RevB designed and ordered
+- Two stacked boards: RevB_1 logic (ESP32, ToF, BNO085, servo, UART to the Pi) and RevB_2 power (two MINI560 buck converters, one only for the Pi, motor driver) (`486bce93`, `c57ed879`).
+- Ordered from JLCPCB (2 designs, 5 of each, ~US$40). Schematics and renders: [`electrical/export/`](electrical/export/).
+- Firmware checked against the real pin map before the boards arrived: servo center, BNO sign, encoder pin, counts per mm.
+
+### 2026-10-19 → 10-24 — Measured dynamics and route-following bench
+- Calibration laps with the encoder + BNO085 logging the ToF against the map: gear ratio 1.25 confirmed, lateral ToF reads the real wall, front ToF reads ~35 cm long on the black wall.
+- ToF static test, ROI 16 vs ROI 8 on the black wall: error at 60 / 80 cm from −50 / −190 mm to **−8 / −40 mm**.
+- Servo range 1–156, center 75 (was 77); turning radius on the mat 123 mm right, 134 mm left.
+- `SeguirRuta`: the PC sends a route over Bluetooth and the ESP32 follows it with odometry. Open lap ×3 at PWM 255: 28.7–29.1 s, mean deviation 12 mm. Obstacle layout ×3: lateral error rms 7 mm ([bench](docs/route-following-bench.md)).
+- The twin got the measured dynamics (servo dead band ±1.5, brake slip, front ToF range) and runs the real `SeguirRuta` sketch matching the car.
+
+## Phase 13 — Assembly, a lost Pi, first full test (2026-11-02 → 11-09)
+
+### 2026-11-03 — ToF XSHUT pins
+- Right and rear XSHUT were swapped when the PCB was mounted → GPIO4 / GPIO5 in firmware (`a182aa57`).
+
+### 2026-11-06 — Raspberry Pi 5 lost
+- The board stack was mounted rotated 180°, which put ~11 V on the Pi's 5 V rail and killed its power chip. A 1000 µF capacitor on the Pi's 5 V had also been tripping the MINI560 at power-on; it was removed.
+- Replaced with a Pi 5 8 GB using the same SD card. Pre-mount check added to the build steps: measure 5.0–5.2 V on the Pi header before plugging the Pi in ([README §12.1](README.md#121-build-the-car)).
+
+### 2026-11-07 — Twin and route mode merged; first test on the real car
+- The twin, route mode and the race build merged into `main` (`a01bacb6`, `6b841973`).
+- First test: the car didn't move. Causes, in order: the Pi opened the UART at 115 200 while the ESP32 was at 460 800 (`106eff38`); then the ESP32 lost bytes because the ToF I2C on the same core overflowed the 128-byte UART FIFO → `Serial2` started on core 0 with a 4 KB buffer (`1360188c`, `4cf13f61`). Bench: 583/583 ACKs, route accepted.
+- The v2 car has no ultrasonics: the wall distances now come from the ToF (`c60ca688`).
+
+### 2026-11-09 — Track tests: mirrored pose, encoder, start
+- The car turned before the walls: the BNO085 yaw sign was lost when merging branches, so the pose was mirrored. The ISR encoder lost 60–67% of the counts → PCNT, 1 m pushed = 1008–1043 mm (`153d5e80`).
+- Per-line checksum on the UART (`*HH` XOR) and route re-send if the ACK doesn't confirm it (`6981cbcd`).
+- Start from the parking lot: speed cap until the lot is located, stop if the front ToF sees something closer than 40 cm (`66634f31`); ToF and orange-line votes for the lot position (`f818e9b0`).
+- BEV re-calibrated with the camera adjusted (`20d4cacc`); orange-line core threshold for the Pi 5 (`eb17570e`).
+- Twin: models the ESP32 UART RX buffer, so a byte loss like the 11-07 one shows up in simulation (`c481a2fc`).
+
+## Phase 14 — Clean races on the real car (2026-11-10 → 11-12)
+
+### 2026-11-10 — Performance pass
+- Per-frame work on the Pi and the twin optimized with bit-identical results (DP planner, color masks in one native pass, non-blocking USB log on the ESP32).
+
+### 2026-11-11 — Camera at 40 fps, speed loop, runs 41 and 48 clean
+- Runs 35–36 completed but weaved (+8% path vs the twin). The Pi ran at 22 fps because the image was scaled on the CPU → Picamera2 with the ISP doing the scaling, ~40 fps (`66ca91aa`); the loop now waits for a new frame (`ed341d3f`).
+- Runs 37–38: lost lines while the motor ran (`ue`≈400/s) → bad UART cable, replaced.
+- **Speed loop with the encoder** (feed-forward + PI, `MOTOR_LAZO_VEL`, `2318dce6`, `e89a6c64`): the start maneuver no longer changes with the battery charge.
+- **Runs 41 and 48: clean races, 12 corners.**
+- Lateral and rear ToF set to ROI 8 in the race firmware (it was never applied, `8af0b2a2`); lateral ToF bias at long range measured (`d6937912`).
+- ERR-30 (lone green mapped at the start of its straight from votes taken while turning, fixed `a22bb3e0`) and ERR-31 (start without orange-line votes, open) — [engineering log](docs/engineering-log.md).
+
+### 2026-11-12 — Fixed exposure; the parking-lot exit
+- Runs 57, 59, 60 hit the island after the lot: auto-exposure inside the lot burned the floor for ~1 s when leaving it, and the orange-line votes were rejected while the car was still turning. Fix: **fixed exposure per venue** (`c6757575`, measured with `mide_exposicion.py`) and the turn limit for line votes 3° → 10° (`1000d3cf`).
+- Runs 62, 64 completed; open: the lone pillar after a corner (E/X1 vs E/X2) can flip in lap 1.
+- Recording stops 5 s after the car stops (`31edf3ab`); run 62's video went from 209 MB to its real length.
+
+## Phase 15 — Documentation for the international final (2026-11-16 →)
+
+- README rewritten for the v2 car and ordered by the judging rubric (Appendix C of the rules); the README judged at the national final frozen in [`docs/v1-national/`](docs/v1-national/README.md) (`bcd0ba5e`).
+- Schematics (PDF/SVG) and 3D renders of both boards exported to `electrical/export/`.
+- Tag `v1.0-nacional` placed on `d5cc66d`. Sensor logs (`logs_tof/`) and the Open Challenge servo center moved to `main`; the Pi deploy workflow updated for the Pi 5.
+
+---
+
+## Open items (as of 2026-11-16)
+
+| Item | State |
+|---|---|
+| Lap-1 E/X1 ↔ E/X2 flip of the lone pillar after a corner | Open; keep both seats until seen head-on |
+| Lot position without orange-line votes (ERR-31) | Open |
+| Validation matrix: Open ×3 per direction, Obstacle OBS-01…06 | To run with the release firmware |
+| Pi 5 cooling (~80 °C without a fan) | Pending |
+| v2 CAD/STL into `models/v2/`, photos into `v-photos/v2/`, weight and height | Pending |
+| Videos (Open, Obstacle) | Pending |
+| Tag `v2.0-internacional` | Before the event |
+| Documentation deadline | 2026-11-21 (team target) |
 
 ---
 
