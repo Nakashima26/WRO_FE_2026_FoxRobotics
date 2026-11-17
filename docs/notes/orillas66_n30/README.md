@@ -78,3 +78,18 @@ Cambio: `ROUTE_L23_MAX_PWM` 333 → **268** (~850 mm/s, igual que el tope de la 
 que pasa esa esquina en las dos corridas). Las vueltas 2-3 quedan a velocidad de vuelta 1
 hasta que el ESP frene activo: hoy `lazoVelocidad()` solo baja el PWM (~1 m/s² de
 frenado) y la ruta a >1 m/s corta la curva hacia la isla.
+
+## Causa real: el verde S/T4 se mapea en la fila interior (S/T2)
+
+En orillas66, 67 y 68 el mapa de la vuelta 1 registra `[DMAP] S/T2 Green` (fila interior,
+600 mm de la pared). El verde real está en **S/T4** (fila exterior, 400 mm). Lo ve de
+lejos, desde la recta E antes de la esquina SE, y la fila (200 mm de diferencia) es justo
+lo que la pose y la BEV confunden. La ruta de las vueltas 2-3 pasa el "verde en T2" por
+su izquierda, o sea por fuera, a ~300-400 mm de la pared: exactamente donde está el
+verde de verdad. La corrección `S/T2 -> S/T4` llega en la vuelta 2, ya en la esquina,
+tarde para la ruta. El tope de velocidad no era la causa principal.
+
+Arreglo (`carrera.json`): `ROUTE_CONF_GHOST_TC` 4 → **13** y `ROUTE_CONF_GHOST_TOL_MM`
+150 → **250**. Una señal confirmada también esquiva la otra fila de su columna con el
+mismo color en todas las vueltas, no solo en la 1. Con el mismo color en las dos filas la
+ruta pasa por el lado bueno de las dos, así que vale para la fila que sea.
