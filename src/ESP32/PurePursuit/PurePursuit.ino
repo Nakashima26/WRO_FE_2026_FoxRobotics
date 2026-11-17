@@ -627,6 +627,7 @@ const float LAZO_PWM0_FWD    = 45.5f;
 const float LAZO_K_REV       = 3.61f;   // reversa
 const float LAZO_PWM0_REV    = 61.0f;
 const float LAZO_V_MAX       = 700.0f;  // mm/s; 0 = sin tope
+const float LAZO_V_MAX_L1    = 0.0f;    // mm/s tope propio de vuelta 1 (tc<4, fuera de INICIO); 0 = usa LAZO_V_MAX
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
 const float LAZO_I_MAX       = 80.0f;   // PWM
@@ -2092,7 +2093,8 @@ int lazoVelocidad(int pwm) {
   float ff = (float)pwm;
   // Vueltas 2-3 (tc 4..TURNS_PER_RACE-1): sin tope, la pila fresca llega a ~830 mm/s. Vuelta 1 y parking siguen con LAZO_V_MAX.
   bool sinTope = (turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE);
-  if (!sinTope && LAZO_V_MAX > 0.0f && vObj > LAZO_V_MAX) { vObj = LAZO_V_MAX; ff = LAZO_V_MAX / k + p0; }
+  float vTope = (LAZO_V_MAX_L1 > 0.0f && turnsCompleted < 4 && estado != INICIO) ? LAZO_V_MAX_L1 : LAZO_V_MAX;   // vuelta 1 propia; 0 = como LAZO_V_MAX
+  if (!sinTope && vTope > 0.0f && vObj > vTope) { vObj = vTope; ff = vTope / k + p0; }
   float e = vObj - v;
   float u = ff + LAZO_KP * e + lazoI;
   // anti-windup: integra solo si la salida no está saturada hacia el lado del error
