@@ -182,29 +182,29 @@ class StartFix:
         return np.array([ox, oy]), hd + ddeg
 
     @staticmethod
-    def _valid_min(d, k, c, n_cells, n_rays):
+    def _valid_min(d, k, c, n_cells, n_rays, max_inc=_US_MAX_INC):
         inc = np.degrees(np.arccos(np.clip(c, 0.0, 1.0)))
-        ok = np.isfinite(d) & ((k == _SIGN) | (inc <= _US_MAX_INC))
+        ok = np.isfinite(d) & ((k == _SIGN) | (inc <= max_inc))
         return np.where(ok, d, np.inf).reshape(n_cells, n_rays).min(axis=1)
 
-    def _expected_us(self, pose, mount) -> np.ndarray:
+    def _expected_us(self, pose, mount, half_cone=_US_HALF_CONE, max_inc=_US_MAX_INC) -> np.ndarray:
         """Lectura esperada (mm, inf = sin eco) del sonar para cada δ, sin
         señales posibles: paredes e isla (corridas δ) y lo que va con el carro
         (maderas del cajón y la señal que vio la cámara)."""
         o, axis_deg = self._sensor(pose, mount)
         J = len(self.deltas)
-        ang = np.radians(axis_deg + np.arange(-_US_HALF_CONE, _US_HALF_CONE + 0.01, _WORLD_RAY_STEP))
+        ang = np.radians(axis_deg + np.arange(-half_cone, half_cone + 0.01, _WORLD_RAY_STEP))
         dirs = np.stack([np.sin(ang), np.cos(ang)], 1)
         R = len(dirs)
         orig = np.repeat(o[None, :] + self.deltas[:, None] * self.axis[None, :], R, axis=0)
         d, k, c = _box_hits(orig, np.tile(dirs, (J, 1)))
-        world = self._valid_min(d, k, c, J, R)
+        world = self._valid_min(d, k, c, J, R, max_inc)
         car = np.inf
         if len(self._car[0]):
-            ang = np.radians(axis_deg + np.arange(-_US_HALF_CONE, _US_HALF_CONE + 0.01, _CAR_RAY_STEP))
+            ang = np.radians(axis_deg + np.arange(-half_cone, half_cone + 0.01, _CAR_RAY_STEP))
             dirs = np.stack([np.sin(ang), np.cos(ang)], 1)
             d, k, c = raycast(np.broadcast_to(o, dirs.shape), dirs, self._car)
-            car = float(self._valid_min(d, k, c, 1, len(dirs))[0])
+            car = float(self._valid_min(d, k, c, 1, len(dirs), max_inc)[0])
         e = np.minimum(world, car)
         return np.where(e <= _US_MAX_MM, e, np.inf)
 
@@ -224,10 +224,10 @@ class StartFix:
         return np.where(ok, r - SIGN_MM / 2.0, np.inf).min(axis=1)
 
     @staticmethod
-    def _lik(z, e) -> np.ndarray:
+    def _lik(z, e, sig0: float = 15.0) -> np.ndarray:
         if z is None:
             return np.where(np.isfinite(e), np.where(e > 1100.0, 0.6, _P_MISS), 1.0)
-        sig = 15.0 + 0.015 * z
+        sig = sig0 + 0.015 * z
         g = np.exp(-0.5 * ((z - np.where(np.isfinite(e), e, 1e9)) / sig) ** 2)
         return (1.0 - _EPS) * g + _EPS
 
@@ -265,9 +265,17 @@ class StartFix:
                 # Sin lectura tampoco es evidencia: el ToF no tiene el timeout de 119 cm.
                 continue
             z = None if (raw <= 0 or z >= _US_MAX_MM) else z
+            cal = (getattr(C, "ROUTE_FIX_TOF_CAL", None) or {}).get(key)
+            if cal is not None and z is not None:
+                z = float(np.interp(z, cal[0], cal[1]))   # (leído, real) medidos: el Long lee ~+20 % de 60 a 150 cm
             mount = C.SENSOR_MOUNTS[mname]
-            e0 = self._expected_us(pose, mount)
-            lik = self._lik(z, e0)
+            # ToF (v2): cono ~14° y contesta oblicuo (gemelo s34: isla a 26° = 500 mm y el
+            # modelo de sonar decía "nada" -> castigaba el δ verdadero y fijaba -417 vs -680).
+            tof_geo = getattr(C, "ROUTE_FIX_TOF_GEOM", None) if tof_max is not None else None
+            e0 = self._expected_us(pose, mount, *tof_geo[:2]) if tof_geo else self._expected_us(pose, mount)
+            # 3er valor: σ base (mm). La pose lateral en vivo va ~25 mm corrida al salir del cajón
+            # (gemelo s26: con 15 el pico verdadero se hundía y fijaba +361 con verdad +608).
+            lik = self._lik(z, e0, float(tof_geo[2])) if tof_geo and len(tof_geo) > 2 else self._lik(z, e0)
             if z is not None:
                 es = self._sign_dist(pose, mount)
                 maybe = (np.isfinite(es) & (z >= es - 60.0)
