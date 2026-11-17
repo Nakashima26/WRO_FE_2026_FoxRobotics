@@ -633,23 +633,26 @@ const float LAZO_PWM0_REV    = 61.0f;
 // Motor real (N30 30:1, 2026-11-17). Los LAZO_K/PWM0 de arriba se quedan como
 // ESCALA DE MANDO (qué velocidad significa el PWM que piden los estados, afinada
 // con el N20); estos son el MOTOR, para el feedforward y para traducir el PWM
-// cuando el lazo no actúa. N30Test en piso, adelante, 6 corridas 60..255:
-// 265/593/809/1077/1366/~1575 mm/s, recta ±40 mm/s; tope ~1.6 m/s.
-// Reversa no medida: ~5 % menos que adelante (barrido en el aire 7.14 vs 7.56).
-const float MOTOR_K_FWD      = 6.64f;   // mm/s por PWM
-const float MOTOR_PWM0_FWD   = 16.6f;
-const float MOTOR_K_REV      = 6.27f;
-const float MOTOR_PWM0_REV   = 16.6f;
+// cuando el lazo no actúa. N30Test en piso (twin/calib/medidas_20261117), a 11.88 V:
+// adelante 100/150/180/255 -> 503/798/1062/1501 mm/s; con la pila a tope k 6.64,
+// pwm0 16.6 (255 -> ~1575). Reversa 100/140/180 -> 370/624/~850 (más fricción).
+// Arranca (rampa en piso) en PWM 11 adelante y 10 en reversa.
+const float MOTOR_K_FWD      = 6.51f;   // mm/s por PWM
+const float MOTOR_PWM0_FWD   = 22.9f;
+const float MOTOR_K_REV      = 6.0f;
+const float MOTOR_PWM0_REV   = 37.6f;
 // Escala de mando arriba del crucero (2026-11-17, para usar el N30 a ~1.3 m/s):
 // hasta LAZO_CODO_PWM (el MOTOR_MAX de hoy) el PWM significa lo mismo que con el
 // N20 (155 -> 418 mm/s); de ahí a 255 sube recto hasta LAZO_V_255. Con 800 es la
-// recta del N20 de siempre (3.82·(255−45.5)); con 1300 cada PWM arriba de 155 son
-// +8.8 mm/s: 180 -> 639, 200 -> 815, 230 -> 1080, 255 -> 1300. Solo adelante.
+// recta del N20 de siempre (3.82·(255−45.5)). Con 1575 (lo que da el N30 a 255 con
+// la pila a tope; a 11.9 V da ~1500) cada PWM arriba de 155 son +11.6 mm/s: 180 -> 708, 200 -> 940,
+// 230 -> 1288, 255 -> 1575. Con la pila baja el motor ya no llega arriba: el lazo
+// se queda en 255 y va a lo que dé. Solo adelante.
 // Hoy setMotor() recorta a MOTOR_MAX (155), así que esto solo se nota si se sube
 // MOTOR_MAX o si la Pi manda rv > 155 en modo RUTA.
 const float LAZO_CODO_PWM    = 155.0f;
-const float LAZO_V_255       = 1300.0f; // mm/s a PWM 255 (adelante)
-const float LAZO_V_MAX       = 1400.0f; // mm/s; 0 = sin tope (era 700 con el N20)
+const float LAZO_V_255       = 1575.0f; // mm/s a PWM 255 (adelante) = máx. del N30 con pila cargada (N30Test 2026-11-17)
+const float LAZO_V_MAX       = 0.0f;    // mm/s; 0 = sin tope (era 700 con el N20)
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
 const float LAZO_I_MAX       = 80.0f;   // PWM

@@ -28,6 +28,9 @@
  *                 del recorrido, frena. Guarda el punto. P. ej. "f100".
  *                 "f255,2500" = 2500 mm en vez de PISO_DIST_MM (para la vel. máx).
  *                 "v2" = velocidad en el último cuarto: si sale > v, aún aceleraba.
+ *                 "f220,2500,c" = al final suelto (coast) en vez de freno en corto.
+ *                 Imprime también la aceleración (ms a 63 % / 90 % de v) y la
+ *                 distancia/tiempo de parada (FRENO o SUELTO).
  *   z / Z         ajusta K y PWM0 con las corridas de piso adelante / reversa
  *   c             borra las corridas de piso guardadas
  *
@@ -223,22 +226,54 @@ void escribirServo(int ang) {
   ledcWrite(SERVO_PIN, (pulso * ((1 << 16) - 1)) / 20000);
 }
 
-void frenar() {                     // freno activo del TB6612 (corto) y luego coast
-  digitalWrite(A1, HIGH); digitalWrite(A2, HIGH);
-  ledcWrite(PWMA, 255);
-  delay(300);
-  dir = 0; aplicaMotor();
-}
-
 const int PISO_N = 16;
 int   pisoPwm[2][PISO_N];
 float pisoV[2][PISO_N];
 int   pisoCnt[2] = {0, 0};
 
-void corridaPiso(int d, int p, float distMm) {
+// Muestras de la corrida (cuentas cada MUESTRA_MS) para la aceleración.
+const int MUESTRA_MS = 10;
+const int MUESTRAS_MAX = 600;          // 6 s
+int32_t muestras[MUESTRAS_MAX];
+
+// Velocidad (mm/s, valor absoluto) de las muestras i-5 .. i (50 ms).
+float vMuestra(int i) {
+  int j = i - 5; if (j < 0) j = 0;
+  if (i == j) return 0;
+  return fabsf((float)(muestras[i] - muestras[j])) / CUENTAS_POR_MM * 1000.0f / (float)((i - j) * MUESTRA_MS);
+}
+
+// Para el carro y mide cuánto recorre hasta quedar quieto. libre = coast
+// (A1=A2=LOW), si no freno en corto (A1=A2=HIGH) hasta pararse.
+void parada(bool libre, float vIni) {
+  int32_t c0 = leeRaw();
+  uint32_t t0 = millis();
+  if (libre) { ledcWrite(PWMA, 0); digitalWrite(A1, LOW); digitalWrite(A2, LOW); }
+  else       { digitalWrite(A1, HIGH); digitalWrite(A2, HIGH); ledcWrite(PWMA, 255); }
+  int32_t cAnt = c0; uint32_t tQuieto = t0, tFin = t0;
+  while (millis() - t0 < 4000) {
+    delay(5);
+    int32_t c = leeRaw();
+    if (c != cAnt) { cAnt = c; tQuieto = millis(); tFin = tQuieto; }
+    else if (millis() - tQuieto > 150) break;
+  }
+  dir = 0; aplicaMotor();
+  float dMm = fabsf((float)(cAnt - c0)) / CUENTAS_POR_MM;
+  float tS  = (tFin - t0) / 1000.0f;
+  Serial.print(libre ? "  SUELTO desde " : "  FRENO desde "); Serial.print(vIni, 0);
+  Serial.print(" mm/s: "); Serial.print(dMm, 0); Serial.print(" mm en ");
+  Serial.print(tS * 1000.0f, 0); Serial.print(" ms");
+  if (dMm > 1.0f) {
+    Serial.print("  decel "); Serial.print(vIni * vIni / (2.0f * dMm) / 1000.0f, 2); Serial.print(" m/s2");
+  }
+  Serial.println("  (encoder; si patina, mide con cinta)");
+}
+
+void corridaPiso(int d, int p, float distMm, bool libre) {
   p = constrain(p, 0, PWM_MAX);
   Serial.print(d > 0 ? "-- piso adelante PWM " : "-- piso reversa PWM "); Serial.print(p);
-  Serial.print(" "); Serial.print(distMm, 0); Serial.println(" mm (tecla aborta) --");
+  Serial.print(" "); Serial.print(distMm, 0); Serial.print(" mm");
+  Serial.print(libre ? ", al final SUELTO" : ", al final FRENO"); Serial.println(" (tecla aborta) --");
   escribirServo(SERVO_CENTRO);
   int32_t c0 = leeRaw();
   float objetivo = distMm * CUENTAS_POR_MM;
@@ -246,23 +281,27 @@ void corridaPiso(int d, int p, float distMm) {
   int32_t cMed0 = 0; uint32_t tMed0 = 0; bool midiendo = false;
   int32_t cMed1 = 0; uint32_t tMed1 = 0;
   int32_t cQ = 0; uint32_t tQ = 0; bool cuarto = false;
-  uint32_t t0 = millis();
+  int nm = 0;
+  uint32_t t0 = millis(), tSig = t0;
   dir = d; pwm = p; aplicaMotor();
   const char* fin = "distancia";
   while (true) {
-    delay(5);
+    delay(1);
     uint32_t ahora = millis();
-    float rec = fabsf((float)(leeRaw() - c0));
-    if (!midiendo && rec >= 0.5f * objetivo) { midiendo = true; cMed0 = leeRaw(); tMed0 = ahora; }
-    if (!cuarto && rec >= 0.75f * objetivo) { cuarto = true; cQ = leeRaw(); tQ = ahora; }
+    int32_t c = leeRaw();
+    if (ahora >= tSig && nm < MUESTRAS_MAX) { muestras[nm++] = c - c0; tSig += MUESTRA_MS; }
+    float rec = fabsf((float)(c - c0));
+    if (!midiendo && rec >= 0.5f * objetivo) { midiendo = true; cMed0 = c; tMed0 = ahora; }
+    if (!cuarto && rec >= 0.75f * objetivo) { cuarto = true; cQ = c; tQ = ahora; }
     if (rec >= 0.95f * objetivo) break;
     if (ahora - t0 > PISO_T_MAX_MS) { fin = "tiempo"; break; }
     if (ahora - t0 > 600 && rec < 50) { fin = "SIN CUENTAS"; break; }
     if (hayTecla()) { fin = "abortado"; break; }
   }
   cMed1 = leeRaw(); tMed1 = millis();
-  frenar();
-  delay(400);
+  float vIni = nm > 5 ? vMuestra(nm - 1) : 0;
+  parada(libre, vIni);
+  delay(300);
   float recTotal = fabsf((float)(leeRaw() - c0)) / CUENTAS_POR_MM;
   if (!midiendo || tMed1 - tMed0 < 100) {
     Serial.print("Sin ventana de medida ("); Serial.print(fin); Serial.println(")");
@@ -276,8 +315,20 @@ void corridaPiso(int d, int p, float distMm) {
     Serial.print("  v2 "); Serial.print(v2, 0);
   }
   Serial.print("  ventana "); Serial.print(tMed1 - tMed0); Serial.print(" ms");
-  Serial.print("  total "); Serial.print(recTotal, 0); Serial.print(" mm (con frenado)");
+  Serial.print("  total "); Serial.print(recTotal, 0); Serial.print(" mm");
   Serial.print("  fin "); Serial.println(fin);
+  // Aceleración: primer movimiento y tiempo a 63 % / 90 % de v.
+  int iMov = -1, i63 = -1, i90 = -1;
+  for (int i = 0; i < nm; i++) {
+    if (iMov < 0 && abs(muestras[i]) > 5) iMov = i;
+    float vi = vMuestra(i);
+    if (i63 < 0 && vi >= 0.632f * v) i63 = i;
+    if (i90 < 0 && vi >= 0.90f * v) { i90 = i; break; }
+  }
+  Serial.print("  ACEL: se mueve a "); Serial.print(iMov * MUESTRA_MS);
+  Serial.print(" ms, 63% a "); Serial.print(i63 * MUESTRA_MS);
+  Serial.print(" ms, 90% a "); Serial.print(i90 * MUESTRA_MS);
+  Serial.println(" ms (v de 50 ms, -1 = no llegó)");
   int i = d > 0 ? 0 : 1;
   if (pisoCnt[i] < PISO_N) { pisoPwm[i][pisoCnt[i]] = p; pisoV[i][pisoCnt[i]] = v; pisoCnt[i]++; }
 }
@@ -340,10 +391,13 @@ void procesaLinea(String s) {
     return;
   }
   if ((s[0] == 'f' || s[0] == 'b') && s.length() > 1) {
+    // f<pwm>[,<mm>][,c]   c = al final suelto (coast) en vez de freno
     int coma = s.indexOf(',');
-    float dist = coma > 0 ? s.substring(coma + 1).toFloat() : PISO_DIST_MM;
+    int coma2 = coma > 0 ? s.indexOf(',', coma + 1) : -1;
+    float dist = coma > 0 ? s.substring(coma + 1, coma2 > 0 ? coma2 : s.length()).toFloat() : PISO_DIST_MM;
     if (dist < 300 || dist > 5000) dist = PISO_DIST_MM;
-    corridaPiso(s[0] == 'f' ? 1 : -1, s.substring(1, coma > 0 ? coma : s.length()).toInt(), dist);
+    bool libre = s.endsWith(",c");
+    corridaPiso(s[0] == 'f' ? 1 : -1, s.substring(1, coma > 0 ? coma : s.length()).toInt(), dist, libre);
     rawAnt = leeRaw();
     return;
   }
