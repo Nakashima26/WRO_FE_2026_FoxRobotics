@@ -912,6 +912,8 @@ class RouteMode:
         tc = _ack_num(ack or "", "tc")
         prof = self._profile_pwm(self._sign_xy(conf, empty),
                                  lap2=tc is not None and 4 <= tc < 8, l23=tc is not None and 4 <= tc < 12)
+        if prof is not None and tc == 4 and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
+            prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
         if self._prueba_cajon and self.fixed:
@@ -1082,6 +1084,8 @@ class RouteMode:
             pwm0 = float(C.ROUTE_L23_PWM0)
         base = int(C.ROUTE_PROFILE_BASE_PWM)
         top = int(C.ROUTE_PROFILE_MAX_PWM)
+        if l23 and getattr(C, "ROUTE_L23_MAX_PWM", None) is not None:
+            top = int(C.ROUTE_L23_MAX_PWM)   # vueltas 2-3: techo propio en recta (None = el de la ruta)
         v_base = K * (base - pwm0)
         v_max = K * (top - pwm0)
         # Perfil v3: piso real del perfil (MIN_PWM, sin pasar de la base). None: la base.
