@@ -611,7 +611,7 @@ const float GIRO_PI_CUENTA_DEG   = 70.0f;
 const float ODOM_PWM_K           = 3.5f;
 const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
-const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
+const float ENC_CUENTAS_POR_MM   = 7.523f;   // N30 7 CPR, medido 2026-11-17 (N30Test: 7523 cuentas en 1000 mm empujado). N20 era 5.45
 
 // ── Lazo de velocidad con encoder (2026-11-11) ───────────────────────────────
 // Con PWM directo la velocidad depende de la pila: orillas36 a 11.1 V dio
@@ -630,6 +630,16 @@ const float LAZO_K_FWD       = 3.82f;   // mm/s por PWM adelante (gemelo MotorPa
 const float LAZO_PWM0_FWD    = 45.5f;
 const float LAZO_K_REV       = 3.61f;   // reversa
 const float LAZO_PWM0_REV    = 61.0f;
+// Motor real (N30 30:1, 2026-11-17). Los LAZO_K/PWM0 de arriba se quedan como
+// ESCALA DE MANDO (qué velocidad significa el PWM que piden los estados, afinada
+// con el N20); estos son el MOTOR, para el feedforward y para traducir el PWM
+// cuando el lazo no actúa. N30Test en piso, adelante, 6 corridas 60..255:
+// 265/593/809/1077/1366/~1575 mm/s, recta ±40 mm/s; tope ~1.6 m/s.
+// Reversa no medida: ~5 % menos que adelante (barrido en el aire 7.14 vs 7.56).
+const float MOTOR_K_FWD      = 6.64f;   // mm/s por PWM
+const float MOTOR_PWM0_FWD   = 16.6f;
+const float MOTOR_K_REV      = 6.27f;
+const float MOTOR_PWM0_REV   = 16.6f;
 const float LAZO_V_MAX       = 700.0f;  // mm/s; 0 = sin tope
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
@@ -2064,8 +2074,20 @@ const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
 int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
 unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
 
+// PWM de la escala de mando (N20) -> PWM del motor real que da la misma
+// velocidad. Debajo del arranque escala proporcional (PWM0 mando -> PWM0 motor),
+// para que un PWM "de casi parado" siga siendo casi parado con el N30.
+float pwmMotorEquiv(float pwm, int dir) {
+  float k  = dir > 0 ? LAZO_K_FWD : LAZO_K_REV;
+  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  float km = dir > 0 ? MOTOR_K_FWD : MOTOR_K_REV;
+  float pm = dir > 0 ? MOTOR_PWM0_FWD : MOTOR_PWM0_REV;
+  if (pwm <= p0) return pwm * pm / p0;
+  return pm + (pwm - p0) * k / km;
+}
+
 // PWM pedido (ya recortado y con rampa) -> PWM de salida para lograr la velocidad
-// que ese PWM daría a ~12 V. Ver MOTOR_LAZO_VEL.
+// que ese PWM significa en la escala de mando. Ver MOTOR_LAZO_VEL.
 int lazoVelocidad(int pwm) {
   static unsigned long tPrev = 0;
   static int dirPrev = 0;
@@ -2073,25 +2095,32 @@ int lazoVelocidad(int pwm) {
   float dt = (tPrev == 0) ? 0.0f : (now - tPrev) / 1000.0f;
   tPrev = now;
   int dir = motorDirActual;
-  if (pwm <= 0 || dir == 0 || dir != dirPrev || dt > 0.2f) {
+  if (pwm <= 0 || dir == 0) { lazoI = 0.0f; dirPrev = dir; return pwm; }
+  int pwmEq = constrain((int)lroundf(pwmMotorEquiv((float)pwm, dir)), 0, 255);
+  if (dir != dirPrev || dt > 0.2f) {
     lazoI = 0.0f; dirPrev = dir;
-    return pwm;
+    return pwmEq;
   }
   float v = (float)dir * encVelMmS;                 // velocidad en el sentido pedido
-  if (v < -60.0f) { lazoI = 0.0f; return pwm; }     // frenando con contramarcha: no tocar
+  if (v < -60.0f) { lazoI = 0.0f; return pwmEq; }   // frenando con contramarcha: sin lazo
   float k  = dir > 0 ? LAZO_K_FWD : LAZO_K_REV;
   float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  float km = dir > 0 ? MOTOR_K_FWD : MOTOR_K_REV;
+  float pm = dir > 0 ? MOTOR_PWM0_FWD : MOTOR_PWM0_REV;
   float vObj = k * ((float)pwm - p0);
-  if (vObj <= 0.0f) { lazoI = 0.0f; return pwm; }   // por debajo del arranque: PWM tal cual
-  float ff = (float)pwm;
-  if (LAZO_V_MAX > 0.0f && vObj > LAZO_V_MAX) { vObj = LAZO_V_MAX; ff = LAZO_V_MAX / k + p0; }
+  if (vObj <= 0.0f) { lazoI = 0.0f; return pwmEq; } // por debajo del arranque: sin lazo
+  if (LAZO_V_MAX > 0.0f && vObj > LAZO_V_MAX) vObj = LAZO_V_MAX;
+  float ff = vObj / km + pm;                        // feedforward con el motor real
+  // KP/KI se afinaron con el N20 (3.82 mm/s por PWM): se escalan para que la
+  // ganancia del lazo en mm/s sea la misma con un motor de otra K.
+  float g  = LAZO_K_FWD / km;
   float e = vObj - v;
-  float u = ff + LAZO_KP * e + lazoI;
+  float u = ff + g * LAZO_KP * e + lazoI;
   // anti-windup: integra solo si la salida no está saturada hacia el lado del error
   if (dt > 0.003f && !((u >= 255.0f && e > 0) || (u <= 0.0f && e < 0))) {
-    lazoI = constrain(lazoI + LAZO_KI * e * dt, -LAZO_I_MAX, LAZO_I_MAX);
+    lazoI = constrain(lazoI + g * LAZO_KI * e * dt, -LAZO_I_MAX, LAZO_I_MAX);
   }
-  u = ff + LAZO_KP * e + lazoI;
+  u = ff + g * LAZO_KP * e + lazoI;
   return constrain((int)lroundf(u), 0, 255);
 }
 

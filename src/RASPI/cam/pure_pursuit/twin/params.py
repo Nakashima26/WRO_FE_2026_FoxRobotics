@@ -111,12 +111,16 @@ class MotorParams:
     # 2026-10-24 a 12.1-11.9 V (logs_tof/freno*/suelto*): 150 -> 394-404, 255 -> 789-826 mm/s
     # (una de 679 con el motor caliente). Es la batería con la que se corre; a 12.5 V
     # (2026-10-21) era k 4.02, pwm0 42.1 (80→152, 120→315, 255→856 mm/s).
-    k_mm_s_per_pwm: float = 3.82
-    pwm0: float = 45.5
+    # 2026-11-17 motor N30 30:1 (N30Test en piso, 6 corridas 60..255 adelante: 265/593/809/
+    # 1077/1366/~1575 mm/s, recta ±40). Reversa no medida: 5 % menos (barrido en el aire).
+    # tau/coast/freno siguen siendo del N20 (sin medir con el N30). N20: k 3.82, pwm0 45.5.
+    k_mm_s_per_pwm: float = 6.64
+    pwm0: float = 16.6
     # Reversa 2026-10-24 (logs_tof/rev_*, 11.93 V): 150 -> 321 mm/s, 255 -> 697-706 mm/s
     # (adelante 400/800). Arranca más tarde: pwm0 propio.
-    k_rev_mm_s_per_pwm: float = 3.61
-    pwm0_rev: float | None = 61.0
+    # N30: reversa supuesta 5 % abajo de adelante (N20: k_rev 3.61, pwm0_rev 61.0).
+    k_rev_mm_s_per_pwm: float = 6.27
+    pwm0_rev: float | None = 16.6
     tau_drive_s: float = 0.173
     tau_coast_s: float = 0.091
     # Rodando suelto (A1=A2=LOW) la caja frena casi parejo, no exponencial: 2026-10-24 desde
@@ -188,14 +192,14 @@ def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
 
 @dataclass
 class EncoderParams:
-    counts_per_mm: float = 5.45   # medido 2026-10-19 (CalibFox x4, enc_runs)
+    counts_per_mm: float = 7.523  # N30 7 CPR, medido 2026-11-17 (N30Test, 1000 mm empujado); N20 era 5.45
     slip_bias_sigma: float = 0.01
     slip_c_acc: float = 2e-5
     slip_c_acc_cap: float = 0.05
     slip_c_scrub: float = 0.02
 
     def __post_init__(self) -> None:
-        _prov("encoder.counts_per_mm", "medido", "calib 2026-10-19 enc_runs (CalibFox x4): 5.45 cuentas/mm")
+        _prov("encoder.counts_per_mm", "medido", "N30Test 2026-11-17: 7523 cuentas en 1000 mm empujado (N20 era 5.45)")
         _prov("encoder.slip_*", "supuesto", "deriva multiplicativa por acel/scrub")
 
 
