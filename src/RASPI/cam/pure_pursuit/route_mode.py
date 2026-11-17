@@ -1095,6 +1095,7 @@ class RouteMode:
         floor = base if mn is None else min(int(mn), base)
         v_min = K * (floor - pwm0)
         tight_on = False
+        corner_floor = None
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
         a_brk = float(C.ROUTE_PROFILE_A_BRAKE_MM_S2)
         if l23:   # vueltas 2-3: frenado propio (sin tope del lazo el carro llega a ~830 mm/s)
@@ -1154,6 +1155,17 @@ class RouteMode:
                     v_sign = np.where(dd < near, v_t + (v_min - v_t) * g, v_sign)
                     tight_on = True
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
+            corner_sign = getattr(C, "ROUTE_L1_CORNER_SIGN", None)
+            if corner_sign and not l23 and self.fixed and float(getattr(self, "_tc_max", 0) or 0) < 4:
+                # El piso normal del perfil permite ~700 mm/s incluso al salir
+                # de la esquina hacia una señal cercana. Se limita solo esa
+                # curva; el mismo sobre de frenado anticipa y suelta el freno.
+                vg = K * (float(corner_sign["pwm"]) - pwm0)
+                near_curve = ((dd < float(corner_sign.get("mm", 350.0)))
+                              & (kmax > 1.0 / float(corner_sign.get("radius_mm", 400.0))))
+                v_c = np.where(near_curve, np.minimum(v_c, vg), v_c)
+                if np.any(near_curve):
+                    corner_floor = int(corner_sign["pwm"])
             osm = getattr(C, "ROUTE_L23_OUTER_SIGN_MM", None)
             outer = signs[np.maximum(np.abs(signs[:, 0]), np.abs(signs[:, 1])) >= 1000.0] if (l23 and osm is not None) else ()
             if len(outer):
@@ -1179,7 +1191,7 @@ class RouteMode:
         inside = np.nonzero(dist <= span)[0]
         k_min = inside[int(np.argmin(allowed[inside]))]
         v_allow = min(v_max, float(allowed[k_min]))
-        lo = floor
+        lo = floor if corner_floor is None else min(floor, corner_floor)
         ff = getattr(C, "ROUTE_PROFILE_BRAKE_FF_S", None)
         if ff is not None and d[k_min] > 0.0 and v_allow < v_max:
             # Frenando hacia una muestra de adelante: se adelanta el retraso del motor.
