@@ -1351,6 +1351,8 @@ ROUTE_PRUEBA_CAJON_FILE = "/home/user/prueba_cajon"
 # firmware tira el 57-68 % (status 2/7). Con el frontal real en el gemelo, s23 ubicaba el
 # cajón a −555 (verdad −43) y chocaba a los 3 s; sin él la naranja lo pone a −64.
 ROUTE_FIX_TOF_MAX_MM = {"dF": 0.0, "dL": 500.0, "dR": 500.0}
+ROUTE_FIX_TOF_GEOM = None   # (medio cono°, incidencia máx°) del ToF en StartFix; None = modelo de sonar
+ROUTE_FIX_TOF_CAL = None   # {clave: ([leído...], [real...])} curva medida del ToF (calib 2026-10-19 frontal: [332,787,1217,1690] -> [300,600,1000,1500])
 # Voto de la naranja por pixeles de cinta (corner_lines._center_pix): mínimo de pixeles.
 ROUTE_FIX_LINE_MIN_PIX = 25
 # True = solo pixeles de cinta del frame (sin respaldo de la recta ajustada sostenida).
@@ -1365,6 +1367,10 @@ ROUTE_FIX_PIX_MIN_NA = 0.7
 # Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.
 ROUTE_FIX_LINE_DECIDE_N = 5
 ROUTE_FIX_LINE_DECIDE_IQR_MM = 60.0
+ROUTE_FIX_LINE_DECIDE_SPAN_MM = None   # rango máx de esos votos (None = sin chequeo)
+ROUTE_FIX_LINE_FRESH = None   # True: el voto por recta solo con la cinta vista en este frame (no la sostenida)
+ROUTE_FIX_FORCE_BLEND_MM = None   # forzado con 1-2 votos de cinta: promedia con el pico del sonar (masa ≥0.2) si están a ≤ esto
+ROUTE_LOC_HOLD_AT_START = None   # True: sin corrección del localizador mientras la odometría sigue en 0 (parado en el cajón)
 ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
 # Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
 # (dentro de ROUTE_SLOWDOWN_MM). None = apagado.

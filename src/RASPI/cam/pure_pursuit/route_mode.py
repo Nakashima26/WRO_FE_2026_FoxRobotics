@@ -594,7 +594,10 @@ class RouteMode:
         if not self.fixed:
             ax, ay = self.axis
             shifts = [(float(d) * ax, float(d) * ay) for d in (self.fix.deltas[0], self.fix.deltas[-1])]
-        self.loc.update(ack, correct=(est in ("S", "C", "R") and _ack_est(ack) in ("S", "C", "R")),
+        # Parado en el cajón la pose del arranque es exacta: un ToF a 84 mm corría y +16 mm (gemelo s26).
+        quieto = (getattr(C, "ROUTE_LOC_HOLD_AT_START", None) and not self.fixed
+                  and _ack_num(ack or "", "px") == 0 and _ack_num(ack or "", "py") == 0)
+        self.loc.update(ack, correct=(est in ("S", "C", "R") and _ack_est(ack) in ("S", "C", "R") and not quieto),
                         shifts=shifts)
         pose = self.loc.pose() if self.loc.odom is not None else (dm.pose_xy[0], dm.pose_xy[1], float(dm.heading))
         if self.loc.odom is not None:
@@ -637,8 +640,12 @@ class RouteMode:
             if (delta is None and n_dec is not None and getattr(C, "ROUTE_FIX_LINE", None)
                     and len(self._line_d) >= int(n_dec)):
                 # La cinta ya votó varias veces y cuadra: decide sin esperar al final de la recta.
-                q1, q3 = np.percentile(self._line_d[-int(n_dec):], [25, 75])
-                if q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0)):
+                last = self._line_d[-int(n_dec):]
+                q1, q3 = np.percentile(last, [25, 75])
+                # Votos que derivan (gemelo s33: -369..-465 en 5 frames, verdad -568) pasan el IQR: también el rango.
+                span = getattr(C, "ROUTE_FIX_LINE_DECIDE_SPAN_MM", None)
+                if (q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0))
+                        and (span is None or max(last) - min(last) <= float(span))):
                     delta = float(np.median(self._line_d[-int(n_dec):]))
             forced = False
             if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
@@ -647,6 +654,13 @@ class RouteMode:
                 delta = self.fix.mean()
                 if getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3)):
                     delta = float(np.median(self._line_d))
+                    # 1-2 votos lejanos de la cinta van ~+60 mm corridos y el pico del sonar del otro lado
+                    # (gemelo s9: cinta +649, pico +546 m=0.62, verdad +587; s22: +83 / -10, verdad +17).
+                    blend = getattr(C, "ROUTE_FIX_FORCE_BLEND_MM", None)
+                    pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
+                    if (blend is not None and len(self._line_d) < 3 and pm >= 0.2
+                            and abs(pk - delta) <= float(blend)):
+                        delta = 0.5 * (pk + delta)
                 forced = True
             if delta is not None:
                 pose = self._apply_fix(dm, ack, delta, forced)
@@ -1206,7 +1220,9 @@ class RouteMode:
                 return
         elif getattr(C, "ROUTE_FIX_LINE_PIX", False) and getattr(self, "_pix_ok", None) is not False:
             return
-        if not o.get("line"):
+        if not o.get("line") or (pix is None and getattr(C, "ROUTE_FIX_LINE_FRESH", None)):
+            # Sin _pix la cinta no se vio en ESTE frame y la recta es la sostenida: con la pose
+            # avanzando el voto se arrastra ~1 frame de avance (gemelo N30 s34: -436 -> -81, verdad -680).
             # Con pixeles, sin _pix este frame no se vota: la recta que queda es la
             # SOSTENIDA de frames anteriores y con la pose avanzando arrastraba el
             # voto ~10 mm/frame (gemelo s19: de +327 a +74).
