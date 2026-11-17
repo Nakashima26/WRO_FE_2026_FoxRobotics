@@ -1441,6 +1441,14 @@ ROUTE_PROFILE_PWM0 = 25.0
 # (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
 ROUTE_PROFILE_MIN_PWM = None
 ROUTE_L23_MIN_PWM = 190    # piso del perfil en vueltas 2-3 (tc 4..11). Con el lazo sin tope en 2-3 (255 = no frenar) chocaban señales; 170 frena cerca de señales/isla. None = ROUTE_PROFILE_MIN_PWM
+ROUTE_L1_SOFT_CLEAR_MM = None  # margen blando de la ruta en vuelta 1 desde tc>=1 (con asientos sin ver). None = ROUTE_SOFT_CLEAR_MM
+ROUTE_L1_MIN_PWM = None    # piso del perfil en vuelta 1 (1<=tc<4). None = ROUTE_PROFILE_MIN_PWM
+ROUTE_L1_UPLOAD_PWM = None # tope en vuelta 1 (1<=tc<4) mientras sube la ruta al ESP. None = ROUTE_UPLOAD_PWM
+ROUTE_MANDO_V_255 = None     # N30 (a3647f6): mm/s del ESP a PWM 255 (LAZO_V_255). None = rv tal cual (N20)
+ROUTE_MANDO_CODO_PWM = 155   # LAZO_CODO_PWM del ESP
+ROUTE_MANDO_K = 3.82         # LAZO_K_FWD / LAZO_PWM0_FWD: escala con que el ESP lee el rv hasta el codo
+ROUTE_MANDO_PWM0 = 45.5
+ROUTE_L1_UPLOAD_LINES = None  # líneas de subida por cuadro en vuelta 1 (tc<4). None = ROUTE_UPLOAD_LINES
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
 ROUTE_PROFILE_SIGN_NEAR_MM = None
@@ -1512,6 +1520,7 @@ ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear
 ROUTE_W_CLEAR = 8.0          # RouteParams.w_clear
 # El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
 ROUTE_TIME_COST = False
+ROUTE_PLAN_VMIN_PWM = None  # piso de velocidad del costo de tiempo de la DP (None = ROUTE_PROFILE_BASE_PWM)
 # Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
 # El twin lo deja en False para que cada corrida sea reproducible.
 ROUTE_PLAN_ASYNC = False

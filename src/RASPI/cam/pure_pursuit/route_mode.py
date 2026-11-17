@@ -77,6 +77,18 @@ def _grip_pwm(steer_deg: float) -> int:
     return max(lo, min(hi, pwm))
 
 
+def _rv_mando(rv) -> int:
+    """PWM de la Pi (escala del N20, puede pasar de 255) -> PWM del ESP con la escala de mando N30
+    (vMando: igual hasta ROUTE_MANDO_CODO_PWM, recto hasta ROUTE_MANDO_V_255 a 255). None = sin traducir."""
+    v255 = getattr(C, "ROUTE_MANDO_V_255", None)
+    codo = float(getattr(C, "ROUTE_MANDO_CODO_PWM", 155))
+    if v255 is None or rv <= codo:
+        return int(min(rv, 255))
+    k, p0 = float(C.ROUTE_MANDO_K), float(C.ROUTE_MANDO_PWM0)
+    vc = k * (codo - p0)
+    return int(min(255, round(codo + (k * (rv - p0) - vc) * (255.0 - codo) / (float(v255) - vc))))
+
+
 def _chord_ahead(follower, ahead_mm: float = 500.0) -> tuple[float]:
     """Cuánto dobla la ruta (grados) en los próximos ahead_mm."""
     r = follower.route
@@ -107,13 +119,16 @@ def _pursuit_kappa(route, idx, lookahead_mm):
     return np.abs(2.0 * right / np.maximum(fwd * fwd + right * right, 1.0))
 
 
-def _prm_for(unknown):
+def _prm_for(unknown, tc=0.0):
     """Mapa completo: no comprar arco hasta 140 mm (arquea la recta hacia la pared).
 
     Con asientos sin ver se queda el margen de config. Semilla 21 ruido 2 chocó
     Red N/T4 en la vuelta 1 cuando el margen bajaba también ahí.
     """
     prm = _route_params()
+    l1s = getattr(C, "ROUTE_L1_SOFT_CLEAR_MM", None)
+    if unknown and l1s is not None and float(tc or 0) >= 1.0:
+        prm.soft_clear_mm = float(l1s)   # vuelta 1 tras la salida: margen propio (en tc=0 rompe la salida: s3/s33/s45)
     if not unknown:
         prm.soft_clear_mm = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
         for k in ("w_kappa", "w_clear"):   # mapa completo: ROUTE_FULL_W_KAPPA / ROUTE_FULL_W_CLEAR pisan el peso
@@ -136,7 +151,8 @@ def _route_params():
         soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
         w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),
         time_cost=bool(getattr(C, "ROUTE_TIME_COST", False)),
-        v_min_mm_s=K * (float(getattr(C, "ROUTE_PROFILE_BASE_PWM", 155)) - pwm0),
+        # ROUTE_PLAN_VMIN_PWM: piso de velocidad que ve la DP (con BASE_PWM=255 el costo de tiempo no distingue curvas).
+        v_min_mm_s=K * (float(getattr(C, "ROUTE_PLAN_VMIN_PWM", None) or getattr(C, "ROUTE_PROFILE_BASE_PWM", 155)) - pwm0),
         v_max_mm_s=K * (float(getattr(C, "ROUTE_PROFILE_MAX_PWM", 255)) - pwm0),
         a_lat_mm_s2=float(getattr(C, "ROUTE_PROFILE_A_LAT_MM_S2", 1500.0)),
         w_visible=float(getattr(C, "ROUTE_W_VISIBLE", 60.0)),
@@ -809,12 +825,12 @@ class RouteMode:
                 # Twin: el plan sale ya, pero se adopta tras el retraso de la Pi (ruta anterior mientras).
                 if self._delay_left is None:
                     self._job_key = key
-                    self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3]), unknown=args[3],
+                    self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3], getattr(self, "_tc_max", 0)), unknown=args[3],
                                                 anchor=args[4], lock=args[5], park_w=args[6], extra=args[7], hug=args[8]),
                                         key, dict(plan_seats), list(plan_unknown), self.shift, hold)
                     self._delay_left = int(round(float(C.ROUTE_PLAN_DELAY_S) * float(getattr(C, "PI_FPS", 40.0))))
             else:
-                self._adopt(RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3]), unknown=args[3],
+                self._adopt(RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3], getattr(self, "_tc_max", 0)), unknown=args[3],
                                     anchor=args[4], lock=args[5], park_w=args[6], extra=args[7], hug=args[8]),
                             key, plan_seats, plan_unknown, empty, dm, self.shift, hold)
         if self._delay_left is not None:
@@ -895,7 +911,11 @@ class RouteMode:
             # (doble buffer, swap en RTE), así que solo se frena en el ALTO.
             # pi_steer: el ESP gira con la Pi, sin tope de subida (pi_steer nunca va con hold: el ALTO sigue).
             if not self.pi_steer and (self.hold or (bool(getattr(C, "ROUTE_UPLOAD_SLOW", True)) and self._upload_risky())):
-                cap = 0 if self.hold else _pwm("ROUTE_UPLOAD_PWM")
+                _tc = _ack_num(ack or "", "tc")
+                _l1u = getattr(C, "ROUTE_L1_UPLOAD_PWM", None)
+                # vuelta 1 tras la primera esquina (1<=tc<4): tope propio mientras sube la ruta. En tc=0 no:
+                # la ruta recién ubicado el cajón cambia de lado (n2 s33 chocó Green E/T1 a 160). U/parking igual.
+                cap = 0 if self.hold else (int(_l1u) if _l1u is not None and _tc is not None and 1 <= _tc < 4 else _pwm("ROUTE_UPLOAD_PWM"))
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False
@@ -911,7 +931,8 @@ class RouteMode:
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
         tc = _ack_num(ack or "", "tc")
         prof = self._profile_pwm(self._sign_xy(conf, empty),
-                                 lap2=tc is not None and 4 <= tc < 8, l23=tc is not None and 4 <= tc < 12)
+                                 lap2=tc is not None and 4 <= tc < 8, l23=tc is not None and 4 <= tc < 12,
+                                 l1=tc is not None and 1 <= tc < 4)   # en tc=0 no: s33 choca Green E/T1 en la salida
         if prof is not None and tc == 4 and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
@@ -946,7 +967,11 @@ class RouteMode:
         lines = []
         if self.upload and getattr(C, "ROUTE_ON_ESP", False):
             # shortcut: >1 línea por frame pide subir el baud (a 115200 solo cabe una junto al V2).
-            for _ in range(max(1, int(getattr(C, "ROUTE_UPLOAD_LINES", 1)))):
+            _nl = getattr(C, "ROUTE_UPLOAD_LINES", 1)
+            _l1n = getattr(C, "ROUTE_L1_UPLOAD_LINES", None)   # vuelta 1 (tc<4): subida entera en menos cuadros
+            if _l1n is not None and getattr(self, "_tc_max", 0) < 4:
+                _nl = _l1n
+            for _ in range(max(1, int(_nl))):
                 if not self.upload:
                     break
                 lines.append(self.upload.pop(0))
@@ -1057,7 +1082,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None, lap2=False, l23=False) -> int | None:
+    def _profile_pwm(self, signs=None, lap2=False, l23=False, l1=False) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -1092,6 +1117,8 @@ class RouteMode:
         mn = getattr(C, "ROUTE_PROFILE_MIN_PWM", None)
         if l23 and getattr(C, "ROUTE_L23_MIN_PWM", None) is not None:
             mn = C.ROUTE_L23_MIN_PWM        # vueltas 2-3: piso del perfil propio (la 1 y la U no cambian)
+        if l1 and getattr(C, "ROUTE_L1_MIN_PWM", None) is not None:
+            mn = C.ROUTE_L1_MIN_PWM         # vuelta 1 (1<=tc<4): piso propio; salida, U y parking no cambian
         floor = base if mn is None else min(int(mn), base)
         v_min = K * (floor - pwm0)
         tight_on = False
@@ -1463,7 +1490,7 @@ class RouteMode:
     def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None, hug=None) -> None:
         self._job_conf = conf
         self._job_unknown = unknown
-        self._job_out = RR.plan(direction, conf, parking, prm=_prm_for(unknown), unknown=unknown, anchor=anchor,
+        self._job_out = RR.plan(direction, conf, parking, prm=_prm_for(unknown, getattr(self, "_tc_max", 0)), unknown=unknown, anchor=anchor,
                                 lock=lock, park_w=park_w, extra=extra, hug=hug)
 
     def _adopt(self, route, key, conf, unknown, empty, dm, shift: float = 0.0, hold: bool = False) -> None:
@@ -1593,7 +1620,7 @@ class RouteMode:
         if self.fixed and getattr(self, "pka", None) is not None:
             s += f",pka={self.pka:.0f}"
         if self.rv is not None:
-            s += f",rv={int(self.rv)}"
+            s += f",rv={_rv_mando(self.rv)}"
         return s
 
     @staticmethod
