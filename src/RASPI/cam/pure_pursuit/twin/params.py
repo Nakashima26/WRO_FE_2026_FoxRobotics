@@ -111,24 +111,38 @@ class MotorParams:
     # 2026-10-24 a 12.1-11.9 V (logs_tof/freno*/suelto*): 150 -> 394-404, 255 -> 789-826 mm/s
     # (una de 679 con el motor caliente). Es la batería con la que se corre; a 12.5 V
     # (2026-10-21) era k 4.02, pwm0 42.1 (80→152, 120→315, 255→856 mm/s).
-    k_mm_s_per_pwm: float = 3.82
-    pwm0: float = 45.5
+    # 2026-11-17 motor N30 30:1 (N30Test, twin/calib/medidas_20261117). A 11.88 V (la de
+    # carrera): 100 -> 503, 150 -> 798, 180 -> 1062, 255 -> 1501 mm/s -> k 6.51, pwm0 22.9.
+    # Con la pila a tope: k 6.64, pwm0 16.6 (255 -> ~1575). N20: k 3.82, pwm0 45.5.
+    k_mm_s_per_pwm: float = 6.51
+    pwm0: float = 22.9
     # Reversa 2026-10-24 (logs_tof/rev_*, 11.93 V): 150 -> 321 mm/s, 255 -> 697-706 mm/s
     # (adelante 400/800). Arranca más tarde: pwm0 propio.
-    k_rev_mm_s_per_pwm: float = 3.61
-    pwm0_rev: float | None = 61.0
-    tau_drive_s: float = 0.173
+    # N30 2026-11-17 en piso: 100 -> 370, 140 -> 624, 180 -> ~850 mm/s (60 -> ~70-117, fuera
+    # de la recta) -> k 6.0, pwm0 37.6. Arrancando de golpe la llanta patina. N20: 3.61 / 61.0.
+    k_rev_mm_s_per_pwm: float = 6.0
+    pwm0_rev: float | None = 37.6
+    # N30: 63 % de v a 270-320 ms y 90 % a 580-660 ms adelante (velocidad de 50 ms) -> ~0.28 s. N20: 0.173.
+    tau_drive_s: float = 0.28
     tau_coast_s: float = 0.091
     # Rodando suelto (A1=A2=LOW) la caja frena casi parejo, no exponencial: 2026-10-24 desde
     # 798/826 mm/s rueda 113/123 mm y desde 404 rueda 31 mm (cinta) -> 2.6-2.8 m/s². None = tau_coast_s.
-    coast_decel_mm_s2: float | None = 2700.0
+    # N30 (30:1) rueda mucho más: desde 803 -> 329 mm en 885 ms, desde 1409 -> 944 mm en 1.5 s
+    # (encoder, sin patinar) -> ~1.0 m/s². N20: 2700.
+    coast_decel_mm_s2: float | None = 1000.0
     # Freno en corto (A1/A2 en una dirección, PWM 0 = setMotor(0) del .ino). 2026-10-24:
     # desde 400 mm/s para en 6-7 mm (cinta = encoder) -> ~12 m/s²; desde 790 las llantas se
     # bloquean: el encoder ve 13-23 mm y el carro se resbala 24-51 mm más (ToF/cinta) -> ~5.5 m/s².
-    brake_decel_mm_s2: float = 12000.0
-    brake_lock_speed_mm_s: float = 550.0     # arriba de esto la llanta se bloquea y el carro patina
-    brake_slide_decel_mm_s2: float = 5500.0
-    brake_wheel_tau_s: float = 0.02          # la llanta bloqueada se para en ~v·tau (lo que cuenta el encoder)
+    # N30 2026-11-17: desde 500 para en 26 mm (~4.8 m/s², sin patinar); reversa desde 351/630/864
+    # en 13/31/56 mm (encoder). Desde 1066 y 1502 se bloquea: encoder 64/88 mm (~0.06·v) y desde
+    # 1502 el carro se resbala ~15 cm más (cinta) -> ~240 mm en total, ~4.7 m/s².
+    # N20: 12000 / 550 / 5500 / 0.02.
+    brake_decel_mm_s2: float = 5000.0
+    # arriba de esto la llanta se bloquea y el carro patina
+    brake_lock_speed_mm_s: float = 600.0
+    brake_slide_decel_mm_s2: float = 4700.0
+    # la llanta bloqueada se para en ~v·tau (lo que cuenta el encoder)
+    brake_wheel_tau_s: float = 0.06
     # p8_curva: PWM 160 a servo 15 (casi tope) −11%, a servo 40 −2%.
     scrub_coeff: float = 0.12
     # Tope de aceleración por agarre; None = sin tope. 0.8·0.55·g (no medido; las llantas patinan ~1 cm al arrancar).
@@ -188,7 +202,7 @@ def physical_motor(mass_kg=0.70, gear=1.5, v_batt=12.6, mu=0.8, rear_frac=0.55,
 
 @dataclass
 class EncoderParams:
-    counts_per_mm: float = 5.45   # medido 2026-10-19 (CalibFox x4, enc_runs)
+    counts_per_mm: float = 7.523  # N30 7 CPR, medido 2026-11-17; N20 era 5.45
     slip_bias_sigma: float = 0.01
     slip_c_acc: float = 2e-5
     slip_c_acc_cap: float = 0.05
