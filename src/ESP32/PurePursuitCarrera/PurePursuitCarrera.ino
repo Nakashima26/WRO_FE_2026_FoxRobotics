@@ -1112,6 +1112,7 @@ const int           PARK_PWM                  = 87;
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
+const bool          PARK_TOF_INVALIDO_POSTE   = true;   // fase 0: ToF exterior inválido (-1) = poste (ver ESTACIONANDO)
 // (PARK_CAIDA_MIN_CM=8 quitado 2026-09-15: descartaba el poste cuando el carro pasa
 //  pegado, orillas959 dio 7,5. La lectura se clasifica como ESTACIONANDO_PUNTA y usa
 //  PARK_PUNTA_SALTO_MAX_CM / _ALTO_REBASE_N / _CAIDA_HUECOS_N.)
@@ -5892,6 +5893,15 @@ void loop() {
       // (PARK_CAIDA_N) como el hueco (PARK_GAP_N) piden 2 lecturas seguidas.
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
+#if FOX_US_DE_TOF && FOX_TOF
+      // ToF inválido sobre el poste (orillas71/72, 2026-11-17): justo en el poste 1 el ToF exterior dio -1
+      // (poste a ~7 cm + pared a ~27 cm en el mismo cono), que leerDistancia() vuelve 200 = "sin eco", y el
+      // poste no contaba. Escaneando a ~27 cm de la pared el Short siempre lee la pared: un inválido ahí es el
+      // poste, se toma como bajada.
+      if (PARK_TOF_INVALIDO_POSTE && parkFase == 0 && parkBaseN >= PARK_BASE_N
+          && tofMm[parkParedEsIzquierda ? 0 : 1] <= 0 && parkBase > (float)(PARK_CAIDA_CM + 2))
+        extRaw = max(1L, (long)(parkBase - PARK_CAIDA_CM - 1));
+#endif
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
       int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
       int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
