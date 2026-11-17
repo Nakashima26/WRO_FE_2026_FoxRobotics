@@ -1539,6 +1539,13 @@ float         parkTrimPared         = 0.0f;   // lo que marca el gyro cuando va 
 // Anti-atoro: rumbo y marca de tiempo de la última vez que el carro SÍ giraba.
 int           parkCenterCnt         = 0;      // debounce de la fase 11 (ver PARK_CENTER_DEB)
 unsigned long parkPoste1Ms          = 0;      // millis de la detección del POSTE 1
+// Poste 2 por odometría (orillas70, 2026-11-17): el poste mide 10 cm y el ToF derecho (ROI 8) a veces
+// no lo ve; el poste 1 salió en 1 lectura y el 2 en ninguna, y el carro siguió hasta el fondo de la recta.
+// Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
+// PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
+const long          PARK_POSTE2_POSE_MM   = 340;
+long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
+int           parkPoste2Pose        = 0;      // 1 = el poste 2 salió por odometría (ACK p2o=)
 float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
 float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
 int           parkTrimMedN          = 0;
@@ -2734,6 +2741,8 @@ void resetParkScan() {
   parkEntryMs          = millis();
   parkCiclos           = 0;
   parkScanSubFase      = 0;
+  parkOdomPoste1       = -1;
+  parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
   parkCaidaCnt         = 0;
@@ -3907,6 +3916,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
 #if FOX_ENCODER && !defined(FOX_SIL)
     ackOut.print(",ei=");   ackOut.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
+    ackOut.print(",p2o=");  ackOut.print(parkPoste2Pose);
     ackOut.print(",fr=");   ackOut.print(lazoFrenando);   // 1 = lazo frenando activo
     ackOut.print(",pw=");   ackOut.print(pwmActual);      // PWM real al motor
     ackOut.print(",ue=");   ackOut.print(uartErrs);
@@ -6250,6 +6260,7 @@ void loop() {
           if (bajada && armada && posteConfirmado) {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
+            parkOdomPoste1   = odomMm;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -6268,6 +6279,7 @@ void loop() {
               parkGapCnt       = 0;
               parkHuecoEntryMs = millis();
               parkPoste1Ms     = parkBajadaPreMs;
+              parkOdomPoste1   = odomMm;
               parkBajadaPre    = false;
               Serial.println("PARK: poste 1 pasó antes del armado — hueco");
             }
@@ -6277,7 +6289,11 @@ void loop() {
         }
         // ── Subfase 1: Sobre Poste 1, esperando hueco ──
         else if (parkScanSubFase == 1) {
-          if (despejado) {
+          if (PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
+            parkScanSubFase  = 2;   // sin hueco confirmado: el poste 2 se toma abajo por odometría
+            parkCaidaCnt     = 0;
+            parkHuecoEntryMs = millis();
+          } else if (despejado) {
             parkGapCnt++;
             if (parkGapCnt >= PARK_GAP_N) {
               parkScanSubFase  = 2;
@@ -6303,6 +6319,12 @@ void loop() {
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
           bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado);
+          if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0
+              && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
+            poste2Detect = true;
+            parkPoste2Pose = 1;
+            Serial.print("PARK: POSTE 2 POR ODOMETRIA (+"); Serial.print(odomMm - parkOdomPoste1); Serial.println(" mm tras el poste 1)");
+          }
 
           // SOLO caída de sónar. La Pi manda park=2 al ver magenta lejos
           // (recta final, ~1 s tras entrar a ESTACIONANDO) y el timeout de
