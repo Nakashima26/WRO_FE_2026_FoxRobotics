@@ -99,7 +99,7 @@ de 700 a 0 (sin tope).
 
 `vMando()` (commit a3647f69 + esta sesión): hasta PWM 155 el mando significa lo
 mismo que con el N20 (155 -> 418 mm/s); de 155 a 255 sube recto hasta
-`LAZO_V_255` = 1575 (180 -> 708, 200 -> 940, 230 -> 1288). `MOTOR_MAX` sigue en
+`LAZO_V_255` (1575 en e994bba0; **regresado a 800** tras orillas65, ver docs/notes/orillas65_n30). `MOTOR_MAX` sigue en
 155: la carrera no cambia hasta que se suba. El perfil de la Pi
 (`ROUTE_PROFILE_K_MM_S_PER_PWM` 3.5 / `PWM0` 25) no usa esta escala.
 

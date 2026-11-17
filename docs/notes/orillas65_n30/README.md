@@ -29,6 +29,27 @@ Con `vMando()` todo lo que está arriba de 155 vale mucho más que con el N20:
 | 195 | `INICIO_PWM` | 571 mm/s | **882 mm/s** (+54 %) |
 | 255 | `INICIO_RECTO_PWM` | 800 → 700 (tope) | **1575 mm/s** (+125 %) |
 
+## El rojo sí lo vio
+
+Cuadros 5–8 del video: `obs_R=1`, el rojo de W X1 (−900, 0) entra por la derecha
+y la memoria lo tiene con conf 1.00; en el cuadro 12 la memoria lo marca
+`PASADO` (`y=347>345`). La Pi mandó `isen=1` (señal cerca de la salida → el ESP
+usa `INICIO_PWM_SENAL` 180 → 708 mm/s). La visión no fue el problema.
+
+## Sensor de frente muerto toda la corrida
+
+**`tF = -1` en los 598 ACK** (y por eso `dF = 200` fijo). El ToF frontal no dio
+ni una lectura: en los cuadros 11–16 la cámara tiene la pared negra encima y el
+ToF no la ve. Revisar el cable / XSHUT del ToF frontal (pin 0) — pudo moverse al
+cambiar el motor. Los laterales sí leen (`tL`, `tR`).
+
+## Odometría
+
+Bien hasta ~44.2 s (od ~1000). De 44.16 a 45.82 el carro está contra la pared
+(cámara negra, `tR` 75–100 mm, rumbo fijo en −57° con el servo al tope): el
+encoder contó **~900 mm que el carro no avanzó** (llanta patinando). Por eso la
+pose del mapa se va a la isla y luego fuera de la pista.
+
 ## Qué hizo (ACK)
 
 | Hora | Estado | od (mm) | yaw | srv | Lo que pasa |
@@ -58,7 +79,8 @@ Sin errores de UART (`ue=0`). `vel=` del ACK siempre es 0 (conocido).
    aplicarse a `inicioMotor()` ni a `rutaVel`: o se recortan esos PWM a
    `LAZO_CODO_PWM`, o se bajan `INICIO_*_PWM` y los `rv` de la Pi a su
    equivalente (180 → ~163, 195 → ~168, 255 → ~187 con 1575).
-3. Probar la salida del cajón sola (`INICIO`) antes de una vuelta completa.
+3. Arreglar el ToF frontal (`tF=-1` toda la corrida) antes de volver a correr.
+4. Probar la salida del cajón sola (`INICIO`) antes de una vuelta completa.
 
 ## Archivos
 
@@ -66,3 +88,7 @@ Sin errores de UART (`ue=0`). `vel=` del ACK siempre es 0 (conocido).
 - `journal_orillas65_1404.log` — journal de `wro-runtime` 14:04:42–14:04:51 (sin `MEMDBG`/`RECUP`).
 - `frames_orillas65.jpg`, `contact_orillas65.jpg` — cuadros del `orillas65.avi` (93 cuadros grabados).
 - Video completo en la Pi: `~/FoxRobotics/videos_orillas/orillas65.avi` (+ `_bev.bin`).
+
+## Arreglo aplicado
+
+`LAZO_V_255` 1575 -> **800** y `LAZO_V_MAX` 0 -> **700**: `vMando()` vuelve a ser la recta del N20 en todo el rango (cada PWM pide la misma velocidad que antes, también INICIO y `rv`). El N30 sigue usando su modelo (`MOTOR_K`) para el feedforward. Cargado en la ESP32. Falta revisar el ToF frontal.
