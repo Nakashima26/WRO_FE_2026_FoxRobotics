@@ -88,3 +88,7 @@ Sin errores de UART (`ue=0`). `vel=` del ACK siempre es 0 (conocido).
 - `journal_orillas65_1404.log` — journal de `wro-runtime` 14:04:42–14:04:51 (sin `MEMDBG`/`RECUP`).
 - `frames_orillas65.jpg`, `contact_orillas65.jpg` — cuadros del `orillas65.avi` (93 cuadros grabados).
 - Video completo en la Pi: `~/FoxRobotics/videos_orillas/orillas65.avi` (+ `_bev.bin`).
+
+## Arreglo aplicado
+
+`LAZO_V_255` 1575 -> **800** y `LAZO_V_MAX` 0 -> **700**: `vMando()` vuelve a ser la recta del N20 en todo el rango (cada PWM pide la misma velocidad que antes, también INICIO y `rv`). El N30 sigue usando su modelo (`MOTOR_K`) para el feedforward. Cargado en la ESP32. Falta revisar el ToF frontal.

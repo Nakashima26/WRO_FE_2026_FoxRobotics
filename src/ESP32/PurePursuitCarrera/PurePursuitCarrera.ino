@@ -651,8 +651,8 @@ const float MOTOR_PWM0_REV   = 37.6f;
 // Hoy setMotor() recorta a MOTOR_MAX (155), así que esto solo se nota si se sube
 // MOTOR_MAX o si la Pi manda rv > 155 en modo RUTA.
 const float LAZO_CODO_PWM    = 155.0f;
-const float LAZO_V_255       = 1575.0f; // mm/s a PWM 255 (adelante) = máx. del N30 con pila cargada (N30Test 2026-11-17)
-const float LAZO_V_MAX       = 0.0f;    // mm/s; 0 = sin tope (era 700 con el N20)
+const float LAZO_V_255       = 800.0f;  // mm/s a PWM 255 (adelante). 800 = escala del N20 en todo el rango (vMando = recta de siempre). 1575 = máx. del N30 con pila a tope, pero orillas65 (2026-11-17) mostró que INICIO (inicioMotor, 255) y la ruta (rv) no pasan por MOTOR_MAX: con 1575 la salida del cajón fue a 708-882 mm/s y chocó. Subir velocidad por estado, no aquí.
+const float LAZO_V_MAX       = 700.0f;  // mm/s; 0 = sin tope. 700 como con el N20 (orillas65)
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
 const float LAZO_I_MAX       = 80.0f;   // PWM
