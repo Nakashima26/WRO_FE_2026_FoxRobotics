@@ -1,0 +1,64 @@
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  150 mm (148-151) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.09
+# ToF L: med  333 mm (330-334) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.45
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  149 mm (148-151) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.11
+# ToF L: med  331 mm (329-334) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.36
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (149-152) n=10 st0:10 st2:0 st7:0 otro:0 señal 18.17
+# ToF L: med  332 mm (329-334) n=10 st0:10 st2:0 st7:0 otro:0 señal 19.41
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  150 mm (148-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.22
+# ToF L: med  332 mm (329-333) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.47
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (147-153) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.25
+# ToF L: med  331 mm (329-333) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.35
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  150 mm (146-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.58
+# ToF L: med  331 mm (329-334) n=10 st0:10 st2:0 st7:0 otro:0 señal 19.38
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  149 mm (147-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.65
+# ToF L: med  331 mm (330-334) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.33
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (149-153) n=10 st0:10 st2:0 st7:0 otro:0 señal 17.95
+# ToF L: med  330 mm (329-331) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.40
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (150-154) n=11 st0:11 st2:0 st7:0 otro:0 señal 17.78
+# ToF L: med  331 mm (329-333) n=10 st0:10 st2:0 st7:0 otro:0 señal 19.35
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  152 mm (150-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 17.95
+# ToF L: med  332 mm (330-332) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.43
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (149-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 17.92
+# ToF L: med  182 mm (2-333) n=11 st0:9 st2:0 st7:2 otro:0 señal 48.52
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (149-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.05
+# ToF L: med  329 mm (42-467) n=11 st0:9 st2:1 st7:1 otro:0 señal 16.49
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (149-153) n=10 st0:10 st2:0 st7:0 otro:0 señal 17.88
+# ToF L: med  330 mm (329-333) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.29
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (147-153) n=11 st0:11 st2:0 st7:0 otro:0 señal 17.88
+# ToF L: med  331 mm (329-332) n=10 st0:10 st2:0 st7:0 otro:0 señal 19.31
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  152 mm (149-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 18.08
+# ToF L: med  331 mm (330-334) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.33
+# ToF R: sin datos
+# listo: manda 'g' para arrancar | encoder 0 mm
+# ToF F: med  151 mm (149-152) n=11 st0:11 st2:0 st7:0 otro:0 señal 17.95
+# ToF L: med  332 mm (331-334) n=11 st0:11 st2:0 st7:0 otro:0 señal 19.46
+# ToF R: sin datos

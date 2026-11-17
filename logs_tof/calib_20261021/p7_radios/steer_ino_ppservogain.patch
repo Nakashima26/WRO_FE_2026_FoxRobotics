@@ -1,0 +1,11 @@
+--- a/src/ESP32/PurePursuit/PurePursuit.ino
++++ b/src/ESP32/PurePursuit/PurePursuit.ino
+@@ -288,7 +288,7 @@
+ // Cuánto se deflecta el servo por cada grado de PP.  steerDeg sale de la
+ // geometría (máx ±35°) y suele quedar corto para la mecánica del servo:
+ // súbelo si el carrito gira poco, bájalo si oscila/sobregira.
+-float ppServoGain = 1.0;
++float ppServoGain = 1.862;
+ float PP_GYRO_BLEND = 0.12;  // 0 = solo vision, 1 = solo gyro. BAJO a propósito: en el modo
+                             // por tramos el heading de referencia queda viciado tras cada
+                             // MANIOBRA (no gira exacto 90°), y un blend alto "defiende" ese

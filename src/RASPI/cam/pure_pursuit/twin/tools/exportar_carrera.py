@@ -24,7 +24,7 @@ TWIN_ONLY = {"PARK_PINK_RATIO_MIN"}
 # de la Pi 5 en /tmp/ce/costo (twin con DP y cuadro medidos): 40/48 contra 18/48 en sincrono.
 CAR_ONLY = {"ROUTE_PLAN_ASYNC": True}
 
-# La carrera completa estaciona: U + paralelo en modo ruta (docs/HANDOFF_PARKING.md). Pisan el
+# La carrera completa estaciona: U + paralelo en modo ruta (docs/notes/HANDOFF_PARKING.md). Pisan el
 # PARK_NINGUNO de los presets de ruta; el bench JSON puede cambiarlos.
 FW_PARK_CARRERA = {"PARK_MODO": "PARK_PARALELO", "PARK_UTURN_RUTA_ALONG_MM": "600",
                    "PARK_UTURN_ALEJAR_CM": "60"}

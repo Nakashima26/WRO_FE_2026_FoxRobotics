@@ -37,16 +37,30 @@ Each competition corresponds to one release. A release is a git tag on the exact
 
 ## v2.0-internacional — in progress
 
-Changes since `v1.0-nacional` (details in the [README](../README.md#13-what-changed-for-the-international-final-v2) and the [engineering log](engineering-log.md)):
+The tag `v2.0-internacional` will be placed on the exact commit raced at the international final. Full design and results: [README](../README.md) (v2) — changes since v1 in [§3](../README.md#3-from-v1-to-v2--what-the-national-final-taught-us).
+
+**Hardware**
+
+| Item | v1 → v2 |
+|---|---|
+| Main computer | Raspberry Pi 4 → **Raspberry Pi 5 (8 GB)**; Picamera2 with the ISP scaling the image, ~40 fps |
+| Distance | 3 × HC-SR04 → **4 × VL53L1X ToF** (front, left, right, rear; ROI 8 on the sides) |
+| IMU | MPU-6050 → **BNO085** in UART-RVC mode |
+| Drive | open-loop N20 + LEGO differential → **N20 50:1 with 12 CPR encoder (PCNT ×4)**, spur 20T→25T, feed-forward + PI speed loop, 700 mm/s cap |
+| Steering | 14T pinion → **19T pinion, corrected Ackermann**; turning radius 123 / 134 mm |
+| Chassis | 176 × 125 mm, battery in the middle, Pi on top |
+| Electronics | PCB RevA → **PCB RevB** (logic board + power board, separate 5 V buck for the Pi) |
+| Link | UART 115 200 → 460 800 baud with checksum |
+
+**Software**
 
 | Area | Change | Status |
 |---|---|---|
-| Steering | Ackermann corrected (rack joints 47 mm, tie rods 18.13 mm); 19-tooth pinion; 53.1° / 37.0° at full lock | Validated in CAD; track test pending |
-| Computer | Raspberry Pi 5 (16 GB) + Active Cooler; same pipeline at 40–41.5 fps | Port in progress: frame-rate constants pending |
-| Sensors | 4 × VL53L1X ToF (front, left, right, rear) | Bench test |
-| Vision | Ratio tests against orange tape and pale floor (`RED_GR_MAX`, `GREEN_S_MIN_MED`) | Validated (replay over 6 runs) |
-| Camera | Pi 5 capture fix (`format=BGRx`) + lens-shading table for our lens + gains `<1.10,1.51>` ([ERR-28](engineering-log.md#err-28--raspberry-pi-5-the-race-camera-pipeline-would-not-start), [ERR-29](engineering-log.md#err-29--raspberry-pi-5-magenta-ring-at-the-frame-edges)) | Validated on a white sheet; pillar thresholds pending |
-| Corners | Forward/reverse decision with hysteresis and a shared latch | In repository; track test pending |
-| Firmware | Single parking-mode switch (`PARK_MODO`), dead parameters removed | In repository |
+| Obstacle Challenge | **Route mode**: pillar seat map, EKF localization with the ToF sensors, dynamic-programming route, speed profile, pure pursuit on the ESP32 | Clean 12-corner races on the car (runs 41, 48, 2026-11-11) |
+| Start | Blind start: parking-lot position from a ToF histogram + orange-line votes | In use; known limitation without line votes (ERR-31) |
+| Open Challenge | `RondaAbierta.ino`, ESP32 only (ToF wall following + BNO085) | 12/12 corners both directions, 29.6–29.9 s |
+| Digital twin | Real firmware + real Pi runtime in a simulator; 42 seeds × 5 noise levels bench; exports the race build `PurePursuitCarrera.ino` + `carrera.json` | In use for every change |
+| Camera | Fixed exposure per venue (`mide_exposicion.py`), lens-shading table | Validated (runs 57–64) |
+| Recording | Video + clean BEV per run, auto-stop 5 s after the car stops | In use |
 
-The release is tagged when the validation matrix in [testing.md](testing.md#62-validation-matrix-for-v2-international-final) passes.
+The release is tagged when the validation matrix in [README §10.4](../README.md#104-obstacle-challenge-v2-real-car-route-mode) passes.

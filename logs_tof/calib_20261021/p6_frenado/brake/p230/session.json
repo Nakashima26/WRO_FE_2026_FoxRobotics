@@ -1,0 +1,31 @@
+{
+  "created": "2026-10-21T12:47:53",
+  "vbat_V": 12.5,
+  "note": "COAST 230 1500 2000 brake; regreso por encoder",
+  "files": [
+    {
+      "file": "brake_p230_r01.csv",
+      "cmd": "COAST 230 1500 2000 brake",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "brake_p230_r02.csv",
+      "cmd": "COAST 230 1500 2000 brake",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "brake_p230_r03.csv",
+      "cmd": "COAST 230 1500 2000 brake",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

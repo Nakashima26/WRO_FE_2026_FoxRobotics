@@ -55,3 +55,7 @@ build/
 # KiCad lock files (exist only while a project is open)
 *.lck
 src/RASPI/cam/runs/
+
+# Grabaciones de corridas (journals, capturas) — se quedan locales
+video/corridas_*/
+video/campo_seed*.png

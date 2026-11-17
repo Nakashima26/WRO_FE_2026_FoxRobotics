@@ -1,0 +1,15 @@
+{
+  "created": "2026-10-21T13:00:42",
+  "vbat_V": 12.4,
+  "note": "",
+  "files": [
+    {
+      "file": "lock_p090_s089_r01.csv",
+      "cmd": "PWM 90 6000 89",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

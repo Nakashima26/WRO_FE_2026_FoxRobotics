@@ -1,0 +1,14 @@
+ESPERANDO  L: 51 R: 59 F:143 | crudo L: 51/7 R: 60/0 F:144/2 | ang:  -90.2 obj:    0.0 des:  0.0 tasa:   0.9 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 56 F:151 | crudo L: 48/7 R: 56/0 F:153/2 | ang:  -87.9 obj:    0.0 des:  0.0 tasa:  23.3 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 48 R: 52 F:141 | crudo L: 48/2 R: 52/7 F:141/2 | ang:  -88.7 obj:    0.0 des:  0.0 tasa: -34.4 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 46 F:144 | crudo L: 50/7 R: 46/7 F:144/2 | ang:  -89.7 obj:    0.0 des:  0.0 tasa: -13.3 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 29 F:154 | crudo L: 49/7 R: 27/7 F:156/2 | ang:  -90.1 obj:    0.0 des:  0.0 tasa:   9.3 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 21 F:151 | crudo L: 50/7 R: 21/7 F:152/2 | ang:  -88.9 obj:    0.0 des:  0.0 tasa:  -5.6 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 19 F:143 | crudo L: 50/2 R: 19/0 F:143/2 | ang:  -89.2 obj:    0.0 des:  0.0 tasa:   2.7 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 19 F:138 | crudo L: 50/7 R: 19/0 F:136/2 | ang:  -89.3 obj:    0.0 des:  0.0 tasa:   2.9 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 18 F:151 | crudo L: 50/7 R: 18/0 F:151/2 | ang:  -89.1 obj:    0.0 des:  0.0 tasa:  -0.5 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 17 F:140 | crudo L: 49/7 R: 17/0 F:139/2 | ang:  -90.8 obj:    0.0 des:  0.0 tasa: -28.0 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 17 F:144 | crudo L: 50/7 R: 17/0 F:144/2 | ang:  -90.9 obj:    0.0 des:  0.0 tasa:   1.6 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 49 R: 17 F:146 | crudo L: 50/7 R: 17/0 F:147/2 | ang:  -92.1 obj:    0.0 des:  0.0 tasa: -31.5 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 51 R: 17 F:153 | crudo L: 51/7 R: 17/0 F:154/2 | ang:  -91.6 obj:    0.0 des:  0.0 tasa:  33.7 | servo: 75 () pwm:  0 | giros:0/12 
+ESPERANDO  L: 50 R: 17 F:156 | crudo L: 50/7 R: 17/0 F:157/2 | ang:  -91.6 obj:    0.0 des:  0.0 tasa: -23.0 | servo: 75 () pwm:  0 | giros:0/12 
