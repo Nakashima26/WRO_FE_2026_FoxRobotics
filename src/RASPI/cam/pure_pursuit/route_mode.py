@@ -1231,7 +1231,7 @@ class RouteMode:
         if abs(vx) < 1e-6:
             return
         by = y0 + (float(C.ROBOT_BEV_X) - x0) * vy / vx
-        fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
+        fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0)) + self._fwd_add(dm)
         if not 100.0 <= fwd <= 600.0:
             return
         k = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
@@ -1255,12 +1255,17 @@ class RouteMode:
         if best is not None:
             self._line_d.append(best[0])
 
+    @staticmethod
+    def _fwd_add(dm) -> float:
+        v = getattr(C, "ROUTE_FIX_FWD_ADD_MM", 0.0)
+        return float(v.get(dm.direction, 0.0)) if isinstance(v, dict) else float(v)
+
     def _pix_vote(self, dm, pose, pix):
         k = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
         cur_h = pose[2]
         if len(self._pre_poses) > k:
             pose = self._pre_poses[-1 - k]   # pose del momento de la imagen (latencia cámara->ACK)
-        fwd = (float(C.ROBOT_BEV_Y) - pix[:, 1]) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
+        fwd = (float(C.ROBOT_BEV_Y) - pix[:, 1]) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0)) + self._fwd_add(dm)
         lat = (pix[:, 0] - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
         h = math.radians(pose[2])
         P = np.column_stack([pose[0] + fwd * math.sin(h) + lat * math.cos(h),
