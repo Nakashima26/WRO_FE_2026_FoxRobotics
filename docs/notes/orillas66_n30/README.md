@@ -63,3 +63,18 @@ el gemelo no frene más fuerte que el carro.
 - `journal_orillas66_vuelta2_esquina_se.log` — journal 14:35:12.8–14.8 (sin `MEMDBG`/`RECUP`).
 - `frames_lap*_esquina_se.jpg` — cámara y mapa (cuadrante SE) del `orillas66.avi`.
 - Video completo en la Pi: `~/FoxRobotics/videos_orillas/orillas66.avi`.
+
+## orillas67 (15:02, con el tope de ~1100 mm/s)
+
+Murió en el mismo lugar: vuelta 2, esquina SE (`tc=6`), mismo verde. Entró a ~1090 mm/s
+(el tope funcionó), la Pi pidió 700–900 hasta 0.3 s antes y el carro solo rodó suelto.
+Cuadro 124 sobre la ruta, 126 ya por dentro de la curva con el verde a la izquierda,
+128 cámara negra = verde pegado al lente (`tF` 62 → 0). Luego empujando el pilar con
+`tF` 6–60 hasta quedar parado (od 13563).
+
+![orillas67](frames_orillas67_esquina_se.jpg)
+
+Cambio: `ROUTE_L23_MAX_PWM` 333 → **268** (~850 mm/s, igual que el tope de la vuelta 1,
+que pasa esa esquina en las dos corridas). Las vueltas 2-3 quedan a velocidad de vuelta 1
+hasta que el ESP frene activo: hoy `lazoVelocidad()` solo baja el PWM (~1 m/s² de
+frenado) y la ruta a >1 m/s corta la curva hacia la isla.
