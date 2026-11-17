@@ -728,7 +728,10 @@ With v1, every idea had to be tested on the real track: one run, one video, one 
 
 Code: [`src/RASPI/cam/pure_pursuit/twin/`](src/RASPI/cam/pure_pursuit/twin/) — entry point `python -m pure_pursuit.chassis_twin`, plan and history in [`docs/notes/twin_plan.md`](docs/notes/twin_plan.md) and [`docs/notes/HANDOFF.md`](docs/notes/HANDOFF.md).
 
-**[TODO: add a screenshot or GIF of the twin viewer (camera panel + map panel with the planned route) to `docs/img/twin.png`.]**
+<p align="center">
+  <img src="docs/img/real_vs_twin.gif" width="900" alt="Real car (left) and digital twin (right) running the same field, seed 990001">
+  <br><sub>Left: the real car's debug view (camera, bird's-eye view, map with the planned route). Right: the twin on the same field (seed 990001) — map, rendered camera and BEV.</sub>
+</p>
 
 ## 9.2 How we use it — the benchmark rule
 
