@@ -281,6 +281,8 @@ float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
+const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
+const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
@@ -611,7 +613,7 @@ const float GIRO_PI_CUENTA_DEG   = 70.0f;
 const float ODOM_PWM_K           = 3.5f;
 const int   ODOM_PWM_0           = 25;
 const float ODOM_TAU_S           = 0.25f;
-const float ENC_CUENTAS_POR_MM   = 5.45f;    // medido 2026-10-19 (CalibFox x4)
+const float ENC_CUENTAS_POR_MM   = 7.523f;   // N30 7 CPR (N20 era 5.45)
 
 // ── Lazo de velocidad con encoder (2026-11-11) ───────────────────────────────
 // Con PWM directo la velocidad depende de la pila: orillas36 a 11.1 V dio
@@ -630,7 +632,30 @@ const float LAZO_K_FWD       = 3.82f;   // mm/s por PWM adelante (gemelo MotorPa
 const float LAZO_PWM0_FWD    = 45.5f;
 const float LAZO_K_REV       = 3.61f;   // reversa
 const float LAZO_PWM0_REV    = 61.0f;
-const float LAZO_V_MAX       = 700.0f;  // mm/s; 0 = sin tope
+// Motor real (N30 30:1, 2026-11-17). Los LAZO_K/PWM0 de arriba se quedan como
+// ESCALA DE MANDO (qué velocidad significa el PWM que piden los estados, afinada
+// con el N20); estos son el MOTOR, para el feedforward y para traducir el PWM
+// cuando el lazo no actúa. N30Test en piso (twin/calib/medidas_20261117), a 11.88 V:
+// adelante 100/150/180/255 -> 503/798/1062/1501 mm/s; con la pila a tope k 6.64,
+// pwm0 16.6 (255 -> ~1575). Reversa 100/140/180 -> 370/624/~850 (más fricción).
+// Arranca (rampa en piso) en PWM 11 adelante y 10 en reversa.
+const float MOTOR_K_FWD      = 6.51f;   // mm/s por PWM
+const float MOTOR_PWM0_FWD   = 22.9f;
+const float MOTOR_K_REV      = 6.0f;
+const float MOTOR_PWM0_REV   = 37.6f;
+// Escala de mando arriba del crucero (2026-11-17, para usar el N30 a ~1.3 m/s):
+// hasta LAZO_CODO_PWM (el MOTOR_MAX de hoy) el PWM significa lo mismo que con el
+// N20 (155 -> 418 mm/s); de ahí a 255 sube recto hasta LAZO_V_255. Con 800 es la
+// recta del N20 de siempre (3.82·(255−45.5)). Con 1575 (lo que da el N30 a 255 con
+// la pila a tope; a 11.9 V da ~1500) cada PWM arriba de 155 son +11.6 mm/s: 180 -> 708, 200 -> 940,
+// 230 -> 1288, 255 -> 1575. Con la pila baja el motor ya no llega arriba: el lazo
+// se queda en 255 y va a lo que dé. Solo adelante.
+// Hoy setMotor() recorta a MOTOR_MAX (155), así que esto solo se nota si se sube
+// MOTOR_MAX o si la Pi manda rv > 155 en modo RUTA.
+const float LAZO_CODO_PWM    = 155.0f;
+const float LAZO_V_255       = 1575.0f; // mm/s a PWM 255 (adelante) = máx. del N30 con pila cargada (N30Test 2026-11-17)
+const float LAZO_V_MAX       = 0.0f;  // mm/s; 0 = sin tope
+const float LAZO_V_MAX_L1    = 850.0f;    // mm/s tope propio de vuelta 1 (tc<4, fuera de INICIO); 0 = usa LAZO_V_MAX
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
 const float LAZO_I_MAX       = 80.0f;   // PWM
@@ -905,8 +930,8 @@ const int cooldownGiro = rondaObstaculos ? COOLDOWN_GIRO_OBSTACULOS : COOLDOWN_G
 // más corto (la pared) fija a la vez el lado de salida Y la dirección de giro de
 // toda la pista (se latchea como hace GIRANDO en la 1ª esquina).
 // TODOS estos números son de ARRANQUE — hay que tunearlos en el tapete.
-const int  INICIO_PWM                  = 195;   // PWM de avance durante la maniobra (ruta: 195 por config; ver inicioMotor)
-const int  INICIO_PWM_SENAL            = 180;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
+const int  INICIO_PWM                  = 140;   // PWM de avance durante la maniobra (ruta: 195 por config; ver inicioMotor)
+const int  INICIO_PWM_SENAL            = 135;    // PWM si la Pi ve señal cerca de la salida (isen=1); 0 = INICIO_PWM
 const int  INICIO_PWM_MIN              = 80;   // arranque de la rampa (evita stall en seco)
 const unsigned long INICIO_RAMP_MS     = 120;  // sube de INICIO_PWM_MIN a INICIO_PWM
 const int  INICIO_ANG_OUT_DEG          = 50;   // fase 1: ángulo de salida (nariz al interior)
@@ -933,6 +958,9 @@ const float INICIO_REV_CORR_TOL_DEG    = 4.0f; // fase 5: corta la reversa-corri
 const unsigned long INICIO_REV_CORR_TIMEOUT_MS = 1500; // fase 5: red de seguridad si no llega a 0
 const unsigned long INICIO_REV_PAUSA_MS = 300;  // fase 7: coast entre la reversa-corrige y la reversa recta
 const unsigned long INICIO_REV_RECTO_MIN_MS = 500; // fase 8: reversa recta mínima aunque la fase 5 haya gastado el presupuesto
+const int  INICIO_REINT_ECO            = 40;    // >0: reintenta la lectura del cajón (ciclos) si el lateral más cercano > INICIO_PARED_MAX_CM (el cajón siempre toca la pared: un eco perdido en ese lado voltea la dirección)
+const int  INICIO_PARED_MAX_CM         = 60;
+int        inicioReint                 = 0;
 const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
                                               // (si el cajón deja lectura ambigua, no se arriesga el
                                               //  latch global: la 1ª esquina real decide como siempre)
@@ -968,7 +996,7 @@ const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto
 const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
 const int  INICIO_TARDE_MIN_DEG    = 25;   // isal=2 llega en la contravuelta (fase 3) con |ang| >= esto: vuelve al recto (0 = no)
-const int  INICIO_RECTO_PWM            = 255;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
+const int  INICIO_RECTO_PWM            = 165;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
 const float INICIO_RECTO_LEAD_S        = 0.15f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
 const int  INICIO_CONTRA_FIN_DEG       = 32;    // fase 3 (sin reversa): suelta el servo a este |ang|; la inercia cierra
 const float INICIO_CONTRA_CIERRE_S     = 0.085f; // solo isal=2: |ω de cierre|×esto. La caja de 90° a PWM 180 se pasa de 0 y entra a la fila interior
@@ -1605,11 +1633,11 @@ PARK_AJ long         PARK_PEGADO_CICLA          = 1;   // 1 = en la fase 13, "pe
 PARK_AJ long         PARK_UTURN_TOPE            = 200;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
 PARK_AJ long         PARK_SCAN_TOPE             = 255;   // tope PWM propio del escaneo rápido; 0 = MOTOR_MAX
 // PWM de alejarse/enderezar (fases 26/27) y de la U (fase 24; rampa desde PARK_RETORNO_PWM_MIN). 0 = como antes.
-PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 255;
-PARK_AJ long         PARK_UTURN_PWM             = 200;
+PARK_AJ long         PARK_UTURN_ALEJAR_PWM      = 188;
+PARK_AJ long         PARK_UTURN_PWM             = 170;
 // Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
 // madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
-PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 255;
+PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 188;
 PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 370;
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
@@ -1680,7 +1708,7 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 145.0f;  // 2026-11-12: 200 -> 145 (ToF lateral v2 a 110.6 mm del eje, el sonar a 56.3: ve la madera 54 mm antes); w del eje trasero cuando el sonar empieza a ver la madera de adelante
-PARK_AJ float        PARK_PL_W_DET_U             = 138.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_W_DET_U             = 143.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
@@ -2071,6 +2099,28 @@ const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
 int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
 unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
 
+// PWM de la escala de mando (N20) -> PWM del motor real que da la misma
+// velocidad. Debajo del arranque escala proporcional (PWM0 mando -> PWM0 motor),
+// para que un PWM "de casi parado" siga siendo casi parado con el N30.
+// Velocidad (mm/s) que significa un PWM de mando. <= 0 debajo del arranque.
+float vMando(float pwm, int dir) {
+  float k  = dir > 0 ? LAZO_K_FWD : LAZO_K_REV;
+  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  if (dir > 0 && pwm > LAZO_CODO_PWM) {
+    float vc = k * (LAZO_CODO_PWM - p0);
+    return vc + (pwm - LAZO_CODO_PWM) * (LAZO_V_255 - vc) / (255.0f - LAZO_CODO_PWM);
+  }
+  return k * (pwm - p0);
+}
+
+float pwmMotorEquiv(float pwm, int dir) {
+  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  float km = dir > 0 ? MOTOR_K_FWD : MOTOR_K_REV;
+  float pm = dir > 0 ? MOTOR_PWM0_FWD : MOTOR_PWM0_REV;
+  if (pwm <= p0) return pwm * pm / p0;
+  return pm + vMando(pwm, dir) / km;
+}
+
 // PWM pedido (ya recortado y con rampa) -> PWM de salida para lograr la velocidad
 // que ese PWM daría a ~12 V. Ver MOTOR_LAZO_VEL.
 int lazoVelocidad(int pwm) {
@@ -2080,27 +2130,31 @@ int lazoVelocidad(int pwm) {
   float dt = (tPrev == 0) ? 0.0f : (now - tPrev) / 1000.0f;
   tPrev = now;
   int dir = motorDirActual;
-  if (pwm <= 0 || dir == 0 || dir != dirPrev || dt > 0.2f) {
+  if (pwm <= 0 || dir == 0) { lazoI = 0.0f; dirPrev = dir; return pwm; }
+  int pwmEq = constrain((int)lroundf(pwmMotorEquiv((float)pwm, dir)), 0, 255);
+  if (dir != dirPrev || dt > 0.2f) {
     lazoI = 0.0f; dirPrev = dir;
-    return pwm;
+    return pwmEq;
   }
   float v = (float)dir * encVelMmS;                 // velocidad en el sentido pedido
-  if (v < -60.0f) { lazoI = 0.0f; return pwm; }     // frenando con contramarcha: no tocar
-  float k  = dir > 0 ? LAZO_K_FWD : LAZO_K_REV;
-  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
-  float vObj = k * ((float)pwm - p0);
-  if (vObj <= 0.0f) { lazoI = 0.0f; return pwm; }   // por debajo del arranque: PWM tal cual
-  float ff = (float)pwm;
-  // Vueltas 2-3 (tc 4..TURNS_PER_RACE-1): sin tope, la pila fresca llega a ~830 mm/s. Vuelta 1 y parking siguen con LAZO_V_MAX.
+  if (v < -60.0f) { lazoI = 0.0f; return pwmEq; }   // frenando con contramarcha: sin lazo
+  float km = dir > 0 ? MOTOR_K_FWD : MOTOR_K_REV;
+  float pm = dir > 0 ? MOTOR_PWM0_FWD : MOTOR_PWM0_REV;
+  float vObj = vMando((float)pwm, dir);
+  if (vObj <= 0.0f) { lazoI = 0.0f; return pwmEq; } // por debajo del arranque: sin lazo
+  // Vueltas 2-3 (tc 4..TURNS_PER_RACE-1): sin tope. Vuelta 1 y parking siguen con LAZO_V_MAX.
   bool sinTope = (turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE);
-  if (!sinTope && LAZO_V_MAX > 0.0f && vObj > LAZO_V_MAX) { vObj = LAZO_V_MAX; ff = LAZO_V_MAX / k + p0; }
+  float vTope = (LAZO_V_MAX_L1 > 0.0f && turnsCompleted < 4 && estado != INICIO) ? LAZO_V_MAX_L1 : LAZO_V_MAX;   // vuelta 1 propia; 0 = como LAZO_V_MAX
+  if (!sinTope && vTope > 0.0f && vObj > vTope) vObj = vTope;
+  float ff = vObj / km + pm;                        // feedforward con el motor real
+  float g  = LAZO_K_FWD / km;                       // KP/KI afinados con el N20: misma ganancia en mm/s
   float e = vObj - v;
-  float u = ff + LAZO_KP * e + lazoI;
+  float u = ff + g * LAZO_KP * e + lazoI;
   // anti-windup: integra solo si la salida no está saturada hacia el lado del error
   if (dt > 0.003f && !((u >= 255.0f && e > 0) || (u <= 0.0f && e < 0))) {
-    lazoI = constrain(lazoI + LAZO_KI * e * dt, -LAZO_I_MAX, LAZO_I_MAX);
+    lazoI = constrain(lazoI + g * LAZO_KI * e * dt, -LAZO_I_MAX, LAZO_I_MAX);
   }
-  u = ff + LAZO_KP * e + lazoI;
+  u = ff + g * LAZO_KP * e + lazoI;
   return constrain((int)lroundf(u), 0, 255);
 }
 
@@ -3554,7 +3608,9 @@ bool rutaSteer(float &ruedaDeg) {
     }
     rutaI = besti;
   }
-  int j = (rutaI + (int)(RUTA_LOOKAHEAD_MM / rutaPaso + 0.5f)) % rutaN;
+  float lookMm = (RUTA_LOOKAHEAD_L23_MM > 0.0f && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE) ? RUTA_LOOKAHEAD_L23_MM : RUTA_LOOKAHEAD_MM;
+  if (RUTA_LOOKAHEAD_L1_MM > 0.0f && turnsCompleted < 4 && estado != INICIO) lookMm = RUTA_LOOKAHEAD_L1_MM;
+  int j = (rutaI + (int)(lookMm / rutaPaso + 0.5f)) % rutaN;
   float dx = rutaX[j] - x, dy = rutaY[j] - y;
   float fwd = dx * sh + dy * ch;
   float right = dx * ch - dy * sh;
@@ -4629,6 +4685,10 @@ void loop() {
         // El cajón SIEMPRE está sobre la pared exterior. El lateral más corto es
         // esa pared: si es dL, la pared está a la izquierda -> el carro sale
         // girando a la DERECHA (y la pista entera gira a la derecha).
+        if (INICIO_REINT_ECO > 0 && min(dL0, dR0) > INICIO_PARED_MAX_CM && inicioReint < INICIO_REINT_ECO) {
+          inicioReint++;
+          break;
+        }
         long dc = dL0 - dR0;                 // <0 => pared a la izq => salir/girar DERECHA
         inicioGirarDer = (dc < 0);
 
