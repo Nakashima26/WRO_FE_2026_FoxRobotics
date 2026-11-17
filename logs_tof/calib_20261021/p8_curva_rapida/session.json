@@ -1,0 +1,23 @@
+{
+  "created": "2026-10-21T13:08:47",
+  "vbat_V": 12.4,
+  "note": "",
+  "files": [
+    {
+      "file": "lock_p255_s005_r01.csv",
+      "cmd": "PWM 255 1500 5",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    },
+    {
+      "file": "lock_p255_s005_r02.csv",
+      "cmd": "PWM 255 1500 5",
+      "comments": [
+        "# BEGIN",
+        "# END"
+      ]
+    }
+  ]
+}

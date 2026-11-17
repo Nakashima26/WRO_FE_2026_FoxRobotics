@@ -1,0 +1,136 @@
+{
+  "wheelbase_mm": 113.0,
+  "kingpin_mm": 60.0,
+  "center_deg": 75.0,
+  "sources": [
+    "radio"
+  ],
+  "table": [
+    {
+      "servo_deg": 5.0,
+      "x": -70.0,
+      "side": "R",
+      "delta_eq_deg": 41.18439303205735,
+      "n": 2,
+      "gain_deg_per_deg": 0.5883484718865336,
+      "radius_mm": 129.14982578397212
+    },
+    {
+      "servo_deg": 20.0,
+      "x": -55.0,
+      "side": "R",
+      "delta_eq_deg": 33.22009539292785,
+      "n": 2,
+      "gain_deg_per_deg": 0.60400173441687,
+      "radius_mm": 172.54998551144595
+    },
+    {
+      "servo_deg": 40.0,
+      "x": -35.0,
+      "side": "R",
+      "delta_eq_deg": 22.25475470213409,
+      "n": 2,
+      "gain_deg_per_deg": 0.6358501343466882,
+      "radius_mm": 276.1434003259098
+    },
+    {
+      "servo_deg": 55.0,
+      "x": -20.0,
+      "side": "R",
+      "delta_eq_deg": 12.29431863651094,
+      "n": 2,
+      "gain_deg_per_deg": 0.6147159318255471,
+      "radius_mm": 518.5118117828561
+    },
+    {
+      "servo_deg": 65.0,
+      "x": -10.0,
+      "side": "R",
+      "delta_eq_deg": 5.910420048174655,
+      "n": 2,
+      "gain_deg_per_deg": 0.5910420048174655,
+      "radius_mm": 1091.5368908024918
+    },
+    {
+      "servo_deg": 89.0,
+      "x": 14.0,
+      "side": "L",
+      "delta_eq_deg": 5.993128842265326,
+      "n": 2,
+      "gain_deg_per_deg": 0.42808063159038046,
+      "radius_mm": 1076.3648711292415
+    },
+    {
+      "servo_deg": 99.0,
+      "x": 24.0,
+      "side": "L",
+      "delta_eq_deg": 11.557575159348412,
+      "n": 2,
+      "gain_deg_per_deg": 0.48156563163951716,
+      "radius_mm": 552.5699810006332
+    },
+    {
+      "servo_deg": 114.0,
+      "x": 39.0,
+      "side": "L",
+      "delta_eq_deg": 19.407482615322152,
+      "n": 2,
+      "gain_deg_per_deg": 0.4976277593672347,
+      "radius_mm": 320.7471862821512
+    },
+    {
+      "servo_deg": 134.0,
+      "x": 59.0,
+      "side": "L",
+      "delta_eq_deg": 29.388672873052244,
+      "n": 2,
+      "gain_deg_per_deg": 0.4981130995432584,
+      "radius_mm": 200.6354260089686
+    },
+    {
+      "servo_deg": 149.0,
+      "x": 74.0,
+      "side": "L",
+      "delta_eq_deg": 33.44331367605729,
+      "n": 2,
+      "gain_deg_per_deg": 0.4519366712980715,
+      "radius_mm": 171.09191712868395
+    }
+  ],
+  "left": {
+    "gain_origin": 0.47350349699128547,
+    "gain_affine": 0.4673773943119565,
+    "intercept_deg": 0.32818407210689904,
+    "rms_deg": 1.093825627233613,
+    "max_abs_resid_deg": 1.5959451012978292,
+    "n": 5,
+    "saturates_at_servo_offset": null,
+    "delta_max_deg": 33.44331367605729,
+    "x_max": 74.0
+  },
+  "right": {
+    "gain_origin": 0.6004061913618346,
+    "gain_affine": 0.5881022377749461,
+    "intercept_deg": 0.624911326913025,
+    "rms_deg": 0.6900901290429423,
+    "max_abs_resid_deg": 1.2405380044698795,
+    "n": 5,
+    "saturates_at_servo_offset": null,
+    "delta_max_deg": 41.18439303205735,
+    "x_max": 70.0
+  },
+  "gain_left_deg_per_deg": 0.47350349699128547,
+  "gain_right_deg_per_deg": 0.6004061913618346,
+  "gain_left_per90": 42.61531472921569,
+  "gain_right_per90": 54.036557222565115,
+  "gain_mean": 0.53695484417656,
+  "ppServoGain_for_wheel_eq_steer": 1.8623539965144307,
+  "ppServoGain_current": 1.0,
+  "wheel_eff_current_deg_per_steer_deg": 0.53695484417656,
+  "wheel_max_deg": 41.18439303205735,
+  "min_turn_radius_mm": 129.14982578397212,
+  "warnings": [
+    "asimetria izq/der 24 %: el twin ya tiene gain_left/right separados",
+    "left: no lineal (residuo max 1.6 deg); la cremallera es no lineal, el twin usa una ganancia: considera ajustar solo el rango usado por la Pi (+-35)"
+  ]
+}

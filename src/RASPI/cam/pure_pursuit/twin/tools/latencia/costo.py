@@ -8,10 +8,13 @@ sys.path.insert(0, ".")
 os.environ.setdefault("FOX_CV_THREADS", "1")
 FF = float(os.environ.get("TWIN_COST_FRAME", "1")); FIRST = float(os.environ.get("TWIN_COST_FIRST", "0") or 0) or None; FD = float(os.environ.get("TWIN_COST_DP", "1"))
 from pure_pursuit import ring_route as RR
+# Reloj del costo. thread_time (default) en Windows avanza en pasos de 15.6 ms y el cuadro sale 0 o 67 ms:
+# ahí TWIN_COST_CLOCK=perf usa perf_counter (pared; correr con pocos procesos en paralelo).
+_clk = time.perf_counter if os.environ.get("TWIN_COST_CLOCK") == "perf" else time.thread_time
 from pure_pursuit.twin import pi_link as PL
 st = types.SimpleNamespace(t0=None, tk=0.0, tend=0.0, dp=0.0, costs=[], dps=[])
 def costo():  # segundos de Pi transcurridos en este cuadro
-    e = time.thread_time() - st.t0
+    e = _clk() - st.t0
     return (e - st.dp) * FF + st.dp * FD
 _plan = RR.plan
 st.depth = 0
@@ -21,7 +24,7 @@ def plan(*a, **k):
     st.depth = 1
     g0 = len(RR._GEOM_CACHE)
     try:
-        t = time.thread_time(); r = _plan(*a, **k); d = time.thread_time() - t
+        t = _clk(); r = _plan(*a, **k); d = _clk() - t
     finally:
         st.depth = 0
     if FIRST and FD and len(RR._GEOM_CACHE) > g0: d = FIRST / FD   # plan que construye la caché: en la Pi 5 real 1.95 s
@@ -48,9 +51,9 @@ class _FakeJob:
     def __init__(self, target=None, args=(), kwargs=None, daemon=None, **k):
         self.target, self.args, self.kwargs = target, args, kwargs or {}
     def start(self):
-        dp0 = st.dp; t = time.thread_time()
+        dp0 = st.dp; t = _clk()
         self.target(*self.args, **self.kwargs)
-        w = time.thread_time() - t; d = st.dp - dp0
+        w = _clk() - t; d = st.dp - dp0
         st.dp = dp0
         if st.t0 is not None: st.t0 += w
         now = st.tk + (costo() if st.t0 is not None else 0.0)
@@ -68,7 +71,7 @@ def costo():
     return c * PEN if (st.job_end is not None and st.tk < st.job_end) else c
 class COST:
     @staticmethod
-    def begin(tk, tend): st.t0 = time.thread_time(); st.tk = tk; st.tend = tend; st.dp = 0.0
+    def begin(tk, tend): st.t0 = _clk(); st.tk = tk; st.tend = tend; st.dp = 0.0
     @staticmethod
     def next_tk(tk, tend, period):
         c = costo(); st.t0 = None; st.costs.append(c)

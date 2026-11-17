@@ -1,15 +1,15 @@
 # Testing and Validation
 
-This document describes how we test the robot, what we measure, and the results we have so far. Results are tied to a code version (commit) so they can be reproduced. A failed run is kept in the record, because it tells us what to change next. Decisions and failures found through these tests are in the README failure log ([§5.5](../README.md#55-failure--incident-log), ERR-01 to ERR-09) and in the [engineering log](engineering-log.md) (ERR-10 onward).
+This document describes how we test the robot, what we measure, and the results we have so far. Results are tied to a code version (commit) so they can be reproduced. A failed run is kept in the record, because it tells us what to change next. Decisions and failures found through these tests are in the README failure log ([§5.5](v1-national/README.md#55-failure--incident-log), ERR-01 to ERR-09) and in the [engineering log](engineering-log.md) (ERR-10 onward).
 
 ## 1. What every run produces
 
-Every run is recorded automatically. Nobody has to remember to start a recording.
+Every run is recorded automatically. Nobody has to remember to start a recording. On v2 the recording also writes the clean bird's-eye view (`_bev.bin`) and stops 5 s after the car stops moving.
 
 | Evidence | Where | What it is used for |
 |---|---|---|
 | Video `orillasNNN.avi` | `~/FoxRobotics/videos_orillas/` on the Pi | Camera and bird's-eye view side by side, with the debug overlay: detections, path, steering, state, stage timings. MJPG format, so it still plays if the run is cut off. |
-| Pi journal | `journalctl -u wro-runtime.service` | Every message sent to the ESP32 and every ACK received: heading, state, the three ultrasonic distances, maneuver choice, parking phase. It also logs the decision traces `[RECUP]`, `[LINEA]`, `[MEMREJ]` and `[COLOR]`. Persistent across reboots on the Pi 5. |
+| Pi journal | `journalctl -u wro-runtime.service` | Every message sent to the ESP32 and every ACK received: heading, state, pose (`px`/`py`), the distance sensors (three ultrasonics on v1, four ToF on v2), maneuver choice, parking phase, UART health (`ue`, `rn`). It also logs the decision traces `[RECUP]`, `[LINEA]`, `[MEMREJ]` and `[COLOR]`. Persistent across reboots on the Pi 5. |
 | Run report | `python scripts/reporte_run.py --pi` | Turns the journal of the last run into a per-corner summary: states, heading at each corner, forward/reverse maneuver, distances, parking phases. Optional HTML output. |
 
 Run numbers (`NNN`) are global and increase with every run, so a run number identifies one video plus one journal section.
@@ -75,18 +75,15 @@ Replay can't test anything that depends on the car moving differently, such as a
 | 1064 | 2026-09 | Obstacle | CCW | **Full clean round + parallel park** | Start from the lot, 12 corners, parked with 0.9° heading error |
 | National final | 2026-09-19 | Both | — | **1st place** | Release `v1.0-nacional` |
 
-### 6.2 Validation matrix for v2 (international final)
+### 6.2 v2 results (international final)
 
-For each configuration we run both directions and three start sections. A configuration passes only with **3 consecutive clean runs**.
+The v2 results live in the main README, next to the design they validate: component and bench tests in [README §10.2](../README.md#102-component-and-bench-results), Open Challenge in [§10.3](../README.md#103-open-challenge-v2), Obstacle Challenge track runs and the formal release matrix (OBS-01…06) in [§10.4](../README.md#104-obstacle-challenge-v2-real-car-route-mode).
 
-| Run | Round | Dir. | Start section | Layout | Score | Time | Contacts | Interventions | Battery (V) | Commit | Status |
-|---|---|---|---|---|---:|---:|---:|---:|---:|---|---|
-| OPEN-01 | Open | CW | | | | | | | | | To run |
-| OPEN-02 | Open | CCW | | | | | | | | | To run |
-| OBS-01 | Obstacle | CW | | | | | | | | | To run |
-| OBS-02 | Obstacle | CCW | | | | | | | | | To run |
+On v2 every change is first run on the **digital twin** before touching the track: the real firmware and the real Pi runtime against 42 random layouts × 5 noise levels, compared paired against the previous version ([README §9](../README.md#9-digital-twin--software-in-the-loop-simulator)). A change that adds a new failure on any seed is not merged. Track runs then check what the twin can't model, and any difference between car and twin is modeled back into the twin.
 
-### 6.3 Sensor-fault behavior
+A configuration passes only with **3 consecutive clean runs** per direction, with random pillar layouts and a random parking-lot position.
+
+### 6.3 Sensor-fault behavior (v1)
 
 | Fault | What the robot does | Evidence | Status |
 |---|---|---|---|
@@ -99,8 +96,11 @@ For each configuration we run both directions and three start sections. A config
 
 ## 7. Known limitations
 
-- Speed is still open-loop: the v2 encoder motor is mounted, but the firmware doesn't use the encoder yet, so maneuvers still depend on battery voltage (ERR-11). Next step: a speed loop on the ESP32 (hardware pulse counter) and distance-based maneuvers.
-- Heading drifts within straights through the dodges, and is only corrected against a wall during parking (ERR-23).
-- The obstacle memory rotates its map with the wrong sign (ERR-21). Other parts were tuned around it, so we left it until it can be re-validated.
-- The bird's-eye calibration assumes a fixed camera angle. Any impact on the mount requires a check (ERR-18).
-- On the Raspberry Pi 5 the main loop runs faster than the camera (40 vs 30 fps) and reprocesses repeated frames. Before racing it, the loop rate must be capped, or the per-frame constants rescaled (ERR-26).
+v1 (national final) — kept for the record:
+
+- Speed was open-loop, so maneuvers depended on battery voltage (ERR-11). **Solved on v2:** encoder on a hardware pulse counter (PCNT) and a feed-forward + PI speed loop on the ESP32.
+- Heading drifted within straights through the dodges (ERR-23). **v2:** the EKF corrects the pose against the walls with the ToF sensors every cycle.
+- The obstacle memory rotated its map with the wrong sign (ERR-21). **v2:** replaced by the seat map of route mode.
+- On the Raspberry Pi 5 the loop ran faster than the camera (ERR-26). **v2:** Picamera2 with the ISP doing the scaling, ~40 fps, and the per-frame constants re-scaled.
+
+v2 (current) — see [README §10.5](../README.md#105-known-limitations): lap-1 mapping of the lone pillar after a corner, the lot fix without orange-line votes, the front ToF range on the black wall, Pi 5 temperature without a fan, and parking realism in the twin.

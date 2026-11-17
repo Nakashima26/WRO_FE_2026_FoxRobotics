@@ -1,6 +1,6 @@
 # Engineering Log — FoxRobotics, WRO 2026 Future Engineers
 
-This log continues the failure log of the [README §5.5](../README.md#55-failure--incident-log) (ERR-01 to ERR-09, up to 2026-09-06) and records the decisions, failures and milestones that changed the robot after that. Every entry points to evidence: a recorded run (`orillasNNN` = run number NNN, a video plus the Pi's journal), a commit, or a measurement. We add entries; we do not rewrite them. When a later change replaces an entry, we mark it *Superseded* and keep it.
+This log continues the failure log of the [README §5.5](v1-national/README.md#55-failure--incident-log) (ERR-01 to ERR-09, up to 2026-09-06) and records the decisions, failures and milestones that changed the robot after that. Every entry points to evidence: a recorded run (`orillasNNN` = run number NNN, a video plus the Pi's journal), a commit, or a measurement. We add entries; we do not rewrite them. When a later change replaces an entry, we mark it *Superseded* and keep it.
 
 **Status legend**
 
@@ -41,7 +41,7 @@ This log continues the failure log of the [README §5.5](../README.md#55-failure
 ### Power
 
 #### ERR-08 — Pi 4 undervoltage halved the frame rate
-Logged in the README: [ERR-08](../README.md#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring).
+Logged in the README: [ERR-08](v1-national/README.md#err-08--raspberry-pi-undervoltage-from-undersized-power-wiring).
 
 #### ERR-10 — Power cut right after `git pull` left files empty
 - **Observed:** 2026-09-12 and 2026-09-15. After an update, the runtime service restarted every 2 s without running anything.
@@ -204,7 +204,7 @@ Logged in the README: [ERR-08](../README.md#err-08--raspberry-pi-undervoltage-fr
 
 ## 3. Milestones
 
-These continue the milestone table of the [README §6.5](../README.md#65-milestones).
+These continue the milestone table of the [README §6.5](v1-national/README.md#65-milestones).
 
 | README # | Date | Run | Result |
 |---|---|---|---|
