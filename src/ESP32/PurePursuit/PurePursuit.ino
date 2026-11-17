@@ -928,6 +928,9 @@ const float INICIO_REV_CORR_TOL_DEG    = 4.0f; // fase 5: corta la reversa-corri
 const unsigned long INICIO_REV_CORR_TIMEOUT_MS = 1500; // fase 5: red de seguridad si no llega a 0
 const unsigned long INICIO_REV_PAUSA_MS = 300;  // fase 7: coast entre la reversa-corrige y la reversa recta
 const unsigned long INICIO_REV_RECTO_MIN_MS = 500; // fase 8: reversa recta mínima aunque la fase 5 haya gastado el presupuesto
+const int  INICIO_REINT_ECO            = 0;    // >0: reintenta la lectura del cajón (ciclos) si el lateral más cercano > INICIO_PARED_MAX_CM (el cajón siempre toca la pared: un eco perdido en ese lado voltea la dirección)
+const int  INICIO_PARED_MAX_CM         = 60;
+int        inicioReint                 = 0;
 const int  INICIO_DIR_MIN_GAP_CM       = 25;   // |dL-dR| mínimo para latchear la dirección de PISTA
                                               // (si el cajón deja lectura ambigua, no se arriesga el
                                               //  latch global: la 1ª esquina real decide como siempre)
@@ -4624,6 +4627,10 @@ void loop() {
         // El cajón SIEMPRE está sobre la pared exterior. El lateral más corto es
         // esa pared: si es dL, la pared está a la izquierda -> el carro sale
         // girando a la DERECHA (y la pista entera gira a la derecha).
+        if (INICIO_REINT_ECO > 0 && min(dL0, dR0) > INICIO_PARED_MAX_CM && inicioReint < INICIO_REINT_ECO) {
+          inicioReint++;
+          break;
+        }
         long dc = dL0 - dR0;                 // <0 => pared a la izq => salir/girar DERECHA
         inicioGirarDer = (dc < 0);
 
