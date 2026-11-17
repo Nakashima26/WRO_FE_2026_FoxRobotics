@@ -227,7 +227,25 @@ class Localizer:
         if not correct:
             return
         sin_us = getattr(C, "US_DESDE_TOF", False)
+        pair_bad = False
+        pair_tol = getattr(C, "LOC_L23_PAIR_TOL_MM", None)
+        tc = _ack_num(ack, "tc") if pair_tol is not None else None
+        if tc is not None and 3 <= tc < 12:
+            zl, zr = _ack_num(ack, "tL"), _ack_num(ack, "tR")
+            if zl is not None and zr is not None and 20 <= zl <= 800 and 20 <= zr <= 800:
+                el, sl, cl = self._expect(self.x, C.SENSOR_MOUNTS["tof_left"], "tof")
+                er, sr, cr = self._expect(self.x, C.SENSOR_MOUNTS["tof_right"], "tof")
+                # Between parallel island/outer walls their summed range is
+                # independent of lateral pose. A short echo must not move it.
+                pair_bad = ({sl, sr} == {_WALL, _ISLAND}
+                            and min(cl, cr) >= math.cos(math.radians(35.0))
+                            and abs((zl + zr) - (el + er)) > float(pair_tol))
+                if pair_bad:
+                    print(f"[LOC] par lateral incompatible medido={zl+zr:.0f} "
+                          f"esperado={el+er:.0f}", flush=True)
         for key, mname, scale, kind in _SENSORS:
+            if pair_bad and key in ("tL", "tR"):
+                continue
             if kind == "us" and sin_us:
                 continue   # dL/dR/dF son los mismos ToF (config.US_DESDE_TOF)
             raw = _ack_num(ack, key)
