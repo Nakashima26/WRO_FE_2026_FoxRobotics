@@ -2734,7 +2734,29 @@ bool paredCajonEsIzq(bool retorno) {
   return retorno ? !ida : ida;
 }
 
+// Cono abierto de los ToF laterales solo para el parking (2026-11-17): el poste del cajón mide 10 cm y con
+// ROI 8 el lateral apenas le roza el borde (orillas70: poste 1 en 1 lectura, poste 2 en ninguna). En la
+// carrera se queda ROI 8 (de lejos el cono ancho ve el piso y lee corto); al escanear el cajón la pared
+// está a ~27 cm y el cono ancho alcanza el poste. 0 = no cambiar.
+const uint8_t TOF_LAT_ROI_PARK = 16;
+void tofLatConoPark() {
+#if FOX_TOF && !defined(FOX_SIL)
+  static bool hecho = false;
+  if (hecho || TOF_LAT_ROI_PARK == 0 || TOF_LAT_ROI_PARK == TOF_LAT_TRAS_ROI) return;
+  hecho = true;
+  VL53L1X *lat[2] = {&tofL, &tofR};
+  for (int i = 0; i < 2; i++) {
+    if (!tofOk[i]) continue;
+    lat[i]->stopContinuous();
+    lat[i]->setROISize(TOF_LAT_ROI_PARK, TOF_LAT_ROI_PARK);
+    lat[i]->startContinuous(TOF_LAT_TRAS_MS);
+  }
+  Serial.println("ToF laterales: ROI de parking");
+#endif
+}
+
 void resetParkScan() {
+  tofLatConoPark();
   parkSinULinea = false;
   parkFase             = 0;
   parkFaseMs           = millis(); parkOdom0 = odomMm;
