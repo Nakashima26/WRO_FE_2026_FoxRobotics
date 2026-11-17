@@ -276,6 +276,7 @@ float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
+const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
 const float RUTA_LOOKAHEAD_L23_MM = 0.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
@@ -3556,6 +3557,7 @@ bool rutaSteer(float &ruedaDeg) {
     rutaI = besti;
   }
   float lookMm = (RUTA_LOOKAHEAD_L23_MM > 0.0f && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE) ? RUTA_LOOKAHEAD_L23_MM : RUTA_LOOKAHEAD_MM;
+  if (RUTA_LOOKAHEAD_L1_MM > 0.0f && turnsCompleted < 4 && estado != INICIO) lookMm = RUTA_LOOKAHEAD_L1_MM;
   int j = (rutaI + (int)(lookMm / rutaPaso + 0.5f)) % rutaN;
   float dx = rutaX[j] - x, dy = rutaY[j] - y;
   float fwd = dx * sh + dy * ch;
