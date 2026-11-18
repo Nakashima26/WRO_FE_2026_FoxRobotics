@@ -1578,6 +1578,12 @@ class RouteMode:
             return wcap(open_cap)
         stop = float(getattr(C, "ROUTE_STOP_MM", 750.0))
         slow_mm = float(getattr(C, "ROUTE_SLOWDOWN_MM", 1300.0))
+        # Recta de salida del cajón (tc=0): piso propio cerca de asientos sin ver
+        # (orillas69-72: ~1 s a rv 130 = ~320 mm/s justo al salir). None = ROUTE_UNSEEN_PWM.
+        unseen_pwm = _pwm("ROUTE_UNSEEN_PWM")
+        _exit = getattr(C, "ROUTE_EXIT_UNSEEN_PWM", None)
+        if _exit is not None and float(getattr(self, "_tc_max", 0) or 0) < 1:
+            unseen_pwm = int(_exit)
         # Detenerse solo sirve si la cámara lo está viendo (en ~0.4 s queda
         # resuelto). Fuera de vista se sigue lento: la ruta ya lo esquiva
         # como obstáculo y al avanzar/girar entra a la vista.
@@ -1586,10 +1592,10 @@ class RouteMode:
             self.stopped += 1
             if self.stopped <= int(getattr(C, "ROUTE_STOP_MAX_FRAMES", 80)):
                 return 0
-            return wcap(min(cap, _pwm("ROUTE_UNSEEN_PWM")))
+            return wcap(min(cap, unseen_pwm))
         self.stopped = 0
         if best <= slow_mm:
-            unseen = min(cap, _pwm("ROUTE_UNSEEN_PWM"))
+            unseen = min(cap, unseen_pwm)
             ramp = getattr(C, "ROUTE_UNSEEN_RAMP_MM", None)
             if ramp is None or best <= float(ramp):
                 return wcap(unseen)
