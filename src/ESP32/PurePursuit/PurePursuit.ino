@@ -1723,8 +1723,8 @@ PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina s
 PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
 PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
-PARK_AJ float        PARK_PL_WF                  = 47.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
-PARK_AJ float        PARK_PL_WF_U                = 39.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
+PARK_AJ float        PARK_PL_WF                  = 55.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
+PARK_AJ float        PARK_PL_WF_U                = 47.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
@@ -1788,8 +1788,8 @@ PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
-PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.0f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
-PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 0;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
+PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
 bool                 parkSinULinea               = false;
