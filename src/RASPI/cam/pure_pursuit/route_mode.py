@@ -939,6 +939,9 @@ class RouteMode:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
+        fpw = getattr(C, "ROUTE_FINAL_PWM", None)
+        if fpw is not None and tc is not None and tc >= int(getattr(C, "ROUTE_FINAL_TC", 11)) and self.fixed:
+            self.rv = int(fpw) if self.rv is None else min(self.rv, int(fpw))   # última recta hacia el cajón: tope propio (con el perfil pursuit hasta tc 12 llegaba rápido y chocaba el cajón)
         if self._prueba_cajon and self.fixed:
             # Prueba de salida (archivo ROUTE_PRUEBA_CAJON_FILE en la Pi): ubicado el
             # cajón se para y reporta la pose cada ~1 s, para medirla con cinta.
