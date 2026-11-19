@@ -654,6 +654,19 @@ const float LAZO_V_MAX_L1    = 0.0f;    // mm/s tope propio de vuelta 1 (tc<4, f
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
 const float LAZO_I_MAX       = 80.0f;   // PWM
+// Freno activo (orillas66/67, 2026-11-17): con KP 0.10 el lazo pasado de velocidad
+// solo bajaba el PWM ~20 y el N30 desaceleraba ~1 m/s² (rodando), así que entraba a
+// 1.1-1.3 m/s a las esquinas aunque la Pi pidiera 700. El TB6612 frena en corto en
+// la parte baja del PWM: con más de LAZO_FRENO_E_MMS de sobra se usa LAZO_KP_FRENO
+// (más PWM bajo = más freno) sin integrar. Arriba de LAZO_FRENO_LOCK_MMS el PWM no
+// baja de LAZO_FRENO_PWM_MIN_ALTO: el freno en corto completo bloquea la llanta
+// arriba de ~600 mm/s (N30Test) y patina sin que el encoder lo cuente.
+#define LAZO_FRENO_ACTIVO 1
+const float LAZO_FRENO_E_MMS       = 100.0f;  // mm/s de sobra para entrar al freno
+const float LAZO_KP_FRENO          = 0.35f;   // PWM por mm/s (escala N20, se multiplica por g)
+const float LAZO_FRENO_LOCK_MMS    = 600.0f;
+const int   LAZO_FRENO_PWM_MIN_ALTO = 25;     // piso de PWM frenando arriba de LOCK
+int lazoFrenando = 0;                         // 1 mientras el lazo frena (ACK fr=)
 const float LAZO_V_TAU_S     = 0.05f;   // filtro de la velocidad del encoder
 float encVelMmS = 0.0f;                 // velocidad medida (mm/s, con signo)
 float lazoI = 0.0f;
@@ -2144,6 +2157,17 @@ int lazoVelocidad(int pwm) {
   float ff = vObj / km + pm;                        // feedforward con el motor real
   float g  = LAZO_K_FWD / km;                       // KP/KI afinados con el N20: misma ganancia en mm/s
   float e = vObj - v;
+#if LAZO_FRENO_ACTIVO
+  if (e < -LAZO_FRENO_E_MMS) {
+    // Pasado de velocidad: freno proporcional, sin integrar (y sin I positivo que empuje).
+    lazoFrenando = 1;
+    if (lazoI > 0.0f) lazoI = 0.0f;
+    float uf = ff + g * LAZO_KP_FRENO * (e + LAZO_FRENO_E_MMS) + g * LAZO_KP * e + lazoI;
+    int piso = (v > LAZO_FRENO_LOCK_MMS) ? LAZO_FRENO_PWM_MIN_ALTO : 0;
+    return constrain((int)lroundf(uf), piso, 255);
+  }
+  lazoFrenando = 0;
+#endif
   float u = ff + g * LAZO_KP * e + lazoI;
   // anti-windup: integra solo si la salida no está saturada hacia el lado del error
   if (dt > 0.003f && !((u >= 255.0f && e > 0) || (u <= 0.0f && e < 0))) {
@@ -3878,6 +3902,8 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
 #if FOX_ENCODER && !defined(FOX_SIL)
     ackOut.print(",ei=");   ackOut.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
+    ackOut.print(",fr=");   ackOut.print(lazoFrenando);   // 1 = lazo frenando activo
+    ackOut.print(",pw=");   ackOut.print(pwmActual);      // PWM real al motor
     ackOut.print(",ue=");   ackOut.print(uartErrs);
     ackOut.print(",uf=");   ackOut.print(uartErrTipo[3]);   // FIFO_OVF
     ackOut.print(",ut=");   ackOut.print(uartErrTipo[4]);   // FRAME
