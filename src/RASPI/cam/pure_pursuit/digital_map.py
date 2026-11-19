@@ -616,6 +616,8 @@ class DigitalMap:
         for other, ocol in _COL.items():
             if ocol != _COL[sid]:
                 continue
+            if other != sid and sec == self.parking and other in PARKING_FORBIDDEN_SEATS:
+                continue   # reglamento: fila exterior vacía en la recta del cajón; el fantasma ahí más las maderas dejaba la ruta infactible (29/40 fallas)
             ox, oy = self._seat_xy(sec, other)
             if abs(self._section_frame(ox, oy, sec)[1] - m) <= tol_mm:
                 out.append(other)
