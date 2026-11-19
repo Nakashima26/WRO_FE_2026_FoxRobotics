@@ -1788,6 +1788,8 @@ PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
+PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.0f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 0;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
 bool                 parkSinULinea               = false;
@@ -2179,6 +2181,7 @@ int lazoVelocidad(int pwm) {
 
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
+int parkArranquePwm = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
 void setMotorTope(int velocidad, int tope) {
   velocidad = constrain(velocidad, 0, tope);
   if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
@@ -2190,6 +2193,7 @@ void setMotorTope(int velocidad, int tope) {
   }
 #if MOTOR_LAZO_VEL && FOX_ENCODER
   velocidad = lazoVelocidad(velocidad);
+  if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
 #endif
 #ifdef FOX_BANCO_SIN_MOTOR
   velocidad = 0;   // banco: probar el UART sin mover el motor
@@ -6889,7 +6893,9 @@ void loop() {
           }
           pwm = min(pwm + extra, 255);
         }
+        parkArranquePwm = PARK_PL_ARRANQUE_PWM;
         setMotor(pwm);
+        parkArranquePwm = 0;
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
         parkPlanPose(pw, ph);
@@ -6928,7 +6934,7 @@ void loop() {
           if (PARK_PL_ZZ && kz >= 0 && kz < 4) dmax = (kz == 0) ? PARK_PL_Z1_MM : (kz == 1) ? PARK_PL_Z2_MM : (kz == 2) ? PARK_PL_Z3_MM : PARK_PL_Z4_MM;
           if (mm >= dmax) { fin = true; why = "DIST"; }
           else if (th * parkPlanSgn <= PARK_PL_TOK * 0.5f && fabsf(th) <= PARK_PL_TOK) { fin = true; why = "TH"; }
-          else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
+          else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * max(encVelMmS, 0.0f) * 0.1f) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
         if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
