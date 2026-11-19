@@ -1750,6 +1750,7 @@ ROUTE_L23_ENTRY_PWM = None        # tope del perfil mientras tc==4 (primer tramo
 # Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
 ROUTE_FINAL_D_MM = 700.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)
 ROUTE_FINAL_LEAD_MM = 1300.0
+ROUTE_LAP2_PROFILE_TC_MAX = 8   # perfil de pursuit (curvatura vista desde el lookahead) para 4 <= tc < esto; 8 = solo la vuelta 2
 ROUTE_FINAL_W = 20.0
 
 LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas que no suman el ancho (tc3..11)
