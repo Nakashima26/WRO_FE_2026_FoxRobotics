@@ -1708,7 +1708,7 @@ PARK_AJ long         PARK_SINU_PRE_MM            = -560;  // con la cuenta en 11
 PARK_AJ long         PARK_SINU_MIN_MM            = -2000;  // no entregar al seguidor de pared antes de pasar la senal de la entrada (T2 esta en -500)
 PARK_AJ long         PARK_SINU_LENTO_MM          = 250;   // zona lenta antes de la madera de adelante
 PARK_AJ int          PARK_SINU_PWM_B2            = 100;
-PARK_AJ float        PARK_SINU_TOL_CM            = 5.0f;
+PARK_AJ float        PARK_SINU_TOL_CM            = 11.0f;   // 5 -> 11: a 28-33 cm bien alineado hacia U y la U falla 23% (directo 5%). Twin 96: 81 -> 86, U 25 -> 18
 PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // Plan de entrada al cajon por segmentos (fase 40), derivado de una busqueda de trayectorias con el modelo calibrado
 // (radios de reversa 156 izq / 145 der, adelante 135 / 125; nariz 154.2, cola 21.8, ancho 125, hueco 264):
