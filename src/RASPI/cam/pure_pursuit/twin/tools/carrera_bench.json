@@ -92,6 +92,8 @@
     "ROUTE_EXIT_UNSEEN_PWM": 255
   },
   "fw": {
+    "PARK_PUNTA_KP_ANG_SEGUIR": "1.3f",
+    "PARK_PUNTA_KPOS": "1.4f",
     "INICIO_PWM": "140",
     "VEL_INICIAL": "158",
     "PARK_MODO": "PARK_PARALELO",
