@@ -655,7 +655,7 @@ const float MOTOR_PWM0_REV   = 37.6f;
 const float LAZO_CODO_PWM    = 155.0f;
 const float LAZO_V_255       = 1575.0f; // mm/s a PWM 255 (adelante) = máx. del N30 con pila cargada (N30Test 2026-11-17)
 const float LAZO_V_MAX       = 0.0f;  // mm/s; 0 = sin tope
-const float LAZO_V_MAX_L1    = 850.0f;    // mm/s tope propio de vuelta 1 (tc<4, fuera de INICIO); 0 = usa LAZO_V_MAX
+const float LAZO_V_MAX_L1    = 1000.0f;    // mm/s tope propio de vuelta 1 (tc<4, fuera de INICIO); 0 = usa LAZO_V_MAX
 const float LAZO_KP          = 0.10f;   // PWM por mm/s
 const float LAZO_KI          = 0.60f;   // PWM por mm/s·s
 const float LAZO_I_MAX       = 80.0f;   // PWM
@@ -1721,7 +1721,7 @@ PARK_AJ long         PARK_SINU_PRE_MM            = -560;  // con la cuenta en 11
 PARK_AJ long         PARK_SINU_MIN_MM            = -2000;  // no entregar al seguidor de pared antes de pasar la senal de la entrada (T2 esta en -500)
 PARK_AJ long         PARK_SINU_LENTO_MM          = 250;   // zona lenta antes de la madera de adelante
 PARK_AJ int          PARK_SINU_PWM_B2            = 100;
-PARK_AJ float        PARK_SINU_TOL_CM            = 5.0f;
+PARK_AJ float        PARK_SINU_TOL_CM            = 11.0f;   // 5 -> 11: a 28-33 cm bien alineado hacia U y la U falla 23% (directo 5%). Twin 96: 81 -> 86, U 25 -> 18
 PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // Plan de entrada al cajon por segmentos (fase 40), derivado de una busqueda de trayectorias con el modelo calibrado
 // (radios de reversa 156 izq / 145 der, adelante 135 / 125; nariz 154.2, cola 21.8, ancho 125, hueco 264):
@@ -1729,15 +1729,15 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 145.0f;  // 2026-11-12: 200 -> 145 (ToF lateral v2 a 110.6 mm del eje, el sonar a 56.3: ve la madera 54 mm antes); w del eje trasero cuando el sonar empieza a ver la madera de adelante
-PARK_AJ float        PARK_PL_W_DET_U             = 143.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_W_DET_U             = 155.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
-PARK_AJ float        PARK_PL_M_MM                = 5.0f;   // un tramo termina si la huella queda a menos de esto de una madera
+PARK_AJ float        PARK_PL_M_MM                = 10.0f;   // un tramo termina si la huella queda a menos de esto de una madera
 PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
 PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
-PARK_AJ float        PARK_PL_WF                  = 47.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
-PARK_AJ float        PARK_PL_WF_U                = 39.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
+PARK_AJ float        PARK_PL_WF                  = 55.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
+PARK_AJ float        PARK_PL_WF_U                = 47.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
@@ -1764,6 +1764,7 @@ PARK_AJ float        PARK_REV_DF_CM              = 25.0f;   // el sonar frontal 
 PARK_AJ float        PARK_REV_H0                 = 400.0f;
 PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
+PARK_AJ int          PARK_PL_ARC1_PWM           = 130;     // PWM del arco EXT del tramo 1 mientras th < 0.4*T1
 PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
 PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
 PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
@@ -1780,7 +1781,7 @@ PARK_AJ float        PARK_PL_EB_CM               = 3.0f;    // holgura de la esq
 PARK_AJ float        PARK_PL_EC_CM               = 3.0f;
 PARK_AJ float        PARK_PL_ED_CM               = 1.5f;
 PARK_AJ float        PARK_PL_D3_MM               = 45.0f;   // tope de distancia del tramo adelante
-PARK_AJ int          PARK_PL_PWM_REV             = 92;
+PARK_AJ int          PARK_PL_PWM_REV             = 84;
 PARK_AJ int          PARK_PL_PWM_FWD             = 80;
 // Anti-atasco del plan: si en PARK_PL_ATASCO_MS el encoder no avanzó PARK_PL_ATASCO_MM, sube el PWM
 // PARK_PL_ATASCO_PASO (hasta +PARK_PL_ATASCO_MAX); en cuanto se mueve vuelve al PWM normal. 2026-11-11:
@@ -1801,6 +1802,8 @@ PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
+PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
 bool                 parkSinULinea               = false;
@@ -2192,6 +2195,7 @@ int lazoVelocidad(int pwm) {
 
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
+int parkArranquePwm = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
 void setMotorTope(int velocidad, int tope) {
   velocidad = constrain(velocidad, 0, tope);
   if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
@@ -2203,6 +2207,7 @@ void setMotorTope(int velocidad, int tope) {
   }
 #if MOTOR_LAZO_VEL && FOX_ENCODER
   velocidad = lazoVelocidad(velocidad);
+  if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
 #endif
 #ifdef FOX_BANCO_SIN_MOTOR
   velocidad = 0;   // banco: probar el UART sin mover el motor
@@ -6933,7 +6938,7 @@ void loop() {
         if (parkPlanDir > 0) motorAdelante(); else motorReversa();
         escribirServo(parkPlanRectaOn ? centroServo : parkPlanSrv);
         int pwm = (parkPlanDir > 0) ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV;
-        if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = 130;
+        if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = PARK_PL_ARC1_PWM;
         {   // anti-atasco (ver PARK_PL_ATASCO_*)
           static int extra = 0; static float od0 = 0.0f; static unsigned long t0 = 0; static int legPrev = -1;
           if (legPrev != parkPlanI || millis() - parkFaseMs < 30UL) { extra = 0; od0 = odomMmF; t0 = millis(); legPrev = parkPlanI; }
@@ -6948,7 +6953,9 @@ void loop() {
           }
           pwm = min(pwm + extra, 255);
         }
+        parkArranquePwm = PARK_PL_ARRANQUE_PWM;
         setMotor(pwm);
+        parkArranquePwm = 0;
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
         parkPlanPose(pw, ph);
@@ -6987,7 +6994,7 @@ void loop() {
           if (PARK_PL_ZZ && kz >= 0 && kz < 4) dmax = (kz == 0) ? PARK_PL_Z1_MM : (kz == 1) ? PARK_PL_Z2_MM : (kz == 2) ? PARK_PL_Z3_MM : PARK_PL_Z4_MM;
           if (mm >= dmax) { fin = true; why = "DIST"; }
           else if (th * parkPlanSgn <= PARK_PL_TOK * 0.5f && fabsf(th) <= PARK_PL_TOK) { fin = true; why = "TH"; }
-          else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM) { fin = true; why = "FRENTE"; }
+          else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * max(encVelMmS, 0.0f) * 0.1f) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
         if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }

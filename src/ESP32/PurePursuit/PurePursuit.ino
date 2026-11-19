@@ -1107,6 +1107,7 @@ const int           PARK_PWM                  = 95;
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
+const bool          PARK_TOF_INVALIDO_POSTE   = true;   // fase 0: ToF exterior inválido (-1) = poste (ver ESTACIONANDO)
 // (PARK_CAIDA_MIN_CM=8 quitado 2026-09-15: descartaba el poste cuando el carro pasa
 //  pegado, orillas959 dio 7,5. La lectura se clasifica como ESTACIONANDO_PUNTA y usa
 //  PARK_PUNTA_SALTO_MAX_CM / _ALTO_REBASE_N / _CAIDA_HUECOS_N.)
@@ -1534,6 +1535,13 @@ float         parkTrimPared         = 0.0f;   // lo que marca el gyro cuando va 
 // Anti-atoro: rumbo y marca de tiempo de la última vez que el carro SÍ giraba.
 int           parkCenterCnt         = 0;      // debounce de la fase 11 (ver PARK_CENTER_DEB)
 unsigned long parkPoste1Ms          = 0;      // millis de la detección del POSTE 1
+// Poste 2 por odometría (orillas70, 2026-11-17): el poste mide 10 cm y el ToF derecho (ROI 8) a veces
+// no lo ve; el poste 1 salió en 1 lectura y el 2 en ninguna, y el carro siguió hasta el fondo de la recta.
+// Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
+// PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
+const long          PARK_POSTE2_POSE_MM   = 340;
+long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
+int           parkPoste2Pose        = 0;      // 1 = el poste 2 salió por odometría (ACK p2o=)
 float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
 float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
 int           parkTrimMedN          = 0;
@@ -2727,13 +2735,37 @@ bool paredCajonEsIzq(bool retorno) {
   return retorno ? !ida : ida;
 }
 
+// Cono abierto de los ToF laterales solo para el parking (2026-11-17): el poste del cajón mide 10 cm y con
+// ROI 8 el lateral apenas le roza el borde (orillas70: poste 1 en 1 lectura, poste 2 en ninguna). En la
+// carrera se queda ROI 8 (de lejos el cono ancho ve el piso y lee corto); al escanear el cajón la pared
+// está a ~27 cm y el cono ancho alcanza el poste. 0 = no cambiar.
+const uint8_t TOF_LAT_ROI_PARK = 16;
+void tofLatConoPark() {
+#if FOX_TOF && !defined(FOX_SIL)
+  static bool hecho = false;
+  if (hecho || TOF_LAT_ROI_PARK == 0 || TOF_LAT_ROI_PARK == TOF_LAT_TRAS_ROI) return;
+  hecho = true;
+  VL53L1X *lat[2] = {&tofL, &tofR};
+  for (int i = 0; i < 2; i++) {
+    if (!tofOk[i]) continue;
+    lat[i]->stopContinuous();
+    lat[i]->setROISize(TOF_LAT_ROI_PARK, TOF_LAT_ROI_PARK);
+    lat[i]->startContinuous(TOF_LAT_TRAS_MS);
+  }
+  Serial.println("ToF laterales: ROI de parking");
+#endif
+}
+
 void resetParkScan() {
+  tofLatConoPark();
   parkSinULinea = false;
   parkFase             = 0;
   parkFaseMs           = millis(); parkOdom0 = odomMm;
   parkEntryMs          = millis();
   parkCiclos           = 0;
   parkScanSubFase      = 0;
+  parkOdomPoste1       = -1;
+  parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
   parkCaidaCnt         = 0;
@@ -3907,6 +3939,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
 #if FOX_ENCODER && !defined(FOX_SIL)
     ackOut.print(",ei=");   ackOut.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
+    ackOut.print(",p2o=");  ackOut.print(parkPoste2Pose);
     ackOut.print(",fr=");   ackOut.print(lazoFrenando);   // 1 = lazo frenando activo
     ackOut.print(",pw=");   ackOut.print(pwmActual);      // PWM real al motor
     ackOut.print(",ue=");   ackOut.print(uartErrs);
@@ -5860,6 +5893,15 @@ void loop() {
       // (PARK_CAIDA_N) como el hueco (PARK_GAP_N) piden 2 lecturas seguidas.
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
+#if FOX_US_DE_TOF && FOX_TOF
+      // ToF inválido sobre el poste (orillas71/72, 2026-11-17): justo en el poste 1 el ToF exterior dio -1
+      // (poste a ~7 cm + pared a ~27 cm en el mismo cono), que leerDistancia() vuelve 200 = "sin eco", y el
+      // poste no contaba. Escaneando a ~27 cm de la pared el Short siempre lee la pared: un inválido ahí es el
+      // poste, se toma como bajada.
+      if (PARK_TOF_INVALIDO_POSTE && parkFase == 0 && parkBaseN >= PARK_BASE_N
+          && tofMm[parkParedEsIzquierda ? 0 : 1] <= 0 && parkBase > (float)(PARK_CAIDA_CM + 2))
+        extRaw = max(1L, (long)(parkBase - PARK_CAIDA_CM - 1));
+#endif
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
       int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
       int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
@@ -6250,6 +6292,7 @@ void loop() {
           if (bajada && armada && posteConfirmado) {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
+            parkOdomPoste1   = odomMm;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -6268,6 +6311,7 @@ void loop() {
               parkGapCnt       = 0;
               parkHuecoEntryMs = millis();
               parkPoste1Ms     = parkBajadaPreMs;
+              parkOdomPoste1   = odomMm;
               parkBajadaPre    = false;
               Serial.println("PARK: poste 1 pasó antes del armado — hueco");
             }
@@ -6277,7 +6321,11 @@ void loop() {
         }
         // ── Subfase 1: Sobre Poste 1, esperando hueco ──
         else if (parkScanSubFase == 1) {
-          if (despejado) {
+          if (PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
+            parkScanSubFase  = 2;   // sin hueco confirmado: el poste 2 se toma abajo por odometría
+            parkCaidaCnt     = 0;
+            parkHuecoEntryMs = millis();
+          } else if (despejado) {
             parkGapCnt++;
             if (parkGapCnt >= PARK_GAP_N) {
               parkScanSubFase  = 2;
@@ -6303,6 +6351,12 @@ void loop() {
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
           bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado);
+          if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0
+              && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
+            poste2Detect = true;
+            parkPoste2Pose = 1;
+            Serial.print("PARK: POSTE 2 POR ODOMETRIA (+"); Serial.print(odomMm - parkOdomPoste1); Serial.println(" mm tras el poste 1)");
+          }
 
           // SOLO caída de sónar. La Pi manda park=2 al ver magenta lejos
           // (recta final, ~1 s tras entrar a ESTACIONANDO) y el timeout de
