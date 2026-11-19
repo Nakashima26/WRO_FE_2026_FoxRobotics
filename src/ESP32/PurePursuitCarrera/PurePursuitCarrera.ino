@@ -1873,7 +1873,7 @@ const int           PARK_PUNTA_PWM             = 155;     // PWM de la recta fin
 const float         PARK_PUNTA_PARED_CM        = 31.0f;  // distancia a mantener de la pared exterior (lectura del sonar)
                                                          // 2026-09-15: 30 -> 35 (orillas949 se enchuecaba hacia la pared) -> 33
                                                          // (orillas950 con 35 se saltó el 1er poste: eco débil más lejos)
-const float         PARK_PUNTA_KPOS            = 2.0f;   // grados de rumbo objetivo por cm de error de pared
+const float         PARK_PUNTA_KPOS            = 1.4f;   // grados de rumbo objetivo por cm de error de pared
                                                          // (2026-09-15: 0.8 -> 1.2 -> 1.0: con 1.2 + KP_ANG 3.0 el servo
                                                          // se iba a tope en ambos sentidos, orillas953)
 // Integral del error de pared: compensa que el 0 del gyro no quede paralelo a la pared
@@ -1886,7 +1886,7 @@ const float         PARK_PUNTA_I_MAX_DEG       = 6.0f;   // tope de lo que aport
 const float         PARK_PUNTA_ANG_MAX_DEG     = 8.0f;   // tope del rumbo objetivo (15 -> 8: orillas953 llegó al 1er
                                                          // poste a +10.8° y el arco relativo entró chueco)
 const float         PARK_PUNTA_KP_ANG          = 2.0f;   // servo por grado de error de rumbo
-const float         PARK_PUNTA_KP_ANG_SEGUIR   = 2.0f;   // idem SOLO en la fase 0 (seguir pared). 3.0 saturó el
+const float         PARK_PUNTA_KP_ANG_SEGUIR   = 1.3f;   // idem SOLO en la fase 0 (seguir pared). 3.0 saturó el
                                                          // servo en orillas953 -> de vuelta a 2.0
 const float         PARK_PUNTA_KD_RATE         = 0.3f;   // servo por deg/s de gyroRate (amortigua)
 const int           PARK_PUNTA_SERVO_MAX       = 30;     // tope |servo - centro| con servo "recto"
