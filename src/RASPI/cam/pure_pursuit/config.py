@@ -1387,6 +1387,7 @@ ROUTE_PROV_RULES = False
 ROUTE_HALF_SEEN = True
 ROUTE_CONF_GHOST_TC = 4   # vuelta 1 (tc < esto): la señal confirmada también esquiva la otra fila de su columna si la mediana lateral cae a <= ROUTE_CONF_GHOST_TOL_MM; None = apagado
 ROUTE_CONF_GHOST_TOL_MM = 150.0
+ROUTE_GHOST_FALLBACK = False   # fantasmas de fila: si el plan con ellos es infactible, se planea sin ellos
 # Filas posibles de una señal medio vista: las que quedan a <= esto de la mediana lateral observada
 # (filas a 200 mm: 150 = las dos si la mediana cae en la mitad central del hueco).
 ROUTE_HALF_ROW_TOL_MM = 150.0

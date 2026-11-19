@@ -749,6 +749,7 @@ class RouteMode:
                 if back:
                     plan_seats = {**plan_seats, **back}
                     plan_unknown = [k for k in plan_unknown if k not in back]
+        self._ghost_fb = None
         gtc = getattr(C, "ROUTE_CONF_GHOST_TC", None)
         if gtc is not None and float(getattr(self, "_tc_max", 0) or 0) < float(gtc) and getattr(dm, "row_candidates", None):
             # Vuelta 1: una señal confirmada con la pose aún corrida (W/T1 por W/T3, s35) puede estar en la otra fila de su
@@ -760,6 +761,7 @@ class RouteMode:
                     if other != seat and tw not in conf and tw not in plan_seats:
                         ghosts2[tw] = col
             if ghosts2:
+                self._ghost_fb = ({k: v for k, v in plan_seats.items()}, list(plan_unknown))   # sin fantasmas, por si el plan sale infactible
                 half_seats |= set(ghosts2)
                 plan_seats = {**plan_seats, **ghosts2}
                 plan_unknown = [k for k in plan_unknown if k not in ghosts2]
@@ -819,7 +821,7 @@ class RouteMode:
                     self._job_out = None
                     self._job_shift = self.shift
                     self._job_hold = hold
-                    self._job = threading.Thread(target=self._run_plan, args=args, daemon=True)
+                    self._job = threading.Thread(target=self._run_plan, args=args, kwargs={"fb": self._ghost_fb}, daemon=True)
                     self._job.start()
             elif getattr(C, "ROUTE_PLAN_DELAY_S", None) is not None and self.route is not None:
                 # Twin: el plan sale ya, pero se adopta tras el retraso de la Pi (ruta anterior mientras).
@@ -1487,11 +1489,15 @@ class RouteMode:
         ty = dm.pose_xy[1] - (p0x * fy + p0y * ly)
         return tx + px * fx + py * lx, ty + px * fy + py * ly, (th - yaw) % 360.0
 
-    def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None, hug=None) -> None:
+    def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None, hug=None, fb=None) -> None:
         self._job_conf = conf
         self._job_unknown = unknown
-        self._job_out = RR.plan(direction, conf, parking, prm=_prm_for(unknown, getattr(self, "_tc_max", 0)), unknown=unknown, anchor=anchor,
-                                lock=lock, park_w=park_w, extra=extra, hug=hug)
+        for seats, unk in ((conf, unknown), fb) if fb is not None and getattr(C, "ROUTE_GHOST_FALLBACK", False) else ((conf, unknown),):
+            self._job_conf, self._job_unknown = seats, unk
+            self._job_out = RR.plan(direction, seats, parking, prm=_prm_for(unk, getattr(self, "_tc_max", 0)), unknown=unk, anchor=anchor,
+                                    lock=lock, park_w=park_w, extra=extra, hug=hug)
+            if self._job_out.report.get("feasible"):
+                break   # con fantasmas infactible (dos filas de la misma columna pegadas): se planea sin ellos
 
     def _adopt(self, route, key, conf, unknown, empty, dm, shift: float = 0.0, hold: bool = False) -> None:
         prev = getattr(self, "_conf_prev", None) or {}
