@@ -1716,7 +1716,7 @@ PARK_AJ float        PARK_SINU_ANG_DEG           = 10.0f;
 // theta = grados de la nariz hacia la isla respecto a parkRumboRef. Cada corte va ADELANTADO por la inercia del volante (retraso 0.1 s).
 const bool           PARK_PLAN_ON                = true;
 PARK_AJ float        PARK_PL_W_DET               = 145.0f;  // 2026-11-12: 200 -> 145 (ToF lateral v2 a 110.6 mm del eje, el sonar a 56.3: ve la madera 54 mm antes); w del eje trasero cuando el sonar empieza a ver la madera de adelante
-PARK_AJ float        PARK_PL_W_DET_U             = 138.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
+PARK_AJ float        PARK_PL_W_DET_U             = 155.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 10.0f;   // un tramo termina si la huella queda a menos de esto de una madera
@@ -1751,6 +1751,7 @@ PARK_AJ float        PARK_REV_DF_CM              = 25.0f;   // el sonar frontal 
 PARK_AJ float        PARK_REV_H0                 = 400.0f;
 PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
+PARK_AJ int          PARK_PL_ARC1_PWM           = 130;     // PWM del arco EXT del tramo 1 mientras th < 0.4*T1
 PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
 PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
 PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
@@ -6878,7 +6879,7 @@ void loop() {
         if (parkPlanDir > 0) motorAdelante(); else motorReversa();
         escribirServo(parkPlanRectaOn ? centroServo : parkPlanSrv);
         int pwm = (parkPlanDir > 0) ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV;
-        if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = 130;
+        if (parkPlanI == 0 && th < 0.4f * parkPlanT1) pwm = PARK_PL_ARC1_PWM;
         {   // anti-atasco (ver PARK_PL_ATASCO_*)
           static int extra = 0; static float od0 = 0.0f; static unsigned long t0 = 0; static int legPrev = -1;
           if (legPrev != parkPlanI || millis() - parkFaseMs < 30UL) { extra = 0; od0 = odomMmF; t0 = millis(); legPrev = parkPlanI; }
