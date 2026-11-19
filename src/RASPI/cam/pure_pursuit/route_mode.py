@@ -933,7 +933,7 @@ class RouteMode:
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
         tc = _ack_num(ack or "", "tc")
         prof = self._profile_pwm(self._sign_xy(conf, empty),
-                                 lap2=tc is not None and 4 <= tc < 8, l23=tc is not None and 4 <= tc < 12,
+                                 lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)), l23=tc is not None and 4 <= tc < 12,
                                  l1=tc is not None and 1 <= tc < 4)   # en tc=0 no: s33 choca Green E/T1 en la salida
         if prof is not None and tc == 4 and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
