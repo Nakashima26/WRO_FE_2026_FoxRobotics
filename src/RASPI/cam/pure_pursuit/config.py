@@ -1372,6 +1372,7 @@ ROUTE_FIX_LINE_FRESH = None   # True: el voto por recta solo con la cinta vista 
 ROUTE_FIX_FORCE_BLEND_MM = None   # forzado con 1-2 votos de cinta: promedia con el pico del sonar (masa ≥0.2) si están a ≤ esto
 ROUTE_FIX_FWD_ADD_MM = 0.0   # número o {"CW":mm,"CCW":mm}: mm que se suman al avance (BEV->mundo) de los votos de cinta de StartFix; corrige el sesgo +37 mm de la cinta (gemelo N20)
 ROUTE_LOC_HOLD_AT_START = None   # True: sin corrección del localizador mientras la odometría sigue en 0 (parado en el cajón)
+ROUTE_EXIT_UNSEEN_PWM = None  # recta de salida del cajón (tc=0): tope cerca de asientos sin ver; None = ROUTE_UNSEEN_PWM
 ROUTE_UNSEEN_PWM = None  # tope cerca de un asiento sin ver (None = ROUTE_SLOW_PWM)
 # Vuelta 1: tope si la ruta pasa por el lado de la pared de un asiento exterior sin ver
 # (dentro de ROUTE_SLOWDOWN_MM). None = apagado.
