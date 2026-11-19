@@ -1078,7 +1078,7 @@ REC_STOP_MOV_MM   = 20.0
 # todo el ancho; en las corridas 35/36/41/44 ningún frame en marcha pasó 0.06).
 PARK_PINK_HSV       = [(np.array([135, 45, 25]), np.array([179, 255, 255])),
                        (np.array([0, 45, 25]),   np.array([3, 255, 255]))]
-PARK_PINK_RATIO_MIN = 0.28   # fracción del ROI que debe ser magenta
+PARK_PINK_RATIO_MIN = 0.15   # fracción del ROI que debe ser magenta
 PARK_PINK_COLS_MIN  = 0.60   # fracción de columnas con >=20% de rosa; si no, ratio=0
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
