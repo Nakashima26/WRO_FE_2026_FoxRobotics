@@ -6463,7 +6463,7 @@ void loop() {
               float sepE = PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
               if (fabsf(sepE) > PARK_POSTE2_SEP_TOL_MM) {
                 sepE = constrain(sepE, -100.0f, 100.0f);
-                parkDetAlong += (parkDirecto ? 1.0f : -1.0f) * sepE;
+                parkDetAlong += sepE;   // en la U el along tambien crece al avanzar (con signo -1 n4 s45 pasaba de 86 a 155 mm de error)
                 Serial.print("PARK poste 2 separacion anomala: ancla "); Serial.println(sepE, 0);
               }
             }
