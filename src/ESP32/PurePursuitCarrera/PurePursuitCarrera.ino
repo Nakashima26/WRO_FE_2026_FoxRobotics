@@ -6011,7 +6011,12 @@ void loop() {
             // Con el ToF lateral fuera de rango, la pose acota la abertura del arco.
             gapMm = (int)constrain(rutaExtTapeteCm() * 10.0f, 550.0f, 700.0f);
           }
-          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
+          const bool fondoCorto = extAhoraP > 5 && extAhoraP < 150
+                               && !direccionIzquierda && piRuta && rutaTfOk && rutaSecSalida >= 0
+                               && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM
+                               && fabsf(anguloGyro - parkRumboGiro0) > 5.0f;
+          // Si empezamos la U sin terminar de enderezar, dejar otro cm respecto a la pared.
+          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10 - (fondoCorto ? 10 : 0);
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(RUTA_BATALLA_MM / radio) * 180.0f / 3.14159265f;
@@ -6201,8 +6206,12 @@ void loop() {
         // mueve base ni error (PARK_PUNTA_SALTO_MAX_CM, orillas942).
         bool lecturaAlta = baseLista && lecturaEnRango
                            && extRaw > (long)(parkBase + PARK_PUNTA_SALTO_MAX_CM);
+        const bool scanDirectoInicial = parkDirecto && parkScanSubFase == 0
+                                        && !isnan(rutaPka) && rutaPka < PARK_SINU_PKA_MIN_MM;
+        // Una lectura del poste durante el armado puede dejar la base demasiado baja.
+        const bool rebaseInicial = scanDirectoInicial && parkBase < 20.0f && extRaw >= 22 && extRaw <= 45;
         if (lecturaAlta) {
-          if (++parkAltasCnt >= PARK_PUNTA_ALTO_REBASE_N) {
+          if (++parkAltasCnt >= (rebaseInicial ? 5 : PARK_PUNTA_ALTO_REBASE_N)) {
             // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
             Serial.print("PARK: re-base alto "); Serial.print(parkBase, 1);
             Serial.print(" -> "); Serial.println(extRaw);
@@ -6305,8 +6314,13 @@ void loop() {
         // 0 del gyro: en la 1056 el carro iba PARALELO a la pared y este candado
         // lo leía a 17.4° -> tiró el poste 2 bueno y se fue al TIMEOUT.
         float parkAngRel = anguloGyro - parkRumboParalelo();
+        // Con trim de pared disperso tras la U, un eco cercano puede confirmar el poste
+        // si la pose del tapete también indica que el carro va alineado.
+        const bool ecoAlineadoPorPose = !parkDirecto && parkTrimListo && !posteSintetico
+                                     && extRaw <= PARK_POSTE2_EXT_MAX_CM
+                                     && parkTrimSpread() > 20.0f && fabsf(parkThCarril()) <= 8.0f;
         bool poseOk = baseLista
-                      && (fabs(parkAngRel) < PARK_ARMADO_ANG_DEG)
+                      && (fabs(parkAngRel) < PARK_ARMADO_ANG_DEG || ecoAlineadoPorPose)
                       && (parkRosaVisto || !PARK_REQUIERE_PI || PARK_TEST_MANO);
         bool armada = poseOk && (tEn >= PARK_ARMADO_MS);
 
@@ -6327,7 +6341,8 @@ void loop() {
         // Con el poste 1 visto por sonar, un poste 2 por pose antes de ~180 mm de odometria es un disparo falso (n2 s34: 49 mm, ancla 109 mm corrida).
         bool sepPoste2Ok = !(parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 < PARK_POSTE2_SEP_POSE_MM);
         if (parkDirecto && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
-            && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
+            && ((scanDirectoInicial && validaPoste2 && !posteSintetico && extRaw <= PARK_POSTE2_EXT_MAX_CM)
+                || fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM)) {
           Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
           parkDetPorPose = true;
           parkScanSubFase  = 2;
@@ -6423,7 +6438,10 @@ void loop() {
           // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
-          bool poste2Cand    = (bajada && huecoMaduro && posteConfirmado && enVentanaPoste2);
+          // Si no se confirmó el primer poste del directo, acotar el eco sintético a la pose.
+          const bool ecoConfirmado = !parkDirecto || parkP1Sonar || parkDetPorPose || !posteSintetico
+                                  || (validaPoste2 && fabsf(errorPoste2) <= 60.0f);
+          bool poste2Cand = bajada && huecoMaduro && posteConfirmado && enVentanaPoste2 && ecoConfirmado;
           bool poste2Detect  = poste2Cand;
           // Una bajada que solo llega a ext >= 12 cm es el haz rozando la orilla de la madera, antes de su cara (ancla -25 mm de media, hasta -89; con ext 3-5 es +10 sd 8): se espera a que baje a la cara.
           if (poste2Cand && PARK_POSTE2_EXT_MAX_CM > 0 && extRaw > PARK_POSTE2_EXT_MAX_CM && ((!parkDetPorPose && parkP1Sonar) || !parkDirecto)) {   // por pose o sin poste 1 por sonar la ventana de pose vence
