@@ -107,9 +107,9 @@ MAX_WHEEL_STEER_DEG  = 40.1   # bici a tope, R 134 mm (CAD decía 44.54 con la i
 # 74° (error 3.2 px; el lente real tiene distorsión de barril). La inclinación sale 25-31° con
 # cualquier FOV supuesto: el 45° de antes NO era el montaje real. Antes: 45° / 97 / 140 (supuestos).
 # En el twin (ruta_perfil, 21 seeds) da 18/21 igual que la cámara vieja, 1.7 s más rápido.
-CAMERA_TILT_DEG      = 34.0     # 24.8 -> 34.0 (2026-11-19): cámara reajustada, BEV recalibrado (calib_camara: 34.0°, h 93, fwd 169)
-CAMERA_HEIGHT_MM     = 95.0
-CAMERA_FWD_MM        = 152.0
+CAMERA_TILT_DEG      = 24.0     # 34.0 -> 24.0 (2026-11-21): BEV recalibrado con 9 cruces (calib_camara: 24.0°, h 91, fwd 142; 14 mm medio). La de 11-19 no cuadraba con la cámara
+CAMERA_HEIGHT_MM     = 91.0
+CAMERA_FWD_MM        = 142.0
 CAMERA_HFOV_DEG      = 74.0     # pinhole equivalente (el twin lo usa en CameraParams)
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
 # Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
@@ -157,9 +157,9 @@ VEHICLE_DIMS_PROVENANCE = {
     "TRACK_MM": "CAD v2 (GLB)",
     "WHEEL_DIAMETER_MM": "README llanta 43 mm",
     "MAX_WHEEL_STEER_DEG": "medido 2026-10-22: R 134 mm (tope izq en tapete) a los dos lados",
-    "CAMERA_TILT_DEG": "PnP de bev_calib.npz del carro nuevo (2026-11-04)",
-    "CAMERA_HEIGHT_MM": "PnP de bev_calib.npz del carro nuevo (2026-11-04)",
-    "CAMERA_FWD_MM": "PnP de bev_calib.npz del carro nuevo (2026-11-04)",
+    "CAMERA_TILT_DEG": "PnP de bev_calib.npz del carro nuevo (2026-11-21, 9 cruces)",
+    "CAMERA_HEIGHT_MM": "PnP de bev_calib.npz del carro nuevo (2026-11-21, 9 cruces)",
+    "CAMERA_FWD_MM": "PnP de bev_calib.npz del carro nuevo (2026-11-21, 9 cruces)",
     "SENSOR_MOUNTS": "CAD v2 (GLB); tof_right supuesto espejo del izquierdo",
     "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM": "100 vs batalla 113, pendiente medir",
 }
