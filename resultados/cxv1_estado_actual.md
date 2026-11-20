@@ -1,32 +1,27 @@
-# cxv1_estado_actual — estado (solo lectura, sin lanzar nada)
+# cxv1 — estado actual de la cola cxv1_r1_seq.sh (19:15 PST, 13-nov-2026)
 
-Hora: 2026-11-13 19:04 PST. Tipo: carrera completa desde el cajón en el banco con latencia (uno.sh/costo.py, FF 2.8 / FD 3.8, primer plan 1.95 s, VBAT 12.5, 96 carreras, P=7). **Sin resultados ni comparación de tiempos** (no ha corrido ninguna carrera cxv1).
+**Tipo de prueba:** repetición aislada cxv1_*_1113a_r1 (mismo tipo que las tandas cxv1_*_1113a originales).
 
-## Cinco originales cxv1_*_1113a (sin r1)
+## Resumen
+- **No hubo deadlock.** El PID 197778 ya no existe: la cola terminó y salió sola.
+- Log: `18:48:57 esperando…` → `19:09:15 locks adquiridos` (tomó twin.lock y luego /tmp/fox-grok-bancos.lock, en ese orden, sin quedarse bloqueada).
+- **lock_base_r1 sí arrancó** (19:11:35) y terminó en 19:11:57.
+- **Las 6 tandas son INVÁLIDAS: el disco se llenó** (`OSError: [Errno 28] No space left on device`).
+  - lock_base_r1: 8/96 ok, wall 21.4 s, 85 carreras sin STOP → INVÁLIDA (ENOSPC, no es un resultado del cambio).
+  - lock3_r1: 96 carreras sin STOP, wall 7.9 s → INVÁLIDA.
+  - debt_base_r1, debt_r1, stale_base_r1, stale_r1: fallaron en segundos; .md/_put.json/_WALL vacíos (0 bytes) → INVÁLIDAS.
+- No cambié nada en la cola (no hacía falta corregir locks). No hay ninguna cola cxv1 corriendo ahora ni bancos duplicados.
 
-| tanda | PID run.sh | estado ahora | último log (mtime) |
-|---|---|---|---|
-| cxv1_lock3_1113a | 184286 | **no existe** (cancelada 18:51 PST, SIGTERM) | 18:40 PST |
-| cxv1_debt_base_1113a | 160738 | **no existe** (cancelada 18:51) | 18:25 |
-| cxv1_debt_1113a | 163723 | **no existe** (cancelada 18:51) | 18:25 |
-| cxv1_stale_base_1113a | 164896 | **no existe** (cancelada 18:51) | 18:26 |
-| cxv1_stale_1113a | 164502 | **no existe** (cancelada 18:51) | 18:25 |
+## /proc/locks (19:15)
+- twin.lock (inodo 121879): **ningún holder** (no aparece en /proc/locks).
+- /tmp/fox-grok-bancos.lock (inodo 7353): **ningún holder**.
+- Solo hay flocks del sistema (box-bounded-log), ninguno de colas Fox.
 
-Cancelación solicitada: **hecha y efectiva**. Las cinco tenían 10–26 min de vida al cancelar, estaban en su bucle de espera y quedaron en 0/96 (inválidas, sin resultados parciales). Hoy no queda ningún proceso `cxv1_*_1113a_run.sh` vivo. (El informe de cancelación cxv1_estado_cancelacion.md sigue pendiente de push en pend/.)
+## Disco
+- `/`: 128G, 126G usados, **1.5G libres (99%)**.
+- /workspace/fox: 99G; /tmp/lat: 22G (carpetas de corridas).
+- Hay que liberar espacio (p. ej. carpetas viejas de /tmp/lat/* y worktrees *_wt antiguos) antes de relanzar. No borré nada: necesita visto bueno de Jesse.
 
-## Única cola r1
-
-- Script: `/workspace/fox/cxv1_r1_seq.sh`, PID **197778** (bash), vida ~14–15 min (inicio 18:48:57 PST). Log: `/workspace/fox/cxv1_r1_seq.log` (única línea: "esperando a que terminen las tandas originales").
-- Hijo **203667** `flock 8` (vida ~11–12 min): ya pasó la espera de originales; **está bloqueado esperando /workspace/fox/twin.lock**.
-- Orden de espera en twin.lock (/proc/locks): titular **197028** `flock twin.lock ./v1kB_run.sh` (~15 min) → en cola **197584** `./v1k0_run.sh` → en cola **203667** (cxv1 r1).
-- v1kB tiene el lock pero aún no corre: su script espera a que no haya ningún `latencia/uno.sh`. El banco que sí corre ahora es **cxpark_b1b_1113** (run.sh PID 171724, ~34 min, lanzado fuera de twin.lock; xargs -P 7 arrancó ~19:03 PST, 7 uno.sh / 8 costo.py activos).
-- Después del lock, la cola r1 aún tomará /tmp/fox-grok-bancos.lock (hoy no existe, libre) y esperará carga<10 sin otros uno.sh/costo.py antes de cada una de sus 6 tandas (lock_base, lock3, debt_base, debt, stale_base, stale). Ninguna tanda r1 ha empezado (sin _ENV/_WALL).
-
-## Caja
-
-- Load: 8.4 / 20.4 / 39.9 (1/5/15 min, 8 CPU) — bajando, pero sube de nuevo con cxpark_b1b_1113.
-- Memoria: 16002 MB total, ~4.6 GB usados, ~11.4 GB disponibles, sin swap.
-
-## Resumen de espera
-
-cxv1 r1 → **no espera originales** (ya no existen) → **espera twin.lock** (detrás de v1kB y v1k0) → v1kB espera a que termine el banco ajeno cxpark_b1b_1113. No se lanzó nada, no se tocaron bancos ajenos.
+## Pendiente
+- Liberar disco y relanzar la secuencia completa (una sola cola, con ambos locks en el mismo orden twin.lock → bancos).
+- Los _put.json de debt/stale en pend/ están vacíos (0 bytes) y no deben publicarse como resultados.
