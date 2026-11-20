@@ -37,7 +37,7 @@ Each competition corresponds to one release. A release is a git tag on the exact
 
 ## v2.0-internacional — in progress
 
-The tag `v2.0-internacional` will be placed on the exact commit raced at the international final. Full design and results: [README](../README.md) (v2) — changes since v1 in [§3](../README.md#3-from-v1-to-v2--what-the-national-final-taught-us).
+The tag `v2.0-internacional` will be placed on the exact commit raced at the international final. Full design and results: [README](../README.md) (v2) — changes since v1 in [§4.2](../README.md#42-from-v1-to-v2--what-the-national-final-taught-us).
 
 **Hardware**
 
@@ -60,7 +60,7 @@ The tag `v2.0-internacional` will be placed on the exact commit raced at the int
 | Start | Blind start: parking-lot position from a ToF histogram + orange-line votes | In use; known limitation without line votes (ERR-31) |
 | Open Challenge | `RondaAbierta.ino`, ESP32 only (ToF wall following + BNO085) | 12/12 corners both directions, 29.6–29.9 s |
 | Digital twin | Real firmware + real Pi runtime in a simulator; 42 seeds × 5 noise levels bench; exports the race build `PurePursuitCarrera.ino` + `carrera.json` | In use for every change |
-| Camera | Fixed exposure per venue (`mide_exposicion.py`), lens-shading table | Validated (runs 57–64) |
+| Camera | Lens-shading table; fixed exposure per venue (`mide_exposicion.py`, runs 57–64), back to automatic exposure after the 2026-11-19 remount; BEV recalibrated | In use |
 | Recording | Video + clean BEV per run, auto-stop 5 s after the car stops | In use |
 
-The release is tagged when the validation matrix in [README §10.4](../README.md#104-obstacle-challenge-v2-real-car-route-mode) passes.
+The release is tagged when the validation matrix in [README §3.10.4](../README.md#3104-obstacle-challenge-v2-real-car-route-mode) passes.

@@ -127,7 +127,7 @@ Floor-colour centerline in the BEV, first `PurePursuit.ino`, first `centerline.p
 Replaces the reactive pillar-offset PID, which over-reacted near and under-reacted far.
 `79706be` (camera-duplicate fix) · `e494d8c` (centre algorithm) · `556266b`.
 → [README iteration log v2.0](docs/v1-national/README.md#53-iteration-log),
-[§4.3](README.md#64-sensors--selection-placement-and-calibration_pursuit).
+[§2.4](README.md#24-sensors--selection-placement-and-calibration).
 
 ### 2026-06-25 — Last commit before the July break
 `2b0f82d`. Repo quiet until 2026-08-07.
@@ -380,7 +380,7 @@ The components arrived, and each one was tested alone before integration. One sk
 | `ServoTest` | The servo's real usable range for the new steering |
 
 ### 2026-09-28 → 10-04 — v2 mechanical design
-Full redesign of the chassis to make the car shorter, around the new parts ([README §2.6](README.md#51-chassis--shorter-car-battery-in-the-middle-pi-on-top)):
+Full redesign of the chassis to make the car shorter, around the new parts ([README §1.1](README.md#11-chassis--shorter-car-battery-in-the-middle-pi-on-top)):
 - The motor turns parallel to the rear axle, driving the differential with spur gears (module 1, 15T/30T, same 2:1 as the old bevel pair). Involute profiles generated as DXF by our own script.
 - The battery moves to the center, crosswise, in a side-loading tunnel where the Raspberry Pi used to be.
 - The Raspberry Pi 5 goes on top, open to the air for its fan.
@@ -426,7 +426,7 @@ Found on the way: the main loop doesn't wait for a new camera frame, so at 40 fp
 ### 2026-10-05 → 10-07 — Mechanical design finished; tests with the new parts; PCB started
 - Mechanical v2 design completed, around the final steering.
 - Tests with the new components on the car.
-- Start of the **two-floor PCB**: a power floor with both regulators, the motor driver, switch and fuse; and a logic floor with the ESP32 and the connectors for 3 ultrasonics, 4 ToF, BNO085 and servo ([README §3.3](README.md#63-pcb-revb--two-stacked-boards)).
+- Start of the **two-floor PCB**: a power floor with both regulators, the motor driver, switch and fuse; and a logic floor with the ESP32 and the connectors for 3 ultrasonics, 4 ToF, BNO085 and servo ([README §2.3](README.md#23-pcb-revb--two-stacked-boards)).
 
 ### 2026-10-06 → 10-07 — Documentation for the international final
 - The `parking` branch merged into `main` (`844195e`, `2dd11cf`). The README judged at the final is kept as the base, with v2 added on top.
@@ -437,7 +437,7 @@ Found on the way: the main loop doesn't wait for a new camera frame, so at 40 fp
 ## Phase 12 — New car on the track, route mode, PCB RevB (2026-10-08 → 10-24)
 
 ### 2026-10-13 — Route mode (**branch**, twin)
-- The obstacle round was redesigned around a **map of pillar seats** instead of reacting to each pillar: the camera votes on the seats, a dynamic-programming planner computes the whole lap, and pure pursuit on the ESP32 follows it ([README §8](README.md#8-obstacle-management--route-mode)).
+- The obstacle round was redesigned around a **map of pillar seats** instead of reacting to each pillar: the camera votes on the seats, a dynamic-programming planner computes the whole lap, and pure pursuit on the ESP32 follows it ([README §3.7](README.md#37-obstacle-management--route-mode)).
 - An EKF localizer (encoder + gyro + ToF ray-cast against the map) and a lap-1 discovery mode for seats not yet seen.
 - Twin result: 69/69 races on known maps and 21/21 with lap-1 discovery. The old line builder (`_build_line`) passed 1/21 on the same seeds.
 
@@ -465,7 +465,7 @@ Found on the way: the main loop doesn't wait for a new camera frame, so at 40 fp
 
 ### 2026-11-06 — Raspberry Pi 5 lost
 - The board stack was mounted rotated 180°, which put ~11 V on the Pi's 5 V rail and killed its power chip. A 1000 µF capacitor on the Pi's 5 V had also been tripping the MINI560 at power-on; it was removed.
-- Replaced with a Pi 5 8 GB using the same SD card. Pre-mount check added to the build steps: measure 5.0–5.2 V on the Pi header before plugging the Pi in ([README §12.1](README.md#121-build-the-car)).
+- Replaced with a Pi 5 8 GB using the same SD card. Pre-mount check added to the build steps: measure 5.0–5.2 V on the Pi header before plugging the Pi in ([README §5.1](README.md#51-build-the-car)).
 
 ### 2026-11-07 — Twin and route mode merged; first test on the real car
 - The twin, route mode and the race build merged into `main` (`a01bacb6`, `6b841973`).

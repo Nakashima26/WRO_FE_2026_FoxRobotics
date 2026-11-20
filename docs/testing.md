@@ -77,9 +77,9 @@ Replay can't test anything that depends on the car moving differently, such as a
 
 ### 6.2 v2 results (international final)
 
-The v2 results live in the main README, next to the design they validate: component and bench tests in [README §10.2](../README.md#102-component-and-bench-results), Open Challenge in [§10.3](../README.md#103-open-challenge-v2), Obstacle Challenge track runs and the formal release matrix (OBS-01…06) in [§10.4](../README.md#104-obstacle-challenge-v2-real-car-route-mode).
+The v2 results live in the main README, next to the design they validate: component and bench tests in [README §3.10.2](../README.md#3102-component-and-bench-results), Open Challenge in [§3.10.3](../README.md#3103-open-challenge-v2), Obstacle Challenge track runs and the formal release matrix (OBS-01…06) in [§3.10.4](../README.md#3104-obstacle-challenge-v2-real-car-route-mode).
 
-On v2 every change is first run on the **digital twin** before touching the track: the real firmware and the real Pi runtime against 42 random layouts × 5 noise levels, compared paired against the previous version ([README §9](../README.md#9-digital-twin--software-in-the-loop-simulator)). A change that adds a new failure on any seed is not merged. Track runs then check what the twin can't model, and any difference between car and twin is modeled back into the twin.
+On v2 every change is first run on the **digital twin** before touching the track: the real firmware and the real Pi runtime against 42 random layouts × 5 noise levels, compared paired against the previous version ([README §3.9](../README.md#39-digital-twin--software-in-the-loop-simulator)). A change that adds a new failure on any seed is not merged. Track runs then check what the twin can't model, and any difference between car and twin is modeled back into the twin.
 
 A configuration passes only with **3 consecutive clean runs** per direction, with random pillar layouts and a random parking-lot position.
 
@@ -103,4 +103,4 @@ v1 (national final) — kept for the record:
 - The obstacle memory rotated its map with the wrong sign (ERR-21). **v2:** replaced by the seat map of route mode.
 - On the Raspberry Pi 5 the loop ran faster than the camera (ERR-26). **v2:** Picamera2 with the ISP doing the scaling, ~40 fps, and the per-frame constants re-scaled.
 
-v2 (current) — see [README §10.5](../README.md#105-known-limitations): lap-1 mapping of the lone pillar after a corner, the lot fix without orange-line votes, the front ToF range on the black wall, Pi 5 temperature without a fan, and parking realism in the twin.
+v2 (current) — see [README §3.10.5](../README.md#3105-known-limitations): lap-1 mapping of the lone pillar after a corner, the lot fix without orange-line votes, the front ToF range on the black wall, Pi 5 temperature without a fan, and parking realism in the twin.

@@ -25,4 +25,4 @@ RPi.GPIO>=0.7.1 ; platform_machine != "aarch64"      # Pi: apt python3-rpi-lgpio
 #
 # ── ESP32 firmware (Arduino, not Python) ────────────────────────────────────
 #   arduino-cli core install esp32:esp32
-#   arduino-cli lib  install "MPU6050_tockn"
+#   arduino-cli lib  install "VL53L1X"          # Pololu VL53L1X (v2 ToF sensors)
