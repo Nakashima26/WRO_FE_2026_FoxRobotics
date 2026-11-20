@@ -909,6 +909,11 @@ flowchart LR
 | 11-11 | 51 | Hit 2nd green after the lot | ERR-31: lot fix without orange-line votes | Open |
 | 11-12 | 57, 59, 60 | Hit the island after the lot | Auto-exposure burn + line votes rejected while still turning → fixed exposure (`c6757575`), turn limit 3°→10° (`1000d3cf`) | Fixed |
 | 11-12 | 62, 64 | Completed; lot error +196/+201 mm vs ~+230 real; near-miss at E/X in lap 1 | E/X1 ↔ E/X2 flip in lap 1 | Open |
+| 11-20 | **98** | Seed 23 layout, CCW: **3 laps in ~31 s, no pillar touched, no wrong side**; after the U-turn the parking anchor was behind the real car, it reversed too late and touched the wall | Lot localization in the return leg | Race: pass · Park: open |
+| 11-20 | **99** | Same layout repeated: identical timing (laps 31 s, park 14 s), no pillar touched; ended 19° from parallel (run 98: 27°) after 11 steering reversals inside the lot | Same as run 98 | Race: pass · Park: open |
+| 11-20 | 100–102 | Same layout at noon: hit the island ~4 s after the start, all three | Lot fix matched the orange tape to the wrong corner: the right tape gave +166..+192 mm, just outside the ±150 mm vote window, so the vote jumped to a tape 1.4 m away (−565 mm). Window 150 → 300 mm and lot position clamped to the legal range (`41dc72be`) | Fixed |
+| 11-20 | **103** | Lot fix correct (+0 mm); **3 laps, 12 corners in ~30 s**; grazed the red pillar in section 2 (lap 1) | The red is not visible from the lot straight; it is confirmed after the corner and the route shifts ~590 mm sideways at PWM ~200 | Open |
+| 11-20 | **104** | Lot fix correct (−33 mm); 3 laps in ~31 s and **parked fully inside and parallel** (first full parallel park of the v2 car); hit the same red pillar | Route passes the outer-row red with ~81 mm clearance, but the lateral pose was ~200 mm toward the inside (side ToF reads short beyond ~45 cm, §3.10.5). Lap-1 corner slowdown near a pillar added (`4de45492`) but did not trigger because of the pose error | Open |
 
 **Formal validation matrix for the release** (to be filled with the final firmware; each row = one full round with a random layout and a random lot position):
 
@@ -917,15 +922,16 @@ flowchart LR
 | OBS-01 | CW | **[TODO]** | | | | | | | | |
 | OBS-02 | CW | | | | | | | | | |
 | OBS-03 | CW | | | | | | | | | |
-| OBS-04 | CCW | | | | | | | | | |
-| OBS-05 | CCW | | | | | | | | | |
+| OBS-04 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (touched wall) | 11.72 | `68bd18b2` | Park fail |
+| OBS-05 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (19° off, not inside) | 11.68 | `68bd18b2` | Park fail |
 | OBS-06 | CCW | | | | | | | | | |
 
 ### 3.10.5 Known limitations
 
 - **Lap-1 mapping of the lone pillar right after a corner** (E/X1 vs E/X2) can flip until the car is straight; planned fix: keep both seats as obstacles until confirmed head-on.
 - **Lot position without orange-line votes** falls back to ToF only, which can be ~0.3 m off (ERR-31).
-- **Parking is not finished yet.** The car leaves the lot, completes the race and runs the parking sequence, but it has not yet ended **fully inside** the lot on the v2 car. We are tuning the arc–straight–arc maneuver (§3.4) to make it both complete and as fast as possible.
+- **Lateral position on the real car** is 100–250 mm off: the side ToF read short beyond ~45 cm (right sensor −110 mm at 57 cm, −214 mm at 72 cm) and the localizer trusts them up to 45–48 cm. In straights the ToF corridor width reads 900–950 mm instead of 1000 (run 104). The route passes outer-row pillars with ~80 mm clearance, so this error is enough to touch them (runs 103–104). Planned fix: calibrate both side ToF, check the corridor width live, and add the wall seen by the camera as a second lateral reference.
+- **Parking is not yet repeatable.** The v2 car ended fully inside and parallel for the first time in run 104 (2026-11-20). Runs 98–99 on the same layout ended 19–27° off because the lot anchor after the U-turn was behind the real car. We are still tuning the arc–straight–arc maneuver (§3.4) so it parks every time and as fast as possible.
 - **Consistency of the full round.** Clean 3-lap rounds with a correct map exist (runs 41, 48), but not every run yet completes all 3 laps with every pillar mapped correctly; the open mapping cases are the two above. The validation matrix above will be filled once this is consistent.
 - **Color depends on the camera exposure.** After the 2026-11-19 remount (automatic exposure) the red pillars appeared at hue 5–7 instead of 170–179 and the old red band missed them; the ratio-based classifier that fixes it is validated offline and still has to be tested on the car (§6).
 - **Front ToF** is reliable only to ~80 cm on the black wall; it is never used for the lot fix.
