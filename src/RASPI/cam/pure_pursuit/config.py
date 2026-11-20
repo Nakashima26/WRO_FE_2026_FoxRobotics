@@ -1363,6 +1363,10 @@ ROUTE_FIX_PIX_MAX_TURN_DEG = 10.0   # 3 -> 10 (2026-11-12): la naranja aparece c
 # Pixeles solo si la cinta cruza la recta con |n·a| >= esto (≈45°); si no, la recta ajustada de siempre.
 ROUTE_FIX_PIX_RAW = True   # True: vota con los pixeles de cinta del frame aunque el tracker aún no la dé por vista (persist)
 ROUTE_FIX_FORCE_WAIT_MM = 250.0   # >0: al llegar al final supuesto de la recta con la cinta vista pero sin votos, esperar este avance antes de forzar
+ROUTE_FIX_WAIT_FRAMES = None   # tope en cuadros de _force_wait (parado, la distancia no crece); None = solo distancia
+ROUTE_FIX_PENDING_FRAMES = None   # cuadros que se espera evidencia en vez de forzar con la media plana (sin cinta y masa < PENDING_MASS); None = fuerza ya
+ROUTE_FIX_PENDING_MASS = 0.1
+ROUTE_FIX_PENDING_CREEP_PWM = None   # mientras espera, tope mínimo de PWM para avanzar y ver la cinta; None = sin avance
 ROUTE_FIX_PIX_MIN_NA = 0.7
 # Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.
 ROUTE_FIX_LINE_DECIDE_N = 5
