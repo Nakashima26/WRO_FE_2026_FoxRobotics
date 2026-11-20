@@ -4028,6 +4028,16 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",rc=");   ackOut.print(rutaCarga);    // diagnóstico de la subida de ruta:
     ackOut.print(",rk=");   ackOut.print(rutaRecib);    //   puntos esperados / recibidos / último RTE
     ackOut.print(",re=");   ackOut.print(rutaUltRte);
+    // Diagnóstico del parking (solo lectura): pkf = parkFase, pal = along actual,
+    // pkp = pka de la Pi, pkd/pkh/pks = ancla (along, h por pose, h por sonar),
+    // pk1 = odomMm en el poste 1 (-1 = sin poste 1).
+    ackOut.print(",pkf=");  ackOut.print(parkFase);
+    ackOut.print(",pal=");  ackOut.print(alongSalidaMm(), 0);
+    ackOut.print(",pkp=");  if (isnan(rutaPka)) ackOut.print('x'); else ackOut.print(rutaPka, 0);
+    ackOut.print(",pkd=");  ackOut.print(parkDetAlong, 0);
+    ackOut.print(",pkh=");  ackOut.print(parkDetHPose, 0);
+    ackOut.print(",pks=");  ackOut.print(parkDetHSon, 0);
+    ackOut.print(",pk1=");  ackOut.print(parkOdomPoste1);
     ackOut.print(",lpm=");  ackOut.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
     loopMaxUs = 0;
     ackOut.print(",lps=");
