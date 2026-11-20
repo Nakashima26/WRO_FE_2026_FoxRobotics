@@ -13,7 +13,16 @@ from pure_pursuit import ring_route as RR
 _clk = time.perf_counter if os.environ.get("TWIN_COST_CLOCK") == "perf" else time.thread_time
 from pure_pursuit.twin import pi_link as PL
 st = types.SimpleNamespace(t0=None, tk=0.0, tend=0.0, dp=0.0, costs=[], dps=[])
+# TWIN_COST_FIJO=1: costo sorteado (lognormal, RNG por seed + TWIN_NOISE_SEED) en vez de medido: el banco se
+# vuelve reproducible y no depende de la carga de la Mac. Medianas y p95 = lo medido en m0 (cuadro 7 ms p95 ~19, DP 36 ms).
+import random as _rnd, math as _m
+FIJO = os.environ.get("TWIN_COST_FIJO") == "1"
+_R = _rnd.Random(f"{sys.argv[1] if len(sys.argv) > 1 else 0}/{os.environ.get('TWIN_NOISE_SEED', '0')}")
+F_MED = float(os.environ.get("TWIN_COST_FIJO_FRAME_MS", "7")) / 1000; F_SIG = 0.6
+D_MED = float(os.environ.get("TWIN_COST_FIJO_DP_MS", "36")) / 1000; D_SIG = 0.35
+st.fr = 0.0
 def costo():  # segundos de Pi transcurridos en este cuadro
+    if FIJO: return st.fr + st.dp * FD
     e = _clk() - st.t0
     return (e - st.dp) * FF + st.dp * FD
 _plan = RR.plan
@@ -27,6 +36,7 @@ def plan(*a, **k):
         t = _clk(); r = _plan(*a, **k); d = _clk() - t
     finally:
         st.depth = 0
+    if FIJO: d = D_MED * _m.exp(D_SIG * _R.gauss(0, 1)) / FD
     if FIRST and FD and len(RR._GEOM_CACHE) > g0: d = FIRST / FD   # plan que construye la caché: en la Pi 5 real 1.95 s
     st.dp += d; st.dps.append(d * FD)
     sys.stdout.write(f"PLAN t={st.tk:.3f} costo_ms={d*FD*1000:.0f} conf={len(a[1]) if len(a)>1 else '?'}\n")
@@ -54,6 +64,7 @@ class _FakeJob:
         dp0 = st.dp; t = _clk()
         self.target(*self.args, **self.kwargs)
         w = _clk() - t; d = st.dp - dp0
+        if FIJO: w = d
         st.dp = dp0
         if st.t0 is not None: st.t0 += w
         now = st.tk + (costo() if st.t0 is not None else 0.0)
@@ -71,7 +82,9 @@ def costo():
     return c * PEN if (st.job_end is not None and st.tk < st.job_end) else c
 class COST:
     @staticmethod
-    def begin(tk, tend): st.t0 = _clk(); st.tk = tk; st.tend = tend; st.dp = 0.0
+    def begin(tk, tend):
+        st.t0 = _clk(); st.tk = tk; st.tend = tend; st.dp = 0.0
+        if FIJO: st.fr = F_MED * _m.exp(F_SIG * _R.gauss(0, 1))
     @staticmethod
     def next_tk(tk, tend, period):
         c = costo(); st.t0 = None; st.costs.append(c)
