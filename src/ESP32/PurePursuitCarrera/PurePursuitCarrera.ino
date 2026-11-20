@@ -283,6 +283,15 @@ float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del ca
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
+// Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
+// RUTA_SUB_CTE_MM y sigue creciendo -> tope de PWM RUTA_SUB_PWM hasta que deja de crecer. 0 = apagado.
+const float RUTA_SUB_CTE_MM     = 60.0f;
+const int   RUTA_SUB_PWM        = 120;
+const float RUTA_SUB_SAT        = 0.5f;    // fraccion de RUEDA_TOPE_DEG
+const float RUTA_SUB_RISE_MM    = 4.0f;    // crecimiento minimo del error en RUTA_SUB_VENT_MS
+const unsigned long RUTA_SUB_VENT_MS = 100;
+const unsigned long RUTA_SUB_HOLD_MS = 150;
+int rutaSubCap = -1;                       // tope vigente (-1 = ninguno)
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
@@ -1545,7 +1554,15 @@ unsigned long parkPoste1Ms          = 0;      // millis de la detección del POS
 // Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
 // PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
 const long          PARK_POSTE2_POSE_MM   = 340;
+PARK_AJ int          PARK_POSTE2_EXT_MAX_CM  = 10;       // poste 2 por sonar solo con ext <= esto (0 = apagado)
+PARK_AJ int          PARK_POSTE2_ESPERA_MS   = 350;      // espera maxima a que la bajada llegue a la cara
+unsigned long        parkP2DefMs             = 0;
+PARK_AJ float        PARK_POSTE2_SEP_POSE_MM = 180.0f;   // odometria minima desde el poste 1 (sonar) para aceptar el poste 2 por pose
+PARK_AJ float        PARK_POSTE2_SEP_TOL_MM = 60.0f;    // tolerancia de la separacion odometrica poste1-poste2 (normal 223-294 mm)
+PARK_AJ float        PARK_POSTE2_SEP_MM     = 272.0f;   // separacion nominal usada para corregir el ancla
+PARK_AJ long         PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
 long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
+bool          parkP1Sonar           = false;  // el poste 1 se vio de verdad con el sonar (no por la via de "paso antes del armado")
 int           parkPoste2Pose        = 0;      // 1 = el poste 2 salió por odometría (ACK p2o=)
 float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
 float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
@@ -1649,6 +1666,10 @@ PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
+// Modo RUTA: si al terminar de alejarse quedan menos de esto (mm, eje trasero a la pared del fondo) no se endereza: la U arranca ya
+// (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
+PARK_AJ long         PARK_UTURN_ENDEREZA_REST_MM = 750;
+PARK_AJ long         PARK_UTURN_ENDEREZA_REST_TOL = 14;   // con poco fondo: 0 = salta el enderezado; >0 = endereza solo hasta esta tolerancia (grados, en vez de 5)
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 1;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 PARK_AJ long         PARK_PEGADO_CICLA          = 1;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
 PARK_AJ long         PARK_UTURN_TOPE            = 200;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
@@ -1745,8 +1766,10 @@ PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
 PARK_AJ float        PARK_PL_WF                  = 55.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
 const float         PARK_PL_WF_DIRECT_NEAR      = 63.0f;    // objetivo opcional cuando el escaneo directo llega cerca
+PARK_AJ float        PARK_PL_H_BAJA_MM           = 290.0f;
+PARK_AJ float        PARK_PL_WF_H_BAJA           = 35.0f;
 const float         PARK_PL_WF_DIRECT_NEAR_H_MM = 360.0f;  // altura máxima estimada en el segundo poste
-PARK_AJ float        PARK_PL_WF_U                = 53.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
+PARK_AJ float        PARK_PL_WF_U                = 58.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
@@ -2779,6 +2802,7 @@ void resetParkScan() {
   parkCiclos           = 0;
   parkScanSubFase      = 0;
   parkOdomPoste1       = -1;
+  parkP1Sonar          = false;
   parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
@@ -2826,7 +2850,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -3548,6 +3572,9 @@ float rutaExtTapeteCm() {
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
 bool parkPlanRectaOn = false;
+float parkPlanExtraMm0 = -1.0f;   // odometria donde la recta pasaria a INT con la nariz pegada al poste 2
+PARK_AJ int          PARK_PL_RECTA_EXT_CM        = 3;   // el sonar salta 2-3 entre corridas casi iguales: con <= 2 solo se activaba a veces
+PARK_AJ float        PARK_PL_RECTA_EXTRA_MM      = 15.0f;   // 0 = apagado
 bool parkDetPorPose = false, parkIgnOk = false;
 float parkIgnAlong = 0.0f;
 float parkDetAlong = 0.0f, parkDetHPose = 0.0f, parkDetHSon = 350.0f;
@@ -3631,12 +3658,42 @@ int rutaServo(float ruedaDeg) {
   return constrain((int)lroundf(RUTA_CENTRO_SERVO + (der ? -u : u)), SERVO_MIN_DEG, SERVO_MAX_DEG);
 }
 
+// Error de seguimiento del ESP (mm, distancia de su pose a la ruta cerca de rutaI) y deteccion de subviraje.
+static float rutaCteMm(float x, float y) {
+  float best = 1e18f;
+  for (int o = -1; o <= 0; o++) {
+    int a = ((rutaI + o) % rutaN + rutaN) % rutaN, b = (a + 1) % rutaN;
+    float sx = rutaX[b] - rutaX[a], sy = rutaY[b] - rutaY[a], sl = sx * sx + sy * sy;
+    float u = sl > 1.0f ? constrain(((x - rutaX[a]) * sx + (y - rutaY[a]) * sy) / sl, 0.0f, 1.0f) : 0.0f;
+    float dx = rutaX[a] + u * sx - x, dy = rutaY[a] + u * sy - y;
+    best = min(best, dx * dx + dy * dy);
+  }
+  return sqrtf(best);
+}
+float rutaSubWheelDeg = 0.0f;   // ultimo volante pedido (lo escribe el caller antes del motor)
+void rutaSubvirajeActualiza(float x, float y) {
+  static unsigned long tRef = 0, tHold = 0;
+  static float cteRef = 0.0f;
+  unsigned long now = millis();
+  float cte = rutaCteMm(x, y);
+  if (now - tRef >= RUTA_SUB_VENT_MS) {
+    bool crece = (cte - cteRef) > RUTA_SUB_RISE_MM;
+    bool sat = fabsf(rutaSubWheelDeg) >= RUTA_SUB_SAT * RUEDA_TOPE_DEG;
+    bool enLaps = turnsCompleted >= 1 && turnsCompleted < TURNS_PER_RACE && estado != INICIO;
+    if (enLaps && sat && crece && cte > RUTA_SUB_CTE_MM) tHold = now + RUTA_SUB_HOLD_MS;
+    cteRef = cte; tRef = now;
+  }
+  rutaSubCap = (now < tHold) ? RUTA_SUB_PWM : -1;
+
+}
+
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
 // Devuelve false si no aplica. ruedaDeg: + = derecha.
 bool rutaSteer(float &ruedaDeg) {
   if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
   float x, y;
   rutaPoseTapete(x, y);
+  const float x0 = x, y0 = y;
   float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
   if (RUTA_LAG_S > 0.0f) {
     // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
@@ -3680,6 +3737,7 @@ bool rutaSteer(float &ruedaDeg) {
     }
     rutaI = besti;
   }
+  if (RUTA_SUB_CTE_MM > 0.0f) rutaSubvirajeActualiza(x0, y0);
   float lookMm = (RUTA_LOOKAHEAD_L23_MM > 0.0f && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE) ? RUTA_LOOKAHEAD_L23_MM : RUTA_LOOKAHEAD_MM;
   if (RUTA_LOOKAHEAD_L1_MM > 0.0f && turnsCompleted < 4 && estado != INICIO) lookMm = RUTA_LOOKAHEAD_L1_MM;
   int j = (rutaI + (int)(lookMm / rutaPaso + 0.5f)) % rutaN;
@@ -3689,6 +3747,7 @@ bool rutaSteer(float &ruedaDeg) {
   float ld2 = fwd * fwd + right * right;
   if (ld2 < 1.0f) ld2 = 1.0f;
   ruedaDeg = atanf(RUTA_BATALLA_MM * 2.0f * right / ld2) * RAD_TO_DEG;
+  rutaSubWheelDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
   return true;
 }
 
@@ -4328,9 +4387,11 @@ void controlPID(long distL, long distR) {
       // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
       // el carro se para al cruzar la meta. Si no, igual que antes: min(rutaVel, velocidadMotor).
       if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
-        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+        setMotorTope(rutaSubCap >= 0 ? min(rutaVel, rutaSubCap) : rutaVel, min(RUTA_PWM_MAX, 255));
       } else {
-        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+        int vm = rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor;
+        if (rutaSubCap >= 0) vm = min(vm, rutaSubCap);
+        setMotor(vm);
       }
       Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);
       Serial.print(" | Servo:");  Serial.print(servoAngle);
@@ -5909,14 +5970,17 @@ void loop() {
       // (PARK_CAIDA_N) como el hueco (PARK_GAP_N) piden 2 lecturas seguidas.
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
+      bool  posteSintetico  = false;
 #if FOX_US_DE_TOF && FOX_TOF
       // ToF inválido sobre el poste (orillas71/72, 2026-11-17): justo en el poste 1 el ToF exterior dio -1
       // (poste a ~7 cm + pared a ~27 cm en el mismo cono), que leerDistancia() vuelve 200 = "sin eco", y el
       // poste no contaba. Escaneando a ~27 cm de la pared el Short siempre lee la pared: un inválido ahí es el
       // poste, se toma como bajada.
       if (PARK_TOF_INVALIDO_POSTE && parkFase == 0 && parkBaseN >= PARK_BASE_N
-          && tofMm[parkParedEsIzquierda ? 0 : 1] <= 0 && parkBase > (float)(PARK_CAIDA_CM + 2))
+          && tofMm[parkParedEsIzquierda ? 0 : 1] <= 0 && parkBase > (float)(PARK_CAIDA_CM + 2)) {
+        posteSintetico = true;
         extRaw = max(1L, (long)(parkBase - PARK_CAIDA_CM - 1));
+      }
 #endif
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
       int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
@@ -5938,7 +6002,9 @@ void loop() {
                       : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
         bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
         bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
-        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0
+        bool  restCorto = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+                          && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
+        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0 || (restCorto && PARK_UTURN_ENDEREZA_REST_TOL == 0)
                                 || (PARK_UTURN_ENDEREZA == 2 && parkRecorridoMm() < 30.0f))) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U sin enderezar (lat="); Serial.print(lateral, 1);
@@ -5963,7 +6029,10 @@ void loop() {
         motorAdelante();
         servoRumboPark(parkRumboGiro0);
         setMotorTope(alejarPwm, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
-        if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
+        bool  restCorto27 = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+                            && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
+        float tolEnd = (restCorto27 && PARK_UTURN_ENDEREZA_REST_TOL > 0) ? (float)PARK_UTURN_ENDEREZA_REST_TOL : 5.0f;
+        if (fabs(anguloGyro - parkRumboGiro0) <= tolEnd || millis() - parkFaseMs >= 1500) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
         }
@@ -5981,8 +6050,19 @@ void loop() {
         float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
         long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
         if (parkServoU == 0) {
-          int gapMm = (extAhoraP > 5 && extAhoraP < 150) ? (int)extAhoraP * 10 : 700;
-          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
+          int gapMm = 700;
+          if (extAhoraP > 5 && extAhoraP < 150) {
+            gapMm = (int)extAhoraP * 10;
+          } else if (piRuta && rutaTfOk && rutaSecSalida >= 0) {
+            // Con el ToF lateral fuera de rango, la pose acota la abertura del arco.
+            gapMm = (int)constrain(rutaExtTapeteCm() * 10.0f, 550.0f, 700.0f);
+          }
+          const bool fondoCorto = extAhoraP > 5 && extAhoraP < 150
+                               && !direccionIzquierda && piRuta && rutaTfOk && rutaSecSalida >= 0
+                               && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM
+                               && fabsf(anguloGyro - parkRumboGiro0) > 5.0f;
+          // Si empezamos la U sin terminar de enderezar, dejar otro cm respecto a la pared.
+          int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10 - (fondoCorto ? 10 : 0);
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
           float delta = atan(RUTA_BATALLA_MM / radio) * 180.0f / 3.14159265f;
@@ -6172,8 +6252,12 @@ void loop() {
         // mueve base ni error (PARK_PUNTA_SALTO_MAX_CM, orillas942).
         bool lecturaAlta = baseLista && lecturaEnRango
                            && extRaw > (long)(parkBase + PARK_PUNTA_SALTO_MAX_CM);
+        const bool scanDirectoInicial = parkDirecto && parkScanSubFase == 0
+                                        && !isnan(rutaPka) && rutaPka < PARK_SINU_PKA_MIN_MM;
+        // Una lectura del poste durante el armado puede dejar la base demasiado baja.
+        const bool rebaseInicial = scanDirectoInicial && parkBase < 20.0f && extRaw >= 22 && extRaw <= 45;
         if (lecturaAlta) {
-          if (++parkAltasCnt >= PARK_PUNTA_ALTO_REBASE_N) {
+          if (++parkAltasCnt >= (rebaseInicial ? 5 : PARK_PUNTA_ALTO_REBASE_N)) {
             // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
             Serial.print("PARK: re-base alto "); Serial.print(parkBase, 1);
             Serial.print(" -> "); Serial.println(extRaw);
@@ -6276,8 +6360,13 @@ void loop() {
         // 0 del gyro: en la 1056 el carro iba PARALELO a la pared y este candado
         // lo leía a 17.4° -> tiró el poste 2 bueno y se fue al TIMEOUT.
         float parkAngRel = anguloGyro - parkRumboParalelo();
+        // Con trim de pared disperso tras la U, un eco cercano puede confirmar el poste
+        // si la pose del tapete también indica que el carro va alineado.
+        const bool ecoAlineadoPorPose = !parkDirecto && parkTrimListo && !posteSintetico
+                                     && extRaw <= PARK_POSTE2_EXT_MAX_CM
+                                     && parkTrimSpread() > 20.0f && fabsf(parkThCarril()) <= 8.0f;
         bool poseOk = baseLista
-                      && (fabs(parkAngRel) < PARK_ARMADO_ANG_DEG)
+                      && (fabs(parkAngRel) < PARK_ARMADO_ANG_DEG || ecoAlineadoPorPose)
                       && (parkRosaVisto || !PARK_REQUIERE_PI || PARK_TEST_MANO);
         bool armada = poseOk && (tEn >= PARK_ARMADO_MS);
 
@@ -6285,23 +6374,43 @@ void loop() {
         bool validaPoste2 = !PARK_TEST_MANO && rutaTfOk && !isnan(rutaPka) && ventanaPoste2 > 0.0f;
         float offsetPoste2 = parkDirecto ? PARK_D_B2_OFF_MM : PARK_U_B2_OFF_MM;
         float errorPoste2 = validaPoste2 ? alongSalidaMm() - (rutaPka - offsetPoste2) : 0.0f;
-        bool enVentanaPoste2 = !validaPoste2 || fabsf(errorPoste2) <= ventanaPoste2;
-        if (validaPoste2 && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
-          finalizarPark("POSTE 2 fuera de ventana");
+        // Con el poste 1 ya visto, la separacion medida desde el (odometria) manda sobre la pose absoluta de la Pi (pka puede venir 90 mm corrido).
+        bool p1Reciente = parkDirecto && PARK_D_P1_ODOM_MM > 0 && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM - 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM + PARK_D_P1_ODOM_MM;   // el poste 2 no puede estar a menos de ~240 mm del 1
+        bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
+        if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
+          // La ruta puede rodear una señal por dentro y saltarse el cajón antes de volver a la pared.
+          // Seguir la ruta hasta el disparo normal de la U si el escaneo directo nunca se alineó.
+          if (PARK_MEDIA_VUELTA && PARK_SINU_FORZAR_U && parkDirecto && !parkSinULinea
+              && parkScanSubFase == 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+              && rutaExtTapeteCm() > PARK_PARED_CM + PARK_SINU_TOL_CM) {
+            parkSinUDec = 2;
+            parkDirecto = false;
+            parkUturnPendiente = true;
+            parkUturnOdom0 = odomMm;
+            parkUturnDisparoOdom = -1;
+            contadorEsquina13 = 0;
+            estado = SIGUIENDO;
+            Serial.println("PARK: ventana vencida lejos de la pared -> U");
+          } else {
+            finalizarPark("POSTE 2 fuera de ventana");
+          }
           break;
         }
 
         // Si se perdió la primera madera, una bajada confirmada en la ventana puede anclar la segunda.
         // Una bajada confirmada justo donde la Pi dice que esta la madera de adelante ES el poste 2.
-        if (parkDirecto && enVentanaPoste2 && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
-            && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
+        // Con el poste 1 visto por sonar, un poste 2 por pose antes de ~180 mm de odometria es un disparo falso (n2 s34: 49 mm, ancla 109 mm corrida).
+        bool sepPoste2Ok = !(parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 < PARK_POSTE2_SEP_POSE_MM);
+        if (parkDirecto && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
+            && ((scanDirectoInicial && validaPoste2 && !posteSintetico && extRaw <= PARK_POSTE2_EXT_MAX_CM)
+                || fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM)) {
           Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
           parkDetPorPose = true;
           parkScanSubFase  = 2;
           parkHuecoEntryMs = millis();
           parkPoste1Ms     = 0;
         }
-        if (!parkDirecto && validaPoste2 && enVentanaPoste2 && parkScanSubFase < 2
+        if (!parkDirecto && validaPoste2 && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2
             && bajada && armada && posteConfirmado) {
           Serial.println("PARK: segundo poste de regreso por pose");
           parkScanSubFase  = 2;
@@ -6330,6 +6439,8 @@ void loop() {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
             parkOdomPoste1   = odomMm;
+            // Tras la U, un ToF inválido puede marcar el hueco, pero no anclar la odometría.
+            parkP1Sonar      = parkDirecto || !posteSintetico;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -6349,6 +6460,7 @@ void loop() {
               parkHuecoEntryMs = millis();
               parkPoste1Ms     = parkBajadaPreMs;
               parkOdomPoste1   = odomMm;
+              parkP1Sonar      = false;
               parkBajadaPre    = false;
               Serial.println("PARK: poste 1 pasó antes del armado — hueco");
             }
@@ -6387,8 +6499,18 @@ void loop() {
           // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
-          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado && enVentanaPoste2);
-          if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0
+          // Si no se confirmó el primer poste del directo, acotar el eco sintético a la pose.
+          const bool ecoConfirmado = !parkDirecto || parkP1Sonar || parkDetPorPose || !posteSintetico
+                                  || (validaPoste2 && fabsf(errorPoste2) <= 60.0f);
+          bool poste2Cand = bajada && huecoMaduro && posteConfirmado && enVentanaPoste2 && ecoConfirmado;
+          bool poste2Detect  = poste2Cand;
+          // Una bajada que solo llega a ext >= 12 cm es el haz rozando la orilla de la madera, antes de su cara (ancla -25 mm de media, hasta -89; con ext 3-5 es +10 sd 8): se espera a que baje a la cara.
+          if (poste2Cand && PARK_POSTE2_EXT_MAX_CM > 0 && extRaw > PARK_POSTE2_EXT_MAX_CM && ((!parkDetPorPose && parkP1Sonar) || !parkDirecto)) {   // por pose o sin poste 1 por sonar la ventana de pose vence
+            if (parkP2DefMs == 0) parkP2DefMs = millis();
+            if (millis() - parkP2DefMs < (unsigned long)PARK_POSTE2_ESPERA_MS) poste2Detect = false;
+          }
+          if (!poste2Cand || poste2Detect) parkP2DefMs = 0;
+          if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && (parkDirecto || parkP1Sonar) && parkOdomPoste1 >= 0
               && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
             if (enVentanaPoste2) {
               poste2Detect = true;
@@ -6430,6 +6552,15 @@ void loop() {
             // real. El rumbo paralelo medido es la referencia correcta.
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
             parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
+            // El ancla del poste 2 se corrige con la separacion odometrica desde el poste 1 (sonar): la real es ~272 mm (twin: sd 38). Una bajada prematura (eco lateral: n1 s28 sep 201, ancla 73 mm adelantada) o el relevo por odometria (+340) dejan el ancla corrida y la cola/nariz pegan en una madera.
+            if (parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100 && extRaw > PARK_POSTE2_EXT_MAX_CM) {   // con la cara a ext <= 10 el poste 2 es fiable; el que llega tarde/pronto es el poste 1 (bajada rasante, ext 11-17: regreso por U, ancla -65..-89)
+              float sepE = PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
+              if (fabsf(sepE) > PARK_POSTE2_SEP_TOL_MM) {
+                sepE = constrain(sepE, -100.0f, 100.0f);
+                parkDetAlong += sepE;   // en la U el along tambien crece al avanzar (con signo -1 n4 s45 pasaba de 86 a 155 mm de error)
+                Serial.print("PARK poste 2 separacion anomala: ancla "); Serial.println(sepE, 0);
+              }
+            }
             // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
             if (parkDetPorPose && parkIgnOk && PARK_PL_ANCLA_IGN > 0 && parkDetAlong - parkIgnAlong >= 0.0f && parkDetAlong - parkIgnAlong <= (float)PARK_PL_ANCLA_IGN) parkDetAlong = 0.5f * (parkDetAlong + parkIgnAlong);   // punto medio: la bajada ignorada adelanta (nariz inclinada), la confirmada atrasa
             parkDetPorPose = false; parkIgnOk = false;
@@ -6914,7 +7045,7 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
-          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false;
+          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
@@ -6963,6 +7094,7 @@ void loop() {
               if (parkDirecto && PARK_PL_WF_DIRECT_NEAR > 0.0f && parkDetHSon <= PARK_PL_WF_DIRECT_NEAR_H_MM)
                 wf = PARK_PL_WF_DIRECT_NEAR;
               if (parkDirecto && parkRevModo) wf += PARK_REV_DWF;
+              if (parkDirecto && h0 < PARK_PL_H_BAJA_MM) wf += PARK_PL_WF_H_BAJA;   // entrada muy pegada a la pared (n4 s24 h0 268): el plan se queda sin altura para la recta y la cola roza el poste 2
               float t = parkPlanT1Solve(w0, h0, th, wf, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
@@ -7019,6 +7151,11 @@ void loop() {
           if (parkPlanRectaOn) {
             float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
             fin = ph <= thr; why = "RECTA";
+            // Con la nariz pegada al poste 2 (sonar ext <= 2 cm al terminar la recta: holgura real 2-6 mm, la pose dice ~20) el arco INT la metia en la madera (n3 s23, n2 s11; avanzar no abre: la holgura sigue en 5.5 mm). La cola tiene ~59 mm al poste 1: la recta sigue PARK_PL_RECTA_EXTRA_MM mas, alejando la nariz.
+            if (fin && PARK_PL_RECTA_EXTRA_MM > 0.0f && th > 30.0f && extRaw >= 1 && extRaw <= PARK_PL_RECTA_EXT_CM) {
+              if (parkPlanExtraMm0 < 0.0f) parkPlanExtraMm0 = mm;
+              fin = (mm - parkPlanExtraMm0) >= PARK_PL_RECTA_EXTRA_MM;
+            }
             if ((ph - thr) / max(sinf(th * 0.0174533f), 0.3f) > PARK_PL_RECTA_FRENA_MM) setMotor(PARK_PL_RECTA_PWM);
           }
           if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; }
