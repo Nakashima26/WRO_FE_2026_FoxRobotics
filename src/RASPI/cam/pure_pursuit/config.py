@@ -1366,6 +1366,7 @@ ROUTE_FIX_FORCE_WAIT_MM = 250.0   # >0: al llegar al final supuesto de la recta 
 ROUTE_FIX_WAIT_FRAMES = None   # tope en cuadros de _force_wait (parado, la distancia no crece); None = solo distancia
 ROUTE_FIX_PENDING_FRAMES = None   # cuadros que se espera evidencia en vez de forzar con la media plana (sin cinta y masa < PENDING_MASS); None = fuerza ya
 ROUTE_FIX_PENDING_MASS = 0.1
+ROUTE_PROFILE_LEFT_K_FACTOR = None   # perfil de velocidad: multiplica |kappa| de giros a la izquierda (a_lat der/izq medido 2750/2400 = 1.146); None = simétrico
 ROUTE_FIX_PENDING_CREEP_PWM = None   # mientras espera, tope mínimo de PWM para avanzar y ver la cinta; None = sin avance
 ROUTE_FIX_PIX_MIN_NA = 0.7
 # Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.

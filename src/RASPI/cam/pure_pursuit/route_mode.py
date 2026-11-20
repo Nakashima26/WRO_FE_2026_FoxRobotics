@@ -116,7 +116,9 @@ def _pursuit_kappa(route, idx, lookahead_mm):
     dy = route.y[q] - route.y[j]
     fwd = dx * np.sin(h) + dy * np.cos(h)
     right = dx * np.cos(h) - dy * np.sin(h)
-    return np.abs(2.0 * right / np.maximum(fwd * fwd + right * right, 1.0))
+    k = 2.0 * right / np.maximum(fwd * fwd + right * right, 1.0)
+    f = getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # el carro agarra menos a la izquierda: κ izquierda cuenta más
+    return np.abs(k) * (np.where(k < 0.0, float(f), 1.0) if f else 1.0)
 
 
 def _prm_for(unknown, tc=0.0):
@@ -1174,7 +1176,9 @@ class RouteMode:
         if lap2:
             kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM))
         else:
-            kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
+            _k = r.kappa[idx]
+            _f = getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # kappa + = izquierda
+            kmax = np.lib.stride_tricks.sliding_window_view(np.abs(_k) * (np.where(_k > 0.0, float(_f), 1.0) if _f else 1.0), 2 * win + 1).max(axis=1)
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
         tight = getattr(C, "ROUTE_PROFILE_TIGHT_KAPPA", None)
