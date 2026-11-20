@@ -1492,6 +1492,8 @@ ROUTE_FIX_LINE_TOL_MM = None
 # y al final de la recta va el pico de los ToF. None = apagado. Corridas 100/101 (2026-11-20): cinta -565, ToF ~-150 -> isla.
 ROUTE_FIX_LINE_TOF_LR = None
 ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
+# Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
+ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
 # Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
 ROUTE_FIX_LINE_LAG_FRAMES = 5
 # Localizer: una lectura de distancia que salta más que esto respecto a la anterior del mismo sensor se ignora (eco de transición señal->pared, semilla 32); None = apagado.
