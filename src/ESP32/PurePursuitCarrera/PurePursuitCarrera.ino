@@ -6332,7 +6332,22 @@ void loop() {
         bool p1Reciente = parkDirecto && PARK_D_P1_ODOM_MM > 0 && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM - 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM + PARK_D_P1_ODOM_MM;   // el poste 2 no puede estar a menos de ~240 mm del 1
         bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
         if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
-          finalizarPark("POSTE 2 fuera de ventana");
+          // La ruta puede rodear una señal por dentro y saltarse el cajón antes de volver a la pared.
+          // Seguir la ruta hasta el disparo normal de la U si el escaneo directo nunca se alineó.
+          if (PARK_MEDIA_VUELTA && PARK_SINU_FORZAR_U && parkDirecto && !parkSinULinea
+              && parkScanSubFase == 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+              && rutaExtTapeteCm() > PARK_PARED_CM + PARK_SINU_TOL_CM) {
+            parkSinUDec = 2;
+            parkDirecto = false;
+            parkUturnPendiente = true;
+            parkUturnOdom0 = odomMm;
+            parkUturnDisparoOdom = -1;
+            contadorEsquina13 = 0;
+            estado = SIGUIENDO;
+            Serial.println("PARK: ventana vencida lejos de la pared -> U");
+          } else {
+            finalizarPark("POSTE 2 fuera de ventana");
+          }
           break;
         }
 
