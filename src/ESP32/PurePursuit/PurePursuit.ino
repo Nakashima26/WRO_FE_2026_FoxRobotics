@@ -1540,6 +1540,8 @@ unsigned long parkPoste1Ms          = 0;      // millis de la detección del POS
 // Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
 // PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
 const long          PARK_POSTE2_POSE_MM   = 340;
+PARK_AJ float        PARK_POSTE2_SEP_MIN_MM = 215.0f;   // separacion odometrica poste1-poste2 normal 223-294 mm (twin, 11 corridas); menos = bajada prematura
+PARK_AJ float        PARK_POSTE2_SEP_MM     = 272.0f;   // separacion nominal usada para corregir el ancla
 PARK_AJ long         PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
 long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
 bool          parkP1Sonar           = false;  // el poste 1 se vio de verdad con el sonar (no por la via de "paso antes del armado")
@@ -6443,6 +6445,11 @@ void loop() {
             // real. El rumbo paralelo medido es la referencia correcta.
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
             parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
+            // Poste 2 prematuro (eco lateral del sonar antes de la cara real): con el poste 1 visto por sonar, la separacion odometrica real es ~270 mm (n1 s28: 201 -> ancla 73 mm adelantada, la cola pego en el poste 1).
+            if (parkDirecto && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_SEP_MIN_MM) {
+              parkDetAlong += PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
+              Serial.print("PARK poste 2 prematuro: ancla +"); Serial.println(PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1), 0);
+            }
             // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
             if (parkDetPorPose && parkIgnOk && PARK_PL_ANCLA_IGN > 0 && parkDetAlong - parkIgnAlong >= 0.0f && parkDetAlong - parkIgnAlong <= (float)PARK_PL_ANCLA_IGN) parkDetAlong = 0.5f * (parkDetAlong + parkIgnAlong);   // punto medio: la bajada ignorada adelanta (nariz inclinada), la confirmada atrasa
             parkDetPorPose = false; parkIgnOk = false;
