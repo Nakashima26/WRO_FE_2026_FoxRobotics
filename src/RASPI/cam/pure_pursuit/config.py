@@ -1746,6 +1746,7 @@ ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pie
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
 ROUTE_L23_MAX_PWM = None          # vueltas 2-3: techo del perfil en recta (None = ROUTE_PROFILE_MAX_PWM)
 ROUTE_L23_ENTRY_PWM = None        # tope del perfil mientras tc==4 (primer tramo de la vuelta 2); None = sin tope
+ROUTE_L23_ENTRY_REPLAN_FRAMES = None  # si se indica, aplica el tope solo al llegar a tc=4 con un plan reciente
 
 # Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
 ROUTE_FINAL_D_MM = 700.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)

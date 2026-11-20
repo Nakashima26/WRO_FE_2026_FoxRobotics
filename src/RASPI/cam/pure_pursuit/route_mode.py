@@ -235,6 +235,9 @@ class RouteMode:
         self.stopped = 0
         self.last_print = None
         self.n_plans = 0
+        self._step_frame = 0
+        self._plan_frame = None
+        self._l23_entry_cap = None
         self._job = None
         self._swap_left = 0
         self._job_key = None
@@ -581,6 +584,13 @@ class RouteMode:
     # ── paso por frame ────────────────────────────────────────────────────
     def step(self, dm, est: str | None, ack: str | None, armed: bool):
         """(obs normalizado o None, sufijo del V2, línea de subida o None)."""
+        self._step_frame += 1
+        tc = _ack_num(ack or "", "tc")
+        replan_frames = getattr(C, "ROUTE_L23_ENTRY_REPLAN_FRAMES", None)
+        if tc == 4 and self._l23_entry_cap is None:
+            self._l23_entry_cap = replan_frames is None or (
+                self._plan_frame is not None and self._step_frame - self._plan_frame <= replan_frames
+            )
         self.rv = None
         if not (armed and getattr(C, "ROUTE_FOLLOW", False)):
             return None, "", None
@@ -930,11 +940,10 @@ class RouteMode:
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
-        tc = _ack_num(ack or "", "tc")
         prof = self._profile_pwm(self._sign_xy(conf, empty),
                                  lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)), l23=tc is not None and 4 <= tc < 12,
                                  l1=tc is not None and 1 <= tc < 4)   # en tc=0 no: s33 choca Green E/T1 en la salida
-        if prof is not None and tc == 4 and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
+        if prof is not None and tc == 4 and self._l23_entry_cap and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
@@ -1512,6 +1521,7 @@ class RouteMode:
         self.follower = RR.RouteFollower(route, float(getattr(C, "ROUTE_LOOKAHEAD_MM", 200.0)))
         self.key = key
         self.n_plans += 1
+        self._plan_frame = self._step_frame + 1  # la siguiente llamada ya encuentra la ruta adoptada
         self.upload = self._upload_lines(route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
         self._upload_full = list(self.upload)
         self._rte_n = None
