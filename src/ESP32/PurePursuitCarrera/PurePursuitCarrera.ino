@@ -3572,6 +3572,9 @@ float rutaExtTapeteCm() {
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
 // La pose sale de la odometria del tapete anclada al instante en que el sonar ve la madera de adelante.
 bool parkPlanRectaOn = false;
+float parkPlanExtraMm0 = -1.0f;   // odometria donde la recta pasaria a INT con la nariz pegada al poste 2
+PARK_AJ int          PARK_PL_RECTA_EXT_CM        = 3;   // el sonar salta 2-3 entre corridas casi iguales: con <= 2 solo se activaba a veces
+PARK_AJ float        PARK_PL_RECTA_EXTRA_MM      = 15.0f;   // 0 = apagado
 bool parkDetPorPose = false, parkIgnOk = false;
 float parkIgnAlong = 0.0f;
 float parkDetAlong = 0.0f, parkDetHPose = 0.0f, parkDetHSon = 350.0f;
@@ -7042,7 +7045,7 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
-          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false;
+          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
@@ -7148,6 +7151,11 @@ void loop() {
           if (parkPlanRectaOn) {
             float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
             fin = ph <= thr; why = "RECTA";
+            // Con la nariz pegada al poste 2 (sonar ext <= 2 cm al terminar la recta: holgura real 2-6 mm, la pose dice ~20) el arco INT la metia en la madera (n3 s23, n2 s11; avanzar no abre: la holgura sigue en 5.5 mm). La cola tiene ~59 mm al poste 1: la recta sigue PARK_PL_RECTA_EXTRA_MM mas, alejando la nariz.
+            if (fin && PARK_PL_RECTA_EXTRA_MM > 0.0f && th > 30.0f && extRaw >= 1 && extRaw <= PARK_PL_RECTA_EXT_CM) {
+              if (parkPlanExtraMm0 < 0.0f) parkPlanExtraMm0 = mm;
+              fin = (mm - parkPlanExtraMm0) >= PARK_PL_RECTA_EXTRA_MM;
+            }
             if ((ph - thr) / max(sinf(th * 0.0174533f), 0.3f) > PARK_PL_RECTA_FRENA_MM) setMotor(PARK_PL_RECTA_PWM);
           }
           if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; }
