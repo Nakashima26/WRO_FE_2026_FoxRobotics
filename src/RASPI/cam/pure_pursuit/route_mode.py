@@ -1177,7 +1177,7 @@ class RouteMode:
         idx = (i + np.arange(-win, m + win)) % n
         j = idx[win:win + m]
         if lap2:
-            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM), getattr(C, "ROUTE_L23_LEFT_K_FACTOR", None) if l23 else None)
+            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM), getattr(C, "ROUTE_L23_LEFT_K_FACTOR", None) if (l23 and float(getattr(self, "_tc_max", 0) or 0) < float(getattr(C, "ROUTE_L23_LEFT_K_TC_MAX", 12))) else None)
         else:
             _k = r.kappa[idx]
             _f = getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # kappa + = izquierda

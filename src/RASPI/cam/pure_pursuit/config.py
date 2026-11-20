@@ -1527,6 +1527,7 @@ ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear
 ROUTE_W_CLEAR = 8.0          # RouteParams.w_clear
 ROUTE_L0_CTE_PWM = None  # tope de PWM en tc=0 con el cajón ya ubicado y |cte| > ROUTE_L0_CTE_MM (None = sin tope)
 ROUTE_L0_CTE_MM = 40.0
+ROUTE_L23_LEFT_K_TC_MAX = 12  # el factor propio solo rige con tc < esto
 ROUTE_L23_LEFT_K_FACTOR = None  # vueltas 2-3: factor de κ a la izquierda propio (None = ROUTE_PROFILE_LEFT_K_FACTOR)
 # El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
 ROUTE_TIME_COST = False
