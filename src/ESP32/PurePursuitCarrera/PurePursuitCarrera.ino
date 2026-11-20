@@ -1760,7 +1760,7 @@ const float         PARK_PL_WF_DIRECT_NEAR      = 63.0f;    // objetivo opcional
 PARK_AJ float        PARK_PL_H_BAJA_MM           = 290.0f;
 PARK_AJ float        PARK_PL_WF_H_BAJA           = 35.0f;
 const float         PARK_PL_WF_DIRECT_NEAR_H_MM = 360.0f;  // altura máxima estimada en el segundo poste
-PARK_AJ float        PARK_PL_WF_U                = 53.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
+PARK_AJ float        PARK_PL_WF_U                = 58.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
 PARK_AJ int          PARK_PL_ANCLA_IGN           = 120;       // mm: el anclaje por pose usa la ultima bajada ignorada si fue hasta esto antes
 PARK_AJ float        PARK_PL_CONO                = 0.25f;    // mm de w que adelanta la deteccion por mm de h sobre 350 (cono del sonar)
@@ -5924,14 +5924,17 @@ void loop() {
       // (PARK_CAIDA_N) como el hueco (PARK_GAP_N) piden 2 lecturas seguidas.
       // La mediana además retrasaba un frame el flanco del poste.
       long  extRaw          = parkParedEsIzquierda ? distL_raw : distR_raw;
+      bool  posteSintetico  = false;
 #if FOX_US_DE_TOF && FOX_TOF
       // ToF inválido sobre el poste (orillas71/72, 2026-11-17): justo en el poste 1 el ToF exterior dio -1
       // (poste a ~7 cm + pared a ~27 cm en el mismo cono), que leerDistancia() vuelve 200 = "sin eco", y el
       // poste no contaba. Escaneando a ~27 cm de la pared el Short siempre lee la pared: un inválido ahí es el
       // poste, se toma como bajada.
       if (PARK_TOF_INVALIDO_POSTE && parkFase == 0 && parkBaseN >= PARK_BASE_N
-          && tofMm[parkParedEsIzquierda ? 0 : 1] <= 0 && parkBase > (float)(PARK_CAIDA_CM + 2))
+          && tofMm[parkParedEsIzquierda ? 0 : 1] <= 0 && parkBase > (float)(PARK_CAIDA_CM + 2)) {
+        posteSintetico = true;
         extRaw = max(1L, (long)(parkBase - PARK_CAIDA_CM - 1));
+      }
 #endif
       float haciaPared      = parkParedEsIzquierda ? 1.0f : -1.0f;  // >0 hacia la pared (izq = +deg)
       int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
@@ -6001,7 +6004,13 @@ void loop() {
         float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
         long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
         if (parkServoU == 0) {
-          int gapMm = (extAhoraP > 5 && extAhoraP < 150) ? (int)extAhoraP * 10 : 700;
+          int gapMm = 700;
+          if (extAhoraP > 5 && extAhoraP < 150) {
+            gapMm = (int)extAhoraP * 10;
+          } else if (piRuta && rutaTfOk && rutaSecSalida >= 0) {
+            // Con el ToF lateral fuera de rango, la pose acota la abertura del arco.
+            gapMm = (int)constrain(rutaExtTapeteCm() * 10.0f, 550.0f, 700.0f);
+          }
           int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
@@ -6354,7 +6363,8 @@ void loop() {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
             parkOdomPoste1   = odomMm;
-            parkP1Sonar      = true;
+            // Tras la U, un ToF inválido puede marcar el hueco, pero no anclar la odometría.
+            parkP1Sonar      = parkDirecto || !posteSintetico;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -6421,7 +6431,7 @@ void loop() {
             if (millis() - parkP2DefMs < (unsigned long)PARK_POSTE2_ESPERA_MS) poste2Detect = false;
           }
           if (!poste2Cand || poste2Detect) parkP2DefMs = 0;
-          if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0
+          if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && (parkDirecto || parkP1Sonar) && parkOdomPoste1 >= 0
               && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
             if (enVentanaPoste2) {
               poste2Detect = true;
