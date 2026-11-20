@@ -107,7 +107,7 @@ MAX_WHEEL_STEER_DEG  = 40.1   # bici a tope, R 134 mm (CAD decía 44.54 con la i
 # 74° (error 3.2 px; el lente real tiene distorsión de barril). La inclinación sale 25-31° con
 # cualquier FOV supuesto: el 45° de antes NO era el montaje real. Antes: 45° / 97 / 140 (supuestos).
 # En el twin (ruta_perfil, 21 seeds) da 18/21 igual que la cámara vieja, 1.7 s más rápido.
-CAMERA_TILT_DEG      = 24.8
+CAMERA_TILT_DEG      = 34.0     # 24.8 -> 34.0 (2026-11-19): cámara reajustada, BEV recalibrado (calib_camara: 34.0°, h 93, fwd 169)
 CAMERA_HEIGHT_MM     = 95.0
 CAMERA_FWD_MM        = 152.0
 CAMERA_HFOV_DEG      = 74.0     # pinhole equivalente (el twin lo usa en CameraParams)
