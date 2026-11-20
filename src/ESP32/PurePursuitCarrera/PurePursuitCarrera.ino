@@ -283,6 +283,15 @@ float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del ca
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
+// Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
+// RUTA_SUB_CTE_MM y sigue creciendo -> tope de PWM RUTA_SUB_PWM hasta que deja de crecer. 0 = apagado.
+const float RUTA_SUB_CTE_MM     = 60.0f;
+const int   RUTA_SUB_PWM        = 120;
+const float RUTA_SUB_SAT        = 0.5f;    // fraccion de RUEDA_TOPE_DEG
+const float RUTA_SUB_RISE_MM    = 4.0f;    // crecimiento minimo del error en RUTA_SUB_VENT_MS
+const unsigned long RUTA_SUB_VENT_MS = 100;
+const unsigned long RUTA_SUB_HOLD_MS = 150;
+int rutaSubCap = -1;                       // tope vigente (-1 = ninguno)
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
@@ -3646,12 +3655,42 @@ int rutaServo(float ruedaDeg) {
   return constrain((int)lroundf(RUTA_CENTRO_SERVO + (der ? -u : u)), SERVO_MIN_DEG, SERVO_MAX_DEG);
 }
 
+// Error de seguimiento del ESP (mm, distancia de su pose a la ruta cerca de rutaI) y deteccion de subviraje.
+static float rutaCteMm(float x, float y) {
+  float best = 1e18f;
+  for (int o = -1; o <= 0; o++) {
+    int a = ((rutaI + o) % rutaN + rutaN) % rutaN, b = (a + 1) % rutaN;
+    float sx = rutaX[b] - rutaX[a], sy = rutaY[b] - rutaY[a], sl = sx * sx + sy * sy;
+    float u = sl > 1.0f ? constrain(((x - rutaX[a]) * sx + (y - rutaY[a]) * sy) / sl, 0.0f, 1.0f) : 0.0f;
+    float dx = rutaX[a] + u * sx - x, dy = rutaY[a] + u * sy - y;
+    best = min(best, dx * dx + dy * dy);
+  }
+  return sqrtf(best);
+}
+float rutaSubWheelDeg = 0.0f;   // ultimo volante pedido (lo escribe el caller antes del motor)
+void rutaSubvirajeActualiza(float x, float y) {
+  static unsigned long tRef = 0, tHold = 0;
+  static float cteRef = 0.0f;
+  unsigned long now = millis();
+  float cte = rutaCteMm(x, y);
+  if (now - tRef >= RUTA_SUB_VENT_MS) {
+    bool crece = (cte - cteRef) > RUTA_SUB_RISE_MM;
+    bool sat = fabsf(rutaSubWheelDeg) >= RUTA_SUB_SAT * RUEDA_TOPE_DEG;
+    bool enLaps = turnsCompleted >= 1 && turnsCompleted < TURNS_PER_RACE && estado != INICIO;
+    if (enLaps && sat && crece && cte > RUTA_SUB_CTE_MM) tHold = now + RUTA_SUB_HOLD_MS;
+    cteRef = cte; tRef = now;
+  }
+  rutaSubCap = (now < tHold) ? RUTA_SUB_PWM : -1;
+
+}
+
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
 // Devuelve false si no aplica. ruedaDeg: + = derecha.
 bool rutaSteer(float &ruedaDeg) {
   if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
   float x, y;
   rutaPoseTapete(x, y);
+  const float x0 = x, y0 = y;
   float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
   if (RUTA_LAG_S > 0.0f) {
     // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
@@ -3695,6 +3734,7 @@ bool rutaSteer(float &ruedaDeg) {
     }
     rutaI = besti;
   }
+  if (RUTA_SUB_CTE_MM > 0.0f) rutaSubvirajeActualiza(x0, y0);
   float lookMm = (RUTA_LOOKAHEAD_L23_MM > 0.0f && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE) ? RUTA_LOOKAHEAD_L23_MM : RUTA_LOOKAHEAD_MM;
   if (RUTA_LOOKAHEAD_L1_MM > 0.0f && turnsCompleted < 4 && estado != INICIO) lookMm = RUTA_LOOKAHEAD_L1_MM;
   int j = (rutaI + (int)(lookMm / rutaPaso + 0.5f)) % rutaN;
@@ -3704,6 +3744,7 @@ bool rutaSteer(float &ruedaDeg) {
   float ld2 = fwd * fwd + right * right;
   if (ld2 < 1.0f) ld2 = 1.0f;
   ruedaDeg = atanf(RUTA_BATALLA_MM * 2.0f * right / ld2) * RAD_TO_DEG;
+  rutaSubWheelDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
   return true;
 }
 
@@ -4343,9 +4384,11 @@ void controlPID(long distL, long distR) {
       // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
       // el carro se para al cruzar la meta. Si no, igual que antes: min(rutaVel, velocidadMotor).
       if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
-        setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
+        setMotorTope(rutaSubCap >= 0 ? min(rutaVel, rutaSubCap) : rutaVel, min(RUTA_PWM_MAX, 255));
       } else {
-        setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
+        int vm = rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor;
+        if (rutaSubCap >= 0) vm = min(vm, rutaSubCap);
+        setMotor(vm);
       }
       Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);
       Serial.print(" | Servo:");  Serial.print(servoAngle);
