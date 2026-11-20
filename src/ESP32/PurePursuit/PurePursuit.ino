@@ -1712,6 +1712,8 @@ PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
 PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
 PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
 PARK_AJ long         PARK_SINU_B2_WIN_MM         = 130;
+const float         PARK_U_B2_OFF_MM            = 160.0f; // distancia en along de pka al eje durante la detección del poste 2 de regreso
+const float         PARK_U_B2_WIN_MM            = 0.0f;   // ventana experimental del twin (0 usa la secuencia de postes)
 PARK_AJ long         PARK_SINU_PRE_MM            = -560;  // con la cuenta en 11, along (centro de la recta = 0) desde el que ya se salio de la esquina 12
 PARK_AJ long         PARK_SINU_MIN_MM            = -2000;  // no entregar al seguidor de pared antes de pasar la senal de la entrada (T2 esta en -500)
 PARK_AJ long         PARK_SINU_LENTO_MM          = 250;   // zona lenta antes de la madera de adelante
@@ -6262,7 +6264,16 @@ void loop() {
                       && (parkRosaVisto || !PARK_REQUIERE_PI || PARK_TEST_MANO);
         bool armada = poseOk && (tEn >= PARK_ARMADO_MS);
 
-        // Sin U: la primera madera se puede perder (la ruta llega a la pared tarde, p.ej. senal roja de entrada).
+        bool validaPosteRegreso = !parkDirecto && !PARK_TEST_MANO && rutaTfOk
+                                 && !isnan(rutaPka) && PARK_U_B2_WIN_MM > 0.0f;
+        float errorPosteRegreso = validaPosteRegreso ? alongSalidaMm() - (rutaPka - PARK_U_B2_OFF_MM) : 0.0f;
+        bool enVentanaRegreso = !validaPosteRegreso || fabsf(errorPosteRegreso) <= PARK_U_B2_WIN_MM;
+        if (validaPosteRegreso && errorPosteRegreso < -PARK_U_B2_WIN_MM) {
+          finalizarPark("POSTE 2 fuera de ventana de regreso");
+          break;
+        }
+
+        // Si se perdió la primera madera, una bajada confirmada en la ventana puede anclar la segunda.
         // Una bajada confirmada justo donde la Pi dice que esta la madera de adelante ES el poste 2.
         if (parkDirecto && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
             && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
@@ -6271,6 +6282,14 @@ void loop() {
           parkScanSubFase  = 2;
           parkHuecoEntryMs = millis();
           parkPoste1Ms     = 0;
+        }
+        if (validaPosteRegreso && enVentanaRegreso && parkScanSubFase < 2
+            && bajada && armada && posteConfirmado) {
+          Serial.println("PARK: segundo poste de regreso por pose");
+          parkScanSubFase  = 2;
+          parkHuecoEntryMs = millis();
+          parkPoste1Ms     = 0;
+          parkOdomPoste1   = -1;
         }
         // ── Subfase 0: Buscando Poste 1 ──
         if (parkScanSubFase == 0) {
@@ -6350,12 +6369,18 @@ void loop() {
           // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
-          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado);
+          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado && enVentanaRegreso);
           if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0
               && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
-            poste2Detect = true;
-            parkPoste2Pose = 1;
-            Serial.print("PARK: POSTE 2 POR ODOMETRIA (+"); Serial.print(odomMm - parkOdomPoste1); Serial.println(" mm tras el poste 1)");
+            if (enVentanaRegreso) {
+              poste2Detect = true;
+              parkPoste2Pose = 1;
+              Serial.print("PARK: POSTE 2 POR ODOMETRIA (+"); Serial.print(odomMm - parkOdomPoste1); Serial.println(" mm tras el poste 1)");
+            } else {
+              // El cruce odométrico ya ocurrió fuera del cajón. Esperar un eco válido.
+              parkOdomPoste1 = -1;
+              Serial.println("PARK: estimación odométrica del poste 2 fuera de ventana");
+            }
           }
 
           // SOLO caída de sónar. La Pi manda park=2 al ver magenta lejos

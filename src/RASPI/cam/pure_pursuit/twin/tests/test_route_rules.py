@@ -2,12 +2,35 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from pure_pursuit import config, ring_route
 from pure_pursuit.route_mode import RouteMode, _grip_pwm, cte_urgent_holds
 from pure_pursuit.wro_field import SECTIONS_CW, SEATS
 
 
 def _all_but(sec, keep):
     return {(sec, s) for s in SEATS if s not in keep}
+
+
+def test_plan_infactible_quita_fantasmas_y_devuelve_mapa_usado(monkeypatch):
+    conf = {("N", "T1"): "Red"}
+    with_ghost = {**conf, ("N", "T3"): "Red"}
+    unknown = [("N", "T2")]
+    calls = []
+
+    def plan(direction, seats, parking, **options):
+        calls.append((seats, options["unknown"]))
+        return SimpleNamespace(report={"feasible": seats == conf})
+
+    monkeypatch.setattr(config, "ROUTE_GHOST_FALLBACK", True)
+    monkeypatch.setattr(ring_route, "plan", plan)
+    route, seats, remaining = RouteMode._solve_plan(
+        "CW", with_ghost, "S", [], None, None, 1000, None, None, fb=(conf, unknown), tc=0,
+    )
+    assert calls == [(with_ghost, []), (conf, unknown)]
+    assert route.report["feasible"]
+    assert (seats, remaining) == (conf, unknown)
 
 
 def test_agarre_baja_el_tope_a_volante_cerrado():

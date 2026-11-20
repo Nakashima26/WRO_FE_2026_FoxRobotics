@@ -42,7 +42,7 @@
     "ROUTE_UPLOAD_LINES": 2,
     "ROUTE_WARM_PLAN": true,
     "ROUTE_LOCK_STATIONS": 2,
-    "ROUTE_PLAN_ASYNC": true,
+    "ROUTE_PLAN_ASYNC": false,
     "ROUTE_FIX_TOF_GEOM": [
       7,
       60

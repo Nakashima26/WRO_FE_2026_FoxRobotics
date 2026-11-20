@@ -811,6 +811,7 @@ class RouteMode:
                 lock = {(k0 + j) % nst: float(self.route.d_stations[(k0 + j) % nst]) for j in range(nl)}
                 anchor = None
             args = (dm.direction, plan_seats, dm.parking, plan_unknown, anchor, lock, self.park_w, extra, hug)
+            plan_kwargs = {"fb": self._ghost_fb, "tc": getattr(self, "_tc_max", 0)}
             hold = anchor_replan and self.route is not None
             if getattr(C, "ROUTE_PLAN_ASYNC", False):
                 # Carro real: la DP tarda ~1-2 s en la Pi; corre aparte y el
@@ -821,20 +822,18 @@ class RouteMode:
                     self._job_out = None
                     self._job_shift = self.shift
                     self._job_hold = hold
-                    self._job = threading.Thread(target=self._run_plan, args=args, kwargs={"fb": self._ghost_fb}, daemon=True)
+                    self._job = threading.Thread(target=self._run_plan, args=args, kwargs=plan_kwargs, daemon=True)
                     self._job.start()
             elif getattr(C, "ROUTE_PLAN_DELAY_S", None) is not None and self.route is not None:
                 # Twin: el plan sale ya, pero se adopta tras el retraso de la Pi (ruta anterior mientras).
                 if self._delay_left is None:
                     self._job_key = key
-                    self._delay_plan = (RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3], getattr(self, "_tc_max", 0)), unknown=args[3],
-                                                anchor=args[4], lock=args[5], park_w=args[6], extra=args[7], hug=args[8]),
-                                        key, dict(plan_seats), list(plan_unknown), self.shift, hold)
+                    route, seats, unk = self._solve_plan(*args, **plan_kwargs)
+                    self._delay_plan = (route, key, dict(seats), list(unk), self.shift, hold)
                     self._delay_left = int(round(float(C.ROUTE_PLAN_DELAY_S) * float(getattr(C, "PI_FPS", 40.0))))
             else:
-                self._adopt(RR.plan(args[0], args[1], args[2], prm=_prm_for(args[3], getattr(self, "_tc_max", 0)), unknown=args[3],
-                                    anchor=args[4], lock=args[5], park_w=args[6], extra=args[7], hug=args[8]),
-                            key, plan_seats, plan_unknown, empty, dm, self.shift, hold)
+                route, seats, unk = self._solve_plan(*args, **plan_kwargs)
+                self._adopt(route, key, seats, unk, empty, dm, self.shift, hold)
         if self._delay_left is not None:
             self._delay_left -= 1
             if self._delay_left <= 0:
@@ -1492,15 +1491,17 @@ class RouteMode:
         ty = dm.pose_xy[1] - (p0x * fy + p0y * ly)
         return tx + px * fx + py * lx, ty + px * fy + py * ly, (th - yaw) % 360.0
 
-    def _run_plan(self, direction, conf, parking, unknown, anchor, lock, park_w=None, extra=None, hug=None, fb=None) -> None:
-        self._job_conf = conf
-        self._job_unknown = unknown
+    def _run_plan(self, *args, **kwargs) -> None:
+        self._job_out, self._job_conf, self._job_unknown = self._solve_plan(*args, **kwargs)
+
+    @staticmethod
+    def _solve_plan(direction, conf, parking, unknown, anchor, lock, park_w, extra, hug, *, fb, tc):
         for seats, unk in ((conf, unknown), fb) if fb is not None and getattr(C, "ROUTE_GHOST_FALLBACK", False) else ((conf, unknown),):
-            self._job_conf, self._job_unknown = seats, unk
-            self._job_out = RR.plan(direction, seats, parking, prm=_prm_for(unk, getattr(self, "_tc_max", 0)), unknown=unk, anchor=anchor,
-                                    lock=lock, park_w=park_w, extra=extra, hug=hug)
-            if self._job_out.report.get("feasible"):
+            route = RR.plan(direction, seats, parking, prm=_prm_for(unk, tc), unknown=unk, anchor=anchor,
+                            lock=lock, park_w=park_w, extra=extra, hug=hug)
+            if route.report.get("feasible"):
                 break   # con fantasmas infactible (dos filas de la misma columna pegadas): se planea sin ellos
+        return route, seats, unk
 
     def _adopt(self, route, key, conf, unknown, empty, dm, shift: float = 0.0, hold: bool = False) -> None:
         prev = getattr(self, "_conf_prev", None) or {}
