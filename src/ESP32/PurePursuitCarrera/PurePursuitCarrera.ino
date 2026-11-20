@@ -1643,7 +1643,7 @@ const int           PARK_UTURN_EXT_MIN_CM      = 32;     // menos que esto, el a
 PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes de cerrar: si no, el regreso cae en las latas
 // Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
 // a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
-PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 40;
+PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 45;
 PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
