@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta_perfil + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -286,7 +286,7 @@ const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
-const int RUTA_PWM_MAX = 0;
+const int RUTA_PWM_MAX = 255;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
@@ -1545,9 +1545,9 @@ unsigned long parkPoste1Ms          = 0;      // millis de la detección del POS
 // Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
 // PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
 const long          PARK_POSTE2_POSE_MM   = 340;
-const long          PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
+PARK_AJ long         PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
 long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
-bool          parkP1Sonar           = false;  // el poste 1 se vio de verdad con el sonar (no por "paso antes del armado")
+bool          parkP1Sonar           = false;  // el poste 1 se vio de verdad con el sonar (no por la via de "paso antes del armado")
 int           parkPoste2Pose        = 0;      // 1 = el poste 2 salió por odometría (ACK p2o=)
 float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
 float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
@@ -2070,7 +2070,7 @@ const bool MODO_CONTINUO = false;
 // que maneja igual que SIGUIENDO (visión + PID) pero SIN buscar esquinas y solo
 // durante TERMINANDO_MS, para meterse en el área de salida y ahí sí frenar.
 // Sube/baja este tiempo según la distancia que falte hasta la zona de salida.
-const unsigned long TERMINANDO_MS = 1000;
+const unsigned long TERMINANDO_MS = 0;
 // Modo RUTA: la cuenta 12 cae a ~70° de la última curva, a veces antes de la diagonal; tras
 // TERMINANDO_MS se sigue hasta estar en la sección de salida a este margen de la diagonal (tope MAX_MS).
 const float TERMINANDO_RUTA_MARGEN_MM = 100.0f;
