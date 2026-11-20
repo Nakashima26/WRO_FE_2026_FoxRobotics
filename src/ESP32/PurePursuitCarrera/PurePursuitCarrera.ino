@@ -1751,6 +1751,8 @@ PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
 PARK_AJ float        PARK_PL_WF                  = 55.0f;    // >0 con RECTA: T1 se calcula al arrancar para que arco EXT + recta + arco INT dejen el eje en (WF, HEND); T1 = ese angulo - LEAD
 const float         PARK_PL_WF_DIRECT_NEAR      = 63.0f;    // objetivo opcional cuando el escaneo directo llega cerca
+PARK_AJ float        PARK_PL_H_BAJA_MM           = 290.0f;
+PARK_AJ float        PARK_PL_WF_H_BAJA           = 35.0f;
 const float         PARK_PL_WF_DIRECT_NEAR_H_MM = 360.0f;  // altura máxima estimada en el segundo poste
 PARK_AJ float        PARK_PL_WF_U                = 53.0f;   // igual que WF tras la U (la pose w sale unos 17 mm mas atras que sin U)
 PARK_AJ float        PARK_PL_LEAD                = 15.0f;   // grados que la inercia del volante suma despues de soltar el arco EXT
@@ -6979,6 +6981,7 @@ void loop() {
               if (parkDirecto && PARK_PL_WF_DIRECT_NEAR > 0.0f && parkDetHSon <= PARK_PL_WF_DIRECT_NEAR_H_MM)
                 wf = PARK_PL_WF_DIRECT_NEAR;
               if (parkDirecto && parkRevModo) wf += PARK_REV_DWF;
+              if (parkDirecto && h0 < PARK_PL_H_BAJA_MM) wf += PARK_PL_WF_H_BAJA;   // entrada muy pegada a la pared (n4 s24 h0 268): el plan se queda sin altura para la recta y la cola roza el poste 2
               float t = parkPlanT1Solve(w0, h0, th, wf, PARK_PL_HEND, PARK_PL_RI);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
