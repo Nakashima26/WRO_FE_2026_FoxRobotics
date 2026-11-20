@@ -1,4 +1,4 @@
-// GENERADO por exportar_carrera.py desde ruta_perfil + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
+// GENERADO por exportar_carrera.py desde ruta + carrera_bench.json. No editar: editar PurePursuit.ino y regenerar.
 #define FOX_ENCODER 1
 #define FOX_TOF 1
 #define PI_BAUD 460800
@@ -286,7 +286,7 @@ const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
-const int RUTA_PWM_MAX = 255;
+const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
                                // FÍSICAMENTE detrás del robot este frame (no que
                                // simplemente dejó de verlo) — dispara RECUPERANDO.
@@ -1649,6 +1649,10 @@ PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
+// Modo RUTA: si al terminar de alejarse quedan menos de esto (mm, eje trasero a la pared del fondo) no se endereza: la U arranca ya
+// (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
+PARK_AJ long         PARK_UTURN_ENDEREZA_REST_MM = 750;
+PARK_AJ long         PARK_UTURN_ENDEREZA_REST_TOL = 14;   // con poco fondo: 0 = salta el enderezado; >0 = endereza solo hasta esta tolerancia (grados, en vez de 5)
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 1;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 PARK_AJ long         PARK_PEGADO_CICLA          = 1;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
 PARK_AJ long         PARK_UTURN_TOPE            = 200;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
@@ -2064,7 +2068,7 @@ const bool MODO_CONTINUO = false;
 // que maneja igual que SIGUIENDO (visión + PID) pero SIN buscar esquinas y solo
 // durante TERMINANDO_MS, para meterse en el área de salida y ahí sí frenar.
 // Sube/baja este tiempo según la distancia que falte hasta la zona de salida.
-const unsigned long TERMINANDO_MS = 0;
+const unsigned long TERMINANDO_MS = 1000;
 // Modo RUTA: la cuenta 12 cae a ~70° de la última curva, a veces antes de la diagonal; tras
 // TERMINANDO_MS se sigue hasta estar en la sección de salida a este margen de la diagonal (tope MAX_MS).
 const float TERMINANDO_RUTA_MARGEN_MM = 100.0f;
@@ -2826,7 +2830,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -5938,7 +5942,9 @@ void loop() {
                       : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
         bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
         bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
-        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0
+        bool  restCorto = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+                          && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
+        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0 || (restCorto && PARK_UTURN_ENDEREZA_REST_TOL == 0)
                                 || (PARK_UTURN_ENDEREZA == 2 && parkRecorridoMm() < 30.0f))) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U sin enderezar (lat="); Serial.print(lateral, 1);
@@ -5963,7 +5969,10 @@ void loop() {
         motorAdelante();
         servoRumboPark(parkRumboGiro0);
         setMotorTope(alejarPwm, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
-        if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
+        bool  restCorto27 = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+                            && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
+        float tolEnd = (restCorto27 && PARK_UTURN_ENDEREZA_REST_TOL > 0) ? (float)PARK_UTURN_ENDEREZA_REST_TOL : 5.0f;
+        if (fabs(anguloGyro - parkRumboGiro0) <= tolEnd || millis() - parkFaseMs >= 1500) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
         }
