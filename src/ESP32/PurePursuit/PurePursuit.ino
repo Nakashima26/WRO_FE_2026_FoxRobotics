@@ -1739,6 +1739,7 @@ PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se dec
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
+PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
 PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
 PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
@@ -2964,7 +2965,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
   SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
-  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
+  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
@@ -3193,6 +3194,42 @@ void parkRevCaeAU(const char *why) {
   parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();
 }
 
+// Estima si aún cabe una alineación hacia la banda de escaneo. La ruta de la
+// Pi sigue al mando y el escaneo sólo empieza al comprobar la pose real.
+static bool parkCabeAlineacion(float along, float lateralCm, float rumboDeg) {
+  // Usa el menor agarre lateral medido para una maniobra con ambos sentidos.
+  const float velocidad = max(0.0f, encVelMmS);
+  const float radio = max(RUTA_BATALLA_MM / tanf(53.0f * DEG_TO_RAD),
+                          velocidad * velocidad / 2400.0f);
+  const float rumbo = (direccionIzquierda ? rumboDeg : -rumboDeg) * DEG_TO_RAD;
+  if (fabsf(rumbo) >= PI / 2.0f) return false;
+
+  // El retardo sólo aplica si el servo todavía debe iniciar la corrección.
+  const float retardo = rumboDeg * gyroRate < 0.0f ? 0.0f : velocidad * 0.10f;
+  const float disponible = rutaPka - PARK_SINU_B2_OFF_MM - PARK_SINU_CORRE_MM - along;
+  const float lateral0 = (lateralCm - PARK_PARED_CM) * 10.0f + retardo * sinf(rumbo);
+  const float banda = PARK_SINU_TOL_CM * 10.0f;
+
+  // Si basta un arco, sólo tiene que llegar al borde angular del escaneo.
+  const float toleranciaRad = PARK_SINU_ANG_DEG * DEG_TO_RAD;
+  const float rumboOk = min(fabsf(rumbo), toleranciaRad);
+  const float lateralOk = lateral0 + copysignf(radio * (cosf(rumboOk) - cosf(rumbo)), rumbo);
+  const float avanceOk = retardo * cosf(rumbo) + radio * (sinf(fabsf(rumbo)) - sinf(rumboOk));
+  if (fabsf(lateralOk) <= banda && avanceOk < disponible) return true;
+
+  // Si aún falta corrección lateral, primero endereza y luego cambia de línea.
+  const float yArco = copysignf(radio * (1.0f - cosf(rumbo)), rumbo);
+  const float lateral = lateral0 + yArco;
+  // Dos arcos opuestos, más recta si el desplazamiento requiere más de 45°.
+  const float delta = max(0.0f, fabsf(lateral) - banda);
+  const float angMax = PI / 4.0f;
+  const float deltaArcos = min(delta, 2.0f * radio * (1.0f - cosf(angMax)));
+  const float ang = acosf(constrain(1.0f - deltaArcos / (2.0f * radio), -1.0f, 1.0f));
+  const float avance = retardo * cosf(rumbo) + radio * fabsf(sinf(rumbo))
+                     + 2.0f * radio * sinf(ang) + (delta - deltaArcos) / tanf(angMax);
+  return avance < disponible;
+}
+
 void vigilarSinU() {
   if (parkRevDir && piRuta && rutaTfOk && rutaSecSalida >= 0) {
     float along = alongSalidaMm();
@@ -3222,11 +3259,14 @@ void vigilarSinU() {
   float along = alongSalidaMm();
   bool pre = (turnsCompleted == TURNS_PER_RACE - 1) && seccionTapete(x, y) == rutaSecSalida && along >= (float)PARK_SINU_PRE_MM;
   if (!(parkUturnPendiente || pre)) return;
+  const float extCm = rutaExtTapeteCm();
+  const float rumboDeg = rutaErrCarrilDeg();
   if (!isnan(rutaPka) && rutaPka < (float)PARK_SINU_PKA_MIN_MM && parkSinUDec == 0) {
     // Cajon al inicio de la recta: directo solo si la ruta ya lo trae pegado a su pared (la senal de la entrada se paso por afuera).
     if (along < (float)PARK_SINU_DEC_MM) return;
-    bool lin = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_DEC_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_DEC_ANG_DEG
+    bool lin = fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_DEC_TOL_CM && fabsf(rumboDeg) <= PARK_SINU_DEC_ANG_DEG
                && (rutaPka - PARK_SINU_B2_OFF_MM - along) >= (float)PARK_SINU_CORRE_MM;   // y queda recta suficiente para armar el sonar antes de la madera
+    if (!lin && PARK_SINU_GEOMETRIA && parkCabeAlineacion(along, extCm, rumboDeg)) return;
     parkSinUDec = lin ? 1 : 2;
     parkRevDir = !lin && PARK_REV_DIR;
     Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
@@ -3235,8 +3275,9 @@ void vigilarSinU() {
   float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
   if (along < alongIni || along < (float)PARK_SINU_MIN_MM) return;
   // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
-  bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
+  bool enLinea = fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rumboDeg) <= PARK_SINU_ANG_DEG;
   if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
+  if (!enLinea && PARK_SINU_GEOMETRIA && !isnan(rutaPka) && parkCabeAlineacion(along, extCm, rumboDeg)) return;
   if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) { parkSinUDec = 2; Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return; }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
   if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
