@@ -49,7 +49,7 @@ FOX_API void fox_twin_vehicle(double *s,const double *p){
  }
  if(vel<0)wheel*=p[29];
  double wh=wheel*(3.14159265358979323846/180.0);
- if(fabs(wh)>1e-9&&fabs(p[30])>1e-6){double yaw=vel/p[30]*tan(wh),alat=yaw>0?p[31]:p[32];
+ if(fabs(wh)>1e-9&&fabs(p[30])>1e-6){double yaw=vel/p[30]*tan(wh),alat=yaw>0?p[32]:p[31];
   if(alat&&fabs(vel)>1e-3&&fabs(yaw*vel)>alat)yaw=copysign(alat/fabs(vel),yaw);
   s[2]+=(yaw*dt)*(180.0/3.14159265358979323846);}
  double h=s[2]*(3.14159265358979323846/180.0);s[0]+=vel*dt*py_sin(h);s[1]+=vel*dt*py_cos(h);

@@ -1363,6 +1363,11 @@ ROUTE_FIX_PIX_MAX_TURN_DEG = 10.0   # 3 -> 10 (2026-11-12): la naranja aparece c
 # Pixeles solo si la cinta cruza la recta con |n·a| >= esto (≈45°); si no, la recta ajustada de siempre.
 ROUTE_FIX_PIX_RAW = True   # True: vota con los pixeles de cinta del frame aunque el tracker aún no la dé por vista (persist)
 ROUTE_FIX_FORCE_WAIT_MM = 250.0   # >0: al llegar al final supuesto de la recta con la cinta vista pero sin votos, esperar este avance antes de forzar
+ROUTE_FIX_WAIT_FRAMES = None   # tope en cuadros de _force_wait (parado, la distancia no crece); None = solo distancia
+ROUTE_FIX_PENDING_FRAMES = None   # cuadros que se espera evidencia en vez de forzar con la media plana (sin cinta y masa < PENDING_MASS); None = fuerza ya
+ROUTE_FIX_PENDING_MASS = 0.1
+ROUTE_PROFILE_LEFT_K_FACTOR = None   # perfil de velocidad: multiplica |kappa| de giros a la izquierda (a_lat der/izq medido 2750/2400 = 1.146); None = simétrico
+ROUTE_FIX_PENDING_CREEP_PWM = None   # mientras espera, tope mínimo de PWM para avanzar y ver la cinta; None = sin avance
 ROUTE_FIX_PIX_MIN_NA = 0.7
 # Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.
 ROUTE_FIX_LINE_DECIDE_N = 5
@@ -1520,6 +1525,10 @@ ROUTE_UPLOAD_HORIZON_MM = 700.0
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm
 ROUTE_W_CLEAR = 8.0          # RouteParams.w_clear
+ROUTE_L0_CTE_PWM = None  # tope de PWM en tc=0 con el cajón ya ubicado y |cte| > ROUTE_L0_CTE_MM (None = sin tope)
+ROUTE_L0_CTE_MM = 40.0
+ROUTE_L23_LEFT_K_TC_MAX = 12  # el factor propio solo rige con tc < esto
+ROUTE_L23_LEFT_K_FACTOR = None  # vueltas 2-3: factor de κ a la izquierda propio (None = ROUTE_PROFILE_LEFT_K_FACTOR)
 # El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
 ROUTE_TIME_COST = False
 ROUTE_PLAN_VMIN_PWM = None  # piso de velocidad del costo de tiempo de la DP (None = ROUTE_PROFILE_BASE_PWM)

@@ -100,7 +100,7 @@ def _chord_ahead(follower, ahead_mm: float = 500.0) -> tuple[float]:
     return (dh,)
 
 
-def _pursuit_kappa(route, idx, lookahead_mm):
+def _pursuit_kappa(route, idx, lookahead_mm, left_f=None):
     """|κ| del pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
 
     Misma cuenta que rutaSteer del ESP: blanco a lookahead fijo, κ = 2·lateral/ld².
@@ -116,7 +116,9 @@ def _pursuit_kappa(route, idx, lookahead_mm):
     dy = route.y[q] - route.y[j]
     fwd = dx * np.sin(h) + dy * np.cos(h)
     right = dx * np.cos(h) - dy * np.sin(h)
-    return np.abs(2.0 * right / np.maximum(fwd * fwd + right * right, 1.0))
+    k = 2.0 * right / np.maximum(fwd * fwd + right * right, 1.0)
+    f = left_f or getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # el carro agarra menos a la izquierda: κ izquierda cuenta más
+    return np.abs(k) * (np.where(k < 0.0, float(f), 1.0) if f else 1.0)
 
 
 def _prm_for(unknown, tc=0.0):
@@ -253,6 +255,7 @@ class RouteMode:
         self.blind = bool(getattr(C, "ROUTE_START_BLIND", False))
         self.fix = None              # StartFix mientras no se sabe el avance
         self.orange = None           # estado de la línea naranja (OrangeLineTracker) del frame
+        self._pend_n = 0             # cuadros esperando evidencia del cajón con la media plana
         self._line_d: list = []      # δ por lectura de la línea naranja (ROUTE_FIX_LINE)
         self._pix_ok = None          # None = aún no se sabe si la cinta de esta recta sirve para pixeles
         self.fixed = not self.blind
@@ -688,6 +691,17 @@ class RouteMode:
                             and abs(pk - delta) <= float(blend)):
                         delta = 0.5 * (pk + delta)
                 forced = True
+                # Sin cinta y con el histograma plano la media es el centro del rango (n2 s36: -158, verdad -319):
+                # esperar evidencia un rato (el carro avanza lento, ver ROUTE_FIX_PENDING_CREEP_PWM).
+                pend = getattr(C, "ROUTE_FIX_PENDING_FRAMES", None)
+                pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
+                edge = float(getattr(C, "ROUTE_FIX_EDGE_MM", None) or 30.0)
+                # pico pegado a un extremo del rango = señal en la pared supuesta (n2 s36: +21 con masa 0.57, verdad -319)
+                flat = (pm < float(getattr(C, "ROUTE_FIX_PENDING_MASS", 0.1))
+                        or pk - (PARK_W_MIN - self.fix.w0_guess) < edge or (PARK_W_MAX - self.fix.w0_guess) - pk < edge)
+                if pend is not None and not self._line_d and flat and self._pend_n < int(pend):
+                    self._pend_n += 1
+                    delta = None
             if delta is not None:
                 pose = self._apply_fix(dm, ack, delta, forced)
                 conf, empty = self._resolved(dm)
@@ -913,6 +927,9 @@ class RouteMode:
                     # entra 9.8 mm; con el PWM del agarre, n4 s21 queda a 3.0 mm.
                     cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
+        l0cap = getattr(C, "ROUTE_L0_CTE_PWM", None)
+        if l0cap is not None and self.fixed and tc is not None and float(tc) < 1.0 and abs(self.follower.cte) > float(getattr(C, "ROUTE_L0_CTE_MM", 40.0)):
+            self.rv = int(l0cap) if self.rv is None else min(self.rv, int(l0cap))   # recién ubicado el cajón (tc=0): la pose saltó y el carro vuelve a la ruta nueva lento (n6 s33)
         self.pi_steer = (bool(self.upload) and not self.hold
                          and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and self._upload_risky())
         if self.upload:
@@ -959,6 +976,11 @@ class RouteMode:
                 print(f"[PRUEBA] parado: pose x={x:.0f} y={y:.0f} rumbo={hd:.1f}  cajón w0={self.park_w:.0f}  "
                       f"dL={_ack_num(ack or '', 'dL')} dR={_ack_num(ack or '', 'dR')} dF={_ack_num(ack or '', 'dF')}",
                       flush=True)
+        cr = getattr(C, "ROUTE_FIX_PENDING_CREEP_PWM", None)
+        if cr is not None and not self.fixed and self._pend_n > 0 and self.rv is not None and self.rv < int(cr):
+            d_f = _ack_num(ack or "", "dF")
+            if d_f is None or d_f <= 0.0 or d_f >= float(getattr(C, "ROUTE_PREFIX_STOP_CM", 40.0)):
+                self.rv = int(cr)   # parado sin evidencia del cajón: avanza lento hasta ver la cinta
         self.dbg = (round(x), round(y), round(hd, 1), round(wheel, 1), round(self.follower.cte),
                     self.follower.i, self.rv, len(unknown))
         # ¿El ESP aceptó la última ruta? Su ACK trae rn = puntos de la ruta activa. Si tras
@@ -1155,9 +1177,11 @@ class RouteMode:
         idx = (i + np.arange(-win, m + win)) % n
         j = idx[win:win + m]
         if lap2:
-            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM))
+            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM), getattr(C, "ROUTE_L23_LEFT_K_FACTOR", None) if (l23 and float(getattr(self, "_tc_max", 0) or 0) < float(getattr(C, "ROUTE_L23_LEFT_K_TC_MAX", 12))) else None)
         else:
-            kmax = np.lib.stride_tricks.sliding_window_view(np.abs(r.kappa[idx]), 2 * win + 1).max(axis=1)
+            _k = r.kappa[idx]
+            _f = getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # kappa + = izquierda
+            kmax = np.lib.stride_tricks.sliding_window_view(np.abs(_k) * (np.where(_k > 0.0, float(_f), 1.0) if _f else 1.0), 2 * win + 1).max(axis=1)
         dist = np.mod(r.s[j] - r.s[i], r.length_mm)
         d = np.maximum(dist - lead, 0.0)
         tight = getattr(C, "ROUTE_PROFILE_TIGHT_KAPPA", None)
@@ -1251,6 +1275,10 @@ class RouteMode:
         if wmm <= 0.0 or self._line_d or not (o and o.get("seen") and not o.get("dead_reckoned")):
             return False
         w0 = self.__dict__.setdefault("_wait0", (pose[0], pose[1]))
+        self._wait_n = getattr(self, "_wait_n", 0) + 1
+        nmax = getattr(C, "ROUTE_FIX_WAIT_FRAMES", None)   # parado (rv=0) la distancia no crece: tope por cuadros
+        if nmax is not None and self._wait_n > int(nmax):
+            return False
         return math.hypot(pose[0] - w0[0], pose[1] - w0[1]) < wmm
 
     def _past_straight(self, dm, pose) -> bool:
@@ -1380,7 +1408,7 @@ class RouteMode:
                 conf, empty = self._resolved(dm)
                 self._update_views(conf, empty, (px + dx, py + dy, ph))
         self._pre_poses = []
-        how = "FORZADO" if forced else f"masa {mass:.2f}"
+        how = f"FORZADO masa {mass:.2f}" if forced else f"masa {mass:.2f}"
         if getattr(C, "ROUTE_FIX_LINE", None):
             how += f" línea n={len(self._line_d)}"
         print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, {how}) tras "
