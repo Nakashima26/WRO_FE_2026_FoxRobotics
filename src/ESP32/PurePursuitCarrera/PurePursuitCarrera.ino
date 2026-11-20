@@ -111,6 +111,12 @@ uint32_t bnoDtAccMs=0;      // ms que cubren esos grados
 uint8_t bnoBuf[19];
 int bnoN=0;
 uint32_t bnoMalos=0;
+// Aceleración del paquete RVC (bytes 9-14, int16 en mg, ejes del BNO, con gravedad).
+// Se promedian los paquetes entre ACKs (ACK bax/bay/baz) y se guarda el pico de |x|,|y|
+// (bxm/bym) para comparar con el encoder y ver si la llanta patina. Solo diagnóstico.
+int32_t bnoAxSum=0, bnoAySum=0, bnoAzSum=0;
+int16_t bnoAxMax=0, bnoAyMax=0;
+uint16_t bnoAccN=0;
 #endif
 
 // ── RONDA OBSTACULOS ──────────────────────────────────────────────────────────
@@ -676,7 +682,7 @@ const float LAZO_I_MAX       = 80.0f;   // PWM
 // baja de LAZO_FRENO_PWM_MIN_ALTO: el freno en corto completo bloquea la llanta
 // arriba de ~600 mm/s (N30Test) y patina sin que el encoder lo cuente.
 #define LAZO_FRENO_ACTIVO 1
-const float LAZO_FRENO_E_MMS       = 100.0f;  // mm/s de sobra para entrar al freno
+const float LAZO_FRENO_E_MMS       = 200.0f;  // mm/s de sobra para entrar al freno (100 -> 200 2026-11-20: runs 98/99 frenaban 23% del tiempo, 2.4/s; twin N30 s23/5/11/30: 16% -> 6%, sin choques, igual o mas rapido)
 const float LAZO_KP_FRENO          = 0.35f;   // PWM por mm/s (escala N20, se multiplica por g)
 const float LAZO_FRENO_LOCK_MMS    = 600.0f;
 const int   LAZO_FRENO_PWM_MIN_ALTO = 25;     // piso de PWM frenando arriba de LOCK
@@ -3461,6 +3467,14 @@ void leerBNO() {
     for (int i = 2; i < 18; i++) suma += bnoBuf[i];
     if (suma != bnoBuf[18]) { bnoMalos++; continue; }   // checksum malo: resincroniza
     float bnoYawNuevo = (int16_t)(bnoBuf[3] | (bnoBuf[4] << 8)) * 0.01f;
+    {
+      int16_t ax = (int16_t)(bnoBuf[9]  | (bnoBuf[10] << 8));
+      int16_t ay = (int16_t)(bnoBuf[11] | (bnoBuf[12] << 8));
+      int16_t az = (int16_t)(bnoBuf[13] | (bnoBuf[14] << 8));
+      bnoAxSum += ax; bnoAySum += ay; bnoAzSum += az; bnoAccN++;
+      if (abs(ax) > bnoAxMax) bnoAxMax = abs(ax);
+      if (abs(ay) > bnoAyMax) bnoAyMax = abs(ay);
+    }
     // Acumula el delta de CADA paquete (llegan a 100 Hz y el loop tarda más de 10 ms:
     // con solo los dos últimos se perdería casi todo el giro).
     uint32_t ahora = millis();
@@ -4038,6 +4052,20 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",pkh=");  ackOut.print(parkDetHPose, 0);
     ackOut.print(",pks=");  ackOut.print(parkDetHSon, 0);
     ackOut.print(",pk1=");  ackOut.print(parkOdomPoste1);
+#if FOX_BNO && !defined(FOX_SIL)
+    // bax/bay/baz = aceleración media (mg) desde el ACK anterior, bxm/bym = pico |x|,|y|, ban = paquetes.
+    if (bnoAccN > 0) {
+      ackOut.print(",bax="); ackOut.print(bnoAxSum / (int32_t)bnoAccN);
+      ackOut.print(",bay="); ackOut.print(bnoAySum / (int32_t)bnoAccN);
+      ackOut.print(",baz="); ackOut.print(bnoAzSum / (int32_t)bnoAccN);
+    } else {
+      ackOut.print(",bax=x,bay=x,baz=x");
+    }
+    ackOut.print(",bxm="); ackOut.print(bnoAxMax);
+    ackOut.print(",bym="); ackOut.print(bnoAyMax);
+    ackOut.print(",ban="); ackOut.print(bnoAccN);
+    bnoAxSum = bnoAySum = bnoAzSum = 0; bnoAxMax = bnoAyMax = 0; bnoAccN = 0;
+#endif
     ackOut.print(",lpm=");  ackOut.print(loopMaxUs / 1000.0f, 1);   // loop más largo desde el ACK anterior (ms)
     loopMaxUs = 0;
     ackOut.print(",lps=");
