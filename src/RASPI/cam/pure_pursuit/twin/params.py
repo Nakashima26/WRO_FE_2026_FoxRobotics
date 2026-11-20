@@ -163,8 +163,6 @@ class MotorParams:
     a_lat_left_mm_s2: float | None = 2400.0
 
     def __post_init__(self) -> None:
-        if os.environ.get("TWIN_ALAT_FIX"):   # vehicle.py: yaw>0 (rumbo brújula) = giro a la DERECHA usa a_lat_left: cruzado
-            self.a_lat_left_mm_s2, self.a_lat_right_mm_s2 = self.a_lat_right_mm_s2, self.a_lat_left_mm_s2
         _prov("motor.k/pwm0", "medido", "2026-10-24 escalones 150/255 a 12.1-11.9 V (a 12.5 V: k 4.02, pwm0 42.1)")
         _prov("motor.coast_decel_mm_s2", "medido", "2026-10-24 suelto desde 255/150: 2.6-2.8 m/s² parejo")
         _prov("motor.reversa", "medido", "2026-10-24: k_rev/pwm0_rev (150/255), patinado al arrancar (cinta), radios a tope en reversa")
