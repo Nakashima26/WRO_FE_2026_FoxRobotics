@@ -100,7 +100,7 @@ def _chord_ahead(follower, ahead_mm: float = 500.0) -> tuple[float]:
     return (dh,)
 
 
-def _pursuit_kappa(route, idx, lookahead_mm):
+def _pursuit_kappa(route, idx, lookahead_mm, left_f=None):
     """|κ| del pure pursuit parado en idx, mirando lookahead_mm sobre la ruta.
 
     Misma cuenta que rutaSteer del ESP: blanco a lookahead fijo, κ = 2·lateral/ld².
@@ -117,7 +117,7 @@ def _pursuit_kappa(route, idx, lookahead_mm):
     fwd = dx * np.sin(h) + dy * np.cos(h)
     right = dx * np.cos(h) - dy * np.sin(h)
     k = 2.0 * right / np.maximum(fwd * fwd + right * right, 1.0)
-    f = getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # el carro agarra menos a la izquierda: κ izquierda cuenta más
+    f = left_f or getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # el carro agarra menos a la izquierda: κ izquierda cuenta más
     return np.abs(k) * (np.where(k < 0.0, float(f), 1.0) if f else 1.0)
 
 
@@ -927,6 +927,9 @@ class RouteMode:
                     # entra 9.8 mm; con el PWM del agarre, n4 s21 queda a 3.0 mm.
                     cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
+        l0cap = getattr(C, "ROUTE_L0_CTE_PWM", None)
+        if l0cap is not None and self.fixed and tc is not None and float(tc) < 1.0 and abs(self.follower.cte) > float(getattr(C, "ROUTE_L0_CTE_MM", 40.0)):
+            self.rv = int(l0cap) if self.rv is None else min(self.rv, int(l0cap))   # recién ubicado el cajón (tc=0): la pose saltó y el carro vuelve a la ruta nueva lento (n6 s33)
         self.pi_steer = (bool(self.upload) and not self.hold
                          and bool(getattr(C, "ROUTE_UPLOAD_PI_STEER", False)) and self._upload_risky())
         if self.upload:
@@ -1174,7 +1177,7 @@ class RouteMode:
         idx = (i + np.arange(-win, m + win)) % n
         j = idx[win:win + m]
         if lap2:
-            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM))
+            kmax = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM), getattr(C, "ROUTE_L23_LEFT_K_FACTOR", None) if l23 else None)
         else:
             _k = r.kappa[idx]
             _f = getattr(C, "ROUTE_PROFILE_LEFT_K_FACTOR", None)   # kappa + = izquierda

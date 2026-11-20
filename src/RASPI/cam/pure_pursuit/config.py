@@ -1525,6 +1525,9 @@ ROUTE_UPLOAD_HORIZON_MM = 700.0
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm
 ROUTE_W_CLEAR = 8.0          # RouteParams.w_clear
+ROUTE_L0_CTE_PWM = None  # tope de PWM en tc=0 con el cajón ya ubicado y |cte| > ROUTE_L0_CTE_MM (None = sin tope)
+ROUTE_L0_CTE_MM = 40.0
+ROUTE_L23_LEFT_K_FACTOR = None  # vueltas 2-3: factor de κ a la izquierda propio (None = ROUTE_PROFILE_LEFT_K_FACTOR)
 # El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
 ROUTE_TIME_COST = False
 ROUTE_PLAN_VMIN_PWM = None  # piso de velocidad del costo de tiempo de la DP (None = ROUTE_PROFILE_BASE_PWM)
