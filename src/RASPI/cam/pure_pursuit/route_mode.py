@@ -654,7 +654,8 @@ class RouteMode:
                 delta = None
             if (delta is None and d_f is not None and d_f <= 100.0 and len(self._line_d) >= 8
                     and float(np.max(self._line_d) - np.min(self._line_d)) <= 40.0
-                    and self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1] < 0.5):
+                    and self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1] < 0.5
+                and self._line_ok(float(np.median(self._line_d)))):
                 # Recta corta: dF ya < 100 y el sonar sigue plano, así que el tope 105
                 # se come el tramo (n3 s23). Si el pico ya pesa, se espera al sonar
                 # (n3 s24: la línea a n=8 iba 32 mm corrida).
@@ -674,14 +675,20 @@ class RouteMode:
                 # Votos que derivan (gemelo s33: -369..-465 en 5 frames, verdad -568) pasan el IQR: también el rango.
                 span = getattr(C, "ROUTE_FIX_LINE_DECIDE_SPAN_MM", None)
                 if (q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0))
-                        and (span is None or max(last) - min(last) <= float(span))):
+                        and (span is None or max(last) - min(last) <= float(span))
+                        and self._line_ok(float(np.median(last)))):
                     delta = float(np.median(self._line_d[-int(n_dec):]))
             forced = False
             if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
                 # decidan, el histograma queda plano cerca de lo supuesto).
                 delta = self.fix.mean()
-                if getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3)):
+                if (getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
+                        and not self._line_ok(float(np.median(self._line_d)))):
+                    # La cinta contradice a los ToF: el pico de los ToF (corridas 100/101: cinta -565, ToF ~-150).
+                    pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
+                    delta = pk if pm >= 0.2 else delta
+                elif getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3)):
                     delta = float(np.median(self._line_d))
                     # 1-2 votos lejanos de la cinta van ~+60 mm corridos y el pico del sonar del otro lado
                     # (gemelo s9: cinta +649, pico +546 m=0.62, verdad +587; s22: +83 / -10, verdad +17).
@@ -1338,6 +1345,26 @@ class RouteMode:
                 best = (float(d), dist)
         if best is not None:
             self._line_d.append(best[0])
+            print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+
+    def _line_ok(self, d: float) -> bool:
+        """La cinta no contradice a los ToF: en ±ROUTE_FIX_WIN_MM de su δ el histograma de los
+        ToF no está más de ROUTE_FIX_LINE_TOF_LR (log) bajo su máximo. Corridas 100/101
+        (2026-11-20, seed 23, mediodía): la cinta votó -565 cinco veces seguidas y decidió;
+        los ToF daban ~-150 y ese δ quedaba ~e^-11..e^-25 abajo -> ruta a la isla."""
+        lr = getattr(C, "ROUTE_FIX_LINE_TOF_LR", None)
+        if lr is None or self.fix.n_inform < int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3)):
+            return True
+        lp = self.fix.logp - self.fix.logp.max()
+        sel = np.abs(self.fix.deltas - d) <= float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0))
+        v = float(lp[sel].max()) if sel.any() else float(lp.min())
+        ok = v >= -float(lr)
+        if v < -3.0 and getattr(self, "_line_rej_d", None) != round(d):
+            self._line_rej_d = round(d)
+            pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
+            print(f"[ROUTE] cinta δ={d:+.0f} {'ok' if ok else 'rechazada'}: ToF logp {v:.1f} (pico {pk:+.0f} masa {pm:.2f}, "
+                  f"{self.fix.n_inform} informativas)", flush=True)
+        return ok
 
     @staticmethod
     def _fwd_add(dm) -> float:
@@ -1387,6 +1414,8 @@ class RouteMode:
         d = d[(d >= lo) & (d <= hi)]
         if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
             self._line_d.append(float(np.median(d)))
+            print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
+                  f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
 
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
