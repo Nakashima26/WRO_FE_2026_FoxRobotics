@@ -1647,6 +1647,7 @@ PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 // Modo RUTA: si al terminar de alejarse quedan menos de esto (mm, eje trasero a la pared del fondo) no se endereza: la U arranca ya
 // (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
 PARK_AJ long         PARK_UTURN_ENDEREZA_REST_MM = 0;
+PARK_AJ long         PARK_UTURN_ENDEREZA_REST_TOL = 0;   // con poco fondo: 0 = salta el enderezado; >0 = endereza solo hasta esta tolerancia (grados, en vez de 5)
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 0;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 PARK_AJ long         PARK_PEGADO_CICLA          = 0;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
 PARK_AJ long         PARK_UTURN_TOPE            = 0;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
@@ -2824,7 +2825,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -5938,7 +5939,7 @@ void loop() {
         bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
         bool  restCorto = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
                           && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
-        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0 || restCorto
+        if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0 || (restCorto && PARK_UTURN_ENDEREZA_REST_TOL == 0)
                                 || (PARK_UTURN_ENDEREZA == 2 && parkRecorridoMm() < 30.0f))) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U sin enderezar (lat="); Serial.print(lateral, 1);
@@ -5963,7 +5964,10 @@ void loop() {
         motorAdelante();
         servoRumboPark(parkRumboGiro0);
         setMotorTope(alejarPwm, PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX);
-        if (fabs(anguloGyro - parkRumboGiro0) <= 5.0f || millis() - parkFaseMs >= 1500) {
+        bool  restCorto27 = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+                            && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
+        float tolEnd = (restCorto27 && PARK_UTURN_ENDEREZA_REST_TOL > 0) ? (float)PARK_UTURN_ENDEREZA_REST_TOL : 5.0f;
+        if (fabs(anguloGyro - parkRumboGiro0) <= tolEnd || millis() - parkFaseMs >= 1500) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
         }
