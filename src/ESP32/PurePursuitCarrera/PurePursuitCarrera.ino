@@ -6474,7 +6474,7 @@ void loop() {
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
             parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
             // El ancla del poste 2 se corrige con la separacion odometrica desde el poste 1 (sonar): la real es ~272 mm (twin: sd 38). Una bajada prematura (eco lateral: n1 s28 sep 201, ancla 73 mm adelantada) o el relevo por odometria (+340) dejan el ancla corrida y la cola/nariz pegan en una madera.
-            if (parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100) {
+            if (parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100 && extRaw > PARK_POSTE2_EXT_MAX_CM) {   // con la cara a ext <= 10 el poste 2 es fiable; el que llega tarde/pronto es el poste 1 (bajada rasante, ext 11-17: regreso por U, ancla -65..-89)
               float sepE = PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
               if (fabsf(sepE) > PARK_POSTE2_SEP_TOL_MM) {
                 sepE = constrain(sepE, -100.0f, 100.0f);
