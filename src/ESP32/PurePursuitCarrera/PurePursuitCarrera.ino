@@ -1691,7 +1691,7 @@ PARK_AJ long         PARK_UTURN_ESPERA_MM        = 0;
 PARK_AJ long         PARK_UTURN_RUTA_ALONG_MM    = 500;
 PARK_AJ long         PARK_UTURN_ADELANTO_MM      = 450;  // U adelantada: desde este along (< PARK_UTURN_RUTA_ALONG_MM) dispara si AMBOS sonares ya ven hueco >= ADELANTO_EXT_CM (la isla ya terminó); 0 = apagado
 PARK_AJ long         PARK_UTURN_ADELANTO_EXT_CM  = 70;
-const float         PARK_UTURN_ADELANTO_POSE_CM = 0.0f;  // adelanto alternativo si la pose confirma espacio lateral; 0 = apagado
+const float         PARK_UTURN_ADELANTO_POSE_CM = 70.0f;  // adelanto alternativo si la pose confirma espacio lateral; 0 = apagado
 PARK_AJ long         PARK_UTURN_RUTA_PKA_MM      = 120;   // piso extra de la U en ruta: along >= pka + esto (madera del cajón más adelante, pka= de la Pi); 0 = apagado
 // Modo RUTA: además del along, la U espera a que el carro vaya casi recto al carril (|anguloGyro| <= esto); si dispara
 // girado (esquivando) el ToF no ve la pared y el radio sale mal. 0 = sin compuerta.
@@ -1777,7 +1777,7 @@ PARK_AJ int          PARK_PL_ARC1_PWM           = 130;     // PWM del arco EXT d
 PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
 PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
 PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
-PARK_AJ float        PARK_PL_RI                  = 85.0f;  // radio de la reversa INT (eje trasero)
+PARK_AJ float        PARK_PL_RI                  = 85.0f;  // radio efectivo del plan (batalla / tan(53°)); pendiente medir arcos de reversa N30
 PARK_AJ float        PARK_PL_TA_MAX              = 92.0f;
 PARK_AJ float        PARK_PL_T2_PISO             = 12.0f;
 PARK_AJ float        PARK_PL_T1_POR_MM           = 0.0f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
@@ -1800,7 +1800,7 @@ PARK_AJ int          PARK_PL_ATASCO_MS           = 250;
 PARK_AJ float        PARK_PL_ATASCO_MM           = 4.0f;
 PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
 PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
-PARK_AJ int          PARK_PL_PAUSA_MS            = 120;     // parado con el volante girando antes de cada tramo nuevo
+PARK_AJ int          PARK_PL_PAUSA_MS            = 220;     // parado con el volante girando antes de cada tramo nuevo
 PARK_AJ float        PARK_PL_Z1_MM               = 21.0f;   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
 PARK_AJ float        PARK_PL_Z2_MM               = 42.0f;
 PARK_AJ float        PARK_PL_Z3_MM               = 42.0f;
@@ -5985,7 +5985,7 @@ void loop() {
           int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
-          float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
+          float delta = atan(RUTA_BATALLA_MM / radio) * 180.0f / 3.14159265f;
           delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
           parkServoU = rutaServo(uturnIzqP ? -delta : delta);
           Serial.print("PARK U servo="); Serial.print(parkServoU);
@@ -7721,7 +7721,7 @@ void loop() {
           int shift = gapMm - PARK_UTURN_EXT_OBJ_CM * 10;
           if (shift < 200) shift = 200;
           float radio = shift / 2.0f;
-          float delta = atan(113.0f / radio) * 180.0f / 3.14159265f;
+          float delta = atan(RUTA_BATALLA_MM / radio) * 180.0f / 3.14159265f;
           delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
           puntaServoU = rutaServo(uturnIzq ? -delta : delta);
           Serial.print("PUNTA U servo="); Serial.print(puntaServoU);

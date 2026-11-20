@@ -154,7 +154,8 @@ class MotorParams:
     a_max_rev_mm_s2: float | None = 1200.0
     rev_spin_tau_s: float = 0.06
     # En reversa a tope el círculo sale más abierto (las delanteras derrapan de lado):
-    # 2026-10-24 PWM -150: servo 1 -> R 138 mm (adelante 120-123), 156 -> R 162 (adelante ~134-143).
+    # 2026-10-24, N20, PWM -150: servo 1 -> R 138 mm; servo 156 -> R 162 mm.
+    # La escala aproxima la apertura por deslizamiento. Los radios de reversa del N30 siguen pendientes.
     reverse_wheel_scale: float = 0.90
     # Tope lateral medido (p8_curva_rapida): arriba de esto la curva se abre (subviraje); None = sin tope.
     # Der (servo 5/20) ~2610-2860, izq (servo 134) ~2400.
