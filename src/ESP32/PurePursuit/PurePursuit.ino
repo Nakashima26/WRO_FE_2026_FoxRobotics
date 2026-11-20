@@ -1540,7 +1540,11 @@ unsigned long parkPoste1Ms          = 0;      // millis de la detección del POS
 // Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
 // PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
 const long          PARK_POSTE2_POSE_MM   = 340;
-PARK_AJ float        PARK_POSTE2_SEP_MIN_MM = 215.0f;   // separacion odometrica poste1-poste2 normal 223-294 mm (twin, 11 corridas); menos = bajada prematura
+PARK_AJ int          PARK_POSTE2_EXT_MAX_CM  = 10;       // poste 2 por sonar solo con ext <= esto (0 = apagado)
+PARK_AJ int          PARK_POSTE2_ESPERA_MS   = 350;      // espera maxima a que la bajada llegue a la cara
+unsigned long        parkP2DefMs             = 0;
+PARK_AJ float        PARK_POSTE2_SEP_POSE_MM = 180.0f;   // odometria minima desde el poste 1 (sonar) para aceptar el poste 2 por pose
+PARK_AJ float        PARK_POSTE2_SEP_TOL_MM = 60.0f;    // tolerancia de la separacion odometrica poste1-poste2 (normal 223-294 mm)
 PARK_AJ float        PARK_POSTE2_SEP_MM     = 272.0f;   // separacion nominal usada para corregir el ancla
 PARK_AJ long         PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
 long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
@@ -6306,7 +6310,9 @@ void loop() {
 
         // Si se perdió la primera madera, una bajada confirmada en la ventana puede anclar la segunda.
         // Una bajada confirmada justo donde la Pi dice que esta la madera de adelante ES el poste 2.
-        if (parkDirecto && enVentanaPoste2 && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
+        // Con el poste 1 visto por sonar, un poste 2 por pose antes de ~180 mm de odometria es un disparo falso (n2 s34: 49 mm, ancla 109 mm corrida).
+        bool sepPoste2Ok = !(parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 < PARK_POSTE2_SEP_POSE_MM);
+        if (parkDirecto && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
             && fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM) {
           Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
           parkDetPorPose = true;
@@ -6314,7 +6320,7 @@ void loop() {
           parkHuecoEntryMs = millis();
           parkPoste1Ms     = 0;
         }
-        if (!parkDirecto && validaPoste2 && enVentanaPoste2 && parkScanSubFase < 2
+        if (!parkDirecto && validaPoste2 && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2
             && bajada && armada && posteConfirmado) {
           Serial.println("PARK: segundo poste de regreso por pose");
           parkScanSubFase  = 2;
@@ -6402,7 +6408,14 @@ void loop() {
           // Mismo conteo que el poste 1 (arriba). Antes aquí se volvía a sumar
           // parkCaidaCnt -> cada lectura baja contaba doble y el "sin eco" a media
           // bajada la reiniciaba.
-          bool poste2Detect  = (bajada && huecoMaduro && posteConfirmado && enVentanaPoste2);
+          bool poste2Cand    = (bajada && huecoMaduro && posteConfirmado && enVentanaPoste2);
+          bool poste2Detect  = poste2Cand;
+          // Una bajada que solo llega a ext >= 12 cm es el haz rozando la orilla de la madera, antes de su cara (ancla -25 mm de media, hasta -89; con ext 3-5 es +10 sd 8): se espera a que baje a la cara.
+          if (poste2Cand && PARK_POSTE2_EXT_MAX_CM > 0 && extRaw > PARK_POSTE2_EXT_MAX_CM && ((!parkDetPorPose && parkP1Sonar) || !parkDirecto)) {   // por pose o sin poste 1 por sonar la ventana de pose vence
+            if (parkP2DefMs == 0) parkP2DefMs = millis();
+            if (millis() - parkP2DefMs < (unsigned long)PARK_POSTE2_ESPERA_MS) poste2Detect = false;
+          }
+          if (!poste2Cand || poste2Detect) parkP2DefMs = 0;
           if (!poste2Detect && PARK_POSTE2_POSE_MM > 0 && parkOdomPoste1 >= 0
               && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM) {
             if (enVentanaPoste2) {
@@ -6445,10 +6458,14 @@ void loop() {
             // real. El rumbo paralelo medido es la referencia correcta.
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
             parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
-            // Poste 2 prematuro (eco lateral del sonar antes de la cara real): con el poste 1 visto por sonar, la separacion odometrica real es ~270 mm (n1 s28: 201 -> ancla 73 mm adelantada, la cola pego en el poste 1).
-            if (parkDirecto && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_SEP_MIN_MM) {
-              parkDetAlong += PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
-              Serial.print("PARK poste 2 prematuro: ancla +"); Serial.println(PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1), 0);
+            // El ancla del poste 2 se corrige con la separacion odometrica desde el poste 1 (sonar): la real es ~272 mm (twin: sd 38). Una bajada prematura (eco lateral: n1 s28 sep 201, ancla 73 mm adelantada) o el relevo por odometria (+340) dejan el ancla corrida y la cola/nariz pegan en una madera.
+            if (parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100) {
+              float sepE = PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
+              if (fabsf(sepE) > PARK_POSTE2_SEP_TOL_MM) {
+                sepE = constrain(sepE, -100.0f, 100.0f);
+                parkDetAlong += (parkDirecto ? 1.0f : -1.0f) * sepE;
+                Serial.print("PARK poste 2 separacion anomala: ancla "); Serial.println(sepE, 0);
+              }
             }
             // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
             if (parkDetPorPose && parkIgnOk && PARK_PL_ANCLA_IGN > 0 && parkDetAlong - parkIgnAlong >= 0.0f && parkDetAlong - parkIgnAlong <= (float)PARK_PL_ANCLA_IGN) parkDetAlong = 0.5f * (parkDetAlong + parkIgnAlong);   // punto medio: la bajada ignorada adelanta (nariz inclinada), la confirmada atrasa
