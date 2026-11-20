@@ -1540,7 +1540,9 @@ unsigned long parkPoste1Ms          = 0;      // millis de la detección del POS
 // Si tras el poste 1 avanza PARK_POSTE2_POSE_MM sin ver el 2, se toma ahí (misma separación que
 // PARK_POSTE_SEP_CM entre detecciones). 0 = apagado.
 const long          PARK_POSTE2_POSE_MM   = 340;
+PARK_AJ long         PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
 long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
+bool          parkP1Sonar           = false;  // el poste 1 se vio de verdad con el sonar (no por la via de "paso antes del armado")
 int           parkPoste2Pose        = 0;      // 1 = el poste 2 salió por odometría (ACK p2o=)
 float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
 float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
@@ -2778,6 +2780,7 @@ void resetParkScan() {
   parkCiclos           = 0;
   parkScanSubFase      = 0;
   parkOdomPoste1       = -1;
+  parkP1Sonar          = false;
   parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
@@ -6289,8 +6292,10 @@ void loop() {
         bool validaPoste2 = !PARK_TEST_MANO && rutaTfOk && !isnan(rutaPka) && ventanaPoste2 > 0.0f;
         float offsetPoste2 = parkDirecto ? PARK_D_B2_OFF_MM : PARK_U_B2_OFF_MM;
         float errorPoste2 = validaPoste2 ? alongSalidaMm() - (rutaPka - offsetPoste2) : 0.0f;
-        bool enVentanaPoste2 = !validaPoste2 || fabsf(errorPoste2) <= ventanaPoste2;
-        if (validaPoste2 && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
+        // Con el poste 1 ya visto, la separacion medida desde el (odometria) manda sobre la pose absoluta de la Pi (pka puede venir 90 mm corrido).
+        bool p1Reciente = parkDirecto && PARK_D_P1_ODOM_MM > 0 && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM - 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM + PARK_D_P1_ODOM_MM;   // el poste 2 no puede estar a menos de ~240 mm del 1
+        bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
+        if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
           finalizarPark("POSTE 2 fuera de ventana");
           break;
         }
@@ -6334,6 +6339,7 @@ void loop() {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
             parkOdomPoste1   = odomMm;
+            parkP1Sonar      = true;
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -6353,6 +6359,7 @@ void loop() {
               parkHuecoEntryMs = millis();
               parkPoste1Ms     = parkBajadaPreMs;
               parkOdomPoste1   = odomMm;
+              parkP1Sonar      = false;
               parkBajadaPre    = false;
               Serial.println("PARK: poste 1 pasó antes del armado — hueco");
             }
