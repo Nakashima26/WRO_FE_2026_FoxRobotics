@@ -1332,7 +1332,11 @@ class RouteMode:
         p = np.array([pose[0] + fwd * math.sin(h), pose[1] + fwd * math.cos(h)])
         a = np.array(self.axis)
         span = PARK_W_MAX - PARK_W_MIN
-        lo, hi = (-150.0, span + 150.0) if dm.direction == "CW" else (-span - 150.0, 150.0)
+        # Holgura más allá del rango del reglamento (el δ final se recorta en _apply_fix). Con 150 la
+        # cinta buena quedaba fuera y votaba la de otra esquina (corridas 100-102: SW a 9 cm daba
+        # +166..+192 y la NE a 1.4 m -565 -> isla).
+        mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
+        lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
         best = None
         for (sx, sy), (ex, ey) in orange_segments():
             u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
@@ -1384,7 +1388,11 @@ class RouteMode:
         c = P.mean(axis=0)
         a = np.array(self.axis)
         span = PARK_W_MAX - PARK_W_MIN
-        lo, hi = (-150.0, span + 150.0) if dm.direction == "CW" else (-span - 150.0, 150.0)
+        # Holgura más allá del rango del reglamento (el δ final se recorta en _apply_fix). Con 150 la
+        # cinta buena quedaba fuera y votaba la de otra esquina (corridas 100-102: SW a 9 cm daba
+        # +166..+192 y la NE a 1.4 m -565 -> isla).
+        mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
+        lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
         best = None
         for (sx, sy), (ex, ey) in orange_segments():
             u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
@@ -1394,10 +1402,10 @@ class RouteMode:
             d = float((n @ np.array([sx, sy]) - n @ c) / (n @ a))
             dist = math.hypot(sx - c[0], sy - c[1])
             if lo <= d <= hi and (best is None or dist < best[2]):
-                best = (n, float(n @ np.array([sx, sy])), dist)
+                best = (n, float(n @ np.array([sx, sy])), dist, d)
         if best is None:
             return True
-        n, ns, _ = best
+        n, ns, _, _ = best
         # Cinta casi paralela a la recta (|n·a| chico, CCW con la de 30°): un error
         # lateral de la pose se multiplica por |n_perp|/|n·a| (1.7 a 30°; gemelo s23
         # −190 mm). Ahí se queda el voto de la recta ajustada de siempre.
@@ -1420,6 +1428,8 @@ class RouteMode:
 
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""
+        # w0 fuera de [PARK_W_MIN, PARK_W_MAX] no existe en el reglamento (corrida 99: 1820 con máx 1696).
+        delta = float(min(max(float(delta), PARK_W_MIN - self.fix.w0_guess), PARK_W_MAX - self.fix.w0_guess))
         ax, ay = self.axis
         dx, dy = delta * ax, delta * ay
         mass = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1]
