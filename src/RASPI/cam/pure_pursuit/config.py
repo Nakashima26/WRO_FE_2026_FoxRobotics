@@ -1495,7 +1495,7 @@ ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
 # Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
 ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
 # Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
-ROUTE_FIX_LINE_LAG_FRAMES = 14   # 2026-11-21: retraso cámara->pose medido 12-16 cuadros (~350 ms) en 121-128; con 5 los votos se corrían al girar
+ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es la del MISMO frame que la pose; el "lag 14" medido salía de que en el _bev.bin el frame del voto m es el 6+m+16, no 6+m (centroide del carro reproducido a 0.5 mm con +16). Con 0: 129 -> -5 mm
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
 ROUTE_FIX_BLUE = True
 ROUTE_FIX_BLUE_HSV = ((95, 70, 60), (115, 255, 200))
