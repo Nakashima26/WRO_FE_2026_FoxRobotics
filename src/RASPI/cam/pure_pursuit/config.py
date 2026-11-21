@@ -1498,6 +1498,8 @@ ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
 ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es la del MISMO frame que la pose; el "lag 14" medido salía de que en el _bev.bin el frame del voto m es el 6+m+16, no 6+m (centroide del carro reproducido a 0.5 mm con +16). Con 0: 129 -> -5 mm
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
 ROUTE_FIX_BLUE = True
+# Cajón = pose ubicada por la cinta + esto (la odometría de la salida se pasa siempre igual; la pose sí se corre con el δ completo).
+ROUTE_FIX_PARK_ADJ_MM = {"CW": 0.0, "CCW": -86.0}   # 2026-11-21: CCW 126/128/131 medido +83/+88/+86; CW 121/130 −2/−29
 ROUTE_FIX_BLUE_HSV = ((95, 70, 60), (115, 255, 200))
 ROUTE_FIX_BLUE_MIN_AREA = 150
 ROUTE_FIX_BLUE_MIN_PIX = 80
