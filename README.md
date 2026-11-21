@@ -163,6 +163,8 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
 
 # 0. Vehicle Overview
 
+<p align="center"><img src="v-photos/v2/isometric.jpeg" width="520" alt="Isometric view of the v2 car"><br><b>Isometric</b></p>
+
 <table>
   <tr>
     <td align="center"><img src="v-photos/v2/front.jpeg" width="300" alt="Front view"><br><b>Front</b></td>
