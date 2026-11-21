@@ -45,6 +45,7 @@
 // Todo lo que se imprime sale por los dos. Desde el celular: "Serial Bluetooth
 // Terminal", emparejar con BT_NOMBRE. Sin nadie conectado, el BT no escribe nada.
 const char* BT_NOMBRE = "RondaAbierta";
+#define PI_BAUD 460800   // igual que PurePursuitCarrera / BAUDRATE de la Pi
 BluetoothSerial SerialBT;
 
 // Sin bloquear: cada mensaje mandado directo por BT trababa el loop ~41 ms
@@ -90,7 +91,7 @@ const bool          LOG_PERIODICO        = false;
 // ruido del motor (a 20 Hz por sensor sobra velocidad). Ver "i2c lentas/err" en RECTA.
 const uint32_t      I2C_HZ               = 400000;
 const unsigned long ARRANQUE_MS    = 5000;    // espera tras prender antes de arrancar (si no es por comando)
-const unsigned long TERMINANDO_MS  = 1000;    // recta tras el último giro hasta frenar
+const unsigned long TERMINANDO_MS  = 300;     // recta tras el último giro hasta frenar (1000 -> 300, 2026-11-21)
 
 // ── Servo ─────────────────────────────────────────────────────────────────────
 // Centro medido 2026-10-21 con encoder + BNO (CalibFox): 75/77/79 van casi
@@ -838,13 +839,46 @@ void setup() {
     while (true) { Log.println("NO ARRANCA: falta un sensor"); delay(1000); }
   }
 
-  if (ARRANQUE_POR_COMANDO) Log.println("Listo: manda 'g' (BT o USB) para arrancar, 'x' para parar");
+  // UART de la Raspberry (como PurePursuitCarrera): el botón de la Pi manda READY y con eso arranca.
+  // En el núcleo 0 y con buffer grande: la Pi manda tramas V2 todo el tiempo y aquí solo se tiran.
+  {
+    static volatile bool listo = false;
+    xTaskCreatePinnedToCore([](void *) {
+      Serial2.setRxBufferSize(4096);
+      Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 -> Raspberry Pi
+      listo = true;
+      vTaskDelete(NULL);
+    }, "uartPi", 4096, NULL, 5, NULL, 0);
+    while (!listo) delay(1);
+  }
+
+  if (ARRANQUE_POR_COMANDO) Log.println("Listo: botón de la Pi (READY), o 'g' por BT/USB para arrancar; 'x' para parar");
   else                      Log.printf("Arranca en %lu s...\n", ARRANQUE_MS / 1000);
   timeStart = millis();
 }
 
+// READY de la Pi (botón) arranca; lo demás que mande la Pi se descarta.
+void leerPi() {
+  static char buf[48];
+  static int n = 0;
+  while (Serial2.available()) {
+    char c = (char)Serial2.read();
+    if (c == '\n' || c == '\r') {
+      buf[n] = 0;
+      if (n >= 5 && strncmp(buf, "READY", 5) == 0) {
+        Serial2.println("ACK:READY");
+        if (estado == ESPERANDO) { Log.println("READY de la Pi"); arrancarCarrera(); }
+      }
+      n = 0;
+    } else if (n < (int)sizeof(buf) - 1) {
+      buf[n++] = c;
+    }
+  }
+}
+
 // 'g' arranca (desde ESPERANDO), 'x' frena y termina. Por BT o por USB.
 void leerComandos() {
+  leerPi();
   while (Serial.available() || SerialBT.available()) {
     char c = Serial.available() ? Serial.read() : SerialBT.read();
     if (c == 'g' && estado == ESPERANDO) {

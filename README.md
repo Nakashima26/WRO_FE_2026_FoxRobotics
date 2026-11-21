@@ -593,7 +593,7 @@ This section covers the software of both controllers ([§3.1](#31-two-controller
 | State machine | `INICIO`, `SIGUIENDO`, `ESTACIONANDO`, … | §3.4 |
 | Sensors | `initUnToF()`, `leerToF()`, BNO RVC parser | ROI, timing budget and status rules of §2.4 |
 
-**Open Challenge firmware** — [`src/ESP32/RondaAbierta/RondaAbierta.ino`](src/ESP32/RondaAbierta/RondaAbierta.ino), ESP32 only (no Pi needed): §3.6. This is the tested fallback; we are working on running the open round with the route-mode firmware too (§3.6).
+**Open Challenge firmware** — [`src/ESP32/RondaAbierta/RondaAbierta.ino`](src/ESP32/RondaAbierta/RondaAbierta.ino), ESP32 only (the Pi only sends `READY` when the start button is pressed): §3.6. This is the tested fallback; we are working on running the open round with the route-mode firmware too (§3.6).
 
 ## 3.3 Data flow and timing (one Pi cycle)
 
@@ -662,7 +662,7 @@ The Open Challenge has no pillars, so the camera adds risk without adding inform
 - **Corners.** Triggered by the front ToF plus the inner side seeing an opening. The turn ends 5° before 90° and the servo unwinds smoothly over the last 25°.
 - **Robust ToF handling** (§2.4): black-wall statuses accepted at their real distance, a jump filter (a reading > 40 cm closer needs a second confirming reading — this removed mid-straight false corners), and a stale-sensor watchdog.
 
-Result: **12/12 corners in 29.6–29.9 s** in both directions on our track (runs 133246 and 141103, 2026-10-19). At the national final v1 needed 57.5 s.
+Result: **12/12 corners in 29.6–29.9 s** in both directions on our track (runs 133246 and 141103, 2026-10-19). At the national final v1 needed 57.5 s. On 2026-11-21 (runs 143–148, §3.10.3) the same firmware did 12/12 in **~20–24 s**, three runs per direction; it now waits for the Pi's `READY` (start button) and stops 0.3 s after the 12th corner instead of 1 s, which had carried it past the start section.
 
 **Next step — open round with route mode.** `RondaAbierta.ino` is reactive: it decides each corner from what the ToF sees at that moment, so it has to drive the whole round at a speed that is safe for a corner it has not seen yet. In the Open Challenge the inner walls can be placed in different positions, but they do not move during the round. We are adapting the obstacle-round firmware (`PurePursuit.ino`, §3.7) so that lap 1 maps the walls with the ToF and the encoder (the position of each straight's inner wall and where each corner starts), and laps 2–3 follow a planned route with pure pursuit and the speed profile, knowing in advance where to turn and how fast each section can be driven. One code base for both rounds also means one set of parameters to calibrate at the venue. Until this beats 29.6 s reliably on our track, `RondaAbierta.ino` stays as the open-round firmware.
 
@@ -903,7 +903,14 @@ flowchart LR
 |---|---|---|---|---|---|---|
 | 133246 | CW (right) | 12/12 | 29.9 s | 0 | `RondaAbierta.ino` | Validated |
 | 141103 | CCW (left) | 12/12 | 29.6 s | 0 | `RondaAbierta.ino` | Validated |
-| **[TODO]** | CW / CCW × 3 each, different inner-wall positions | | | | release commit | To run before the deadline |
+| 143 | CW (right) | 12/12 | ~23.0 s | 0 | `RondaAbierta.ino`, end straight 1.0 s | Stopped past the start section → end straight cut to 0.3 s |
+| 144 | CW (right) | 12/12 | ~23.3 s | 0 | `RondaAbierta.ino`, end straight 0.3 s | Validated |
+| 145 | CW (right) | 12/12 | ~21.3 s | 0 | `RondaAbierta.ino`, end straight 0.3 s | Validated |
+| 146 | CCW (left) | 12/12 | ~20.0 s | 0 | `RondaAbierta.ino`, end straight 0.3 s | Validated |
+| 147 | CCW (left) | 12/12 | ~20.9 s | 0 | `RondaAbierta.ino`, end straight 0.3 s | Validated |
+| 148 | CCW (left) | 12/12 | ~24.1 s | 0 | `RondaAbierta.ino`, end straight 0.3 s | Validated |
+
+Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` over the UART, the ESP32 answers `ACK:READY` and drives on its own; nothing else from the Pi is used). Times are measured on the Pi's recorded video, from the first to the last frame with motion (the video is ~6.5 fps, so ±0.3 s). All six runs used the same inner-wall position; runs with other positions are still to do.
 
 ### 3.10.4 Obstacle Challenge (v2, real car, route mode)
 
