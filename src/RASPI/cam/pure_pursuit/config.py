@@ -1767,6 +1767,7 @@ ROUTE_FULL_HARD_CLEAR_MM = None   # None = ROUTE_HARD_CLEAR_MM
 ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil (None = ROUTE_PROFILE_LATENCY_S)
 ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón
 ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
+ROUTE_MAP_FREEZE_TC = 0           # desde qué esquina congela (antes fijo 4); 0 = desde que ubica el cajón (orillas135/137: soltaba el rojo de S/T1 antes de la esquina 1)
 ROUTE_L23_PWM0 = 45.5             # LAZO_PWM0_FWD
 ROUTE_L23_MAX_PWM = None          # vueltas 2-3: techo del perfil en recta (None = ROUTE_PROFILE_MAX_PWM)
 ROUTE_L23_ENTRY_PWM = None        # tope del perfil mientras tc==4 (primer tramo de la vuelta 2); None = sin tope
