@@ -1662,7 +1662,8 @@ class RouteMode:
               f"vacios={len(empty)} desconocidos={len(unknown)} feasible={rep.get('feasible')} "
               f"sign={rep.get('sign_mm', 0):.0f} wall={rep.get('wall_mm', 0):.0f} "
               f"isla={rep.get('island_mm', 0):.0f} Rmin={rep.get('r_min_mm', 0):.0f} "
-              f"L={route.length_mm:.0f} {rep.get('solve_ms', 0):.0f}ms", flush=True)
+              f"L={route.length_mm:.0f} {rep.get('solve_ms', 0):.0f}ms "
+              f"señales=[{' '.join(f'{sc}/{sd}{str(col)[0]}' for (sc, sd), col in sorted(conf.items()))}]", flush=True)
 
     def _speed(self, unknown, pose) -> int | None:
         """PWM máximo según lo que falta por ver.

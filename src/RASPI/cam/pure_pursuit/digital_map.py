@@ -637,7 +637,9 @@ class DigitalMap:
             if theirs + 80.0 < mine:
                 return
             if mine + 80.0 < theirs:
-                self.confirmed.pop(rival, None)
+                if self.confirmed.pop(rival, None) is not None:
+                    print(f"[DMAP] {sec}/{other} {color} BORRADA: {sec}/{sid} queda más cerca "
+                          f"({mine:.0f} vs {theirs:.0f} mm)", flush=True)
             elif rival in self.confirmed:
                 return
         key = (sec, sid)
