@@ -198,7 +198,23 @@ Logged in the README: [ERR-08](v1-national/README.md#err-08--raspberry-pi-underv
 #### ERR-31 — Second green after leaving the parking lot hit when the orange line was not seen
 - **Observed:** 2026-11-11, run orillas51. The car dodged the first green after leaving the lot but hit the second one (N/T2).
 - **Diagnosis:** At the start the car corrects its position from the orange line. In run 51 it saw no line votes (n=0), so it fell back to the mean of the side ToF and was off by +322 mm. After the first corner that error becomes a lateral error, so N/T2 was mapped as N/T4 and the route took the wrong side. In run 52 the line was seen (n=5, correction +128 mm) and the same pillar was dodged.
-- **Status:** Open. The start fix without line votes needs a better fallback.
+- **Fix (2026-11-21):** In CCW the orange line crosses the exit at ~30° and was often rejected, while the blue tape crosses the lane almost square (|n·a| 0.87). The start fix now also votes on the blue tape (HSV mask, largest blob, median offset per pixel, `13b31a2f`). Replaying the recordings showed the camera→pose lag is ~0, not 14 frames (the vote's frame in `_bev.bin` is 16 frames later than we had assumed; `e129e2d1`). CCW exits overshoot ~86 mm in odometry (runs 126/128/131: 83/88/86 mm), so the lot is shifted by that amount while the pose takes the full correction (`cdec20bb`).
+- **Result:** Runs 130 (CW) and 131 (CCW): 4.4 and 2.9 cm from the measured lot along the straight; runs 134–142 decided 1125–1194 mm for a lot at ~1170 mm. Across the lane it still reads ~4 cm too wide.
+- **Status:** Fixed.
+
+#### ERR-32 — Red pillar of the first straight dropped from the plan just before corner 1
+- **Observed:** 2026-11-21, runs orillas135 (hit) and orillas137 (grazed), CCW, red pillar at S/T1.
+- **Diagnosis:** The planner's map only stopped dropping pillars from corner 4 on. Half a second before corner 1 the provisional red at S/T1 lost its votes and disappeared from the map; the next plan went straight over it. The new log line (`[DMAP] … BORRADA`, confirmed pillars in every `[ROUTE] plan`, `4de56bc1`) showed the drop.
+- **Fix:** The map no longer drops pillars once the lot position is fixed (`ROUTE_MAP_FREEZE_TC` 4 → 0, `424138c9`).
+- **Result:** Run 138, same layout: 3 laps in 29 s without touching a pillar.
+- **Status:** Fixed.
+
+#### ERR-33 — U-turn before parking hit the back wall
+- **Observed:** 2026-11-21, run orillas140, CW.
+- **Diagnosis:** Before the U-turn the firmware first moves away from the inner wall. When the car reaches that phase with little straight left, the move-away uses it up and the U starts ~25 cm from the back wall, too close for the turning radius.
+- **Fix:** If less than 650 mm of straight remain, the U starts right away (`PARK_UTURN_ALEJAR_REST_MM`, `PurePursuitCarrera.ino`, `2d186d87`).
+- **Result:** Run 142: the U started 17–26 cm from the wall and finished without contact. The parallel maneuver after it is still open (ended ~24° off).
+- **Status:** Fixed (U-turn).
 
 ---
 
