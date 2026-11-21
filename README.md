@@ -39,7 +39,7 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 - **Open round = ESP32 alone.** Heading hold on the BNO085 plus four ToF sensors: **12/12 corners in 29.6–29.9 s** in both directions ([§3.6](#36-open-challenge-esp32-only)).
 - **Mechanics.** 176 × 125 mm, 1.25 : 1 gearing (~800 mm/s, capped at 700), Ackermann steering with a measured turning radius of 123–134 mm ([§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion)).
 - **Built with a digital twin** that runs the real firmware and the real Pi code: **126/126** full simulated races without wall contact. On the real car: clean 12-corner route-mode races (runs 41 and 48) ([§3.9](#39-digital-twin--software-in-the-loop-simulator), [§3.10](#310-testing-tuning-and-validation)).
-- **Honest status:** parking does not yet end fully inside the lot on the real car, and lap-1 mapping has two open cases ([§3.10](#310-testing-tuning-and-validation), [§6](#6-next-steps)).
+- **Honest status:** parallel parking has ended fully inside the lot on the real car once (run 104) but is not yet repeatable, and lap-1 mapping has two open cases ([§3.10](#310-testing-tuning-and-validation), [§6](#6-next-steps)).
 
 ## How this document follows the judging rubric
 
@@ -936,9 +936,9 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 
 | Run | Direction | Lot position | Score | Time | Collisions | Wrong side | Park | Battery V | Commit | Status |
 |---|---|---|---:|---:|---:|---:|---|---:|---|---|
-| OBS-01 | CW | **[TODO]** | | | | | | | | |
-| OBS-02 | CW | | | | | | | | | |
-| OBS-03 | CW | | | | | | | | | |
+| OBS-01 | CW | random layout, lot 1151 mm (run 106) | 54 / 62 | ≈42 s (laps 30.2 s) | 0 (passed the red after corner 10 at 5 mm in lap 3, not moved) | 0 | Partial (14° off, partly inside; oscillates while settling) | 12.4 | `4de45492` | Park partial |
+| OBS-02 | CW | random layout, lot 1177 mm (run 107) | 54 / 62 | ≈39 s (laps 29.8 s) | 0 (closest 69 mm, after corner 6) | 0 | Partial (19° off, partly inside) | ≈12.3 | `4de45492` | Park partial |
+| OBS-03 | CW | random layout, lot 1140 mm (run 111) | 44 / 62 | ≈44 s | 1 (lone green in the middle of a straight, lap 2: mapped one column off) | 0 | Partial (16° off, partly inside) | — | `4de45492` | Collision + park partial |
 | OBS-04 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (touched wall) | 11.72 | `68bd18b2` | Park fail |
 | OBS-05 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (19° off, not inside) | 11.68 | `68bd18b2` | Park fail |
 | OBS-06 | CCW | | | | | | | | | |
@@ -1065,7 +1065,7 @@ The [v1 documentation](docs/v1-national/README.md) describes the national-final 
 | 2026-11-04 → 11-07 | PCB assembled; first full-system tests; UART and power problems found and fixed |
 | 2026-11-11 | First clean route-mode races on the real car (runs 41, 48) |
 | 2026-11-12 | Fixed exposure, lot-fix robustness |
-| 2026-11-16 | Documentation for the international final; v2 CAD published (parts, STEP, STL, renders); HC-SR04 cross-check of the ToF added to the firmware (not yet on the car) |
+| 2026-11-16 | Documentation for the international final; v2 CAD published (parts, STEP, STL, renders); HC-SR04 cross-check of the ToF added to the firmware (sensors mounted on the car, not yet wired) |
 | 2026-11-19 | Camera remounted: BEV recalibrated, automatic exposure; red pillars found outside the red hue band → color study over 11 recorded runs (§6) |
 | 2026-11-20 | Documentation reorganized in the order of the judging rubric |
 | next | See [§6 Next Steps](#6-next-steps) |
@@ -1256,7 +1256,7 @@ What is still open, in the order we will work on it, and how we will know it is 
 
 | # | Next step | Why (evidence) | Plan | Done when |
 |---|---|---|---|---|
-| 1 | **Parking fully inside the lot** | Parallel parking is worth 15 points; the v2 car runs the sequence but has not yet ended fully inside the lot ([§3.10](#310-testing-tuning-and-validation)) | Tune the arc–straight–arc maneuver in the twin (the U-turn distance and the settle passes were the last changes), then confirm the constants on the car | 5 consecutive parks fully inside the lot on the car |
+| 1 | **Parking fully inside the lot** | Parallel parking is worth 15 points; the v2 car ended fully inside and parallel once (run 104) but not repeatably ([§3.10](#310-testing-tuning-and-validation)) | Tune the arc–straight–arc maneuver in the twin (the U-turn distance and the settle passes were the last changes), then confirm the constants on the car | 5 consecutive parks fully inside the lot on the car |
 | 2 | **Consistent 3-lap rounds** | Two open lap-1 mapping cases: the lone pillar after a corner (E/X1 ↔ E/X2) and the lot position without orange-line votes, ~0.3 m off (ERR-31) | Keep both seats as obstacles until the pillar is seen head-on; give the ToF histogram a fallback when the line is not seen | The obstacle validation matrix OBS-01…06 passes with random layouts and lot positions |
 | 3 | **Colors that do not depend on the light** | After the camera remount (2026-11-19) the red pillars looked orange-red (hue 5–7) instead of magenta-red (175–179), outside the old red band; the cause is the camera exposure, not the room light (the floor color was identical) | Classify red by channel ratios inside a wide hue band; correct white balance against the floor; set the exposure from the floor brightness; a 30-second color calibration at the venue. First step validated offline on 11 recorded runs × 6 simulated lights: frames with a red pillar 131 → 181, none of the old detections lost, no orange tape taken as red | The same detections on the car under the workshop light and a much darker and brighter light |
 | 4 | **Validation matrices and the release** | Formal evidence for the final code | Fill the open (3 CW + 3 CCW) and obstacle (OBS-01…06) matrices with the final firmware, then tag `v2.0-internacional` | Matrices filled and tagged |

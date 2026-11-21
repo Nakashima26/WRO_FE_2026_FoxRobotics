@@ -185,6 +185,8 @@ class DigitalMap:
         self._tc = 0
         self._votes: dict[tuple[str, str], dict[str, int]] = {}
         self._row_obs: dict[tuple[str, str, str], list[float]] = {}
+        # (recta, color) -> [(along, lateral)] de cada detección: col_candidates (columna medio vista).
+        self._col_obs: dict[tuple[str, str], list[tuple[float, float]]] = {}
         # Corrección a lo largo por la cinta naranja (DIGITAL_MAP_LINE_ALONG_FIX): vector (x, y) que se suma a
         # lo que ve la cámara, medido contra la cinta de verdad; vale solo en la recta donde se midió.
         self._line_fix: tuple[float, float] | None = None
@@ -573,7 +575,10 @@ class DigitalMap:
             obs = self._row_obs.setdefault((sec, _COL[sid], color), [])
             obs.append(fr)
             del obs[:-30]
-            stuck = self._stick_seat(sec, sid, color, wx, wy)
+            cobs = self._col_obs.setdefault((sec, color), [])
+            cobs.append((fa, fr))
+            del cobs[:-200]
+            stuck =self._stick_seat(sec, sid, color, wx, wy)
             if stuck != sid:
                 sid = stuck
                 sx, sy = self._seat_xy(sec, sid)
@@ -622,6 +627,37 @@ class DigitalMap:
             if abs(self._section_frame(ox, oy, sec)[1] - m) <= tol_mm:
                 out.append(other)
         return out or [sid]
+
+    def stray_seats(self, known: dict, tol_mm: float, far_mm: float = 250.0,
+                    min_n: int = 4) -> dict:
+        """Detecciones que ninguna señal conocida explica -> asientos cerca de ellas.
+
+        orillas110/111 (2026-11-20): el verde solo de E/X1 (fila interior, a la mitad) dejó dos
+        grupos de votos: visto desde la recta N entrando a la esquina caía en along ~1190 (entre
+        T2 y X1) y visto ya en E, ~2100 (T1). Ganó E/T1, la carta dejó X1 vacío y la ruta le pasó
+        encima en la vuelta 2 (las dos corridas). El grupo que nadie explica se queda como
+        "algo de este color está por aquí": todos los asientos de su fila a <= tol_mm.
+        known: {(recta, asiento): color} (confirmados + provisionales). Devuelve {(recta, asiento): color}
+        sin los que ya están en known."""
+        out = {}
+        for (sec, color), obs in self._col_obs.items():
+            seats = [self._section_frame(*self._seat_xy(sec, s), sec)
+                     for (sc, s), col in known.items() if sc == sec and col == color]
+            stray = [(fa, fr) for fa, fr in obs
+                     if all(math.hypot(fa - sa, fr - sr) > far_mm for sa, sr in seats)]
+            if len(stray) < min_n:
+                continue
+            ma = float(np.median([a for a, _ in stray]))
+            mr = float(np.median([r for _, r in stray]))
+            for sid in _COL:
+                if (sec, sid) in known:
+                    continue
+                if sec == self.parking and sid in PARKING_FORBIDDEN_SEATS:
+                    continue
+                sa, sr = self._section_frame(*self._seat_xy(sec, sid), sec)
+                if abs(sr - mr) <= 150.0 and abs(sa - ma) <= tol_mm:
+                    out[(sec, sid)] = color
+        return out
 
     def _keep_closer_row(self, sec: str, sid: str, color: str) -> None:
         """T1 y T3 son la misma altura, solo cambia la fila. Se queda la más cercana."""

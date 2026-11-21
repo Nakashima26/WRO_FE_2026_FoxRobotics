@@ -4764,7 +4764,29 @@ void setup() {
       for (int i = 0; i < TOF_N; i++) Serial2.print(tofInitBoot[i] ? '1' : '0');
       Serial2.print(" r=");
       for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofReinicios[i]); }
-      Serial2.print(" rst="); Serial2.println((int)esp_reset_reason());
+      Serial2.print(" rst="); Serial2.print((int)esp_reset_reason());
+#if FOX_ENCODER
+      Serial2.print(" enc="); Serial2.print(leerEncoder());   // banco: escala del encoder empujando a mano
+#endif
+      Serial2.println();
+    }
+#endif
+#if FOX_ENCODER && !defined(FOX_SIL)
+    // Banco (2026-11-21): por USB, cuentas del encoder y mm con ENC_CUENTAS_POR_MM para medir la escala
+    // empujando el carro a mano junto a un flexómetro, sin arrancar.
+    {
+      static unsigned long usbMs = 0;
+      if (millis() - usbMs >= 500) {
+        usbMs = millis();
+        int32_t c = leerEncoder();
+        Serial.print("BANCO enc="); Serial.print(c);
+        Serial.print(" mm="); Serial.print((float)c / ENC_CUENTAS_POR_MM, 1);
+#if FOX_TOF
+        Serial.print(" L="); Serial.print(tofMm[0]); Serial.print(" R="); Serial.print(tofMm[1]);
+        Serial.print(" B="); Serial.print(tofMm[2]); Serial.print(" F="); Serial.print(tofMm[3]);
+#endif
+        Serial.println();
+      }
     }
 #endif
     if (Serial2.available()) {

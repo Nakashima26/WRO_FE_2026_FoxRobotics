@@ -1677,6 +1677,7 @@ PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 // (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
 PARK_AJ long         PARK_UTURN_ENDEREZA_REST_MM = 750;
 PARK_AJ long         PARK_UTURN_ENDEREZA_REST_TOL = 14;   // con poco fondo: 0 = salta el enderezado; >0 = endereza solo hasta esta tolerancia (grados, en vez de 5)
+PARK_AJ long         PARK_UTURN_ALEJAR_REST_MM  = 650;   // fase 26: con menos recta que esto (1500 - along) deja de alejarse y hace la U ya; 0 = apagado (orillas140 CW: se alejó 500 mm y la U empezó a ~25 cm de la pared del fondo)
 PARK_AJ long         PARK_UTURN_SIN_SETTLE      = 1;   // 1 = al cerrar la U (fase 24) pasa directo al escaneo sin coast ni settle (fase 25); 0 = como antes
 PARK_AJ long         PARK_PEGADO_CICLA          = 1;   // 1 = en la fase 13, "pegado de lado" sin estar alineado cicla a la fase 9 en vez de terminar
 PARK_AJ long         PARK_UTURN_TOPE            = 200;   // tope PWM propio de alejar (26/27) y la U (24); 0 = MOTOR_MAX
@@ -4769,7 +4770,29 @@ void setup() {
       for (int i = 0; i < TOF_N; i++) Serial2.print(tofInitBoot[i] ? '1' : '0');
       Serial2.print(" r=");
       for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofReinicios[i]); }
-      Serial2.print(" rst="); Serial2.println((int)esp_reset_reason());
+      Serial2.print(" rst="); Serial2.print((int)esp_reset_reason());
+#if FOX_ENCODER
+      Serial2.print(" enc="); Serial2.print(leerEncoder());   // banco: escala del encoder empujando a mano
+#endif
+      Serial2.println();
+    }
+#endif
+#if FOX_ENCODER && !defined(FOX_SIL)
+    // Banco (2026-11-21): por USB, cuentas del encoder y mm con ENC_CUENTAS_POR_MM para medir la escala
+    // empujando el carro a mano junto a un flexómetro, sin arrancar.
+    {
+      static unsigned long usbMs = 0;
+      if (millis() - usbMs >= 500) {
+        usbMs = millis();
+        int32_t c = leerEncoder();
+        Serial.print("BANCO enc="); Serial.print(c);
+        Serial.print(" mm="); Serial.print((float)c / ENC_CUENTAS_POR_MM, 1);
+#if FOX_TOF
+        Serial.print(" L="); Serial.print(tofMm[0]); Serial.print(" R="); Serial.print(tofMm[1]);
+        Serial.print(" B="); Serial.print(tofMm[2]); Serial.print(" F="); Serial.print(tofMm[3]);
+#endif
+        Serial.println();
+      }
     }
 #endif
     if (Serial2.available()) {
@@ -6183,6 +6206,14 @@ void loop() {
                       : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
         bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
         bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
+        bool  sinRecta = PARK_UTURN_ALEJAR_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
+                         && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ALEJAR_REST_MM;
+        if (sinRecta) {
+          parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK fase 24: U ya, poca recta (resto="); Serial.print(1500.0f - alongSalidaMm(), 0);
+          Serial.print(" lat="); Serial.print(lateral, 1); Serial.println(")");
+          break;
+        }
         bool  restCorto = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
                           && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
         if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0 || (restCorto && PARK_UTURN_ENDEREZA_REST_TOL == 0)

@@ -216,6 +216,59 @@ def warm_caches() -> None:
         RR.plan(d, {}, None, prm=_prm_for([]))
 
 
+def pix_line_delta(pix, pose, axis, direction, fwd_add: float = 0.0):
+    """(δ, texto) de la cinta vista en `pix` (pixeles BEV) con el carro en `pose` (x, y, rumbo°), o None.
+    Ver RouteMode._pix_line_vote. Función suelta para re-probarla offline con los BEV grabados."""
+    pix = np.asarray(pix, float)
+    a = np.asarray(axis, float)
+    fwd = (float(C.ROBOT_BEV_Y) - pix[:, 1]) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0)) + fwd_add
+    lat = (pix[:, 0] - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
+    span = PARK_W_MAX - PARK_W_MIN
+    mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
+    lo, hi = (-mg, span + mg) if direction == "CW" else (-span - mg, mg)
+    win = float(getattr(C, "ROUTE_FIX_PIX_LINE_W_MM", 30.0))
+    min_n = int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25))
+    min_span = float(getattr(C, "ROUTE_FIX_PIX_LINE_SPAN_MM", 100.0))
+    # Con la línea entera (no un punto) la cinta empinada de CCW (|n·a| 0.5) también sirve: el error
+    # lateral de la pose se multiplica x1.7, pero tras la S queda en ~2-3 cm (2026-11-21).
+    min_na = float(getattr(C, "ROUTE_FIX_PIX_LINE_MIN_NA", 0.45))
+    dh_max = float(getattr(C, "ROUTE_FIX_PIX_LINE_DH_DEG", 6.0))
+    dh_step = float(getattr(C, "ROUTE_FIX_PIX_LINE_DH_STEP", 1.0))
+    segs = []
+    for (sx, sy), (ex, ey) in orange_segments():
+        u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
+        n = np.array([-u[1], u[0]])
+        if abs(float(n @ a)) >= min_na:
+            segs.append((u, n, float(n @ np.array([sx, sy]))))
+    best = None
+    for dh in np.arange(-dh_max, dh_max + 1e-6, dh_step):
+        h = math.radians(pose[2] + float(dh))
+        P = np.column_stack([pose[0] + fwd * math.sin(h) + lat * math.cos(h),
+                             pose[1] + fwd * math.cos(h) - lat * math.sin(h)])
+        for u, n, ns in segs:
+            d = (ns - P @ n) / (n @ a)
+            ok = (d >= lo) & (d <= hi)
+            if ok.sum() < min_n:
+                continue
+            ds = np.sort(d[ok])
+            j = np.searchsorted(ds, ds + win, side="right")
+            cnt = j - np.arange(len(ds))
+            i = int(np.argmax(cnt))
+            c = int(cnt[i])
+            if c < min_n or (best is not None and c <= best[0]):
+                continue
+            sel = ok & (d >= ds[i]) & (d <= ds[i] + win)
+            t = P[sel] @ u
+            sp = float(np.percentile(t, 95) - np.percentile(t, 5))
+            best = (c, float(np.median(d[sel])), float(dh), sp, int(ok.sum()))
+    if best is None:
+        return None
+    c, dmed, dh, sp, tot = best
+    if sp < min_span:
+        return None
+    return dmed, f"n={c}/{tot} largo={sp:.0f} dh={dh:+.0f}"
+
+
 class RouteMode:
     def __init__(self) -> None:
         if getattr(C, "ROUTE_WARM", False):
@@ -798,6 +851,23 @@ class RouteMode:
                 half_seats |= set(ghosts2)
                 plan_seats = {**plan_seats, **ghosts2}
                 plan_unknown = [k for k in plan_unknown if k not in ghosts2]
+        ctc = getattr(C, "ROUTE_COL_GHOST_TC", None)
+        if ctc is not None and float(getattr(self, "_tc_max", 0) or 0) < float(ctc) and getattr(dm, "stray_seats", None):
+            # Detecciones que ninguna señal conocida explica (orillas110/111: el verde solo de E/X1 visto entrando
+            # a la esquina caía entre T2 y X1, visto en la recta caía en T1; ganó T1, la carta vació X1 y la ruta le
+            # pasó encima en la vuelta 2): los asientos de su fila cerca de ese grupo se esquivan con su color.
+            tol = float(getattr(C, "ROUTE_COL_GHOST_TOL_MM", 320.0))
+            ghosts3 = {k: c for k, c in dm.stray_seats({**conf, **prov}, tol, float(getattr(C, "ROUTE_COL_GHOST_FAR_MM", 250.0))).items()
+                       if k not in plan_seats}
+            if ghosts3:
+                if self._ghost_fb is None:
+                    self._ghost_fb = ({k: v for k, v in plan_seats.items()}, list(plan_unknown))
+                if ghosts3 != getattr(self, "_col_ghosts_prev", None):
+                    print(f"[ROUTE] columna medio vista: " + " ".join(f"{s}/{o}={c[0]}" for (s, o), c in sorted(ghosts3.items())), flush=True)
+                half_seats |= set(ghosts3)
+                plan_seats = {**plan_seats, **ghosts3}
+                plan_unknown = [k for k in plan_unknown if k not in ghosts3]
+            self._col_ghosts_prev = ghosts3
         extra, extra_key, anchor_replan = None, None, False
         if not self.fixed:
             # Recta del cajón sin el avance: sus asientos no se pueden ubicar;
@@ -1306,6 +1376,13 @@ class RouteMode:
             self._blue_vote(dm, pose)
         o = self.orange
         pix = o.get("_pix") if o else None
+        if o and getattr(C, "ROUTE_FIX_PIX_LINE", False):
+            # Voto por línea: con todos los pixeles naranjas de la franja, aunque el tracker no
+            # haya aceptado la cinta en este frame (sol: core 0; señal roja tomada como cinta).
+            pall = o.get("_pix_all")
+            if pall is not None and len(pall) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+                self._pix_line_vote(dm, pose, np.asarray(pall, float))
+            return
         # Con pixeles crudos del frame no hace falta que el tracker ya haya persistido la línea
         if not o or o.get("dead_reckoned") or not (o.get("seen") or (
                 pix is not None and getattr(C, "ROUTE_FIX_PIX_RAW", False))):
@@ -1408,6 +1485,36 @@ class RouteMode:
         self._line_d.append(best[0])
         print(f"[FIXVOTE] azul d={best[0]:+.0f} n={len(fwd)} c=({c[0]:.0f},{c[1]:.0f}) "
               f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+
+    def _pix_line_vote(self, dm, pose, pix) -> None:
+        """Voto del cajón buscando UNA LÍNEA con la dirección de la cinta, no la mediana de todo lo naranja.
+
+        Corridas 110/113-117 (2026-11-20, de noche): la orilla de la base de una señal roja (H 6-8, fuera
+        de LINE_CONE_HSV) entraba como cinta en la franja del voto y el tracker hasta la aceptaba como la
+        línea; al estar más cerca que la cinta, el carro se creía más adelante -> cajón +130..+245 mm.
+        La cinta es una línea recta de 20 mm con dirección conocida (el segmento del modelo) y el rumbo
+        del BNO es bueno (salida 2026-11-21: 2 cm tras la S). Por cada rumbo de prueba (BNO ±N°) se lleva
+        cada pixel al tapete, se mide su distancia d a lo largo del eje de la recta a la que esa cinta
+        cruzaría, y se busca la ventana de ROUTE_FIX_PIX_LINE_W_MM con más pixeles. Gana el rumbo con la
+        ventana más llena (la línea más nítida). Vale solo si esos pixeles cubren al menos
+        ROUTE_FIX_PIX_LINE_SPAN_MM a lo largo de la cinta: el contorno de una señal (50 mm) no llega."""
+        k = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
+        cur_h = pose[2]
+        if len(self._pre_poses) > k:
+            pose = self._pre_poses[-1 - k]
+        turn = abs((cur_h - pose[2] + 180.0) % 360.0 - 180.0)
+        if turn > float(getattr(C, "ROUTE_FIX_PIX_MAX_TURN_DEG", 3.0)):
+            return
+        a = np.array(self.axis)
+        h0 = math.radians(pose[2])
+        if abs(math.sin(h0) * a[1] - math.cos(h0) * a[0]) > math.sin(math.radians(float(getattr(C, "ROUTE_FIX_PIX_MAX_ANG_DEG", 15.0)))):
+            return
+        res = pix_line_delta(pix, pose, a, dm.direction, self._fwd_add(dm))
+        if res is None:
+            return
+        d, info = res
+        self._line_d.append(d)
+        print(f"[FIXVOTE] linea d={d:+.0f} {info} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
     def _line_ok(self, d: float) -> bool:
         """La cinta no contradice a los ToF: en ±ROUTE_FIX_WIN_MM de su δ el histograma de los
@@ -1794,3 +1901,4 @@ class RouteMode:
             lines.append(f"RTP,{i},{pts}")
         lines.append(f"RTE,{n}")
         return lines
+

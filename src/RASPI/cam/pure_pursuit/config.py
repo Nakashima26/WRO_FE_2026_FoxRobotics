@@ -1369,6 +1369,17 @@ ROUTE_FIX_PENDING_MASS = 0.1
 ROUTE_PROFILE_LEFT_K_FACTOR = None   # perfil de velocidad: multiplica |kappa| de giros a la izquierda (a_lat der/izq medido 2750/2400 = 1.146); None = simétrico
 ROUTE_FIX_PENDING_CREEP_PWM = None   # mientras espera, tope mínimo de PWM para avanzar y ver la cinta; None = sin avance
 ROUTE_FIX_PIX_MIN_NA = 0.7
+# Voto del cajón por LÍNEA (route_mode.pix_line_delta, 2026-11-21): en vez de la mediana de los pixeles
+# naranjas, la ventana de ROUTE_FIX_PIX_LINE_W_MM (a lo largo del eje de la recta) con más pixeles, probando
+# rumbos BNO ±ROUTE_FIX_PIX_LINE_DH_DEG; vale si esos pixeles cubren >= ROUTE_FIX_PIX_LINE_SPAN_MM de cinta.
+# Usa todos los pixeles naranjas de la franja (corner_lines `_pix_all`), aunque el tracker no acepte la cinta.
+ROUTE_FIX_PIX_LINE = False
+ROUTE_FIX_PIX_LINE_W_MM = 30.0
+ROUTE_FIX_PIX_LINE_SPAN_MM = 100.0
+ROUTE_FIX_PIX_LINE_DH_DEG = 6.0
+ROUTE_FIX_PIX_LINE_DH_STEP = 1.0
+ROUTE_FIX_PIX_LINE_MIN_NA = 0.45
+LINE_PIX_FAR_MM = 600.0   # tope lejano (mm del eje trasero) de la franja de pixeles del voto (corner_lines._center_pix)
 # Decide con la cinta en cuanto sus últimos N votos cuadran (IQR <= esto); None = espera al final de la recta.
 ROUTE_FIX_LINE_DECIDE_N = 5
 ROUTE_FIX_LINE_DECIDE_IQR_MM = 60.0
@@ -1393,6 +1404,9 @@ ROUTE_PROV_RULES = False
 ROUTE_HALF_SEEN = True
 ROUTE_CONF_GHOST_TC = 4   # vuelta 1 (tc < esto): la señal confirmada también esquiva la otra fila de su columna si la mediana lateral cae a <= ROUTE_CONF_GHOST_TOL_MM; None = apagado
 ROUTE_CONF_GHOST_TOL_MM = 150.0
+ROUTE_COL_GHOST_TC = None   # tc < esto: detecciones que ninguna señal conocida explica (>250 mm de todas) dejan como obstáculo los asientos de su fila a <= ROUTE_COL_GHOST_TOL_MM (orillas110/111: E/X1 tomado como E/T1); None = apagado
+ROUTE_COL_GHOST_TOL_MM = 320.0
+ROUTE_COL_GHOST_FAR_MM = 250.0   # una detección es "sin explicar" si queda a más de esto de toda señal conocida de su color
 ROUTE_GHOST_FALLBACK = False   # fantasmas de fila: si el plan con ellos es infactible, se planea sin ellos
 # Filas posibles de una señal medio vista: las que quedan a <= esto de la mediana lateral observada
 # (filas a 200 mm: 150 = las dos si la mediana cae en la mitad central del hueco).
