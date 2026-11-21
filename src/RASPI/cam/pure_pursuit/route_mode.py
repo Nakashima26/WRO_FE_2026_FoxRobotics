@@ -1493,7 +1493,12 @@ class RouteMode:
         self.fixed = True
         self.fix.fixed = float(delta)
         self.loc.shift(dx, dy)
-        self.park_w = self.fix.w0_guess + float(delta)
+        # El δ corre la POSE (lo que ve la cinta = dónde está el carro), pero la odometría de la salida
+        # del cajón se pasa siempre lo mismo: en CCW ~+86 mm (131/126/128 medidos 86/83/88). Ese error
+        # no es del cajón: sin esto el cajón quedaba ~9 cm corrido y el carro chocaba al estacionar (133).
+        adj = getattr(C, "ROUTE_FIX_PARK_ADJ_MM", 0.0)
+        adj = float(adj.get(dm.direction, 0.0)) if isinstance(adj, dict) else float(adj)
+        self.park_w = float(min(max(self.fix.w0_guess + float(delta) + adj, PARK_W_MIN), PARK_W_MAX))
         dm.park_w = self.park_w
         n = dm.replay_deferred(dx, dy)
         pose = self.loc.pose()
@@ -1506,7 +1511,7 @@ class RouteMode:
         how = f"FORZADO masa {mass:.2f}" if forced else f"masa {mass:.2f}"
         if getattr(C, "ROUTE_FIX_LINE", None):
             how += f" línea n={len(self._line_d)}"
-        print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, {how}) tras "
+        print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, ajuste {adj:+.0f}, {how}) tras "
               f"{self.fix.n_frames} lecturas ({self.fix.n_inform} informativas); "
               f"{n} frames de cámara votados", flush=True)
         if self._prueba_cajon:
