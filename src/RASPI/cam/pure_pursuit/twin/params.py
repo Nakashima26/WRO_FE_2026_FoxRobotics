@@ -293,8 +293,15 @@ class ToFParams:
     # Curva propia por id (reemplaza la de arriba). Derecho (1): corridas 35-42 del 2026-11-11, real
     # sacado de la pared de enfrente (pasillo 1000, ancho tL+tR+70 = 985-1016 con el carro centrado):
     # exacto hasta ~45 cm y luego se queda en 460-500 (55 cm -> 463, 65 -> 484, 75 -> ~500).
+    # L y R medidos 2026-11-20 (carro paralelo a la pared de la pista, TofDiag ROI 8 Short, mediana de ~9):
+    # los mismos puntos que TOF_CAL_* del firmware, que los corrige de vuelta (carro y gemelo leen igual).
     short_map_by_id: dict[int, tuple[tuple[float, ...], tuple[float, ...]]] = field(
-        default_factory=dict)  # el sesgo del derecho (460-500 desde 45 cm) era de ROI 16; con ROI 8 sin medir aún
+        default_factory=lambda: {
+            0: ((100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0),
+                (95.0, 193.0, 292.0, 380.0, 481.0, 559.0, 626.0, 669.0)),
+            1: ((100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0),
+                (97.0, 193.0, 295.0, 395.0, 488.0, 571.0, 653.0, 695.0)),
+        })
     # Frontal Long (calib 2026-10-19 frontal_estatica, pared negra): +32 a 30 cm y ~+20 cm de 60 a 150,
     # con ±7..20 cm de ruido, y casi todo con status 2/7. El firmware (leerToF) solo acepta status 0:
     # en las corridas del 2026-11-09 (14:27, 14:35) el frontal salió -1 el 57-68 % de las lecturas y

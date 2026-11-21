@@ -82,6 +82,7 @@ MPU6050 mpu(Wire);
 
 #if FOX_TOF && !defined(FOX_SIL)
 #include <VL53L1X.h>
+#include <esp_system.h>
 // pinout probado en TofBnoTest/TofTest4 (v2). GPIO0 y GPIO15 son pines de strapping del ESP32: el módulo no debe forzarlos a nivel que cambie el arranque
 #define TOF_XSHUT_F 0
 #define TOF_XSHUT_L 15
@@ -2464,6 +2465,28 @@ void actualizarOdometria() {
 #endif
 }
 
+// Calibración estática de los laterales (2026-11-20, pared de la pista, carro paralelo, mediana de ~9
+// lecturas de TofDiag con ROI 8 Short): leído -> real. Bien hasta 50 cm (−5..−20 mm); de 60 cm en
+// adelante leen cada vez más corto (80 cm -> 669 / 695). Interpolación lineal; abajo del 1er punto
+// se suma su error y arriba del último se sigue su pendiente, con tope en 1000 mm.
+// Fuera del #if: el gemelo (sil_tof_mm) simula la misma lectura corta y pasa por aquí igual.
+const bool TOF_LAT_CALIB = true;
+const int  TOF_CAL_N = 8;
+const int16_t TOF_CAL_REAL[TOF_CAL_N] = {100, 200, 300, 400, 500, 600, 700, 800};
+const int16_t TOF_CAL_LEIDO[2][TOF_CAL_N] = {
+  {95, 193, 292, 380, 481, 559, 626, 669},   // L (60 cm: media de 555 y 563)
+  {97, 193, 295, 395, 488, 571, 653, 695},   // R
+};
+int corregirToF(int i, int mm) {
+  if (!TOF_LAT_CALIB || i > 1 || mm < 0) return mm;
+  const int16_t *l = TOF_CAL_LEIDO[i];
+  if (mm <= l[0]) return mm + (TOF_CAL_REAL[0] - l[0]);
+  int k = 1;
+  while (k < TOF_CAL_N - 1 && mm > l[k]) k++;
+  float r = TOF_CAL_REAL[k - 1] + (float)(mm - l[k - 1]) * (TOF_CAL_REAL[k] - TOF_CAL_REAL[k - 1]) / (float)(l[k] - l[k - 1]);
+  return r > 1000.0f ? 1000 : (int)(r + 0.5f);
+}
+
 #if FOX_TOF && !defined(FOX_SIL)
 // Varios VL53 en el mismo I2C: todos en reset (XSHUT bajo) y se despiertan de a
 // uno para darle a cada uno su dirección antes de despertar el siguiente.
@@ -2491,16 +2514,20 @@ const bool     TOF_LAT_ACEPTA_ST2  = true;
 const uint16_t TOF_LAT_ST2_MAX_MM  = 900;
 
 static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
-                      bool corto) {
+                      bool corto, uint8_t roi = TOF_LAT_TRAS_ROI) {
   digitalWrite(xshut, HIGH);
   delay(10);
   dev.setTimeout(500);
-  if (!dev.init()) { Serial.print("ToF "); Serial.print(nombre); Serial.println(" fail"); return false; }
+  if (!dev.init()) {
+    // De vuelta a reset: si se queda despierto ocupa 0x29 y el siguiente que se arranque choca con él.
+    digitalWrite(xshut, LOW);
+    Serial.print("ToF "); Serial.print(nombre); Serial.println(" fail"); return false;
+  }
   dev.setAddress(addr);
   const bool usaShort = corto && TOF_LAT_TRAS_SHORT;
   const uint16_t ms = usaShort ? TOF_LAT_TRAS_MS : (corto ? 33 : TOF_FRENTE_MS);
   dev.setDistanceMode(usaShort ? VL53L1X::Short : VL53L1X::Long);
-  if (usaShort && TOF_LAT_TRAS_ROI > 0) dev.setROISize(TOF_LAT_TRAS_ROI, TOF_LAT_TRAS_ROI);
+  if (usaShort && roi > 0) dev.setROISize(roi, roi);
   if (!dev.setMeasurementTimingBudget((uint32_t)ms * 1000UL)) {
     Serial.print("ToF "); Serial.print(nombre); Serial.println(" presupuesto rechazado");
   }
@@ -2508,9 +2535,44 @@ static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
   return true;
 }
 
+// ── Salud de los ToF (2026-11-20, runs 108/109) ──────────────────────────────
+// En 108 y 109 el derecho arrancó, dio UNA lectura (660/690) y no volvió a tener
+// dataReady() en toda la corrida: el carro manejó con ese valor congelado y chocó
+// en la esquina 2. Con TofDiag (mismo modo/ROI) los 4 leen bien. Para saber la
+// causa y que no vuelva a chocar:
+//  - Cada ToF lleva la hora de su última lectura nueva. Si pasan TOF_STALE_MS sin
+//    dato, tofMm = -1 (la localización deja de usar el valor viejo) y se mira el
+//    bus: 'd' = contesta en su dirección pero no mide, 'z' = algo contesta en
+//    0x29 (el sensor se reinició: bajón en su 3.3 V o pulso en XSHUT, perdió la
+//    dirección), 'n' = nadie contesta, 'x' = no arrancó (init falló).
+//  - Cada TOF_REINIT_MS se reintenta: XSHUT bajo de los caídos (libera 0x29) y
+//    se arrancan de nuevo uno por uno. Bloquea ~15-25 ms por sensor, solo cuando
+//    hay uno caído.
+//  ACK: tfh=L/R/B/F estado (o = bien), tfa= mayor edad del dato en ms desde el ACK
+//  anterior, tfr= reinicios acumulados, tfi= init al arrancar (1 = OK), rst= razón
+//  del último reinicio del ESP (esp_reset_reason: 1 encendido, 3 software, 4 pánico,
+//  5-7 watchdog, 9 brownout).
+const unsigned long TOF_STALE_MS  = 250;
+const unsigned long TOF_REINIT_MS = 1000;
+const uint8_t TOF_LAT_ROI_PARK    = 16;     // ROI de los laterales en el parking (ver tofLatConoPark)
+const uint8_t TOF_ADDR[TOF_N]  = {0x30, 0x31, 0x32, 0x33};
+const int     TOF_XS[TOF_N]    = {TOF_XSHUT_L, TOF_XSHUT_R, TOF_XSHUT_B, TOF_XSHUT_F};
+const char   *TOF_NOM[TOF_N]   = {"L", "R", "B", "F"};
+char          tofEstado[TOF_N] = {'x', 'x', 'x', 'x'};
+unsigned long tofUltimoMs[TOF_N]  = {0, 0, 0, 0};
+unsigned long tofEdadMax[TOF_N]   = {0, 0, 0, 0};
+uint16_t      tofReinicios[TOF_N] = {0, 0, 0, 0};
+bool          tofInitBoot[TOF_N]  = {false, false, false, false};
+unsigned long tofUltimoReintento = 0;
+bool          tofRoiPark = false;   // tofLatConoPark() ya cambió la ROI de los laterales
+
+static bool i2cContesta(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  return Wire.endTransmission() == 0;
+}
+
 void initToF() {
-  const int xs[TOF_N] = {TOF_XSHUT_L, TOF_XSHUT_R, TOF_XSHUT_B, TOF_XSHUT_F};
-  for (int i = 0; i < TOF_N; i++) { pinMode(xs[i], OUTPUT); digitalWrite(xs[i], LOW); }
+  for (int i = 0; i < TOF_N; i++) { pinMode(TOF_XS[i], OUTPUT); digitalWrite(TOF_XS[i], LOW); }
   delay(10);
   // Si uno falla se sigue con los demás (antes un fallo dejaba a los siguientes
   // en reset); el que falló queda en -1.
@@ -2518,14 +2580,46 @@ void initToF() {
   tofOk[1] = initUnToF(tofR, TOF_XSHUT_R, 0x31, "R", true);
   tofOk[2] = initUnToF(tofB, TOF_XSHUT_B, 0x32, "B", true);
   tofOk[3] = initUnToF(tofF, TOF_XSHUT_F, 0x33, "F", false);
+  unsigned long ahora = millis();
+  for (int i = 0; i < TOF_N; i++) {
+    tofInitBoot[i] = tofOk[i];
+    tofEstado[i]   = tofOk[i] ? 'o' : 'x';
+    tofUltimoMs[i] = ahora;
+  }
+  tofUltimoReintento = ahora;
+}
+
+// Rearranca los ToF caídos (tofEstado != 'o'). Todos los caídos se ponen en reset
+// primero para que ninguno ocupe 0x29 mientras se arranca otro.
+static void reintentarToF() {
+  VL53L1X *dev[TOF_N] = {&tofL, &tofR, &tofB, &tofF};
+  bool caido[TOF_N];
+  bool alguno = false;
+  for (int i = 0; i < TOF_N; i++) {
+    caido[i] = tofEstado[i] != 'o';
+    if (caido[i]) { digitalWrite(TOF_XS[i], LOW); alguno = true; }
+  }
+  if (!alguno) return;
+  delay(2);
+  for (int i = 0; i < TOF_N; i++) {
+    if (!caido[i]) continue;
+    *dev[i] = VL53L1X();   // el objeto vuelve a 0x29, igual que el sensor recién despertado
+    uint8_t roi = (i < 2 && tofRoiPark) ? TOF_LAT_ROI_PARK : TOF_LAT_TRAS_ROI;
+    tofOk[i] = initUnToF(*dev[i], TOF_XS[i], TOF_ADDR[i], TOF_NOM[i], i < 3, roi);
+    tofReinicios[i]++;
+    tofEstado[i] = tofOk[i] ? 'o' : 'x';
+    tofUltimoMs[i] = millis();
+  }
 }
 
 void leerToF() {
   VL53L1X *dev[TOF_N] = {&tofL, &tofR, &tofB, &tofF};
+  unsigned long ahora = millis();
+  bool hayCaido = false;
   for (int i = 0; i < TOF_N; i++) {
-    // El que falló en initToF() no se consulta: sigue en la dirección por defecto (o no está)
-    // y cada dataReady() serían dos transacciones I2C sin respuesta por loop.
-    if (!tofOk[i]) { tofMm[i] = -1; continue; }
+    // El caído no se consulta (cada dataReady() a un sensor ausente son
+    // transacciones I2C sin respuesta por loop): se reintenta abajo.
+    if (!tofOk[i] || tofEstado[i] != 'o') { tofMm[i] = -1; hayCaido = true; continue; }
     unsigned long t0 = micros();
     if (dev[i]->dataReady()) {
       uint16_t mm = dev[i]->read(false);
@@ -2536,10 +2630,27 @@ void leerToF() {
       // sigue solo con 0: su status 2 lee ~+20 cm.
       bool corto = (i < 3) && TOF_LAT_TRAS_SHORT;
       bool ok = (st == 0) || (corto && TOF_LAT_ACEPTA_ST2 && st == 2 && mm <= TOF_LAT_ST2_MAX_MM);
-      tofMm[i] = ok ? (int)mm : -1;
+      tofMm[i] = ok ? corregirToF(i, (int)mm) : -1;
+      tofUltimoMs[i] = ahora;
     }
     unsigned long dt = micros() - t0;
     if (dt > tofUsMax[i]) tofUsMax[i] = dt;
+    unsigned long edad = ahora - tofUltimoMs[i];
+    if (edad > tofEdadMax[i]) tofEdadMax[i] = edad;
+    if (edad > TOF_STALE_MS) {
+      // Sin dato nuevo: no usar el último valor y anotar qué pasa en el bus.
+      tofMm[i] = -1;
+      if (i2cContesta(TOF_ADDR[i]))   tofEstado[i] = 'd';
+      else if (i2cContesta(0x29))     tofEstado[i] = 'z';
+      else                            tofEstado[i] = 'n';
+      Serial.print("ToF "); Serial.print(TOF_NOM[i]); Serial.print(" sin datos: ");
+      Serial.println(tofEstado[i]);
+      hayCaido = true;
+    }
+  }
+  if (hayCaido && ahora - tofUltimoReintento >= TOF_REINIT_MS) {
+    tofUltimoReintento = ahora;
+    reintentarToF();
   }
 }
 #endif
@@ -2777,12 +2888,13 @@ bool paredCajonEsIzq(bool retorno) {
 // ROI 8 el lateral apenas le roza el borde (orillas70: poste 1 en 1 lectura, poste 2 en ninguna). En la
 // carrera se queda ROI 8 (de lejos el cono ancho ve el piso y lee corto); al escanear el cajón la pared
 // está a ~27 cm y el cono ancho alcanza el poste. 0 = no cambiar.
-const uint8_t TOF_LAT_ROI_PARK = 16;
+// (TOF_LAT_ROI_PARK = 16 está arriba, junto a initToF: el reintento de un ToF caído lo usa.)
 void tofLatConoPark() {
 #if FOX_TOF && !defined(FOX_SIL)
   static bool hecho = false;
   if (hecho || TOF_LAT_ROI_PARK == 0 || TOF_LAT_ROI_PARK == TOF_LAT_TRAS_ROI) return;
   hecho = true;
+  tofRoiPark = true;
   VL53L1X *lat[2] = {&tofL, &tofR};
   for (int i = 0; i < 2; i++) {
     if (!tofOk[i]) continue;
@@ -4077,6 +4189,15 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
       if (tofOk[i]) ackOut.print(tofUsMax[i] / 1000.0f, 1); else ackOut.print('x');
       tofUsMax[i] = 0;
     }
+    ackOut.print(",tfh=");
+    for (int i = 0; i < TOF_N; i++) { if (i) ackOut.print('/'); ackOut.print(tofEstado[i]); }
+    ackOut.print(",tfa=");
+    for (int i = 0; i < TOF_N; i++) { if (i) ackOut.print('/'); ackOut.print(tofEdadMax[i]); tofEdadMax[i] = 0; }
+    ackOut.print(",tfr=");
+    for (int i = 0; i < TOF_N; i++) { if (i) ackOut.print('/'); ackOut.print(tofReinicios[i]); }
+    ackOut.print(",tfi=");
+    for (int i = 0; i < TOF_N; i++) ackOut.print(tofInitBoot[i] ? '1' : '0');
+    ackOut.print(",rst="); ackOut.print((int)esp_reset_reason());
 #endif
     ackOut.println();
 #if !defined(FOX_SIL)
@@ -4623,7 +4744,29 @@ void setup() {
   // loop() siempre arranca con piReadyReceived = true.
   Serial.println("Esperando READY desde Pi...");
   piReadyReceived = false;
+#if FOX_TOF && !defined(FOX_SIL)
+  unsigned long preMs = 0;
+#endif
   while (!piReadyReceived) {
+#if FOX_TOF && !defined(FOX_SIL)
+    // Antes del botón: los ToF cada 500 ms al Pi (journal "[SERIAL] RX: PRE ...") para revisarlos sin arrancar.
+    // Claves distintas a las del ACK para que nadie lo lea como ACK.
+    leerToF();
+    if (millis() - preMs >= 500) {
+      preMs = millis();
+      Serial2.print("PRE L="); Serial2.print(tofMm[0]);
+      Serial2.print(" R=");    Serial2.print(tofMm[1]);
+      Serial2.print(" B=");    Serial2.print(tofMm[2]);
+      Serial2.print(" F=");    Serial2.print(tofMm[3]);
+      Serial2.print(" h=");
+      for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofEstado[i]); }
+      Serial2.print(" i=");
+      for (int i = 0; i < TOF_N; i++) Serial2.print(tofInitBoot[i] ? '1' : '0');
+      Serial2.print(" r=");
+      for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofReinicios[i]); }
+      Serial2.print(" rst="); Serial2.println((int)esp_reset_reason());
+    }
+#endif
     if (Serial2.available()) {
       String line = Serial2.readStringUntil('\n');
       line.trim();
@@ -4675,7 +4818,7 @@ void loop() {
   lpsMarca(0, lpsT);
 #if FOX_TOF
 #if defined(FOX_SIL)
-  for (int _ti = 0; _ti < TOF_N; _ti++) tofMm[_ti] = sil_tof_mm(_ti);
+  for (int _ti = 0; _ti < TOF_N; _ti++) tofMm[_ti] = corregirToF(_ti, sil_tof_mm(_ti));
 #else
   leerToF();
 #endif
