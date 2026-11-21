@@ -772,7 +772,9 @@ class RouteMode:
             # Vueltas 2-3 (tc >= 4): lo que ya tenía color (confirmado, provisional o fantasma de fila) no vuelve a vacío ni
             # a desconocido para el planificador; solo cambia de color si el mapa actual lo dice. Un solo punto: da igual por qué se vació.
             tcn = max(float(getattr(self, "_tc_max", 0) or 0), float(_ack_num(ack or "", "tc") or 0))
-            if tcn >= 4:
+            # Desde ROUTE_MAP_FREEZE_TC (con el cajón ya ubicado). orillas135/137: medio segundo antes de la esquina 1 el
+            # rojo provisional de S/T1 bajó de votos, la ruta lo soltó y planeó encima; al volver ya no daba para rodearlo.
+            if tcn >= float(getattr(C, "ROUTE_MAP_FREEZE_TC", 4)) and self.fixed:
                 fz = self.__dict__.setdefault("_map_freeze", {})
                 for k, col in plan_seats.items():
                     fz[k] = col
