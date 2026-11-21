@@ -107,10 +107,10 @@ MAX_WHEEL_STEER_DEG  = 40.1   # bici a tope, R 134 mm (CAD decía 44.54 con la i
 # 74° (error 3.2 px; el lente real tiene distorsión de barril). La inclinación sale 25-31° con
 # cualquier FOV supuesto: el 45° de antes NO era el montaje real. Antes: 45° / 97 / 140 (supuestos).
 # En el twin (ruta_perfil, 21 seeds) da 18/21 igual que la cámara vieja, 1.7 s más rápido.
-CAMERA_TILT_DEG      = 24.0     # 34.0 -> 24.0 (2026-11-21): BEV recalibrado con 9 cruces (calib_camara: 24.0°, h 91, fwd 142; 14 mm medio). La de 11-19 no cuadraba con la cámara
-CAMERA_HEIGHT_MM     = 91.0
-CAMERA_FWD_MM        = 142.0
-CAMERA_HFOV_DEG      = 74.0     # pinhole equivalente (el twin lo usa en CameraParams)
+CAMERA_TILT_DEG      = 22.9     # 2026-11-21 tablero 9x6 en el piso a 83 y 120 mm de la defensa, con el lente enderezado (lens_calib.npz): 22.5/23.3°, h 80/81, fwd 153/152; BEV 3-4 mm medio (antes 15-23)
+CAMERA_HEIGHT_MM     = 80.6
+CAMERA_FWD_MM        = 152.6
+CAMERA_HFOV_DEG      = 83.0     # pinhole de la imagen ENDEREZADA (newK de lens_calib.npz, alpha 0.25: fx 365); el twin lo usa en CameraParams
 CAMERA_RIGHT_MM      = 0.0      # supuesto: centrada
 # Montajes de sensores: (right_mm, fwd_mm, dir_deg), en la CARA que mide (GLB del CAD v2).
 # El CAD solo trae el ToF izquierdo (x −35.2…−27.7, fwd 100.6…120.6); el derecho se
