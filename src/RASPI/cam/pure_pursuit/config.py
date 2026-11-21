@@ -1495,7 +1495,13 @@ ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
 # Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
 ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
 # Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
-ROUTE_FIX_LINE_LAG_FRAMES = 5
+ROUTE_FIX_LINE_LAG_FRAMES = 14   # 2026-11-21: retraso cámara->pose medido 12-16 cuadros (~350 ms) en 121-128; con 5 los votos se corrían al girar
+# Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
+ROUTE_FIX_BLUE = True
+ROUTE_FIX_BLUE_HSV = ((95, 70, 60), (115, 255, 200))
+ROUTE_FIX_BLUE_MIN_AREA = 150
+ROUTE_FIX_BLUE_MIN_PIX = 80
+ROUTE_FIX_BLUE_FAR_MM = 700.0
 # Localizer: una lectura de distancia que salta más que esto respecto a la anterior del mismo sensor se ignora (eco de transición señal->pared, semilla 32); None = apagado.
 LOC_SENSOR_JUMP_MM = 100.0
 # Reanclaje del localizador: si un mismo ToF da LOC_REANCHOR_N lecturas seguidas fuera del gate de 3σ,

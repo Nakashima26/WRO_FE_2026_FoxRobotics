@@ -496,6 +496,8 @@ class PPRuntime:
         self._rmode.color_ranges = getattr(self.vision, "color_ranges", None)
         self._rmode.bev = self.bev
         self._rmode.orange = orange
+        self._rmode.bev_hsv = getattr(self, "_bev_hsv_route", None)
+        self._bev_hsv_route = None
         return self._rmode.step(self.digital, self._prev_estado, getattr(self, "_prev_ack", None), armed)
 
     # ── Serial ────────────────────────────────────────────────────────────────
@@ -1647,7 +1649,9 @@ class PPRuntime:
                 # Con _sin_nar nadie lee _hay_naranja (ni el BEV ni el tracker): no se mide.
                 _hay_naranja = (_sin_nar or _hsv_cam is None or any(
                     cv2.countNonZero(cv2.inRange(_hsv_cam, lo, hi)) for lo, hi in C.LINE_ORANGE_HSV))
-                if getattr(self, "_route_steering", False) and (_sin_nar or not _hay_naranja):
+                # Sin ubicar el cajón el BEV sí hace falta: el voto azul (route_mode._blue_vote).
+                _rm_fixed = getattr(getattr(self, "_rmode", None), "fixed", True)
+                if getattr(self, "_route_steering", False) and (_sin_nar or not _hay_naranja) and _rm_fixed:
                     bev_frame = bev_hsv = None
                 else:
                     bev_frame = self.bev.warp(processed_frame)
@@ -1656,6 +1660,7 @@ class PPRuntime:
                     # cada una convertía la misma imagen BGR->HSV por su
                     # cuenta, duplicando trabajo cada frame.
                     bev_hsv = cv2.cvtColor(bev_frame, cv2.COLOR_BGR2HSV)
+                self._bev_hsv_route = bev_hsv
                 _t1 = time.perf_counter()
                 bev_timing["warp"] = (_t1 - _t0) * 1000.0
 

@@ -38,7 +38,7 @@ from .digital_map import feet_world
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
-                        SECTIONS_CW, SIGN_MM, orange_segments, section_to_world, world_to_section)
+                        SECTIONS_CW, SIGN_MM, blue_segments, orange_segments, section_to_world, world_to_section)
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
 _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
@@ -1300,6 +1300,8 @@ class RouteMode:
         corner_lines._center_pix): cada pixel llevado al mundo con la pose supuesta da
         un δ, y el voto es la mediana. Si no, el punto de la recta ajustada en la
         columna central del BEV."""
+        if getattr(C, "ROUTE_FIX_BLUE", False):
+            self._blue_vote(dm, pose)
         o = self.orange
         pix = o.get("_pix") if o else None
         # Con pixeles crudos del frame no hace falta que el tracker ya haya persistido la línea
@@ -1350,6 +1352,60 @@ class RouteMode:
         if best is not None:
             self._line_d.append(best[0])
             print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+
+    def _blue_vote(self, dm, pose) -> None:
+        """δ del cajón con la cinta AZUL (la que cruza el carril en CCW, |n·a| 0.87; la naranja ahí va a
+        30° y en salidas rectas nunca pasa enfrente: corridas 125/128 decididas a la fuerza con 0 votos).
+        Máscara HSV del BEV (cinta H 99-107 S 98-195 V 110-146; paredes V~40), componente más grande
+        (los falsos son manchas chicas), pixeles a fwd <= ROUTE_FIX_BLUE_FAR_MM llevados al tapete con la
+        pose de hace ROUTE_FIX_LINE_LAG_FRAMES; voto = mediana del δ por pixel contra el segmento azul
+        más cercano. Offline 2026-11-21 (lag 14): 126 −82 vs −83 medido, 128 −118 vs −88."""
+        hsv = getattr(self, "bev_hsv", None)
+        if hsv is None:
+            return
+        lo_hsv, hi_hsv = getattr(C, "ROUTE_FIX_BLUE_HSV", ((95, 70, 60), (115, 255, 200)))
+        mk = cv2.inRange(hsv, np.array(lo_hsv, np.uint8), np.array(hi_hsv, np.uint8))
+        mk = cv2.morphologyEx(mk, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        nc, lab, st, _ = cv2.connectedComponentsWithStats(mk)
+        if nc < 2:
+            return
+        k = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+        if st[k, cv2.CC_STAT_AREA] < int(getattr(C, "ROUTE_FIX_BLUE_MIN_AREA", 150)):
+            return
+        ys, xs = np.nonzero(lab == k)
+        fwd = (float(C.ROBOT_BEV_Y) - ys) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0)) + self._fwd_add(dm)
+        lat = (xs - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
+        sel = fwd <= float(getattr(C, "ROUTE_FIX_BLUE_FAR_MM", 700.0))
+        if int(sel.sum()) < int(getattr(C, "ROUTE_FIX_BLUE_MIN_PIX", 80)):
+            return
+        fwd, lat = fwd[sel], lat[sel]
+        lag = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
+        if len(self._pre_poses) > lag:
+            pose = self._pre_poses[-1 - lag]
+        h = math.radians(pose[2])
+        P = np.column_stack([pose[0] + fwd * math.sin(h) + lat * math.cos(h),
+                             pose[1] + fwd * math.cos(h) - lat * math.sin(h)])
+        c = P.mean(axis=0)
+        a = np.array(self.axis)
+        span = PARK_W_MAX - PARK_W_MIN
+        mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
+        lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
+        best = None
+        for (sx, sy), (ex, ey) in blue_segments():
+            u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
+            n = np.array([-u[1], u[0]])
+            if abs(float(n @ a)) < float(getattr(C, "ROUTE_FIX_PIX_MIN_NA", 0.7)):
+                continue
+            ns = float(n @ np.array([sx, sy]))
+            d = float(np.median((ns - P @ n) / (n @ a)))
+            dist = math.hypot(sx - c[0], sy - c[1])
+            if lo <= d <= hi and (best is None or dist < best[1]):
+                best = (d, dist)
+        if best is None:
+            return
+        self._line_d.append(best[0])
+        print(f"[FIXVOTE] azul d={best[0]:+.0f} n={len(fwd)} c=({c[0]:.0f},{c[1]:.0f}) "
+              f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
     def _line_ok(self, d: float) -> bool:
         """La cinta no contradice a los ToF: en ±ROUTE_FIX_WIN_MM de su δ el histograma de los
