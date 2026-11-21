@@ -941,7 +941,7 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 | OBS-03 | CW | random layout, lot 1140 mm (run 111) | 44 / 62 | ≈44 s | 1 (lone green in the middle of a straight, lap 2: mapped one column off) | 0 | Partial (16° off, partly inside) | — | `4de45492` | Collision + park partial |
 | OBS-04 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (touched wall) | 11.72 | `68bd18b2` | Park fail |
 | OBS-05 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (19° off, not inside) | 11.68 | `68bd18b2` | Park fail |
-| OBS-06 | CCW | | | | | | | | | |
+| OBS-06 | CCW | random layout, lot ≈1170 mm (run 138) | 47 / 62 | laps 29 s | 0 | 0 | Fail (log ends during the U-turn, not inside) | — | `e473a322` | Park fail |
 
 ### 3.10.5 Known limitations
 
