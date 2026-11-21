@@ -176,14 +176,14 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
   </tr>
 </table>
 
-**[TODO: add the six v2 photos to `v-photos/v2/` with these names (front, rear, top, left, right, bottom). The v1 photos stay in `v-photos/` for the v1 document.]**
+The v1 photos stay in `v-photos/` for the [v1 document](docs/v1-national/README.md).
 
 ### Key specifications (v2)
 
 | Parameter | Value |
 |---|---|
 | Dimensions | **176 × 125 mm** footprint (front overhang 41.2 mm, rear 21.8 mm, measured) · height **≈120 mm** including cables (104 mm to the top of the camera mount in CAD) |
-| Mass | **[TODO: weigh]** g (the simulator uses 564 g) |
+| Mass | **557 g** (measured; the simulator uses 564 g) |
 | Wheelbase / rear track | 113 mm / 110 mm |
 | Drive | Rear-wheel drive, one motor, printed open differential |
 | Drive motor | N20 50:1 metal gear motor, 460 rpm, 12 CPR Hall encoder |
@@ -372,7 +372,17 @@ For this car, stability means four things: it must not tip in a turn, it must st
 
 **It slides long before it can tip.** In a turn the car tips over when the lateral acceleration reaches g · (t/2) / h, where t is the track width and h the height of the center of mass. Our rear track is 110 mm. Even in the worst case, with all of the mass at the very top of the car (h ≈ 120 mm), tipping needs 9.81 × 55 / 120 ≈ **4.5 m/s²**. The tires start sliding at **2.5–2.8 m/s²** (measured, [§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed)), so the car always slides before it can tip, and the real center of mass is much lower than the worst case: the battery, the motor and the power board sit at the bottom ([§1.1](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top)). The speed profile keeps every corner and dodge under the grip limit ([§3.7.6](#376-speed-profile)), so in normal driving neither happens.
 
-**Weight distribution.** The battery, the heaviest part, sits low and between the axles in the center tunnel, which balances the load front to rear and keeps the weight on the driven rear wheels. The Raspberry Pi 5 on top is a deliberate trade-off: it raises the center of mass slightly, but it gets free air for cooling, and the margin above shows that tipping is not a risk. **[TODO: weigh the car and each major part to state the measured mass split.]**
+**Weight distribution.** The battery, the heaviest part, sits low and between the axles in the center tunnel, which balances the load front to rear and keeps the weight on the driven rear wheels. The Raspberry Pi 5 on top is a deliberate trade-off: it raises the center of mass slightly, but it gets free air for cooling, and the margin above shows that tipping is not a risk.
+
+| Part | Mass | Share |
+|---|---:|---:|
+| Battery (3S LiPo 2200 mAh) | 237 g | 43 % |
+| Raspberry Pi 5 + Active Cooler | 73 g | 13 % |
+| PCB | 54 g | 10 % |
+| Chassis, drivetrain, wheels, servo, sensors and camera | 193 g | 35 % |
+| **Total (measured)** | **557 g** | |
+
+The battery alone is 43 % of the mass, which is why its position matters most: placing it low and centered sets the balance of the whole car.
 
 **Braking.** From full speed (PWM 255) the wheels lock and the car slides 24–51 mm further than the encoder measures, which would corrupt the odometry the route follower depends on. So the speed loop caps the target at 700 mm/s and the speed profile brakes at ≤ 3.0 m/s² before each curve ([§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§3.7.6](#376-speed-profile)). From PWM 150 a short brake stops the car in 6–7 mm without sliding.
 
@@ -411,7 +421,7 @@ flowchart TD
 
 ## 2.2 Power budget
 
-*Design values from datasheets. **[TODO: replace with values measured with an inline USB/DC meter on the assembled car: idle, racing, and servo at the stop.]***
+Each rail is budgeted from the component datasheets: a typical value for normal racing and a design peak with every load at its worst case at the same time (servo stalled, all ToF ranging, Pi under full vision load). The regulators and the battery are sized against the design peak.
 
 | Rail | Load | Typical | Design peak | Basis |
 |---|---|---:|---:|---|
@@ -531,7 +541,7 @@ UART-RVC mode: the sensor streams a 19-byte packet with yaw, pitch, roll and acc
 
 **What the port required:** UART on `/dev/ttyAMA0` (on the Pi 5 `serial0` is the debug connector); `rpi-lgpio` instead of `RPi.GPIO`; a 22-to-15-pin camera cable; `camera_auto_detect=0` + `dtoverlay=imx219,cam0`; system OpenCV from apt. Details in [§5](#5-reproducibility-and-github-quality).
 
-**Open item — cooling.** The replacement Pi 5 (8 GB, after the one lost in the incident above) runs without a fan and sits at ~80 °C with soft-throttle flags during long sessions. **[TODO: mount the Active Cooler / a fan and record the temperature over a 3-round session.]**
+**Cooling.** The replacement Pi 5 (8 GB, after the one lost in the incident above) ran without a fan at first and climbed to ~80 °C within minutes, with soft-throttle flags. With the official Active Cooler mounted it read **47.7 °C and `throttled=0x0`** after 25 min powered on and three consecutive rounds (2026-11-20, run 99); later checks the same day gave 46–49 °C, always `0x0`.
 
 ---
 
@@ -936,7 +946,6 @@ flowchart LR
 - **Color depends on the camera exposure.** After the 2026-11-19 remount (automatic exposure) the red pillars appeared at hue 5–7 instead of 170–179 and the old red band missed them; the ratio-based classifier that fixes it is validated offline and still has to be tested on the car (§6).
 - **Front ToF** is reliable only to ~80 cm on the black wall; it is never used for the lot fix.
 - **Surprise pillar (§3.7.8)** is validated only in the twin: it still needs a calibration table from real photos and three twin regressions (parking and one pillar) fixed before we declare the attempt.
-- **Pi 5 temperature** without a fan (~80 °C) — cooling pending (§2.5).
 - **Twin parking** is the least realistic part of the simulator; parking constants are confirmed on the car.
 
 
@@ -1031,7 +1040,7 @@ The [v1 documentation](docs/v1-national/README.md) describes the national-final 
 | Yaw sign wrong after a merge | Car turned before the walls | Mirrored pose | Sign checked in the bench checklist; constants audited after merges | Fixed |
 | ToF reads the floor / black wall | Static tests, lateral pose bias | Pose bias 100–250 mm | ROI 8, status rules, per-sensor max range in the EKF | Fixed |
 | Camera exposure burn after the lot | Video of runs 57/59/60 | Late orange line → crash | Fixed exposure per venue (2026-11-12); back to auto after the 11-19 remount because the fixed value was too dark at night; floor-referenced exposure planned (§6) | Mitigated |
-| Pi overheating | ~80 °C, throttle flags | Lower frame rate | Fan / Active Cooler | **Open** |
+| Pi overheating | ~80 °C, throttle flags (no fan) | Lower frame rate | Official Active Cooler | Solved: 46–49 °C, `throttled=0x0` after 3 rounds |
 | Venue lighting changes colors | National final: pink read as red | Wrong pillar color | Ratio tests + `calibra_luz.py` at the venue | Mitigated |
 | USB powering the car without the battery | Motor weak, 636 vs 2000 counts/s | Misleading bench results | Bench tests only with the battery connected | Procedure |
 
@@ -1244,11 +1253,10 @@ What is still open, in the order we will work on it, and how we will know it is 
 | 2 | **Consistent 3-lap rounds** | Two open lap-1 mapping cases: the lone pillar after a corner (E/X1 ↔ E/X2) and the lot position without orange-line votes, ~0.3 m off (ERR-31) | Keep both seats as obstacles until the pillar is seen head-on; give the ToF histogram a fallback when the line is not seen | The obstacle validation matrix OBS-01…06 passes with random layouts and lot positions |
 | 3 | **Colors that do not depend on the light** | After the camera remount (2026-11-19) the red pillars looked orange-red (hue 5–7) instead of magenta-red (175–179), outside the old red band; the cause is the camera exposure, not the room light (the floor color was identical) | Classify red by channel ratios inside a wide hue band; correct white balance against the floor; set the exposure from the floor brightness; a 30-second color calibration at the venue. First step validated offline on 11 recorded runs × 6 simulated lights: frames with a red pillar 131 → 181, none of the old detections lost, no orange tape taken as red | The same detections on the car under the workshop light and a much darker and brighter light |
 | 4 | **Validation matrices and the release** | Formal evidence for the final code | Fill the open (3 CW + 3 CCW) and obstacle (OBS-01…06) matrices with the final firmware, then tag `v2.0-internacional` | Matrices filled and tagged |
-| 5 | **Pi 5 cooling** | ~80 °C with soft-throttle flags without a fan ([§2.5](#25-main-computer--raspberry-pi-5)) | Mount the Active Cooler or a fan; log the temperature over a 3-round session | No throttle flags in a 3-round session |
-| 6 | **Ultrasonic cross-check of the ToF** | The ToF's weak spot (far black wall) is where sound works ([§2.4](#24-sensors--selection-placement-and-calibration)) | Steps 3–4 of the cross-check plan: static test on black and white walls, then let the EKF drop a ToF reading that disagrees | Measured disagreement threshold and a twin bench with no new failures |
-| 7 | **Open round in route mode** | `RondaAbierta.ino` drives every corner at a speed safe for an unseen corner ([§3.6](#36-open-challenge-esp32-only)) | Lap 1 maps the inner walls with the ToF and the encoder; laps 2–3 follow a planned route | Beats 29.6 s reliably on our track |
-| 8 | **Surprise pillar (2026 extra task)** | Validated only in the twin ([§3.7.8](#378-2026-extra-task--the-surprise-pillar)) | Calibration table from real photos of a normal pillar; fix the three twin regressions | The twin regressions pass and real 50 / 150 mm pillars are classified correctly |
-| 9 | **PCB RevC** | A rotated board killed a Pi 5; a large output capacitor stopped the Pi from booting ([§4.5](#45-risks-failure-modes-and-mitigations)) | Keyed stacking headers, PTC fuse and 5 V TVS diode on the Pi rail, input capacitor ≥ 25 V | Board ordered and the power-up checklist passes |
+| 5 | **Ultrasonic cross-check of the ToF** | The ToF's weak spot (far black wall) is where sound works ([§2.4](#24-sensors--selection-placement-and-calibration)) | Steps 3–4 of the cross-check plan: static test on black and white walls, then let the EKF drop a ToF reading that disagrees | Measured disagreement threshold and a twin bench with no new failures |
+| 6 | **Open round in route mode** | `RondaAbierta.ino` drives every corner at a speed safe for an unseen corner ([§3.6](#36-open-challenge-esp32-only)) | Lap 1 maps the inner walls with the ToF and the encoder; laps 2–3 follow a planned route | Beats 29.6 s reliably on our track |
+| 7 | **Surprise pillar (2026 extra task)** | Validated only in the twin ([§3.7.8](#378-2026-extra-task--the-surprise-pillar)) | Calibration table from real photos of a normal pillar; fix the three twin regressions | The twin regressions pass and real 50 / 150 mm pillars are classified correctly |
+| 8 | **PCB RevC** | A rotated board killed a Pi 5; a large output capacitor stopped the Pi from booting ([§4.5](#45-risks-failure-modes-and-mitigations)) | Keyed stacking headers, PTC fuse and 5 V TVS diode on the Pi rail, input capacitor ≥ 25 V | Board ordered and the power-up checklist passes |
 
 ---
 
