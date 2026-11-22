@@ -23,6 +23,7 @@ from pure_pursuit.twin.metrics import compute_metrics, _parse_ack_field, _parse_
 from pure_pursuit.twin.params import TwinParams, max_wheel_deg, physical_motor, wheel_deg_from_servo
 from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
+from pure_pursuit.twin.battery import BatteryDrive
 from pure_pursuit.twin.vehicle import Vehicle
 from pure_pursuit.twin.world import OUTER_HALF_MM, World, body_corners, collision
 from pure_pursuit.wro_field import randomize
@@ -378,6 +379,7 @@ class Sim:
         park_pos: Any = None,
         ruta_seed: dict[str, Any] | None = None,
         surprise: tuple[int, int] | None = None,
+        battery: BatteryDrive | None = None,
     ) -> None:
         # Tocar una lata termina la corrida, igual que una pared. knock_signs
         # solo sirve para medir el resto de la vuelta con la lata ya derribada.
@@ -434,6 +436,7 @@ class Sim:
             park_pos = os.environ.get("FOX_PARK_POS") or cfg.get("park_pos")
         self.park_pos = park_pos
         self.params = params or TwinParams()
+        self.battery = battery
         # Relación de engranes (estudio): TWIN_SPEED_SCALE escala mm/s por PWM y
         # TWIN_TAU_SCALE la constante de tiempo de arranque (menos torque = más lento).
         speed_scale = float(os.environ.get("TWIN_SPEED_SCALE", speed_scale))
@@ -515,7 +518,7 @@ class Sim:
         surprise_judge = SurpriseJudge(special, field.direction) if special is not None else None
         world = World(field)
         vehicle_cls = Vehicle
-        if os.environ.get("FOX_TWIN_PHYSICS", "native") != "python":
+        if self.battery is None and os.environ.get("FOX_TWIN_PHYSICS", "native") != "python":
             from .native_vehicle import NativeVehicle
             from ..native import get_lib
             if get_lib() is not None:
@@ -525,7 +528,10 @@ class Sim:
             field.start_x,
             field.start_y,
             field.start_heading,
+            battery=self.battery,
         )
+        if self.battery is not None:
+            self.battery.reset()
         enc = Encoder(self.params.encoder, rng)
         gyro = Gyro(self.params.gyro, rng)
         bno = Bno085Heading(self.params.bno, rng) if self.imu == "bno085" else None
@@ -612,6 +618,9 @@ class Sim:
                 "servo": fw.servo_angle(),
                 "speed_mm_s": abs(veh.v),
             }
+            if self.battery is not None:
+                row["pack_voltage_v"] = self.battery.terminal_voltage_v
+                row["pack_current_a"] = self.battery.pack_current_a
             row.update(extra)
             trace.append(row)
 
@@ -988,6 +997,11 @@ class Sim:
         metrics["signs_touched"] = len(sign_contacts)
         metrics["ignored_contacts"] = list(ignored_contacts.values())
         metrics["sim_loops"] = loops
+        if self.battery is not None:
+            metrics["pack_open_voltage_v"] = self.battery.open_voltage_v
+            metrics["pack_resistance_ohm"] = self.battery.pack_resistance_ohm
+            metrics["min_pack_voltage_v"] = self.battery.min_terminal_voltage_v
+            metrics["peak_pack_current_a"] = self.battery.peak_pack_current_a
         wall = time.perf_counter() - t_wall0
         # Timing breakdown: accumulate over the whole simulation
         metrics["render_s"] = round(render_s, 3)

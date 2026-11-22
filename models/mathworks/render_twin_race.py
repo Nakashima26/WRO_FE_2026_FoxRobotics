@@ -2,10 +2,12 @@
 import argparse
 import json
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from render_twin_replay import _field_payload, _paint
 from pure_pursuit import config
@@ -13,7 +15,44 @@ from pure_pursuit.centerline import draw_bev_debug
 from pure_pursuit.twin.sim import Sim
 
 
+def write_video(frames: Path, output: Path, times: list[float]) -> None:
+    """Encode synchronized panels at the simulator's recorded frame cadence."""
+    period = (times[-1] - times[0]) / (len(times) - 1)
+    if not np.allclose(np.diff(times), period, atol=1e-6, rtol=0):
+        raise ValueError("The video export requires uniformly spaced camera frames.")
+    with subprocess.Popen([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo",
+        "-pixel_format", "bgr24", "-video_size", "1120x720",
+        "-framerate", f"{1 / period:.9f}", "-i", "-", "-c:v", "libx264",
+        "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output),
+    ], stdin=subprocess.PIPE) as encoder:
+        assert encoder.stdin is not None
+        for index in range(1, len(times) + 1):
+            frame = np.full((720, 1120, 3), (27, 23, 20), dtype=np.uint8)
+            for label, heading, x, y, width, height in (
+                ("map", "Pista", 12, 12, 680, 696),
+                ("camera", "Camara", 708, 12, 400, 338),
+                ("bev", "BEV", 708, 370, 400, 338),
+            ):
+                image = cv2.imread(str(frames / f"{label}_{index:04d}.jpg"))
+                if image is None:
+                    raise OSError(f"Missing {label} frame {index}")
+                scale = min(width / image.shape[1], (height - 26) / image.shape[0])
+                resized = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                h, w = resized.shape[:2]
+                left = x + (width - w) // 2
+                top = y + 26 + (height - 26 - h) // 2
+                frame[top:top+h, left:left+w] = resized
+                cv2.putText(frame, heading, (x, y + 18), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.56, (240, 240, 240), 1, cv2.LINE_AA)
+            encoder.stdin.write(frame.tobytes())
+        encoder.stdin.close()
+        if encoder.wait() != 0:
+            raise RuntimeError("FFmpeg did not finish encoding the replay.")
+
+
 def record(seed: int, output: Path, setup: dict) -> None:
+    every = 1 if output.suffix.lower() == ".mp4" else 3
     output = output.resolve()
     with tempfile.TemporaryDirectory() as work:
         root = Path(work)
@@ -23,14 +62,14 @@ def record(seed: int, output: Path, setup: dict) -> None:
         field = None
 
         def wants_images():
-            return wants_images.frame % 3 == 0
+            return wants_images.frame % every == 0
 
         wants_images.frame = 0
 
         def record_frame(view):
             nonlocal field
             wants_images.frame += 1
-            if wants_images.frame % 3 != 1:
+            if (wants_images.frame - 1) % every != 0:
                 return True
             result = view.frame_result
             if result.processed_frame is None or result.bev_frame is None:
@@ -69,14 +108,18 @@ def record(seed: int, output: Path, setup: dict) -> None:
         (root / "replay_manifest.json").write_text(json.dumps(summary))
         shutil.copyfile(Path(__file__).with_name("view_twin_replay.m"), root / "view_twin_replay.m")
         output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.make_archive(str(output.with_suffix("")), "zip", root)
+        if every == 1:
+            write_video(frames, output, summary["times_s"])
+            output.with_suffix(".json").write_text(json.dumps(summary, indent=2))
+        else:
+            shutil.make_archive(str(output.with_suffix("")), "zip", root)
         print(f"{output}: {len(times)} frames, {times[-1][1]:.2f} s, {result.stop_reason}")
         print(result.metrics)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output", type=Path)
+    parser.add_argument("output", type=Path, help="Viewer ZIP or full-frame MP4")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--setup", type=Path, help="Optional twin benchmark JSON")
     args = parser.parse_args()

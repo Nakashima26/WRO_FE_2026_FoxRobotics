@@ -1,0 +1,44 @@
+{
+  "source_commit": "d771e9129ccaedd97af892a2ec5c29baf5602881",
+  "benchmark": "p0",
+  "field_seed": 9,
+  "noise_seed": 2,
+  "source_entry_point": "pure_pursuit/twin/tools/latencia/uno.sh",
+  "env": {
+    "TWIN_VBAT": 12.5,
+    "TWIN_COST_FIRST": 1.95,
+    "TWIN_COST_FIJO": 1,
+    "TWIN_PI_EXTRA": {
+      "ROUTE_FIX_LINE_LAG_FRAMES": 5
+    },
+    "TWIN_FW_OVER": {}
+  },
+  "frame_factor": 4.28,
+  "plan_factor": 5.8,
+  "field": [
+    "dir=CW parking=E parkw=1587 start=(1364,-134,180.0)",
+    "Red W/X2 (-1100,0)",
+    "Green N/T3 (500,1100)",
+    "Red N/T4 (-500,1100)",
+    "Red S/T1 (-500,-900)",
+    "Green S/T4 (500,-1100)",
+    "Green E/X1 (900,0)"
+  ],
+  "metrics": {
+    "finished": true,
+    "stop_reason": "race_finished",
+    "total_time_s": 29.533,
+    "turns_completed": 12,
+    "lap_times_s": [
+      8.811,
+      7.41,
+      6.586
+    ],
+    "min_clearance_sign_mm": 40.76,
+    "min_clearance_wall_mm": 4.62,
+    "collisions": [],
+    "ignored_contacts": [],
+    "pass_side_violations": [],
+    "sign_contacts": []
+  }
+}

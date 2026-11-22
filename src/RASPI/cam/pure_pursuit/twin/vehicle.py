@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .battery import BatteryDrive
 from .params import (
     TwinParams,
     max_wheel_deg,
@@ -36,6 +37,7 @@ class Vehicle:
     sliding: bool = False
     # wheel_servo_deg con el retraso de steering.lag_tau_s (lo que de verdad apuntan las ruedas).
     wheel_lag_deg: float | None = None
+    battery: BatteryDrive | None = None
 
     def __post_init__(self) -> None:
         if self.wheel_servo_deg is None:
@@ -124,6 +126,10 @@ class Vehicle:
         wheel = wheel_deg_from_servo(eff, st)
         self.last_wheel_deg = wheel   # = wheel_deg_from_servo(wheel_lag_deg): el encoder del sim lo reusa
         braking = direction != 0 and pwm <= mot.pwm0
+        drive_pwm = pwm
+        if self.battery is not None:
+            voltage_ratio = self.battery.advance(dt, pwm, direction, braking, self.v_wheel)
+            drive_pwm *= voltage_ratio
         if braking:
             # Freno en corto: desaceleración casi constante; rápido, la llanta se bloquea y patina.
             v0 = self.v
@@ -151,9 +157,9 @@ class Vehicle:
                 v_target = 0.0
             else:
                 if direction < 0 and mot.pwm0_rev is not None:
-                    v = mot.k_rev_mm_s_per_pwm * (pwm - mot.pwm0_rev)
+                    v = mot.k_rev_mm_s_per_pwm * (drive_pwm - mot.pwm0_rev)
                 else:
-                    v = mot.k_mm_s_per_pwm * (pwm - mot.pwm0)
+                    v = mot.k_mm_s_per_pwm * (drive_pwm - mot.pwm0)
                 w_max = self._w_max
                 if w_max is None:
                     w_max = self._w_max = max_wheel_deg(st)   # constante: params no cambian en la corrida
