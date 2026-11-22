@@ -612,6 +612,12 @@ class Sim:
                 "servo": fw.servo_angle(),
                 "speed_mm_s": abs(veh.v),
             }
+            if C.LOC_MANEUVER_VIEW:
+                route = getattr(runtime, "_rmode", None)
+                loc = route.maneuver_loc if route is not None else None
+                if loc is not None:
+                    tx, ty, th = loc.transform()
+                    row.update(view_tx=tx, view_ty=ty, view_th=th, view_fused=loc.n_used)
             row.update(extra)
             trace.append(row)
 

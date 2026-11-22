@@ -478,11 +478,15 @@ class PPRuntime:
                 empty |= rm._rule_empty(conf)
             except Exception:
                 empty = None
+        view_pose = None
+        if rm is not None and rm.maneuver_loc is not None:
+            view_pose = rm.maneuver_loc.pose(getattr(self, "_prev_ack", None))
         if rm is not None and rm.route is not None:
             label = "plan DP (subiendo)" if rm.upload else "plan DP"
             return self.digital.render(route_line=self._shown_line(),
-                                       route_closed=rm.route.closed, route_label=label, empty=empty)
-        return self.digital.render(empty=empty)
+                                       route_closed=rm.route.closed, route_label=label, empty=empty,
+                                       view_pose=view_pose)
+        return self.digital.render(empty=empty, view_pose=view_pose)
 
     def _route_step(self, armed: bool, frame=None, orange=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""

@@ -8,7 +8,8 @@ predice un ray-casting sobre el mapa COMPLETO (paredes, isla, señales y maderas
 del cajón). Una medición solo se usa si el rayo esperado pega en pared o isla
 (superficie plana conocida) con buen ángulo; si lo más cercano es una señal o
 una madera, se descarta. Así una señal o el cajón nunca se confunden con la
-pared (lo que hacía digital_map._wall_fix).
+pared (lo que hacía digital_map._wall_fix). El visor de maniobras también
+usa caras de las maderas con el cajón fijado.
 
 Salida para el ESP: la transformación odometría -> tapete (tx, ty, th) con
 mundo = (tx, ty) + px·F + py·L, F = (sin th, cos th), L = (-cos th, sin th),
@@ -25,7 +26,7 @@ import re
 import numpy as np
 
 from . import config as C
-from .wro_field import INNER_HALF_MM, OUTER_HALF_MM, SEATS, SIGN_MM, _barrier_corners, section_to_world
+from .wro_field import INNER_HALF_MM, OUTER_HALF_MM, SEATS, SIGN_MM, _barrier_corners, section_to_world, w_axis
 
 # tipo de superficie
 _WALL, _ISLAND, _SIGN, _BARRIER = 0, 1, 2, 3
@@ -83,8 +84,8 @@ def build_segments(seats: dict, parking: str | None, park_w: float | None = None
     return a, b, k
 
 
-def raycast(origins: np.ndarray, dirs: np.ndarray, segs, max_mm: float = 4000.0):
-    """Distancia, tipo y |cos| de incidencia del primer impacto de cada rayo."""
+def raycast(origins: np.ndarray, dirs: np.ndarray, segs, max_mm: float = 4000.0, *, face=False):
+    """Distancia, tipo y |cos| del primer impacto; face devuelve índice y fracción del segmento."""
     a, b, kind = segs
     e = b - a                                            # (S,2)
     ox, oy = origins[:, 0:1], origins[:, 1:2]            # (R,1)
@@ -102,6 +103,8 @@ def raycast(origins: np.ndarray, dirs: np.ndarray, segs, max_mm: float = 4000.0)
     en = e[j] / np.linalg.norm(e[j], axis=1, keepdims=True)
     cos_inc = np.abs(dirs[:, 0] * en[:, 1] - dirs[:, 1] * en[:, 0])     # |dir · normal|
     hit = np.isfinite(d) & (d <= max_mm)
+    if face:
+        return np.where(hit, d, np.inf), j, u[np.arange(len(t)), j], cos_inc
     return np.where(hit, d, np.inf), np.where(hit, kind[j], -1), cos_inc
 
 
@@ -109,6 +112,7 @@ class Localizer:
     def __init__(self, seats: dict, parking: str | None, x: float, y: float, heading_deg: float,
                  park_w: float | None = None):
         self.park_w = park_w
+        self.park_axis = w_axis(parking) if parking is not None else None
         self.segs = build_segments(seats, parking, park_w)
         self.x = np.array([x, y, math.radians(heading_deg)], float)
         # El rumbo del BNO085 es bueno (deriva ~0.5°/min): poca incertidumbre de
@@ -129,6 +133,7 @@ class Localizer:
         allseats = dict(seats)
         for key in unknown or ():
             allseats.setdefault(key, "?")
+        self.park_axis = w_axis(parking) if parking is not None else None
         self.segs = build_segments(allseats, parking, self.park_w)
 
     def shift(self, dx: float, dy: float) -> None:
@@ -149,7 +154,16 @@ class Localizer:
         ty = self.x[1] - (px * fy + py * ly)
         return tx, ty, th
 
-    def pose(self):
+    def pose(self, ack: str | None = None):
+        """Pose actual, o proyección odométrica al ACK nuevo sin modificar el filtro."""
+        if ack and self.odom is not None:
+            px, py, yaw = (_ack_num(ack, key) for key in ("px", "py", "yaw"))
+            if px is not None and py is not None and yaw is not None:
+                tx, ty, th = self.transform()
+                r = math.radians(th)
+                sin_th, cos_th = math.sin(r), math.cos(r)
+                return (tx + px * sin_th - py * cos_th, ty + px * cos_th + py * sin_th,
+                        (th - yaw) % 360.0)
         return float(self.x[0]), float(self.x[1]), math.degrees(self.x[2]) % 360.0
 
     def _predict(self, px, py, yaw):
@@ -209,6 +223,74 @@ class Localizer:
         m = (k == _BARRIER)[:, None]
         sv = np.array([dx, dy])
         return a + m * sv, b + m * sv, k
+
+    def update_maneuver(self, ack: str) -> None:
+        """ToF de maniobra para el visor: corrige posición y conserva rumbo IMU."""
+        px, py, yaw = (_ack_num(ack, key) for key in ("px", "py", "yaw"))
+        if px is None or py is None or yaw is None or self.odom == (px, py, yaw):
+            return
+        self._predict(px, py, yaw)
+        a, b, surface = self.segs
+        # La U de parking usa estado E y pnf 20..27 en el firmware actual.
+        phase = _ack_num(ack, "pnf")
+        turning = ",est=G," in ack or (phase is not None and 20 <= phase <= 27)
+        h = self.x[2]
+        fwd = np.array([math.sin(h), math.cos(h)])
+        right = np.array([fwd[1], -fwd[0]])
+        for key, name, _, kind in _SENSORS:
+            if kind != "tof":
+                continue
+            z = _ack_num(ack, key)
+            if z is None or z <= 0.0:
+                continue
+            if key == "tF":
+                z -= C.LOC_MANEUVER_FRONT_OFFSET_MM
+            limit = C.LOC_TOF_MAX_MM.get(key, 240.0)
+            if not 20.0 <= z <= limit:
+                continue
+            lateral, longitudinal, angle = C.SENSOR_MOUNTS[name]
+            origin = self.x[:2] + longitudinal * fwd + lateral * right
+            rad = h + math.radians(angle)
+            direction = np.array([math.sin(rad), math.cos(rad)])
+            (expected,), (j,), (u,), (cosi,) = raycast(
+                origin[None, :], direction[None, :], self.segs, face=True)
+            if (surface[j] not in (_WALL, _BARRIER) or cosi <= math.cos(math.radians(35.0))
+                    or not 20.0 <= expected <= limit):
+                continue
+            if surface[j] == _WALL and key in ("tL", "tR") and not turning and expected > 180.0:
+                continue  # durante el escaneo, la madera puede tapar parte del eco lejano
+            if surface[j] == _BARRIER and expected > 200.0:
+                continue
+            cone = rad + np.radians([-7.0, 7.0])
+            rim = np.column_stack((np.sin(cone), np.cos(cone)))
+            _, faces, _, _ = raycast(np.broadcast_to(origin, rim.shape), rim, self.segs, face=True)
+            if np.any(faces != j):
+                continue
+            edge = b[j] - a[j]
+            # Al borde, el cono del ToF puede mezclar la cara y el fondo.
+            length = np.linalg.norm(edge)
+            if min(u, 1.0 - u) * length < min(0.35 * length, max(12.0, 0.08 * expected)):
+                continue
+            normal = np.array([edge[1], -edge[0]])
+            if surface[j] == _BARRIER and key != "tF" and normal @ self.park_axis != 0.0:
+                # Las caras cuyo plano depende de w0 requieren el frontal calibrado.
+                continue
+            H = np.zeros(3)
+            H[:2] = -normal / (direction @ normal)
+            sigma = (C.LOC_MANEUVER_WOOD_SIGMA_MM if surface[j] == _BARRIER else 12.0) + 0.02 * z
+            innovation = z - expected
+            variance = float(H @ self.P @ H + sigma ** 2)
+            if abs(innovation) > C.LOC_MANEUVER_MAX_INNOV_MM or innovation ** 2 > 9.0 * variance:
+                self.n_rej += 1
+                continue
+            gain = self.P @ H / variance
+            gain[2] = 0.0
+            gain *= 0.25  # varios ACK pueden llevar ecos del mismo intervalo de muestreo
+            self.x += gain * innovation
+            residual = np.eye(3) - np.outer(gain, H)
+            self.P = residual @ self.P @ residual.T + sigma ** 2 * np.outer(gain, gain)
+            self.n_used += 1
+            self.last[key] = (round(z), round(expected))
 
     def update(self, ack: str | None, correct: bool = True, shifts=None) -> None:
         """Predicción con la odometría del ACK; con correct, corrección con sensores.

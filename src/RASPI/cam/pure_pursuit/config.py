@@ -145,6 +145,11 @@ US_DESDE_TOF = True
 # derecha (roces en la sección 2). Izquierdo: 55 cm lee 526. Gemelo campo 36 con esa curva: 500/500
 # termina 2/7, 480/450 termina 7/7.
 LOC_TOF_MAX_MM = {"tL": 480.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
+# Corrección de pose para el visor durante maniobras, con el cajón ya fijado.
+LOC_MANEUVER_VIEW = False
+LOC_MANEUVER_MAX_INNOV_MM = 80.0
+LOC_MANEUVER_WOOD_SIGMA_MM = 44.0  # incertidumbre de asociar el cono con la madera
+LOC_MANEUVER_FRONT_OFFSET_MM = 32.0  # frontal Long en el rango cercano (calib. 2026-10-19)
 # Ruido de proceso lineal del localizador (mm² por mm recorrido); None = el de antes. Ver localizer._predict.
 LOC_Q_XY_PER_MM = 2.0   # gemelo (s19/s7/s23, encoder 1.00 y 1.04): 2 -> 12+12+3 y 12+12+2 vueltas-esquina; sin esto con 1.04: 1+1+1
 # Procedencia, para el twin (describe()) y para quien mida.

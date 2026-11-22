@@ -1533,8 +1533,8 @@ class DigitalMap:
         return out
 
     def render(self, size: int = 520, *, route_line=None, route_closed=False,
-               route_label=None, empty=None) -> np.ndarray:
-        """empty: asientos {(recta, asiento)} que el modo ruta da por vacíos (vistos o por regla); se marcan con x."""
+               route_label=None, empty=None, view_pose=None) -> np.ndarray:
+        """Marca los asientos vacíos y pinta el carro en view_pose (x, y, rumbo en grados) si se indica."""
         empty = empty or set()
         img = np.full((size, size, 3), (232, 224, 208), np.uint8)
         scale = (size - 24) / _SPAN_MM
@@ -1583,8 +1583,8 @@ class DigitalMap:
             cv2.putText(img, route_label, (8, 20), cv2.FONT_HERSHEY_SIMPLEX,
                         .45, (40, 40, 40), 1, cv2.LINE_AA)
 
-        cx, cy = self.pose_xy
-        rad = math.radians(self.heading)
+        cx, cy, heading = (*self.pose_xy, self.heading) if view_pose is None else view_pose
+        rad = math.radians(heading)
         tip = px(cx + 80 * math.sin(rad), cy + 80 * math.cos(rad))
         # Chasis a escala: pose_xy es el eje trasero.
         fx, fy = math.sin(rad), math.cos(rad)

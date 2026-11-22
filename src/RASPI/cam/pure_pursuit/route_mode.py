@@ -26,6 +26,7 @@ transformación del marco viejo hasta tener la ruta nueva completa.
 
 from __future__ import annotations
 
+from copy import copy
 import math
 import os
 
@@ -314,6 +315,7 @@ class RouteMode:
         self.fixed = not self.blind
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
         self.axis = (0.0, 0.0)
+        self.maneuver_loc = None     # pose del visor durante E/G
         self.park_w = None           # w0 del cajón en uso (supuesto o medido)
         _pf = getattr(C, "ROUTE_PRUEBA_CAJON_FILE", None)
         self._prueba_cajon = bool(_pf) and os.path.exists(str(_pf))
@@ -648,6 +650,19 @@ class RouteMode:
                 self._plan_frame is not None and self._step_frame - self._plan_frame <= replan_frames
             )
         self.rv = None
+        ack_est = _ack_est(ack)
+        if (C.LOC_MANEUVER_VIEW and armed and self.fixed and self.loc is not None
+                and self.loc.odom is not None and ack_est in ("E", "G")):
+            if self.maneuver_loc is None:
+                # El ESP usa la transformación de ruta también dentro de E.
+                self.maneuver_loc = copy(self.loc)
+                self.maneuver_loc.x = self.loc.x.copy()
+                self.maneuver_loc.P = self.loc.P.copy()
+                self.maneuver_loc.last = {}
+                self.maneuver_loc.n_used = self.maneuver_loc.n_rej = 0
+            self.maneuver_loc.update_maneuver(ack)
+        elif not armed or not C.LOC_MANEUVER_VIEW or ack_est is not None:
+            self.maneuver_loc = None
         if not (armed and getattr(C, "ROUTE_FOLLOW", False)):
             return None, "", None
         if est not in ("S", "C", "R"):
@@ -679,7 +694,7 @@ class RouteMode:
         # Parado en el cajón la pose del arranque es exacta: un ToF a 84 mm corría y +16 mm (gemelo s26).
         quieto = (getattr(C, "ROUTE_LOC_HOLD_AT_START", None) and not self.fixed
                   and _ack_num(ack or "", "px") == 0 and _ack_num(ack or "", "py") == 0)
-        self.loc.update(ack, correct=(est in ("S", "C", "R") and _ack_est(ack) in ("S", "C", "R") and not quieto),
+        self.loc.update(ack, correct=(est in ("S", "C", "R") and ack_est in ("S", "C", "R") and not quieto),
                         shifts=shifts)
         pose = self.loc.pose() if self.loc.odom is not None else (dm.pose_xy[0], dm.pose_xy[1], float(dm.heading))
         if self.loc.odom is not None:
