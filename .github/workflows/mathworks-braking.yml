@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - 'models/mathworks/*.m'
-      - 'models/mathworks/+foxdrive/**'
+      - 'models/mathworks/**/*.ssc'
       - 'logs_tof/calib_20261021/p5_escalones/**'
       - 'models/mathworks/*.csv'
       - 'models/mathworks/*.c'

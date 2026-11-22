@@ -65,7 +65,7 @@ fig = figure('Visible','off');
 figCleanup = onCleanup(@() close(fig)); %#ok<NASGU>
 layout = tiledlayout(fig,3,1);
 axesList = [nexttile(layout), nexttile(layout), nexttile(layout)];
-rows = zeros(4,5);
+rows = zeros(4,7);
 index = 0;
 for voltage = [11.88, 12.4]
     for stopMode = [-1, 0]
@@ -79,7 +79,12 @@ for voltage = [11.88, 12.4]
         assert(max(abs(run.pack_v.Data + 0.12*run.pack_a.Data - voltage)) < 1e-4, ...
             'Pack voltage and current failed the circuit balance.');
         speed = run.speed.Data;
-        rows(index,:) = [voltage, stopMode, max(run.pack_a.Data), min(run.pack_v.Data), max(speed)];
+        [speedTime, uniqueSamples] = unique(run.speed.Time, 'last');
+        speedAt200ms = interp1(speedTime, speed(uniqueSamples), 1.6);
+        afterStopCommand = speedTime >= 1.4;
+        travelAfterCommand = trapz(speedTime(afterStopCommand), speed(uniqueSamples(afterStopCommand)));
+        rows(index,:) = [voltage, stopMode, max(run.pack_a.Data), min(run.pack_v.Data), ...
+            max(speed), speedAt200ms, travelAfterCommand];
         label = sprintf('%.2f V, %s', voltage, string(modeName(stopMode)));
         for k = 1:numel(signals)
             trace = run.get(signals{k});
@@ -94,7 +99,8 @@ ylabel(axesList(3), 'Speed (m/s)');
 xlabel(axesList(3), 'Time (s)');
 legend(axesList(1), 'Location','best');
 writetable(array2table(rows, 'VariableNames', ...
-    {'pack_ocv_v','stop_command','peak_pack_a','min_pack_v','peak_speed_m_s'}), ...
+    {'pack_ocv_v','stop_command','peak_pack_a','min_pack_v','peak_speed_m_s', ...
+    'speed_200ms_after_command_m_s','travel_600ms_after_command_m'}), ...
     fullfile(outputDir,'n30_electrical_sensitivity.csv'));
 exportgraphics(layout, fullfile(outputDir,'n30_electrical.png'), 'Resolution', 150);
 end
