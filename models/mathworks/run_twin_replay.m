@@ -24,7 +24,9 @@ cleanup = onCleanup(@() close_system(model, 0)); %#ok<NASGU>
 workspace = get_param(model, 'ModelWorkspace');
 % Put command transitions between discrete sample hits.
 commandTime = max(0, time - c.sample_s/2);
-assignin(workspace, 'actuators', [commandTime, c.commands]);
+% Keep data past the last output hit so no extrapolation is needed.
+assignin(workspace, 'actuators', [commandTime, c.commands; ...
+    time(end) + c.sample_s, c.commands(end,:)]);
 assignin(workspace, 'plantParameters', c.plant_parameters);
 assignin(workspace, 'encoderParameters', c.encoder_parameters);
 assignin(workspace, 'initialState', c.states(1,:)');

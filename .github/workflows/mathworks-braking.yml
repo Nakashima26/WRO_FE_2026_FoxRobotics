@@ -41,6 +41,7 @@ jobs:
             run_braking_study(fullfile(pwd,'mathworks-output'));
             run_twin_replay(fullfile(pwd,'mathworks-output','twin_case.json'),fullfile(pwd,'mathworks-output'));
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: fox-simulink-studies
           path: mathworks-output/
