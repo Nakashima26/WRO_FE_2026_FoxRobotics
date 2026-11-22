@@ -110,52 +110,18 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
 
 ## Table of Contents
 
-0. [Vehicle Overview](#0-vehicle-overview)
-1. [Mobility and Mechanical Design](#1-mobility-and-mechanical-design)
-   - [1.1 Chassis — shorter car, battery in the middle, Pi on top](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top)
-   - [1.2 Drivetrain — gear ratio chosen from measured speed](#12-drivetrain--gear-ratio-chosen-from-measured-speed)
-   - [1.3 Steering — Ackermann rack and pinion](#13-steering--ackermann-rack-and-pinion)
-   - [1.4 Camera mount](#14-camera-mount)
-   - [1.5 Assembly order (v2)](#15-assembly-order-v2)
-   - [1.6 Mechanical stability](#16-mechanical-stability)
-2. [Power and Sensor Architecture](#2-power-and-sensor-architecture)
-   - [2.1 Power tree](#21-power-tree)
-   - [2.2 Power budget](#22-power-budget)
-   - [2.3 PCB RevB — two stacked boards](#23-pcb-revb--two-stacked-boards)
-   - [2.4 Sensors — selection, placement and calibration](#24-sensors--selection-placement-and-calibration)
-   - [2.5 Main computer — Raspberry Pi 5](#25-main-computer--raspberry-pi-5)
-3. [Software Architecture and Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)
-   - [3.1 Two controllers, one link](#31-two-controllers-one-link)
-   - [3.2 Module map](#32-module-map)
-   - [3.3 Data flow and timing (one Pi cycle)](#33-data-flow-and-timing-one-pi-cycle)
-   - [3.4 ESP32 firmware and state machine](#34-esp32-firmware-and-state-machine)
-   - [3.5 Start procedure](#35-start-procedure)
-   - [3.6 Open Challenge (ESP32 only)](#36-open-challenge-esp32-only)
-   - [3.7 Obstacle Management — route mode](#37-obstacle-management--route-mode)
-   - [3.8 Edge cases — what can go wrong on the field, and what the car does](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does)
-   - [3.9 Digital Twin — software-in-the-loop simulator](#39-digital-twin--software-in-the-loop-simulator)
-   - [3.10 Testing, Tuning and Validation](#310-testing-tuning-and-validation)
-4. [Systems Thinking and Engineering Decisions](#4-systems-thinking-and-engineering-decisions)
-   - [4.1 The challenge, our goals and the design constraints](#41-the-challenge-our-goals-and-the-design-constraints)
-   - [4.2 From v1 to v2 — what the national final taught us](#42-from-v1-to-v2--what-the-national-final-taught-us)
-   - [4.3 How the subsystems constrain each other](#43-how-the-subsystems-constrain-each-other)
-   - [4.4 Trade-offs — "we chose X instead of Y because…"](#44-trade-offs--we-chose-x-instead-of-y-because)
-   - [4.5 Risks, failure modes and mitigations](#45-risks-failure-modes-and-mitigations)
-   - [4.6 Iteration timeline](#46-iteration-timeline)
-5. [Reproducibility and GitHub Quality](#5-reproducibility-and-github-quality)
-   - [5.1 Build the car](#51-build-the-car)
-   - [5.2 ESP32 firmware](#52-esp32-firmware)
-   - [5.3 Raspberry Pi 5 software](#53-raspberry-pi-5-software)
-   - [5.4 Calibration at a new venue (≈ 20 minutes)](#54-calibration-at-a-new-venue--20-minutes)
-   - [5.5 Run](#55-run)
-   - [5.6 Run the digital twin (PC)](#56-run-the-digital-twin-pc)
-   - [5.7 Reproduce our results](#57-reproduce-our-results)
-   - [5.8 Repository structure](#58-repository-structure)
-   - [5.9 Versioning, releases and commit history](#59-versioning-releases-and-commit-history)
-6. [Next Steps](#6-next-steps)
-7. [Cost Report](#7-cost-report)
-8. [The Team](#8-the-team)
-9. [License](#9-license)
+| | Section | Jump to |
+|:---:|---|---|
+| 📸 | **[0 · Vehicle Overview](#0-vehicle-overview)**<br>_Photos of the car from every side_ | |
+| ⚙️ | **[1 · Mobility & Mechanical Design](#1-mobility-and-mechanical-design)**<br>_How it moves and turns_ | [Chassis](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top) · [Drivetrain](#12-drivetrain--gear-ratio-chosen-from-measured-speed) · [Steering](#13-steering--ackermann-rack-and-pinion) · [Camera mount](#14-camera-mount) · [Assembly](#15-assembly-order-v2) · [Stability](#16-mechanical-stability) |
+| 🔋 | **[2 · Power & Sensors](#2-power-and-sensor-architecture)**<br>_Electronics, PCB and what the car senses_ | [Power tree](#21-power-tree) · [Power budget](#22-power-budget) · [PCB](#23-pcb-revb--two-stacked-boards) · [Sensors](#24-sensors--selection-placement-and-calibration) · [Raspberry Pi 5](#25-main-computer--raspberry-pi-5) |
+| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) |
+| 🧩 | **[4 · Engineering Decisions](#4-systems-thinking-and-engineering-decisions)**<br>_Why we built it this way_ | [Constraints](#41-the-challenge-our-goals-and-the-design-constraints) · [v1 → v2](#42-from-v1-to-v2--what-the-national-final-taught-us) · [Subsystems](#43-how-the-subsystems-constrain-each-other) · [Trade-offs](#44-trade-offs--we-chose-x-instead-of-y-because) · [Risks](#45-risks-failure-modes-and-mitigations) · [Timeline](#46-iteration-timeline) |
+| 🛠️ | **[5 · Reproduce It](#5-reproducibility-and-github-quality)**<br>_Build, flash, calibrate and run your own_ | [Build](#51-build-the-car) · [ESP32 firmware](#52-esp32-firmware) · [Pi software](#53-raspberry-pi-5-software) · [Venue calibration](#54-calibration-at-a-new-venue--20-minutes) · [Run](#55-run) · [Twin on PC](#56-run-the-digital-twin-pc) · [Our results](#57-reproduce-our-results) · [Repo structure](#58-repository-structure) · [Versions](#59-versioning-releases-and-commit-history) |
+| 🚀 | **[6 · Next Steps](#6-next-steps)** | |
+| 💰 | **[7 · Cost Report](#7-cost-report)** | |
+| 👥 | **[8 · The Team](#8-the-team)** | |
+| 📄 | **[9 · License](#9-license)** | |
 
 ---
 
