@@ -33,7 +33,7 @@ run_braking_study
 
 The [runner](run_braking_study.m) writes `output/fox_n30_braking.slx`, `bench_comparison.csv`, `curve_entry_sweep.csv` and `curve_entry.png`. Open the generated model to inspect the integrators and run the default 1500-to-500 mm/s scenario. For a public GitHub repository, the [GitHub Actions workflow](../../.github/workflows/mathworks-braking.yml) uses MathWorks batch licensing and uploads the same files as an artifact. Review a successful run and publish the generated model, graph and metrics at stable repository links for judging.
 
-The figures above are analytical reference calculations. The Simulink run and generated files are pending. We will add product feedback after the team has used the model and reviewed the simulation results.
+The figures above are analytical reference calculations. The GitHub Actions run reproduced the three bench comparison rows in Simulink. We will add product feedback after the team has used the model and reviewed the simulation results.
 
 ## Digital twin plant replay in Simulink
 
@@ -56,7 +56,7 @@ run_twin_replay('models/mathworks/output/twin_case.json')
 
 The runner builds the shared C source as a platform-specific MEX and generates `output/fox_twin_replay.slx`, plus a trajectory and speed plot and per-step CSV. To reopen the generated model in a new session, add both `models/mathworks` and `models/mathworks/output` to the MATLAB path. Re-run the generator if moving to a different platform. For the replay, start with the public repo's GitHub Actions workflow so the Linux runner can compile the C source.
 
-The Python exporter uses independent Python dynamics and encoder code for the reference. The Simulink runner asserts matching timestamps, exact integer encoder counts, and per-channel continuous state and range errors below 1e-6 in each channel's units. This measures replay parity under the same commands and initial conditions. The bench study above addresses agreement with physical measurements. The Simulink runtime check and generated model are pending a run with MATLAB.
+The Python exporter uses independent Python dynamics and encoder code for the reference. The Simulink runner asserts matching timestamps, exact integer encoder counts, and per-channel continuous state and range errors below 1e-6 in each channel's units. This measures replay parity under the same commands and initial conditions. The bench study above addresses agreement with physical measurements. The [verified GitHub Actions run](https://github.com/Nakashima26/WRO_FE_2026_FoxRobotics/actions/runs/45001314032) passed with 1,961 samples on seed 1, exact integer encoder counts, a maximum continuous state error of 6.82e-13 in the logged channel units, and a maximum range error of 6.76e-12 mm. Its artifact contains both models, graphs and CSVs.
 
 ## Award preparation
 
