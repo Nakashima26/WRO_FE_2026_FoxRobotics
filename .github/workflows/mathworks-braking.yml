@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - 'models/mathworks/*.m'
+      - 'models/mathworks/+foxdrive/**'
+      - 'logs_tof/calib_20261021/p5_escalones/**'
       - 'models/mathworks/*.csv'
       - 'models/mathworks/*.c'
       - 'models/mathworks/*.py'
@@ -49,4 +51,29 @@ jobs:
         with:
           name: fox-simulink-studies
           path: mathworks-output/
+          if-no-files-found: error
+
+
+  motor-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: matlab-actions/setup-matlab@v3
+        with:
+          release: R2025b
+          products: Simulink Optimization_Toolbox System_Identification_Toolbox Simscape Simscape_Electrical
+      - uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath('models/mathworks');
+            output = fullfile(pwd,'mathworks-motor-output');
+            fit_n30_dynamics(output);
+            identify_n20_dynamics(output);
+            run_n30_electrical(output);
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fox-motor-models
+          path: mathworks-motor-output/
           if-no-files-found: error

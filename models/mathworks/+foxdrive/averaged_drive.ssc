@@ -1,0 +1,62 @@
+component averaged_drive
+% Averaged Drive
+% Averaged PWM DC drive with separate coast and short-brake modes.
+% Parameters are sensitivity-study assumptions until measured on the car.
+
+nodes
+    p = foundation.electrical.electrical; % p:left
+    n = foundation.electrical.electrical; % n:left
+end
+
+inputs
+    command = {0, '1'}; % command:top
+end
+
+outputs
+    pack_v = {0, 'V'}; % pack_v:right
+    pack_a = {0, 'A'}; % pack_a:right
+    speed = {0, 'm/s'}; % speed:right
+end
+
+parameters
+    Rmotor = {3, 'Ohm'};
+    Lmotor = {1, 'mH'};
+    Ke = {0.0035, 'V*s/rad'};
+    Kt = {0.0035, 'N*m/A'};
+    J = {1.5e-7, 'kg*m^2'};
+    B = {1.3e-6, 'N*m/(rad/s)'};
+    Rbridge = {0.5, 'Ohm'};
+    Rcoast = {80, 'Ohm'};
+    aux_current = {0.5, 'A'};
+    ratio = {37.5, '1'};
+    radius = {0.022, 'm'};
+end
+
+variables
+    battery_current = {0, 'A'};
+    armature_current = {value = {0, 'A'}, priority = priority.high};
+    omega = {value = {0, 'rad/s'}, priority = priority.high};
+end
+
+branches
+    battery_current : p.i -> n.i;
+end
+
+equations
+    pack_v == p.v - n.v;
+    pack_a == battery_current;
+    speed == value(omega, 'rad/s') * radius / ratio * {1, '1/s'};
+    if command > 0
+        battery_current == aux_current + command * armature_current;
+        Lmotor * armature_current.der == command * pack_v ...
+            - (Rmotor + Rbridge) * armature_current - Ke * omega;
+    elseif command < 0
+        battery_current == aux_current;
+        Lmotor * armature_current.der == -(Rmotor + Rcoast) * armature_current - Ke * omega;
+    else
+        battery_current == aux_current;
+        Lmotor * armature_current.der == -(Rmotor + Rbridge) * armature_current - Ke * omega;
+    end
+    J * omega.der == Kt * armature_current - B * omega;
+end
+end
