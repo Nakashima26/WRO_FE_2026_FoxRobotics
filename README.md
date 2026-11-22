@@ -39,7 +39,27 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 - **Built with a digital twin** that runs the real firmware and the real Pi code: **126/126** full simulated races without wall contact. On the real car: clean 12-corner route-mode races (runs 41 and 48) ([§3.9](#39-digital-twin--software-in-the-loop-simulator), [§3.10](#310-testing-tuning-and-validation)).
 - **Honest status:** parallel parking has ended fully inside the lot on the real car once (run 104) but is not yet repeatable, and lap-1 mapping has one open case ([§3.10](#310-testing-tuning-and-validation), [§6](#6-next-steps)).
 
+## Table of Contents
+
+| | Section | Jump to |
+|:---:|---|---|
+| 📸 | **[0 · Vehicle Overview](#0-vehicle-overview)**<br>_Photos of the car from every side_ | |
+| ⚙️ | **[1 · Mobility & Mechanical Design](#1-mobility-and-mechanical-design)**<br>_How it moves and turns_ | [Chassis](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top) · [Drivetrain](#12-drivetrain--gear-ratio-chosen-from-measured-speed) · [Steering](#13-steering--ackermann-rack-and-pinion) · [Camera mount](#14-camera-mount) · [Assembly](#15-assembly-order-v2) · [Stability](#16-mechanical-stability) |
+| 🔋 | **[2 · Power & Sensors](#2-power-and-sensor-architecture)**<br>_Electronics, PCB and what the car senses_ | [Power tree](#21-power-tree) · [Power budget](#22-power-budget) · [PCB](#23-pcb-revb--two-stacked-boards) · [Sensors](#24-sensors--selection-placement-and-calibration) · [Raspberry Pi 5](#25-main-computer--raspberry-pi-5) |
+| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) |
+| 🧩 | **[4 · Engineering Decisions](#4-systems-thinking-and-engineering-decisions)**<br>_Why we built it this way_ | [Constraints](#41-the-challenge-our-goals-and-the-design-constraints) · [v1 → v2](#42-from-v1-to-v2--what-the-national-final-taught-us) · [Subsystems](#43-how-the-subsystems-constrain-each-other) · [Trade-offs](#44-trade-offs--we-chose-x-instead-of-y-because) · [Risks](#45-risks-failure-modes-and-mitigations) · [Timeline](#46-iteration-timeline) |
+| 🛠️ | **[5 · Reproduce It](#5-reproducibility-and-github-quality)**<br>_Build, flash, calibrate and run your own_ | [Build](#51-build-the-car) · [ESP32 firmware](#52-esp32-firmware) · [Pi software](#53-raspberry-pi-5-software) · [Venue calibration](#54-calibration-at-a-new-venue--20-minutes) · [Run](#55-run) · [Twin on PC](#56-run-the-digital-twin-pc) · [Our results](#57-reproduce-our-results) · [Repo structure](#58-repository-structure) · [Versions](#59-versioning-releases-and-commit-history) |
+| 🚀 | **[6 · Next Steps](#6-next-steps)** | |
+| 💰 | **[7 · Cost Report](#7-cost-report)** | |
+| 👥 | **[8 · The Team](#8-the-team)** | |
+| 📄 | **[9 · License](#9-license)** | |
+
+> ⏱️ **Short on time?** Watch the [videos](#videos), read [The car in one minute](#the-car-in-one-minute) and the **In short** line at the start of each section: that is the whole car in about 5 minutes. Collapsed blocks (▶) hold reference tables you only need when you look for a detail.
+
 ## How this document follows the judging rubric
+
+<details>
+<summary><b>Rubric checklist for judges</b> — every item the rubric asks for and the section that answers it (click to open)</summary>
 
 Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers documentation rubric, in the same order**. The tables below list every item the rubric asks for (the "what is evaluated" and the 6-point column) and the exact place where we answer it.
 
@@ -108,20 +128,7 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
 | Versioning / release notes | [§5.9](#59-versioning-releases-and-commit-history), [`docs/releases.md`](docs/releases.md) |
 | README ≥ 5000 characters | This document |
 
-## Table of Contents
-
-| | Section | Jump to |
-|:---:|---|---|
-| 📸 | **[0 · Vehicle Overview](#0-vehicle-overview)**<br>_Photos of the car from every side_ | |
-| ⚙️ | **[1 · Mobility & Mechanical Design](#1-mobility-and-mechanical-design)**<br>_How it moves and turns_ | [Chassis](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top) · [Drivetrain](#12-drivetrain--gear-ratio-chosen-from-measured-speed) · [Steering](#13-steering--ackermann-rack-and-pinion) · [Camera mount](#14-camera-mount) · [Assembly](#15-assembly-order-v2) · [Stability](#16-mechanical-stability) |
-| 🔋 | **[2 · Power & Sensors](#2-power-and-sensor-architecture)**<br>_Electronics, PCB and what the car senses_ | [Power tree](#21-power-tree) · [Power budget](#22-power-budget) · [PCB](#23-pcb-revb--two-stacked-boards) · [Sensors](#24-sensors--selection-placement-and-calibration) · [Raspberry Pi 5](#25-main-computer--raspberry-pi-5) |
-| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) |
-| 🧩 | **[4 · Engineering Decisions](#4-systems-thinking-and-engineering-decisions)**<br>_Why we built it this way_ | [Constraints](#41-the-challenge-our-goals-and-the-design-constraints) · [v1 → v2](#42-from-v1-to-v2--what-the-national-final-taught-us) · [Subsystems](#43-how-the-subsystems-constrain-each-other) · [Trade-offs](#44-trade-offs--we-chose-x-instead-of-y-because) · [Risks](#45-risks-failure-modes-and-mitigations) · [Timeline](#46-iteration-timeline) |
-| 🛠️ | **[5 · Reproduce It](#5-reproducibility-and-github-quality)**<br>_Build, flash, calibrate and run your own_ | [Build](#51-build-the-car) · [ESP32 firmware](#52-esp32-firmware) · [Pi software](#53-raspberry-pi-5-software) · [Venue calibration](#54-calibration-at-a-new-venue--20-minutes) · [Run](#55-run) · [Twin on PC](#56-run-the-digital-twin-pc) · [Our results](#57-reproduce-our-results) · [Repo structure](#58-repository-structure) · [Versions](#59-versioning-releases-and-commit-history) |
-| 🚀 | **[6 · Next Steps](#6-next-steps)** | |
-| 💰 | **[7 · Cost Report](#7-cost-report)** | |
-| 👥 | **[8 · The Team](#8-the-team)** | |
-| 📄 | **[9 · License](#9-license)** | |
+</details>
 
 ---
 
@@ -208,6 +215,9 @@ The **Raspberry Pi 5** answers *where should the car go*: it sees the pillars an
 ---
 
 # 1. Mobility and Mechanical Design
+
+> [!NOTE]
+> **In short:** a 3D-printed car of 176 × 125 mm (27 % shorter than v1), one N20 motor geared 1.25 : 1 (~800 mm/s, capped at 700), Ackermann steering with a measured turning radius of 123–134 mm, and the battery — 43 % of the mass — low in the center.
 
 ## 1.1 Chassis — shorter car, battery in the middle, Pi on top
 
@@ -366,6 +376,9 @@ The battery alone is 43 % of the mass, which is why its position matters most: p
 
 # 2. Power and Sensor Architecture
 
+> [!NOTE]
+> **In short:** a 3S LiPo drives the motor directly and feeds two separate 5 V regulators — one only for the Pi, so servo spikes never reach it — on two stacked PCBs. The car senses with a camera (colors), four ToF sensors (walls), a BNO085 (heading) and an encoder (distance).
+
 ## 2.1 Power tree
 
 ```mermaid
@@ -431,6 +444,9 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 
 ### Wiring / pin map (ESP32)
 
+<details>
+<summary><b>ESP32 pin map</b> — 14 signals (click to open)</summary>
+
 | Signal | ESP32 GPIO | Connected to | Notes |
 |---|---|---|---|
 | Motor PWM | 23 | TB6612 PWMA | |
@@ -445,6 +461,8 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 | READY LED | — (Pi GPIO 27) | D2 on the logic board → `TO_PI` pin 5 | Driven by the Pi |
 | HC-SR04 left / right / front TRIG | 27 / 26 / 14 | HC-SR04 TRIG | 10 µs pulse, one sensor at a time |
 | HC-SR04 left / right / front ECHO | 32 / 35 / 33 | HC-SR04 ECHO via the level shifter | 5 V → 3.3 V; read with a CHANGE interrupt |
+
+</details>
 
 ## 2.4 Sensors — selection, placement and calibration
 
@@ -527,6 +545,9 @@ UART-RVC mode: the sensor streams a 19-byte packet with yaw, pitch, roll and acc
 
 # 3. Software Architecture and Obstacle Strategy
 
+> [!NOTE]
+> **In short:** the Pi 5 sees the pillars, fills a map of 6 possible seats per straight and plans the whole lap with dynamic programming; the ESP32 follows that route with odometry and pure pursuit, without stopping at corners. The open round runs on the ESP32 alone. Everything is tried first in a digital twin that runs the real code.
+
 This section covers the software of both controllers ([§3.1](#31-two-controllers-one-link)–[§3.6](#36-open-challenge-esp32-only)), the obstacle strategy ([§3.7](#37-obstacle-management--route-mode)), every edge case we handle ([§3.8](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does)), the digital twin we developed it with ([§3.9](#39-digital-twin--software-in-the-loop-simulator)) and how we test, tune and measure it ([§3.10](#310-testing-tuning-and-validation)).
 
 ## 3.1 Two controllers, one link
@@ -544,6 +565,9 @@ This section covers the software of both controllers ([§3.1](#31-two-controller
 **Why the route follower runs on the ESP32 (new in v2).** In v1 the Pi computed the steering from the image and sent it every frame. The pose reached the Pi 4–6 frames late (the ACK travels the UART after the frame was captured), so the Pi steered for where the car *had been*. In v2 the Pi sends the **whole route** once, and the ESP32 steers against its own odometry at loop rate with no communication delay. The Pi only corrects the pose and changes the route when the map changes.
 
 ## 3.2 Module map
+
+<details>
+<summary><b>Module tables</b> — Raspberry Pi modules and ESP32 firmware blocks (click to open)</summary>
 
 **Raspberry Pi** — [`src/RASPI/cam/pure_pursuit/`](src/RASPI/cam/pure_pursuit/)
 
@@ -572,6 +596,8 @@ This section covers the software of both controllers ([§3.1](#31-two-controller
 | Speed | `setMotor()`, `setMotorTope()` | Feed-forward + PI on encoder speed, 700 mm/s cap |
 | State machine | `INICIO`, `SIGUIENDO`, `ESTACIONANDO`, … | §3.4 |
 | Sensors | `initUnToF()`, `leerToF()`, BNO RVC parser | ROI, timing budget and status rules of §2.4 |
+
+</details>
 
 **Open Challenge firmware** — [`src/ESP32/RondaAbierta/RondaAbierta.ino`](src/ESP32/RondaAbierta/RondaAbierta.ino), ESP32 only (the Pi only sends `READY` when the start button is pressed): §3.6. This is the tested fallback; we are working on running the open round with the route-mode firmware too (§3.6).
 
@@ -615,6 +641,9 @@ stateDiagram-v2
 - **ESTACIONANDO — parking.** After corner 12 the car continues to the next corner, does a **half turn** and comes back to the lot, so the lot is approached from the side that lets a reverse parallel park start in the open. The Pi confirms the lot is alongside (magenta seen); the ESP32 scans the lot walls with the side and rear ToF and the encoder, solves a reverse **arc–straight–arc** path for the measured lot position (`parkPlanT1Solve()`), drives it, then straightens with short forward/backward passes against the reference heading. An anti-stall rule raises the PWM in steps of 20 if the encoder sees less than 4 mm of progress in 250 ms (parking at low PWM on a fresh vs. tired battery).
 - **Fallbacks.** If the Pi never saw the lot, a timeout triggers the parking scan anyway. If the Pi's lines stop arriving, the ESP32 keeps the last *complete* route (double buffer: a half-uploaded route is never used).
 
+<details>
+<summary><b>Link protocol</b> — message format and checksums (click to open)</summary>
+
 **Link protocol (UART 460 800 baud, one line per message):**
 
 ```
@@ -626,6 +655,8 @@ ESP → Pi   ACK,px=..,py=..,yaw=..,est=..,tc=..,tL=..,tR=..,tF=..,tB=..,rn=..,u
 ```
 
 `*HH` is an XOR checksum: the ESP32 drops a corrupted line and counts it (`lc=`); if the ACK shows that the ESP32 does not have the full route (`rn` ≠ n), the Pi re-sends it. The ACK also carries UART error counters (`ue=`, by type), loop time and per-sensor I²C time, which is how we found the electrical problems in §4.5.
+
+</details>
 
 ## 3.5 Start procedure
 
@@ -736,6 +767,9 @@ Twin result with the lot at a random position: **41/42 clean, median lot error 1
 
 **Idea.** Color alone cannot solve this: the special pillar is a perfectly normal red or green pillar. The only thing that gives it away is its **height**, so the Pi measures each pillar's height in the image and swaps the driving color when the height is not 100 mm. Everything after that is unchanged: the digital map, the planner (§3.7.4) and the ESP32 receive the *driving* color, so the route, the protocol and the firmware stay the same. The detection keeps both colors (seen and driving) in the log.
 
+<details>
+<summary><b>How the height is measured, edge cases and twin results</b> (click to open)</summary>
+
 **How the height is measured** ([`surprise.py`](src/RASPI/cam/pure_pursuit/surprise.py)):
 
 | Option | Why we did not use it / why we did |
@@ -765,6 +799,8 @@ Only the pillar's **foot** goes through the floor homography; the height is meas
 | Full race with parking, surprise mode on | 6/48 (normal-mode controls on the same fields: 4/24) |
 | Unit tests | 390 passed (both colors and directions, three heights, distance, cropping, memory across laps and GO, judge) |
 
+</details>
+
 **Open before declaring the attempt.**
 1. **Calibrate with real photos** of a normal pillar at several distances on the car (no real table yet), then check with real 50 mm and 150 mm pillars.
 2. **Three regressions in the twin:** on two fields the car hits the parking walls only when surprise mode is on, and on one field (150 mm) it hits a normal pillar after 10 corners. In all three the special pillar itself was classified correctly; the cause is in the route or the parking, not in the classifier.
@@ -775,6 +811,9 @@ Design notes and the full twin study: [`docs/notes/SURPRISE_RULE_2026.md`](docs/
 ## 3.8 Edge cases — what can go wrong on the field, and what the car does
 
 Each row is a situation we either met on the track or found in the twin. The last column points to where it is explained.
+
+<details>
+<summary><b>22 situations and what the car does in each</b> (click to open)</summary>
 
 | Situation | What the car does | Where |
 |---|---|---|
@@ -798,6 +837,8 @@ Each row is a situation we either met on the track or found in the twin. The las
 | Battery charge changes the motor speed | Speed loop on the encoder (FF + PI) | [§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed) |
 | A side wall gets too close | Last-resort "wall panic" term steers away | [§3.4](#34-esp32-firmware-and-state-machine) |
 | The surprise pillar (2026 extra task) | Measured height vs a normal pillar at the same distance; 3 consistent frames before swapping the color | [§3.7.8](#378-2026-extra-task--the-surprise-pillar) |
+
+</details>
 
 ## 3.9 Digital Twin — software-in-the-loop simulator
 
@@ -908,6 +949,9 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 
 ### 3.10.4 Obstacle Challenge (v2, real car, route mode)
 
+<details>
+<summary><b>Run-by-run history, 2026-11-07 → 11-21</b> — every problem found on the track and its fix (click to open)</summary>
+
 | Date | Runs | What happened | Cause → fix | Status |
 |---|---|---|---|---|
 | 11-07 | first test | Car did not move | Pi→ESP UART not arriving; then FIFO overflow (`rn=0`) → `Serial2` on core 0, 4 KB buffer (`1360188`) | Fixed |
@@ -932,6 +976,8 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 | 11-21 | **138** | CCW: **3 laps in 29 s, no pillar touched, no wrong side** (OBS-06); parking not finished | — | Race: pass · Park: open |
 | 11-21 | 140 | CW: U-turn before parking hit the back wall | ERR-33: the U started ~25 cm from the wall because the car moved away first even with little straight left → U right away when < 650 mm remain (`e2ddbcbc`) | Fixed |
 | 11-21 | **142** | CW: 3 laps clean, U-turn OK (17–26 cm from the wall); parallel park jammed ~24° off | Entry reverse swing of ~48° is too much | Open |
+
+</details>
 
 **Formal validation matrix for the release** (to be filled with the final firmware; each row = one full round with a random layout and a random lot position):
 
@@ -960,6 +1006,9 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 ---
 
 # 4. Systems Thinking and Engineering Decisions
+
+> [!NOTE]
+> **In short:** every v2 change answers a problem we measured on v1 ([§4.2](#42-from-v1-to-v2--what-the-national-final-taught-us)), and every choice in [§4.4](#44-trade-offs--we-chose-x-instead-of-y-because) comes with the number that decided it.
 
 This section starts from the constraints ([§4.1](#41-the-challenge-our-goals-and-the-design-constraints)) and what v1 taught us ([§4.2](#42-from-v1-to-v2--what-the-national-final-taught-us)), then shows how the subsystems constrain each other ([§4.3](#43-how-the-subsystems-constrain-each-other)), the decisions we took with the data behind them ([§4.4](#44-trade-offs--we-chose-x-instead-of-y-because)), the risks we found and how we handle them ([§4.5](#45-risks-failure-modes-and-mitigations)) and the timeline of iterations ([§4.6](#46-iteration-timeline)).
 
@@ -1077,6 +1126,9 @@ The dated, phase-by-phase story is in the [Engineering Journal](ENGINEERING_JOUR
 
 # 5. Reproducibility and GitHub Quality
 
+> [!NOTE]
+> **In short:** print the parts, order the two PCBs, flash the ESP32, install the Pi software, calibrate at the venue in ~20 minutes and run. Every number in this document has the command and the data that reproduce it ([§5.7](#57-reproduce-our-results)).
+
 Everything needed to rebuild the car and re-run our results is in this repository: CAD and STL, gear profiles, KiCad projects and schematics, both firmwares, the Pi software, the simulator, and the raw logs behind every measured table. [§5.1](#51-build-the-car)–[§5.6](#56-run-the-digital-twin-pc) rebuild and run the car; [§5.7](#57-reproduce-our-results) reproduces the numbers in this document; [§5.8](#58-repository-structure) and [§5.9](#59-versioning-releases-and-commit-history) describe the repository and its history.
 
 ## 5.1 Build the car
@@ -1193,6 +1245,9 @@ Every number in this document comes from a run, a log or a script that is in thi
 
 ## 5.8 Repository structure
 
+<details>
+<summary><b>Folder tree</b> (click to open)</summary>
+
 ```
 WRO_FE_2026_FoxRobotics/
 ├── README.md                    ← this document (v2, international final)
@@ -1235,6 +1290,8 @@ WRO_FE_2026_FoxRobotics/
 ├── v-photos/  (current car; v1/ = national car)   t-photos/   video/
 └── requirements.txt
 ```
+
+</details>
 
 ## 5.9 Versioning, releases and commit history
 
