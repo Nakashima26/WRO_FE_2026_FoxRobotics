@@ -161,22 +161,22 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
 
 # 0. Vehicle Overview
 
-<p align="center"><img src="v-photos/v2/isometric.jpeg" width="520" alt="Isometric view of the v2 car"><br><b>Isometric</b></p>
+<p align="center"><img src="v-photos/isometric.jpeg" width="520" alt="Isometric view of the v2 car"><br><b>Isometric</b></p>
 
 <table>
   <tr>
-    <td align="center"><img src="v-photos/v2/front.jpeg" width="300" alt="Front view"><br><b>Front</b></td>
-    <td align="center"><img src="v-photos/v2/rear.jpeg" width="300" alt="Rear view"><br><b>Rear</b></td>
-    <td align="center"><img src="v-photos/v2/top.jpeg" width="300" alt="Top view"><br><b>Top</b></td>
+    <td align="center"><img src="v-photos/front.jpeg" width="300" alt="Front view"><br><b>Front</b></td>
+    <td align="center"><img src="v-photos/rear.jpeg" width="300" alt="Rear view"><br><b>Rear</b></td>
+    <td align="center"><img src="v-photos/top.jpeg" width="300" alt="Top view"><br><b>Top</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="v-photos/v2/left.jpeg" width="300" alt="Left side"><br><b>Left</b></td>
-    <td align="center"><img src="v-photos/v2/right.jpeg" width="300" alt="Right side"><br><b>Right</b></td>
-    <td align="center"><img src="v-photos/v2/bottom.jpeg" width="300" alt="Bottom view"><br><b>Bottom</b></td>
+    <td align="center"><img src="v-photos/left.jpeg" width="300" alt="Left side"><br><b>Left</b></td>
+    <td align="center"><img src="v-photos/right.jpeg" width="300" alt="Right side"><br><b>Right</b></td>
+    <td align="center"><img src="v-photos/bottom.jpeg" width="300" alt="Bottom view"><br><b>Bottom</b></td>
   </tr>
 </table>
 
-The v1 photos stay in `v-photos/` for the [v1 document](docs/v1-national/README.md).
+The v1 photos are in `v-photos/v1/` for the [v1 document](docs/v1-national/README.md).
 
 ### Key specifications (v2)
 
@@ -499,16 +499,17 @@ The inner walls are black, which absorbs most of the 940 nm light. What we measu
 
 Timing: left/right/rear in **Short** mode with a 20 ms budget; front in **Long** mode with 33 ms. The ACK to the Pi reports the worst I²C time per sensor, so a slow sensor shows up in the log, not as a mystery in the driving.
 
-### Ultrasonic cross-check (in progress)
+### Ultrasonic cross-check — prepared, not used for racing
 
-The ToF and the ultrasonic fail in opposite situations. The ToF measures light, so a black wall far away returns little signal and the reading goes long or short (table above). The HC-SR04 measures sound: the wall color does not matter, but its wide cone picks up pillars and multipath echoes (ERR-19 in v1). When both agree, the reading is trustworthy; when they disagree, one of them is wrong and that reading should not move the pose.
+**The car races on the ToF sensors only.** The three HC-SR04 are mounted as a cross-check for the future, not as a driving input.
 
-| Step | What | Status |
-|---|---|---|
-| 1 | Non-blocking read in `PurePursuit.ino`: one sensor fired every 30 ms (so one sensor's echo is not heard by the next), echo timed with a CHANGE interrupt instead of `pulseIn()` (which would block the loop up to 25 ms). ~11 Hz per sensor, ~10 µs of loop time per ping | Written, not yet on the car |
-| 2 | Both readings in every ACK (`tL/tR/tF` next to `uL/uR/uF`), recorded in the journal; [`scripts/compara_tof_us.py`](scripts/compara_tof_us.py) reports, per sensor and distance band, the median ToF − US difference and how often they disagree | Written, not yet on the car |
-| 3 | Static test like the ToF one: black and white wall at 30 / 60 / 80 / 120 cm, both sensors in one table | Pending (needs the car) |
-| 4 | If the data supports it: the EKF drops a ToF reading that disagrees with the ultrasonic by more than the measured threshold, and the front ultrasonic covers 80–200 cm, where the front ToF is unreliable | Pending |
+The idea behind them is that the ToF and the ultrasonic fail in opposite situations. The ToF measures light, so a black wall far away returns little signal and the reading goes long or short (table above). The HC-SR04 measures sound: the wall color does not matter, but its wide cone picks up pillars and multipath echoes (ERR-19 in v1). When both agree, the reading can be trusted. When they disagree, one of them is wrong and that reading should not move the pose.
+
+What is ready:
+- **Firmware:** a non-blocking read in `PurePursuit.ino`. One sensor fires every 30 ms, so one sensor's echo is not heard by the next. The echo is timed with a CHANGE interrupt instead of `pulseIn()`, which would block the loop for up to 25 ms. That gives ~11 Hz per sensor at ~10 µs of loop time per ping.
+- **Logging and analysis:** both readings go into every ACK (`uL/uR/uF` next to `tL/tR/tF`). [`scripts/compara_tof_us.py`](scripts/compara_tof_us.py) reports, per sensor and distance band, the median ToF − ultrasonic difference and how often the two disagree.
+
+What would come next, if the data supports it: a static test with both sensors against black and white walls at 30 / 60 / 80 / 120 cm. Then the EKF could drop a ToF reading that disagrees with the ultrasonic by more than the measured threshold, and the front ultrasonic could cover 80–200 cm, where the front ToF is unreliable. It is item 5 in [§6 Next Steps](#6-next-steps).
 
 ### BNO085
 
@@ -609,7 +610,7 @@ sequenceDiagram
   PI->>PI: localizer: predict with odometry, correct with ToF ray-casts
   PI->>PI: digital map: vote detections into seats (with the pose 5 frames old)
   PI->>PI: route mode: resolve seats → re-plan if needed (background thread)
-  PI->>ESP: V2 line: rt=1, map transform rtx/rty/rth, allowed speed rv, flags  *XX
+  PI->>ESP: V2 line: rt=1, map transform rtx/rty/rth, allowed speed rv, flags
   PI->>ESP: RTB / RTP×n / RTE (only when the route changed)
   ESP->>ESP: every loop: odometry → pure pursuit → servo, speed loop → motor
 ```
@@ -1237,7 +1238,7 @@ WRO_FE_2026_FoxRobotics/
 ├── remote/                          ← live camera view from the Pi in a browser (bench only, never during a run)
 ├── deploy/systemd/                  ← Pi autostart service (wro-runtime)
 ├── .github/workflows/deploy-pi.yml  ← every push to main is pulled on the Pi and the service restarted (stop + 4 s + start)
-├── v-photos/  (v2/ = current car)   t-photos/   video/
+├── v-photos/  (current car; v1/ = national car)   t-photos/   video/
 └── requirements.txt
 ```
 
@@ -1267,7 +1268,7 @@ What is still open, in the order we will work on it, and how we will know it is 
 | 2 | **Consistent 3-lap rounds** | One open lap-1 mapping case: the lone pillar after a corner (E/X1 ↔ E/X2) (the lot position, ERR-31, was fixed on 2026-11-21); lap 1 steers less smoothly than laps 2–3 | Keep both seats as obstacles until the pillar is seen head-on; find the cause of the lap-1 steering reversals | The obstacle validation matrix OBS-01…06 passes with random layouts and lot positions |
 | 3 | **Colors that do not depend on the light** | After the camera remount (2026-11-19) the red pillars looked orange-red (hue 5–7) instead of magenta-red (175–179), outside the old red band; the cause is the camera exposure, not the room light (the floor color was identical) | Classify red by channel ratios inside a wide hue band; correct white balance against the floor; set the exposure from the floor brightness; a 30-second color calibration at the venue. First step validated offline on 11 recorded runs × 6 simulated lights: frames with a red pillar 131 → 181, none of the old detections lost, no orange tape taken as red | The same detections on the car under the workshop light and a much darker and brighter light |
 | 4 | **Validation matrices and the release** | Formal evidence for the final code | Fill the open (3 CW + 3 CCW) and obstacle (OBS-01…06) matrices with the final firmware, then tag `v2.0-internacional` | Matrices filled and tagged |
-| 5 | **Ultrasonic cross-check of the ToF** | The ToF's weak spot (far black wall) is where sound works ([§2.4](#24-sensors--selection-placement-and-calibration)) | Steps 3–4 of the cross-check plan: static test on black and white walls, then let the EKF drop a ToF reading that disagrees | Measured disagreement threshold and a twin bench with no new failures |
+| 5 | **Ultrasonic cross-check of the ToF** | The ToF's weak spot (far black wall) is where sound works ([§2.4](#24-sensors--selection-placement-and-calibration)) | Static test on black and white walls, then let the EKF drop a ToF reading that disagrees | Measured disagreement threshold and a twin bench with no new failures |
 | 6 | **Open round in route mode** | `RondaAbierta.ino` drives every corner at a speed safe for an unseen corner ([§3.6](#36-open-challenge-esp32-only)) | Lap 1 maps the inner walls with the ToF and the encoder; laps 2–3 follow a planned route | Beats 29.6 s reliably on our track |
 | 7 | **Surprise pillar (2026 extra task)** | Validated only in the twin ([§3.7.8](#378-2026-extra-task--the-surprise-pillar)) | Calibration table from real photos of a normal pillar; fix the three twin regressions | The twin regressions pass and real 50 / 150 mm pillars are classified correctly |
 | 8 | **PCB RevC** | A rotated board killed a Pi 5; a large output capacitor stopped the Pi from booting ([§4.5](#45-risks-failure-modes-and-mitigations)) | Keyed stacking headers, PTC fuse and 5 V TVS diode on the Pi rail, input capacitor ≥ 25 V | Board ordered and the power-up checklist passes |

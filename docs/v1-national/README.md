@@ -40,7 +40,7 @@
 # 1. Vehicle Overview
 
 <p align="center">
-  <img src="../../v-photos/isometric.jpeg" width="520" alt="Isometric view of the vehicle">
+  <img src="../../v-photos/v1/isometric.jpeg" width="520" alt="Isometric view of the vehicle">
 </p>
 
 Our vehicle is a custom-built autonomous car for the WRO 2026 Future Engineers — Self-Driving Cars challenge. It completes 3 laps around a randomized track, and in the Obstacle Challenge it also detects and correctly passes coloured traffic-sign pillars (**red → keep the pillar on the car's left / pass on its right; green → keep it on the right / pass on its left**) before parking at the end.
@@ -1173,23 +1173,23 @@ FoxRobotics/
 
 # 10. Photos
 
-Full-size images are in [`v-photos/`](../../v-photos/) (vehicle) and [`t-photos/`](../../t-photos/) (team).
+Full-size images are in [`v-photos/v1/`](../../v-photos/v1/) (vehicle) and [`t-photos/`](../../t-photos/) (team).
 
 <table>
   <tr>
-    <td align="center"><img src="../../v-photos/front.jpeg" width="380" alt="Front view"><br><b>Front</b></td>
-    <td align="center"><img src="../../v-photos/rear.jpeg" width="380" alt="Rear view"><br><b>Rear</b></td>
+    <td align="center"><img src="../../v-photos/v1/front.jpeg" width="380" alt="Front view"><br><b>Front</b></td>
+    <td align="center"><img src="../../v-photos/v1/rear.jpeg" width="380" alt="Rear view"><br><b>Rear</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="../../v-photos/left.jpeg" width="380" alt="Left side"><br><b>Left side</b></td>
-    <td align="center"><img src="../../v-photos/right.jpeg" width="380" alt="Right side"><br><b>Right side</b></td>
+    <td align="center"><img src="../../v-photos/v1/left.jpeg" width="380" alt="Left side"><br><b>Left side</b></td>
+    <td align="center"><img src="../../v-photos/v1/right.jpeg" width="380" alt="Right side"><br><b>Right side</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="../../v-photos/top.jpeg" width="380" alt="Top view"><br><b>Top</b></td>
-    <td align="center"><img src="../../v-photos/bottom.jpeg" width="380" alt="Bottom / undercarriage"><br><b>Bottom (undercarriage)</b></td>
+    <td align="center"><img src="../../v-photos/v1/top.jpeg" width="380" alt="Top view"><br><b>Top</b></td>
+    <td align="center"><img src="../../v-photos/v1/bottom.jpeg" width="380" alt="Bottom / undercarriage"><br><b>Bottom (undercarriage)</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="../../v-photos/isometric.jpeg" width="380" alt="Isometric view"><br><b>Isometric</b></td>
+    <td align="center"><img src="../../v-photos/v1/isometric.jpeg" width="380" alt="Isometric view"><br><b>Isometric</b></td>
     <td align="center"><img src="../../t-photos/TeamPicture.jpeg" width="380" alt="Team photo"><br><b>Team</b></td>
   </tr>
 </table>
