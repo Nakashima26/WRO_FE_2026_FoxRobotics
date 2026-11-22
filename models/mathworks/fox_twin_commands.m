@@ -7,6 +7,7 @@ block.NumOutputPorts = 1;
 block.OutputPort(1).Dimensions = 3;
 block.OutputPort(1).DatatypeID = 0;
 block.OutputPort(1).Complexity = 'Real';
+block.OutputPort(1).SamplingMode = 'Sample';
 block.SampleTimes = [block.DialogPrm(2).Data, 0];
 block.RegBlockMethod('Outputs', @command);
 end

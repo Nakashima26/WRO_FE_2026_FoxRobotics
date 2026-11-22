@@ -7,10 +7,12 @@ block.NumOutputPorts = 1;
 block.InputPort(1).Dimensions = 12;
 block.InputPort(1).DatatypeID = 0;
 block.InputPort(1).Complexity = 'Real';
+block.InputPort(1).SamplingMode = 'Sample';
 block.InputPort(1).DirectFeedthrough = true;
 block.OutputPort(1).Dimensions = 4;
 block.OutputPort(1).DatatypeID = 0;
 block.OutputPort(1).Complexity = 'Real';
+block.OutputPort(1).SamplingMode = 'Sample';
 block.SampleTimes = [-1, 0];
 block.RegBlockMethod('Outputs', @measure);
 end
