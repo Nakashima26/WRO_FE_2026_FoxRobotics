@@ -886,6 +886,8 @@ Each row is a situation we either met on the track or found in the twin. The las
 
 ## 3.9 Digital Twin — software-in-the-loop simulator
 
+The [N30 braking study](models/mathworks/README.md) uses a Simulink longitudinal model to compare braking strategies against bench measurements and estimate the distance needed to reach curve-entry speed. The study includes the model generator, inputs and reproduction instructions. The [Simulink plant replay](models/mathworks/README.md#digital-twin-plant-replay-in-simulink) also exercises the shared twin drivetrain, steering, chassis, encoder and WRO field range geometry against a step-by-step Python reference.
+
 ### 3.9.1 Why we built it
 
 With v1, every idea had to be tested on the real track: one run, one video, one log. Between the national and the international final we had ~11 weeks, a car that did not exist yet for the first month (new PCB, new chassis) and a new strategy to develop. So we built a **digital twin** that runs **the real code**, not a re-implementation of it:
