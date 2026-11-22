@@ -46,7 +46,7 @@ The tag `v2.0-internacional` will be placed on the exact commit raced at the int
 | Main computer | Raspberry Pi 4 → **Raspberry Pi 5 (8 GB)**; Picamera2 with the ISP scaling the image, ~40 fps |
 | Distance | 3 × HC-SR04 → **4 × VL53L1X ToF** (front, left, right, rear; ROI 8 on the sides) |
 | IMU | MPU-6050 → **BNO085** in UART-RVC mode |
-| Drive | open-loop N20 + LEGO differential → **N20 50:1 with 12 CPR encoder (PCNT ×4)**, spur 20T→25T, feed-forward + PI speed loop, 700 mm/s cap |
+| Drive | open-loop N20 + LEGO differential → **N30 30:1 with 7 CPR encoder (PCNT ×4)** (N20 50:1 with 12 CPR until 2026-11-17), spur 20T→25T, feed-forward + PI speed loop, top ~1.5 m/s |
 | Steering | 14T pinion → **19T pinion, corrected Ackermann**; turning radius 123 / 134 mm |
 | Chassis | 176 × 125 mm, battery in the middle, Pi on top |
 | Electronics | PCB RevA → **PCB RevB** (logic board + power board, separate 5 V buck for the Pi) |

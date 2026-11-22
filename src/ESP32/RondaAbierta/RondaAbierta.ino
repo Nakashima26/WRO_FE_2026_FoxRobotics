@@ -21,7 +21,7 @@
  *   TERMINANDO: tras el giro 12, TERMINANDO_MS más de recta y frena.
  * Los sensores se procesan a ritmo fijo (CONTROL_MS ~ un dato nuevo de ToF),
  * así los debounces cuentan lecturas, como con los ultrasónicos.
- * Librería: "VL53L1X" de Pololu. Monitor a 115200 o por Bluetooth (BT_NOMBRE), opcional.
+ * Librería: "VL53L1X" de Pololu. Monitor a 115200; por Bluetooth (BT_NOMBRE) solo con BT_LOG 1, en el banco.
  *
  * PINES:
  *   Driver TB6612: PWMA=23, AIN1=18, AIN2=19
@@ -39,14 +39,21 @@
 
 #include <Wire.h>
 #include <VL53L1X.h>
+// BT_LOG 1 = log y comandos por Bluetooth, SOLO en el banco. En competencia debe ser 0:
+// la regla 11.10 prohíbe radios encendidos en el carro durante la ronda (los jueces revisan).
+#define BT_LOG 0
+#if BT_LOG
 #include "BluetoothSerial.h"
+#endif
 
 // ── Log por USB y Bluetooth ───────────────────────────────────────────────────
 // Todo lo que se imprime sale por los dos. Desde el celular: "Serial Bluetooth
 // Terminal", emparejar con BT_NOMBRE. Sin nadie conectado, el BT no escribe nada.
 const char* BT_NOMBRE = "RondaAbierta";
 #define PI_BAUD 460800   // igual que PurePursuitCarrera / BAUDRATE de la Pi
+#if BT_LOG
 BluetoothSerial SerialBT;
+#endif
 
 // Sin bloquear: cada mensaje mandado directo por BT trababa el loop ~41 ms
 // (run 141737: "pausa max" 41/123 ms por recta, y el "Giro n" sale justo al
@@ -787,7 +794,9 @@ void logTarea(void*) {
     portEXIT_CRITICAL(&logMux);
     if (k) {
       Serial.write(trozo, k);
+#if BT_LOG
       if (SerialBT.hasClient()) SerialBT.write(trozo, k);
+#endif
     } else {
       vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -796,7 +805,9 @@ void logTarea(void*) {
 
 void setup() {
   Serial.begin(115200);
+#if BT_LOG
   SerialBT.begin(BT_NOMBRE);
+#endif
   xTaskCreatePinnedToCore(logTarea, "log", 4096, nullptr, 1, nullptr, 0);
   delay(200);
 
@@ -879,8 +890,13 @@ void leerPi() {
 // 'g' arranca (desde ESPERANDO), 'x' frena y termina. Por BT o por USB.
 void leerComandos() {
   leerPi();
+#if BT_LOG
   while (Serial.available() || SerialBT.available()) {
     char c = Serial.available() ? Serial.read() : SerialBT.read();
+#else
+  while (Serial.available()) {
+    char c = Serial.read();
+#endif
     if (c == 'g' && estado == ESPERANDO) {
       arrancarCarrera();
     } else if (c == 'x' && estado != ESPERANDO && estado != TERMINADO) {
