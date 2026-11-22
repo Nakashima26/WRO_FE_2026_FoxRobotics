@@ -160,18 +160,8 @@ PYTHONPATH=src/RASPI/cam TWIN_NOISE_SEED=1 python -m pure_pursuit.twin.tools.com
 
 Each arm writes a JSON metrics summary and CSV with pose, PWM, speed, pack voltage and pack current.
 
-## Award preparation
+## Summary for the MathWorks Modeling Award
 
-| Official rubric | Max | Evidence and work before judging |
-| --- | ---: | --- |
-| Problem context and strategy | 5 | Show how speed planning, ESP32 control and encoder odometry interact in the approach to a curve. |
-| Innovation and modeling | 5 | Linked models show the independent braking sweep and the shared twin physics replay. |
-| Test and verification | 5 | Linked plots and metrics cover bench agreement and replay parity. Repeated physical curve-entry tests are still needed to validate the planning rate. |
-| Code quality and readability | 3 | The models, generators and inputs are linked from the root README. |
-| Report quality and product feedback | 2 | The braking study records the MATLAB Online experience and suggests an improvement for native dependency packaging. |
+The judge-facing summary (problem, products used and why, models, verification, lessons and product feedback) is [§3.11 of the main README](../../README.md#311-matlab-and-simulink--modeling-the-twins-physics). This page holds the full details and reproduction steps.
 
-The award is for eligible teams at the International Final. Future Engineers submits the public repository link through the organizer's process. Ask the national organizer whether there is a separate award opt-in, where the submission link goes and what deadline and time zone apply. The general rules require the repository link at least three weeks before competition and the main scoring commit at least two weeks before competition. The organizer announces the exact link deadline. The award documents do not give a separate public deadline.
-
-Access options for this study are GitHub Actions on the public repository, free MATLAB Online Basic with a MathWorks account, and the complimentary WRO competition license requested by the team leader or faculty advisor. An existing school license with Simulink can also run the model. We chose this scope to make a substantive modeling contribution using the actual N30 and preserve the race-tested full-car twin. A MATLAB-only study could meet the announcement's tool wording, but Simulink delivers the model file specifically requested by the rubric. Porting the entire twin would require recreating the hardware and firmware coupling before the port could support equivalent claims.
-
-[Official award announcement](https://wro-association.org/mathworks-modeling-award-returns-to-wro-2026/) · [2026 rubric](https://wro-association.org/wp-content/uploads/MathWorks-Modeling-Award-Scoring-Rubric_20260312.pdf) · [Future Engineers rules §7](https://wro-association.org/wp-content/uploads/WRO-2026-Future-Engineers-Self-Driving-Cars-General-Rules.pdf#page=9) · [WRO software request](https://www.mathworks.com/academia/student-competitions/world-robot-olympiad.html) · [MATLAB Online options](https://www.mathworks.com/products/matlab-online/matlab-online-versions.html)
+[Official award announcement](https://wro-association.org/mathworks-modeling-award-returns-to-wro-2026/) · [2026 rubric](https://wro-association.org/wp-content/uploads/MathWorks-Modeling-Award-Scoring-Rubric_20260312.pdf)

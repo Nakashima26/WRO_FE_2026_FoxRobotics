@@ -14,7 +14,9 @@
 
 This README documents **the car that competes at the WRO 2026 International Final (v2)**. After winning the Mexico national final with v1 we rebuilt almost every subsystem: a shorter chassis, a new two-board PCB, an encoder motor, four ToF sensors, a BNO085 IMU, a Raspberry Pi 5, and a completely new obstacle-round strategy (a planned route followed with odometry instead of reactive steering), developed with a software-in-the-loop **digital twin**. v1 is kept as a separate, unchanged document so the iteration is visible.
 
-**Quick links:** [Videos](#videos) · [Rubric checklist](#how-this-document-follows-the-judging-rubric) · [Engineering Journal](ENGINEERING_JOURNAL.md) · [Engineering log (decisions, incidents)](docs/engineering-log.md) · [Testing workflow](docs/testing.md) · [Releases](docs/releases.md) · [Schematics (PDF)](electrical/export/) · [CAD](models/v2/) · [Firmware](src/ESP32/PurePursuitCarrera/) · [Raspberry Pi code](src/RASPI/cam/pure_pursuit/)
+**Quick links:** [Videos](#videos) · [Rubric checklist](#how-this-document-follows-the-judging-rubric) · [**MATLAB & Simulink (MathWorks Modeling Award)**](#311-matlab-and-simulink--modeling-the-twins-physics) · [Engineering Journal](ENGINEERING_JOURNAL.md) · [Engineering log (decisions, incidents)](docs/engineering-log.md) · [Testing workflow](docs/testing.md) · [Releases](docs/releases.md) · [Schematics (PDF)](electrical/export/) · [CAD](models/v2/) · [Firmware](src/ESP32/PurePursuitCarrera/) · [Raspberry Pi code](src/RASPI/cam/pure_pursuit/)
+
+> 🧮 **MathWorks Modeling Award.** We used **MATLAB, Simulink, Simscape Electrical, Optimization Toolbox and System Identification Toolbox** to model the car's braking, motor and battery, and to verify our digital twin's physics block by block (twin ↔ Simulink error < 10⁻¹²). The models re-run on every push in GitHub Actions. Summary in [§3.11](#311-matlab-and-simulink--modeling-the-twins-physics); models and data in [`models/mathworks/`](models/mathworks/).
 
 ---
 
@@ -39,6 +41,7 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 - **Open round = ESP32 alone.** Heading hold on the BNO085 plus four ToF sensors: **12/12 corners in ~20–24 s** in both directions, 6/6 runs on 2026-11-21 ([§3.6](#36-open-challenge-esp32-only)).
 - **Mechanics.** 176 × 125 mm, N30 30:1 motor with a 1.25 : 1 spur stage (top ~1.5 m/s), Ackermann steering with a measured turning radius of 123–134 mm ([§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion)).
 - **Built with a digital twin** that runs the real firmware and the real Pi code: **126/126** full simulated races without wall contact. On the real car: clean 12-corner route-mode races (runs 41 and 48) ([§3.9](#39-digital-twin--software-in-the-loop-simulator), [§3.10](#310-testing-tuning-and-validation)).
+- **Modeled in MATLAB and Simulink.** Simulink braking and plant-replay models, a Simscape Electrical battery/motor model and motor fits from our bench logs check the twin's physics; all re-run in CI ([§3.11](#311-matlab-and-simulink--modeling-the-twins-physics)).
 - **Honest status:** parallel parking has ended fully inside the lot on the real car once (run 104) but is not yet repeatable, and lap-1 mapping has one open case ([§3.10](#310-testing-tuning-and-validation), [§6](#6-next-steps)).
 
 ## Table of Contents
@@ -48,7 +51,7 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 | 📸 | **[0 · Vehicle Overview](#0-vehicle-overview)**<br>_Photos of the car from every side_ | |
 | ⚙️ | **[1 · Mobility & Mechanical Design](#1-mobility-and-mechanical-design)**<br>_How it moves and turns_ | [Chassis](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top) · [Drivetrain](#12-drivetrain--gear-ratio-chosen-from-measured-speed) · [Steering](#13-steering--ackermann-rack-and-pinion) · [Camera mount](#14-camera-mount) · [Assembly](#15-assembly-order-v2) · [Stability](#16-mechanical-stability) |
 | 🔋 | **[2 · Power & Sensors](#2-power-and-sensor-architecture)**<br>_Electronics, PCB and what the car senses_ | [Power tree](#21-power-tree) · [Power budget](#22-power-budget) · [PCB](#23-pcb-revb--two-stacked-boards) · [Sensors](#24-sensors--selection-placement-and-calibration) · [Raspberry Pi 5](#25-main-computer--raspberry-pi-5) |
-| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [MathWorks models and results](models/mathworks/README.md) · [Testing](#310-testing-tuning-and-validation) |
+| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) · [**MATLAB & Simulink**](#311-matlab-and-simulink--modeling-the-twins-physics) |
 | 🧩 | **[4 · Engineering Decisions](#4-systems-thinking-and-engineering-decisions)**<br>_Why we built it this way_ | [Constraints](#41-the-challenge-our-goals-and-the-design-constraints) · [v1 → v2](#42-from-v1-to-v2--what-the-national-final-taught-us) · [Subsystems](#43-how-the-subsystems-constrain-each-other) · [Trade-offs](#44-trade-offs--we-chose-x-instead-of-y-because) · [Risks](#45-risks-failure-modes-and-mitigations) · [Timeline](#46-iteration-timeline) |
 | 🛠️ | **[5 · Reproduce It](#5-reproducibility-and-github-quality)**<br>_Build, flash, calibrate and run your own_ | [Build](#51-build-the-car) · [ESP32 firmware](#52-esp32-firmware) · [Pi software](#53-raspberry-pi-5-software) · [Venue calibration](#54-calibration-at-a-new-venue--20-minutes) · [Run](#55-run) · [Twin on PC](#56-run-the-digital-twin-pc) · [Our results](#57-reproduce-our-results) · [Repo structure](#58-repository-structure) · [Versions](#59-versioning-releases-and-commit-history) |
 | 🚀 | **[6 · Next Steps](#6-next-steps)** | |
@@ -129,6 +132,16 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
 | Testing workflow documented | [§3.10](#310-testing-tuning-and-validation), [`docs/testing.md`](docs/testing.md) |
 | Versioning / release notes | [§5.9](#59-versioning-releases-and-commit-history), [`docs/releases.md`](docs/releases.md) |
 | README ≥ 5000 characters | This document |
+
+**MathWorks Modeling Award → [§3.11](#311-matlab-and-simulink--modeling-the-twins-physics)** (models and full write-up in [`models/mathworks/`](models/mathworks/))
+
+| The award rubric asks for | Where we answer it |
+|---|---|
+| Problem context, strategy, why MATLAB/Simulink and which products | [§3.11.1](#3111-the-problem-and-why-we-used-matlab-and-simulink); strategy and architecture in [§3](#3-software-architecture-and-obstacle-strategy) |
+| Innovation and modeling | [§3.11.2](#3112-the-models): Simulink braking and plant-replay models, Simscape Electrical drive, motor fits |
+| Test and verification (plots, metrics, iteration) | [§3.11.3](#3113-testing-verification-and-what-went-back-to-the-car): bench vs. model, twin ↔ Simulink parity in CI, paired battery races |
+| Link to the Simulink models and code | [`fox_n30_braking.slx`](models/mathworks/evidence/fox_n30_braking.slx), [`fox_twin_replay.slx`](models/mathworks/evidence/fox_twin_replay.slx), generators in [`models/mathworks/`](models/mathworks/), [CI workflow](.github/workflows/mathworks-braking.yml) |
+| Lessons learned and product feedback | [§3.11.4](#3114-what-we-learned-and-feedback-on-the-tools) |
 
 </details>
 
@@ -886,21 +899,7 @@ Each row is a situation we either met on the track or found in the twin. The las
 
 ## 3.9 Digital Twin — software-in-the-loop simulator
 
-The twin helped us select the **1.25 : 1 transmission for the N20**, investigate the straight-line speed limit that led to the **N30 upgrade**, and compare changes to the **dynamic-programming route planner** over paired field and noise seeds before testing them on the car. The [simulation and verification summary](models/mathworks/README.md#the-engineering-decisions-behind-the-models) traces those decisions to the benchmark, bench measurements and race configuration.
-
-### N30 obstacle round in 29.533 s
-
-[![Replay of the N30 completing three laps and parallel parking](models/mathworks/evidence/n30_best_race.gif)](models/mathworks/evidence/n30_best_race.mp4)
-
-Fastest clean finish in the current 288-case N30 reference bank, including three laps and parallel parking. Field seed **9**, sensor noise seed **2**, and modeled Raspberry Pi processing delay. The three laps took **22.807 s** in total. The preview runs at 2× and reconstructs the camera and bird’s-eye views from the logged poses. [Full-speed video](models/mathworks/evidence/n30_best_race.mp4) · [Run metrics and source revision](models/mathworks/evidence/n30_best_race.json) · [Reproduction steps](models/mathworks/README.md#n30-obstacle-round-replay)
-
-### Why we used Simulink
-
-The full-course twin runs the real Pi and ESP32 code. Simulink gives us an inspectable model for experiments on individual subsystems. We used it to vary braking and delay independently, check predicted braking distance against N30 measurements, and replay the twin’s chassis and sensors against the Python reference. Simscape let us model pack voltage and motor current under load. We then brought the voltage drop back into the race twin and held the course, controller and sensor noise fixed to test its effect.
-
-[![Paired N30 race trajectories and simulated battery voltage](models/mathworks/evidence/n30_battery_pair.png)](models/mathworks/README.md#battery-sag-coupled-to-the-software-in-the-loop-twin)
-
-All eight paired races finished cleanly. In the illustrated case, the minimum pillar clearance shifted from **52 to 21 mm**. Other layouts gained clearance. The assumed pack resistance makes this a sensitivity test for race setups. [Simulink models, measured data and verification](models/mathworks/README.md) · [Eight paired results](models/mathworks/evidence/n30_battery_pairs.json)
+The twin is also where our **MATLAB and Simulink** models come from: Simulink re-runs the twin's vehicle physics and sensor geometry block by block, and Simscape adds the battery and motor electrics. See [§3.11](#311-matlab-and-simulink--modeling-the-twins-physics).
 
 ### 3.9.1 Why we built it
 
@@ -1066,6 +1065,113 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 - **Surprise pillar (§3.7.8)** is validated only in the twin: it still needs a calibration table from real photos and three twin regressions (parking and one pillar) fixed before we declare the attempt.
 - **Twin parking** is the least realistic part of the simulator; parking constants are confirmed on the car.
 
+
+## 3.11 MATLAB and Simulink — modeling the twin's physics
+
+> **In short:** our digital twin runs the real Pi and ESP32 code, so every race-tuning decision rests on its vehicle physics. We used **Simulink** to rebuild those physics as inspectable block models and check them against the bench and against the twin itself, **Simscape Electrical** to model battery sag, and **Optimization** / **System Identification Toolbox** to re-fit the motors from our logs. All models are generated by scripts and re-run on every push by **GitHub Actions** (MATLAB R2025b). Everything is in [`models/mathworks/`](models/mathworks/) ([full write-up](models/mathworks/README.md)).
+
+### 3.11.1 The problem and why we used MATLAB and Simulink
+
+The obstacle round is a speed problem with a hard constraint: the faster the car drives, the less margin it has to pass a pillar on the correct side and still park. In v2 the Pi plans a route and a speed profile ([§3.7](#37-obstacle-management--route-mode)), and the ESP32 follows that route on **encoder odometry** ([§3.4](#34-esp32-firmware-and-state-machine)). We accept or reject every change in the twin before it reaches the car ([§3.9.2](#392-how-we-use-it--the-benchmark-rule)), so a physics error in the twin becomes a tuning error on the car.
+
+Three questions were hard to answer inside the full twin, because there everything changes at once (route, camera, controllers):
+
+1. **Braking:** how far before a curve does the N30 have to start slowing down, and what happens to the odometry when the wheels lock?
+2. **Plant fidelity:** are the twin's motor, steering, encoder and ToF models doing what we think they do, step by step?
+3. **Battery:** the motor speed changes with pack voltage. Does a voltage drop under load change the race outcome?
+
+**Where MATLAB and Simulink sit in our workflow.** Bench data feeds the MATLAB models; the models check and extend the twin's physics; the twin (real Pi and ESP32 code) accepts or rejects each change; only accepted changes are flashed to the car, whose logs go back to the bench data.
+
+```mermaid
+flowchart LR
+  subgraph CAR["Real car"]
+    BENCH["Bench and track logs<br/>encoder speed, stop distance,<br/>PWM steps"]
+    FW["ESP32 firmware +<br/>Pi software"]
+  end
+  subgraph MW["MATLAB / Simulink — re-run by GitHub Actions on every push"]
+    FIT["Motor fits<br/>Optimization Tbx (N30)<br/>System Identification Tbx (N20)"]
+    BRK["Braking model<br/>Simulink"]
+    ELEC["Pack + motor electrics<br/>Simscape Electrical"]
+    REP["Twin plant replay<br/>Simulink + C MEX, 1 ms"]
+  end
+  subgraph TWIN["Digital twin, §3.9"]
+    PHY["Vehicle physics<br/>+ sensor models"]
+    BEN["288-race benchmark<br/>real Pi + ESP32 code"]
+  end
+  BENCH --> FIT
+  BENCH --> BRK
+  FIT -- "motor calibration" --> PHY
+  ELEC -- "battery sag" --> PHY
+  REP <-- "same C kernel,<br/>parity ~1e-12" --> PHY
+  BRK -- "braking rules" --> BEN
+  PHY --> BEN
+  BEN -- "accepted changes only" --> FW
+  FW -- "new runs" --> BENCH
+```
+
+| MathWorks product | What we used it for | Why this tool |
+|---|---|---|
+| **Simulink** | Braking model; 1 ms discrete replay of the twin's vehicle plant and ToF geometry | Speed and distance are separate states we can probe; inputs (deceleration, delay) can be varied one at a time |
+| **Simscape** + **Simscape Electrical** | Pack (open-circuit voltage + internal resistance) driving an averaged H-bridge motor with back-EMF and armature inductance ([`averaged_drive.ssc`](models/mathworks/+foxdrive/averaged_drive.ssc)) | Physical-network modeling: the voltage–current coupling comes from the circuit, not from a hand-written guess |
+| **Optimization Toolbox** (`lsqnonlin`) | Bounded fit of the N30 speed model (gain, intercept, time constant, delay) | Parameters with physical bounds, validated on runs left out of the fit |
+| **System Identification Toolbox** (`procest`) | First-order N20 models with and without delay, from timestamped step logs | Compare model structures on held-out data |
+| **MATLAB + GitHub Actions** (`matlab-actions`) | Every model is built from a script and re-run in CI ([workflow](.github/workflows/mathworks-braking.yml)) | Judges and teammates can reproduce the results without a local license |
+
+### 3.11.2 The models
+
+| Model | Files | What it does |
+|---|---|---|
+| **N30 braking** | [`fox_n30_braking.slx`](models/mathworks/evidence/fox_n30_braking.slx) · generator [`run_braking_study.m`](models/mathworks/run_braking_study.m) · data [`n30_measurements.csv`](models/mathworks/n30_measurements.csv) | Constant-deceleration input, speed integrator saturated at the target speed, distance integrator. Fitted on one coast run, checked on the others, then swept over approach speed, target speed and delay |
+| **Twin plant replay** | [`fox_twin_replay.slx`](models/mathworks/evidence/fox_twin_replay.slx) · generator [`run_twin_replay.m`](models/mathworks/run_twin_replay.m) · plant [`fox_twin_plant.m`](models/mathworks/fox_twin_plant.m) · ranges [`fox_twin_ranges.m`](models/mathworks/fox_twin_ranges.m) | Runs the twin's own C vehicle kernel ([`twin_vehicle.c`](src/RASPI/cam/pure_pursuit/native/src/twin_vehicle.c), as a MEX block) at 1 ms: forward/reverse motor maps, grip limits, coasting, short brake and wheel lock, servo deadband, backlash and lag, rear-axle bicycle model, encoder quantization. A second block computes the four ToF center rays against the WRO walls, pillars and parking boards |
+| **Electrical** | generator [`run_n30_electrical.m`](models/mathworks/run_n30_electrical.m) · component [`averaged_drive.ssc`](models/mathworks/+foxdrive/averaged_drive.ssc) | Pack + averaged drive + motor + inertia; terminal voltage, pack current and speed at start-up, coasting and short braking |
+| **Motor fits** | [`fit_n30_dynamics.m`](models/mathworks/fit_n30_dynamics.m) · [`identify_n20_dynamics.m`](models/mathworks/identify_n20_dynamics.m) | N30 bounded fit on 3 bench runs (2 held out); N20 identification on 6 PWM steps (3 repeats held out) |
+
+All `.slx` files are generated by their `.m` script, so the model and the code that builds it are reviewed together in git.
+
+### 3.11.3 Testing, verification and what went back to the car
+
+**Braking vs. the bench (N30, 11.88 V).** The coast deceleration was fitted on one run and checked on another; the short brake was checked against the twin's low-speed parameter:
+
+| Bench case | Measured (encoder) | Simulink | Note |
+|---|---:|---:|---|
+| Coast from 1409 mm/s | 944 mm | 944 mm | Fit run (1052 mm/s²) |
+| Coast from 803 mm/s | 329 mm | 307 mm | Held out: −22 mm (−6.8 %) |
+| Short brake from 500 mm/s | 26 mm | 25 mm | Twin's 5000 mm/s² confirmed |
+| Short brake from 1502 mm/s | 88 mm (tape ~240 mm) | — | Wheels lock: **~150 mm the encoder never sees** |
+
+<p align="center"><img src="models/mathworks/evidence/curve_entry.png" width="80%" alt="Simulink curve-entry distance for coasting and for commanded deceleration, as a function of approach speed"></p>
+
+*Distance needed to slow down before a curve. From 1.5 m/s to 0.5 m/s with 100 ms of delay: **~1100 mm coasting** vs **~480 mm** at the profile's 3000 mm/s².*
+
+**What this changed on the car.** The model put numbers on two rules the car uses: the speed profile starts slowing down **before** each curve instead of braking in it, and at high speed the ESP32 slows down through the speed loop, never with a short brake, because a wheel lock silently corrupts the odometry the route follower depends on ([§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§3.7.6](#376-speed-profile)).
+
+**Twin plant vs. Simulink (parity).** The Python twin exports a run (commands + reference states); Simulink re-runs it and asserts that timestamps match, encoder counts are identical and every continuous state stays within 1e-6. [Verified run](https://github.com/Nakashima26/WRO_FE_2026_FoxRobotics/actions/runs/45001314032): 1961 samples, **identical encoder counts**, max state error **6.8 × 10⁻¹³**, max ToF range error **6.8 × 10⁻¹² mm**. This tells us the twin's physics do exactly what the documented model says; agreement with the real car comes from the bench tables above and in [§3.9.3](#393-what-the-twin-gave-us--and-where-it-was-wrong).
+
+**Motor fits.** The N30 fit (6.45 mm/s per PWM, 255 ms time constant, 50 ms delay) over-predicted the two held-out runs by 41 and 109 mm/s, about the same as the twin's current calibration (29 and 104 mm/s), so we **kept** the twin calibration. For the N20, models with and without delay fit the held-out steps equally (~53 / 87 / 74 %), so we kept the simpler one. [Verified run](https://github.com/Nakashima26/WRO_FE_2026_FoxRobotics/actions/runs/45052046608).
+
+**Battery sag back in the race twin.** We ported the Simscape pack and armature equations into the twin ([`battery.py`](src/RASPI/cam/pure_pursuit/twin/battery.py), off by default) and ran paired races, same fields, same noise, same code, with 0 Ω and 0.12 Ω of pack resistance:
+
+<p align="center"><img src="models/mathworks/evidence/n30_battery_pair.png" width="90%" alt="Paired N30 race trajectories with and without battery sag, and the simulated pack voltage"></p>
+
+*All 8 paired races finished clean in both arms. With sag the pack dropped to 12.1–12.2 V, total time moved −0.94 to +0.71 s (median +0.17 s), and minimum pillar clearance moved both ways (in this layout 52 → 21 mm). [Paired results](models/mathworks/evidence/n30_battery_pairs.json).*
+
+That sensitivity is why the car closes a **speed loop on the encoder** instead of trusting PWM ([§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed)), and why we test inside a measured battery window.
+
+**Viewer.** [`view_twin_replay.m`](models/mathworks/view_twin_replay.m) plays a run in MATLAB (track, reconstructed camera and bird's-eye view, timeline). Example: the fastest clean finish in our 288-race N30 benchmark, **29.5 s in simulation** (field seed 9, noise seed 2, modeled Pi latency; [metrics](models/mathworks/evidence/n30_best_race.json), [video](models/mathworks/evidence/n30_best_race.mp4)):
+
+<p align="center"><a href="models/mathworks/evidence/n30_best_race.mp4"><img src="models/mathworks/evidence/n30_best_race.gif" width="90%" alt="Simulated N30 obstacle round: three laps and parallel parking, replayed at 2x"></a></p>
+
+### 3.11.4 What we learned and feedback on the tools
+
+- **A small model answers a sharp question better than the full twin.** The braking model has three blocks and answered "where do we start slowing down" in one sweep; in the full twin the same question is mixed with the route, the camera and the controllers.
+- **Parity first, then physics.** Replaying the twin in Simulink found no mismatch, and that was the point: it turned "we think the twin does X" into a checked statement before we trust it on 288 races.
+- **Our weak spot is data, not models.** The Simscape parameters (motor resistance, inductance, pack resistance) are still assumptions. To calibrate them we need pack voltage and current logged on the car while accelerating and braking; that is our next bench test.
+
+**Product feedback.**
+
+1. **MATLAB Online cannot build a C MEX.** Our plant block runs the twin's C kernel; in MATLAB Online the braking model ran, but the replay needed a MEX compiled in CI. A way to build and bundle native code from MATLAB Online would make models like ours easy to share with judges.
+2. **CI with `matlab-actions` was the best part.** Batch licensing on a public repository let every push re-run the models and upload the figures as artifacts, with no local license.
+3. **Python ↔ Simulink round trip.** Our reference runs come from Python; a lighter path to stream Python data into a Simulink test harness (and back) would save the JSON/CSV glue we wrote ([`export_twin_case.py`](models/mathworks/export_twin_case.py)).
 
 ---
 
