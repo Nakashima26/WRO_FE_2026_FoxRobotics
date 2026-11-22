@@ -9,7 +9,7 @@ nodes
 end
 
 inputs
-    command = {0, '1'}; % command:top
+    command = {0, '1'}; % command:left
 end
 
 outputs
