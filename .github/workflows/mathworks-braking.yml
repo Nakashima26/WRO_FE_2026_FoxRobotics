@@ -1,0 +1,79 @@
+name: Simulink twin and braking studies
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'models/mathworks/*.m'
+      - 'models/mathworks/**/*.ssc'
+      - 'logs_tof/calib_20261021/p5_escalones/**'
+      - 'models/mathworks/*.csv'
+      - 'models/mathworks/*.c'
+      - 'models/mathworks/*.py'
+      - 'src/RASPI/cam/pure_pursuit/twin/**'
+      - 'src/RASPI/cam/pure_pursuit/native/**'
+      - 'src/RASPI/cam/pure_pursuit/config.py'
+      - 'src/RASPI/cam/pure_pursuit/wro_field.py'
+      - '.github/workflows/mathworks-braking.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  braking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Export Python twin reference
+        run: |
+          python -m pip install numpy
+          python models/mathworks/export_twin_case.py mathworks-output/twin_case.json
+      - uses: matlab-actions/setup-matlab@v3
+        with:
+          release: R2025b
+          products: Simulink
+      - uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath('models/mathworks');
+            run_braking_study(fullfile(pwd,'mathworks-output'));
+            run_twin_replay(fullfile(pwd,'mathworks-output','twin_case.json'),fullfile(pwd,'mathworks-output'));
+      - name: Render the MATLAB replay viewer
+        run: |
+          python -m pip install opencv-python-headless matplotlib
+          python models/mathworks/render_twin_replay.py mathworks-output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fox-simulink-studies
+          path: mathworks-output/
+          if-no-files-found: error
+
+
+  motor-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: matlab-actions/setup-matlab@v3
+        with:
+          release: R2025b
+          products: Simulink Optimization_Toolbox System_Identification_Toolbox Simscape Simscape_Electrical
+      - uses: matlab-actions/run-command@v3
+        with:
+          command: >-
+            addpath('models/mathworks');
+            output = fullfile(pwd,'mathworks-motor-output');
+            fit_n30_dynamics(output);
+            identify_n20_dynamics(output);
+            run_n30_electrical(output);
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fox-motor-models
+          path: mathworks-motor-output/
+          if-no-files-found: error

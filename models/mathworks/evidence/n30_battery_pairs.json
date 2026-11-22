@@ -1,0 +1,380 @@
+{
+  "commit": "d771e912",
+  "entrypoint": "pure_pursuit/twin/tools/latencia/uno.sh",
+  "preset": "ruta_perfil + carrera_bench.json",
+  "options": {
+    "TWIN_VBAT": 12.5,
+    "TWIN_COST_FIRST": 1.95,
+    "TWIN_COST_FIJO": 1,
+    "TWIN_PI_EXTRA": {
+      "ROUTE_FIX_LINE_LAG_FRAMES": 5
+    },
+    "TWIN_FW_OVER": {},
+    "TWIN_COST_FRAME": 4.28,
+    "TWIN_COST_DP": 5.8,
+    "wall_contacts": "recorded without stopping, as in p0",
+    "pack_resistance_ohm": {
+      "ideal": 0,
+      "sag": 0.12
+    },
+    "pack_aux_current_a": 0.5
+  },
+  "summary": {
+    "p0_exact_parity_count": 8,
+    "finish_count": {
+      "ideal": 8,
+      "sag": 8
+    },
+    "clean_finish_count": {
+      "ideal": 8,
+      "sag": 8
+    },
+    "delta_total_time_s_median": 0.168,
+    "delta_total_time_s_range": [
+      -0.939,
+      0.712
+    ],
+    "sag_voltage_min_range_v": [
+      12.1054,
+      12.229
+    ]
+  },
+  "pairs": [
+    {
+      "noise_seed": 1,
+      "seed": 3,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 37.868,
+        "lap_times_s": [
+          13.049,
+          7.215,
+          7.824
+        ],
+        "min_clearance_sign_mm": 52.18,
+        "min_clearance_wall_mm": 14.27,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.806986554533589
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 37.883,
+        "lap_times_s": [
+          13.046,
+          7.263,
+          8.16
+        ],
+        "min_clearance_sign_mm": 20.58,
+        "min_clearance_wall_mm": 14.47,
+        "min_pack_voltage_v": 12.173263468234781,
+        "peak_pack_current_a": 2.722804431376824
+      },
+      "delta_total_time_s": 0.015,
+      "delta_min_clearance_sign_mm": -31.6
+    },
+    {
+      "noise_seed": 1,
+      "seed": 5,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 37.445,
+        "lap_times_s": [
+          11.717,
+          7.68,
+          7.185
+        ],
+        "min_clearance_sign_mm": 69.23,
+        "min_clearance_wall_mm": 20.32,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.222752785721627
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 37.907,
+        "lap_times_s": [
+          11.786,
+          7.469,
+          7.306
+        ],
+        "min_clearance_sign_mm": 36.68,
+        "min_clearance_wall_mm": 33.36,
+        "min_pack_voltage_v": 12.2290234043038,
+        "peak_pack_current_a": 2.2581382974683315
+      },
+      "delta_total_time_s": 0.462,
+      "delta_min_clearance_sign_mm": -32.55
+    },
+    {
+      "noise_seed": 1,
+      "seed": 11,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 35.092,
+        "lap_times_s": [
+          12.525,
+          7.501,
+          7.609
+        ],
+        "min_clearance_sign_mm": 18.55,
+        "min_clearance_wall_mm": 33.56,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.4735637034063265
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 35.042,
+        "lap_times_s": [
+          12.251,
+          7.59,
+          7.677
+        ],
+        "min_clearance_sign_mm": 32.94,
+        "min_clearance_wall_mm": 33.24,
+        "min_pack_voltage_v": 12.212997790210183,
+        "peak_pack_current_a": 2.391685081581811
+      },
+      "delta_total_time_s": -0.05,
+      "delta_min_clearance_sign_mm": 14.39
+    },
+    {
+      "noise_seed": 1,
+      "seed": 12,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 34.057,
+        "lap_times_s": [
+          12.071,
+          7.462,
+          7.503
+        ],
+        "min_clearance_sign_mm": 39.4,
+        "min_clearance_wall_mm": 24.43,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.518925464991296
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 34.218,
+        "lap_times_s": [
+          12.141,
+          7.35,
+          7.514
+        ],
+        "min_clearance_sign_mm": 42.56,
+        "min_clearance_wall_mm": 25.66,
+        "min_pack_voltage_v": 12.157960169964355,
+        "peak_pack_current_a": 2.8503319169637074
+      },
+      "delta_total_time_s": 0.161,
+      "delta_min_clearance_sign_mm": 3.16
+    },
+    {
+      "noise_seed": 1,
+      "seed": 14,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 34.995,
+        "lap_times_s": [
+          12.606,
+          8.008,
+          7.613
+        ],
+        "min_clearance_sign_mm": 12.72,
+        "min_clearance_wall_mm": 16.94,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 3.080286489506802
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 35.476,
+        "lap_times_s": [
+          12.699,
+          8.209,
+          7.694
+        ],
+        "min_clearance_sign_mm": 32.52,
+        "min_clearance_wall_mm": 14.38,
+        "min_pack_voltage_v": 12.10543418376202,
+        "peak_pack_current_a": 3.288048468649832
+      },
+      "delta_total_time_s": 0.481,
+      "delta_min_clearance_sign_mm": 19.8
+    },
+    {
+      "noise_seed": 1,
+      "seed": 23,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 33.727,
+        "lap_times_s": [
+          11.952,
+          7.421,
+          8.136
+        ],
+        "min_clearance_sign_mm": 3.66,
+        "min_clearance_wall_mm": 32.39,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.632356248864414
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 34.439,
+        "lap_times_s": [
+          12.021,
+          7.661,
+          8.183
+        ],
+        "min_clearance_sign_mm": 12.36,
+        "min_clearance_wall_mm": 22.3,
+        "min_pack_voltage_v": 12.195837464625653,
+        "peak_pack_current_a": 2.5346877947862323
+      },
+      "delta_total_time_s": 0.712,
+      "delta_min_clearance_sign_mm": 8.7
+    },
+    {
+      "noise_seed": 1,
+      "seed": 29,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 35.03,
+        "lap_times_s": [
+          12.822,
+          7.533,
+          7.588
+        ],
+        "min_clearance_sign_mm": 48.15,
+        "min_clearance_wall_mm": 19.46,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.532425035429707
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 34.091,
+        "lap_times_s": [
+          11.946,
+          7.559,
+          7.622
+        ],
+        "min_clearance_sign_mm": 37.82,
+        "min_clearance_wall_mm": 26.98,
+        "min_pack_voltage_v": 12.160353402050555,
+        "peak_pack_current_a": 2.8303883162453727
+      },
+      "delta_total_time_s": -0.939,
+      "delta_min_clearance_sign_mm": -10.33
+    },
+    {
+      "noise_seed": 1,
+      "seed": 30,
+      "p0_matches_ideal": true,
+      "p0_parity_differences": {},
+      "ideal": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 33.339,
+        "lap_times_s": [
+          11.715,
+          6.93,
+          7.553
+        ],
+        "min_clearance_sign_mm": 64.47,
+        "min_clearance_wall_mm": 21.33,
+        "min_pack_voltage_v": 12.5,
+        "peak_pack_current_a": 2.5451723446988734
+      },
+      "sag": {
+        "finished": true,
+        "stop_reason": "race_finished",
+        "collisions": [],
+        "ignored_contacts": [],
+        "turns_completed": 12,
+        "total_time_s": 33.515,
+        "lap_times_s": [
+          12.194,
+          6.809,
+          7.576
+        ],
+        "min_clearance_sign_mm": 52.3,
+        "min_clearance_wall_mm": 21.42,
+        "min_pack_voltage_v": 12.20291358852175,
+        "peak_pack_current_a": 2.4757200956520826
+      },
+      "delta_total_time_s": 0.176,
+      "delta_min_clearance_sign_mm": -12.17
+    }
+  ]
+}

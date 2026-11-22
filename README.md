@@ -48,7 +48,7 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 | 📸 | **[0 · Vehicle Overview](#0-vehicle-overview)**<br>_Photos of the car from every side_ | |
 | ⚙️ | **[1 · Mobility & Mechanical Design](#1-mobility-and-mechanical-design)**<br>_How it moves and turns_ | [Chassis](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top) · [Drivetrain](#12-drivetrain--gear-ratio-chosen-from-measured-speed) · [Steering](#13-steering--ackermann-rack-and-pinion) · [Camera mount](#14-camera-mount) · [Assembly](#15-assembly-order-v2) · [Stability](#16-mechanical-stability) |
 | 🔋 | **[2 · Power & Sensors](#2-power-and-sensor-architecture)**<br>_Electronics, PCB and what the car senses_ | [Power tree](#21-power-tree) · [Power budget](#22-power-budget) · [PCB](#23-pcb-revb--two-stacked-boards) · [Sensors](#24-sensors--selection-placement-and-calibration) · [Raspberry Pi 5](#25-main-computer--raspberry-pi-5) |
-| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) |
+| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [MathWorks models and results](models/mathworks/README.md) · [Testing](#310-testing-tuning-and-validation) |
 | 🧩 | **[4 · Engineering Decisions](#4-systems-thinking-and-engineering-decisions)**<br>_Why we built it this way_ | [Constraints](#41-the-challenge-our-goals-and-the-design-constraints) · [v1 → v2](#42-from-v1-to-v2--what-the-national-final-taught-us) · [Subsystems](#43-how-the-subsystems-constrain-each-other) · [Trade-offs](#44-trade-offs--we-chose-x-instead-of-y-because) · [Risks](#45-risks-failure-modes-and-mitigations) · [Timeline](#46-iteration-timeline) |
 | 🛠️ | **[5 · Reproduce It](#5-reproducibility-and-github-quality)**<br>_Build, flash, calibrate and run your own_ | [Build](#51-build-the-car) · [ESP32 firmware](#52-esp32-firmware) · [Pi software](#53-raspberry-pi-5-software) · [Venue calibration](#54-calibration-at-a-new-venue--20-minutes) · [Run](#55-run) · [Twin on PC](#56-run-the-digital-twin-pc) · [Our results](#57-reproduce-our-results) · [Repo structure](#58-repository-structure) · [Versions](#59-versioning-releases-and-commit-history) |
 | 🚀 | **[6 · Next Steps](#6-next-steps)** | |
@@ -885,6 +885,22 @@ Each row is a situation we either met on the track or found in the twin. The las
 </details>
 
 ## 3.9 Digital Twin — software-in-the-loop simulator
+
+The twin helped us select the **1.25 : 1 transmission for the N20**, investigate the straight-line speed limit that led to the **N30 upgrade**, and compare changes to the **dynamic-programming route planner** over paired field and noise seeds before testing them on the car. The [simulation and verification summary](models/mathworks/README.md#the-engineering-decisions-behind-the-models) traces those decisions to the benchmark, bench measurements and race configuration.
+
+### N30 obstacle round in 29.533 s
+
+[![Replay of the N30 completing three laps and parallel parking](models/mathworks/evidence/n30_best_race.gif)](models/mathworks/evidence/n30_best_race.mp4)
+
+Fastest clean finish in the current 288-case N30 reference bank, including three laps and parallel parking. Field seed **9**, sensor noise seed **2**, and modeled Raspberry Pi processing delay. The three laps took **22.807 s** in total. The preview runs at 2× and reconstructs the camera and bird’s-eye views from the logged poses. [Full-speed video](models/mathworks/evidence/n30_best_race.mp4) · [Run metrics and source revision](models/mathworks/evidence/n30_best_race.json) · [Reproduction steps](models/mathworks/README.md#n30-obstacle-round-replay)
+
+### Why we used Simulink
+
+The full-course twin runs the real Pi and ESP32 code. Simulink gives us an inspectable model for experiments on individual subsystems. We used it to vary braking and delay independently, check predicted braking distance against N30 measurements, and replay the twin’s chassis and sensors against the Python reference. Simscape let us model pack voltage and motor current under load. We then brought the voltage drop back into the race twin and held the course, controller and sensor noise fixed to test its effect.
+
+[![Paired N30 race trajectories and simulated battery voltage](models/mathworks/evidence/n30_battery_pair.png)](models/mathworks/README.md#battery-sag-coupled-to-the-software-in-the-loop-twin)
+
+All eight paired races finished cleanly. In the illustrated case, the minimum pillar clearance shifted from **52 to 21 mm**. Other layouts gained clearance. The assumed pack resistance makes this a sensitivity test for race setups. [Simulink models, measured data and verification](models/mathworks/README.md) · [Eight paired results](models/mathworks/evidence/n30_battery_pairs.json)
 
 ### 3.9.1 Why we built it
 

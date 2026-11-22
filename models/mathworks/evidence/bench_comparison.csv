@@ -1,0 +1,4 @@
+mode,pwm,initial_mm_s,encoder_stop_mm,tape_stop_mm,role,decel_mm_s2,simulated_mm,error_mm
+short,100,500,26,NaN,reference_low_speed,5000,25,-1
+coast,150,803,329,NaN,holdout,1051.52595338983,306.606317191371,-22.3936828086286
+coast,255,1409,944,NaN,calibration,1051.52595338983,944.000000000041,4.14956957683899e-11
