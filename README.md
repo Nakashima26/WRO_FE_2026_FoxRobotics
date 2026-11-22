@@ -936,6 +936,10 @@ The twin is a model, and the real car found what the model did not have. **Every
 
 ## 3.10 Testing, Tuning and Validation
 
+<p align="center"><a href="docs/img/results_overview.png"><img src="docs/img/results_overview.png" width="100%" alt="Results overview: open-round times, obstacle runs per test day on the real car, digital twin success rates"></a></p>
+
+*The tables of this section in one picture. **A:** every v2 open-round run finished 12/12 corners; 57.5 s is v1 at the national final. **B:** obstacle runs on the real car per test day, counted from the run history in §3.10.4 (green = 3 laps / 12 corners without touching anything; parking not counted). From 11-20 most runs tested new layouts, the lot at random positions and the parking, which is where the open issues of §3.10.5 come from. **C:** the twin, same seeds for every row (§3.9.3).*
+
 ### 3.10.1 Testing workflow
 
 ```mermaid
@@ -1286,7 +1290,7 @@ Every number in this document comes from a run, a log or a script that is in thi
 | Turning radius, braking, grip, speed per PWM | [§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion) | Raw ESP32 logs, one CSV per test (servo command, PWM and battery voltage in the file name); method in [`docs/route-following-bench.md`](docs/route-following-bench.md) | [`logs_tof/`](logs_tof/) (`arco_*`, `freno*`, `grip_*`, `rev_*`) |
 | Encoder counts per mm, ToF static error, calibration laps | [§2.4](#24-sensors--selection-placement-and-calibration), [§3.10](#310-testing-tuning-and-validation) | Sketches [`CalibFox`](src/ESP32/CalibFox/), [`EncoderTest`](src/ESP32/EncoderTest/), [`TofTest4`](src/ESP32/TofTest4/) | [`logs_tof/calib_*`](logs_tof/), `ronda_*` |
 | Bird's-eye-view calibration and camera pose | [§1.4](#14-camera-mount), [§2.4](#24-sensors--selection-placement-and-calibration) | `python -m pure_pursuit.calibrate` (crosses on the floor), `python pure_pursuit/twin/tools/calib/calib_camara.py` (pose from the homography) | [`bev_calib.npz`](src/RASPI/cam/pure_pursuit/bev_calib.npz), calibration images in [`pure_pursuit/twin/calib/`](src/RASPI/cam/pure_pursuit/twin/calib/) |
-| Figures in this document (route, strategy, steering, sensors, parts, wiring) and the labelled photos | §0, §1.3, §1.5, §2.3, §2.4, §3.7, §3.10 | `python docs/img/make_figures.py` and `python docs/img/make_labels.py` from the repository root (the strategy figure runs the real planner) | Logs in [`logs_tof/`](logs_tof/), STL in [`models/v2/stl/`](models/v2/stl/), mounts in `config.py` |
+| Figures in this document (route, strategy, steering, sensors, parts, wiring, results) and the labelled photos | §0, §1.3, §1.5, §2.3, §2.4, §3.7, §3.10 | `python docs/img/make_figures.py` and `python docs/img/make_labels.py` from the repository root (the strategy figure runs the real planner) | Logs in [`logs_tof/`](logs_tof/), STL in [`models/v2/stl/`](models/v2/stl/), mounts in `config.py` |
 
 **Software versions we use.** Raspberry Pi OS (Debian 13 "trixie", 64-bit) with the apt OpenCV, NumPy and Picamera2; Python 3.11+ on the PC (we run 3.14); ESP32 Arduino core 3.3.4 with the Pololu VL53L1X library 1.3.1; KiCad 10; SolidWorks for the CAD (STEP and STL exported for anyone without it). Python dependencies: [`requirements.txt`](requirements.txt) (car) and [`src/RASPI/cam/requirements-sim.txt`](src/RASPI/cam/requirements-sim.txt) (simulator).
 

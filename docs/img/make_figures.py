@@ -492,8 +492,68 @@ def fig_wiring():
     print("wiring_diagram.png")
 
 
+def fig_results():
+    """§3.10 — the run tables of §3.10.3, §3.10.4 and §3.9.3 as one picture."""
+    fig = plt.figure(figsize=(16.5, 4.9))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1.05, 1.3, 1.0], wspace=0.62)
+
+    # A — open round, every run 12/12
+    ax = fig.add_subplot(gs[0])
+    runs = [("v1\nnat.", 57.5, "#9a9a9a"), ("CW", 29.9, "#1f77b4"), ("CCW", 29.6, "#ff7f0e"),
+            ("143\nCW", 23.0, "#1f77b4"), ("144\nCW", 23.3, "#1f77b4"), ("145\nCW", 21.3, "#1f77b4"),
+            ("146\nCCW", 20.0, "#ff7f0e"), ("147\nCCW", 20.9, "#ff7f0e"), ("148\nCCW", 24.1, "#ff7f0e")]
+    xs = np.arange(len(runs))
+    ax.bar(xs, [r[1] for r in runs], color=[r[2] for r in runs], width=0.7)
+    for x, (_, v, _) in zip(xs, runs):
+        ax.text(x, v + 0.8, f"{v:.1f}", ha="center", fontsize=8)
+    ax.set_xticks(xs, [r[0] for r in runs], fontsize=7.5)
+    ax.set_ylabel("time for 3 laps (s)")
+    ax.set_ylim(0, 64)
+    ax.axvline(0.5, color="#bbb", lw=1)
+    ax.text(1.5, 60, "10-19", ha="center", fontsize=8, color="#666")
+    ax.text(5.5, 60, "2026-11-21", ha="center", fontsize=8, color="#666")
+    ax.set_title("A · Open Challenge — every v2 run 12/12 corners", loc="left", fontsize=10.5)
+
+    # B — obstacle round on the real car, per test day
+    ax = fig.add_subplot(gs[1])
+    days = ["11-07", "11-09", "11-11", "11-12", "11-20", "11-21"]
+    ok = np.array([0, 0, 4, 2, 4, 2])        # 3 laps / 12 corners, no contact (parking not counted)
+    bad = np.array([1, 1, 3, 3, 6, 4])       # did not finish or touched something
+    x = np.arange(len(days))
+    ax.bar(x, ok, color="#2ca02c", width=0.62, label="3 laps, no contact")
+    ax.bar(x, bad, bottom=ok, color="#d9a6a6", width=0.62, label="contact or not finished")
+    notes = {0: "UART\nfixed", 1: "yaw sign,\nPCNT", 2: "first clean\nraces 41, 48", 3: "fixed\nexposure",
+             4: "first full\nparallel park (104)", 5: "3 laps in 29 s\n(138)"}
+    for i, s in notes.items():
+        ax.text(i, ok[i] + bad[i] + 0.25, s, ha="center", va="bottom", fontsize=7.8)
+    ax.set_xticks(x, days)
+    ax.set_ylabel("runs")
+    ax.set_ylim(0, 13)
+    ax.legend(frameon=False, fontsize=8.3, loc="upper left")
+    ax.set_title("B · Obstacle Challenge on the real car, per test day", loc="left", fontsize=10.5)
+
+    # C — digital twin
+    ax = fig.add_subplot(gs[2])
+    rows = [("Reactive control (v1 idea)", 1, 21), ("Route mode, known map", 69, 69), ("Lap 1, unknown map", 21, 21),
+            ("Lot at a random position", 41, 42), ("Full race incl. parking", 126, 126),
+            ("Full race, real Pi 5 latency", 40, 48)]
+    y = np.arange(len(rows))[::-1]
+    pct = [100 * a / b for _, a, b in rows]
+    ax.barh(y, pct, color=["#9a9a9a"] + ["#1f77b4"] * 5, height=0.6)
+    for yy, (_, a, b), p in zip(y, rows, pct):
+        ax.text(min(p, 100) + 1.5 if p < 80 else p - 1.5, yy, f"{a}/{b}", va="center",
+                ha="left" if p < 80 else "right", fontsize=8.5, color="black" if p < 80 else "white", weight="bold")
+    ax.set_yticks(y, [r[0] for r in rows], fontsize=8.3)
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("clean races (%)")
+    ax.set_title("C · Digital twin, same seeds", loc="left", fontsize=10.5)
+
+    fig.savefig(OUT / "results_overview.png", bbox_inches="tight")
+    print("results_overview.png")
+
+
 FIGS = {"route": fig_route, "strategy": fig_strategy, "parts": fig_parts, "steering": fig_steering,
-        "sensors": fig_sensors, "tof": fig_tof, "wiring": fig_wiring}
+        "sensors": fig_sensors, "tof": fig_tof, "wiring": fig_wiring, "results": fig_results}
 
 if __name__ == "__main__":
     for name in sys.argv[1:] or FIGS:
