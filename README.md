@@ -341,6 +341,8 @@ The CAD predicts the geometry; the mat decides. With the car assembled we ran co
 |---|---|---|---|---|---|---|---|---|---|---|
 | Radius (mm) | **123** | 130 | 142 | 166 | ∞ | 153 | 140 | 136 | **134** | 136 |
 
+<p align="center"><img src="docs/img/steering_ackermann_radius.png" width="100%" alt="Ackermann geometry at full lock and the measured turning radius per servo command"></p>
+
 What this taught us:
 - **The usable servo range is 1–156** (mechanical stops), with **75 = straight** (straight runs at PWM 150 approached from both sides). At 160 the servo strains against the stop with no gain in radius.
 - **Left turns are ~15 % weaker than right turns.** Moving the wheels by hand at full left lock showed the play is in the *outer* wheel's linkage. The servo backlash is ±1.5 servo units and the wheels follow the servo with a **0.10 s lag**.
@@ -365,6 +367,10 @@ The camera sits at the front on the centerline, tilted down. We measure its real
 4. **Sensors** — four ToF mounts (front, left, right, rear; ~50 mm above the floor, level), BNO085 near the center of rotation, camera mount.
 5. **Electronics** — power board (RevB_2) on its standoffs, logic board (RevB_1) on top **in the keyed orientation** (see the warning in §2.3), battery into the center tunnel, Raspberry Pi 5 on top.
 6. **Cables** — camera ribbon (22-to-15-pin), ToF and IMU leads, encoder, servo, motor.
+
+<p align="center"><img src="docs/img/v2_printed_parts.png" width="100%" alt="Rendered v2 printed parts grouped by subsystem"></p>
+
+All screws are **M3 × 10 mm**.
 
 ## 1.6 Mechanical stability
 
@@ -486,6 +492,10 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 | **Encoder** 12 CPR | Distance and speed | Closed-loop speed and odometry | On the motor; read by hardware (PCNT) |
 | **HC-SR04 ×3** (cross-check) | Distance to the walls (left, right, front) | Fails for different reasons than the ToF: sound does not care about the wall's color, light does not care about echoes. Used to check the ToF, not to drive (see below) | Same sides as the ToF; the side sensors 28.3 mm further out, the front one 6.2 mm further forward |
 
+<p align="center"><img src="docs/img/sensor_coverage.png" width="560" alt="Top view to scale: camera floor footprint, the four ToF cones and the IMU position"></p>
+
+*Mounts from the CAD ([`config.py`](src/RASPI/cam/pure_pursuit/config.py) `SENSOR_MOUNTS`); ranges are what the localizer accepts from each ToF.*
+
 ### VL53L1X — making a ToF see a black wall
 
 The inner walls are black, which absorbs most of the 940 nm light. What we measured and changed:
@@ -498,6 +508,9 @@ The inner walls are black, which absorbs most of the 940 nm light. What we measu
 | A sensor can freeze (same value) or fail at boot | Firmware skips a sensor that failed init and reports it (`ltf=` field in the ACK); in the open-round firmware a reading stale for > 300 ms re-initializes that sensor through its XSHUT pin |
 
 Timing: left/right/rear in **Short** mode with a 20 ms budget; front in **Long** mode with 33 ms. The ACK to the Pi reports the worst I²C time per sensor, so a slow sensor shows up in the log, not as a mystery in the driving.
+
+<p align="center"><img src="docs/img/tof_roi_error.png" width="520" alt="Static error of the side ToF on the black wall with ROI 16x16 vs 8x8"></p>
+
 
 ### Ultrasonic cross-check — prepared, not used for racing
 
@@ -673,6 +686,11 @@ Result: **12/12 corners in 29.6–29.9 s** in both directions on our track (runs
 
 The obstacle field is not random in an arbitrary way: by the rules, each straight has **6 possible pillar seats** (two rows × three columns), and the parking lot lies in the start straight. So the field can be described by a small table: *which seat of which straight holds which color*. Once that table is known, a full lap is a fixed curve on the mat that can be planned in advance and followed with odometry. The camera's job reduces to **filling the table** and correcting the pose.
 
+<p align="center"><img src="docs/img/strategy_seats_route.png" width="100%" alt="Seat table of the field, lap-1 route with unknown seats, and the full-map route from the real planner"></p>
+
+*Drawn with the real planner ([`ring_route.plan`](src/RASPI/cam/pure_pursuit/ring_route.py)) for one legal field. Lap 1 keeps away from every seat that has not been seen yet; from lap 2 the full map gives one fixed line.*
+
+
 ```mermaid
 flowchart LR
   A["Camera detections<br/>(red / green, BEV mm)"] --> B["Digital map<br/>votes per seat"]
@@ -690,7 +708,12 @@ flowchart LR
 
 ### 3.7.2 Mapping pillars into seats
 
+<p align="center"><img src="docs/img/hud_run142.jpg" width="100%" alt="Debug view of real run 142: camera with a red pillar, bird's-eye view with pillar circles, digital map with seats and the planned route"></p>
+
+*One frame of real run 142 (2026-11-21), as the Pi records it: what the camera sees, where those pillars land on the floor, and the map and route that result.*
+
 Each pillar detection is projected to the floor (BEV, mm), moved to the mat frame with the localized pose, and **votes** for the nearest seat. A seat is confirmed when the votes agree and a detection has landed within 160 mm of it. Edge cases we hit and handled:
+
 
 | Edge case | Handling | Evidence |
 |---|---|---|
@@ -897,6 +920,10 @@ flowchart LR
 | Route following, ESP32 only, open lap ×3 at PWM 255 | 28.7–29.1 s, mean deviation **12 mm** with wall correction | 2026-10-22 |
 | Route following, ESP32 only, obstacle layout ×3 | 26.2–26.6 s, lateral error rms **7 mm**, all pillars correct | 2026-10-23 |
 | Pi 5 pipeline | 23.5 ms/frame mean, re-plan 59–70 ms | 2026-11-06 |
+
+<p align="center"><img src="docs/img/route_following_obstacles.png" width="100%" alt="ESP32 route following on the obstacle layout: path on the field, lateral error and servo over 3 laps"></p>
+
+*Run `ruta_obstaculos_20261023_152651` (data in [`logs_tof/`](logs_tof/)): the ESP32 alone follows the planner's route around 4 pillars for 3 laps at PWM 255; lateral error rms 7 mm.*
 
 ### 3.10.3 Open Challenge (v2)
 
@@ -1194,6 +1221,7 @@ Every number in this document comes from a run, a log or a script that is in thi
 | Turning radius, braking, grip, speed per PWM | [§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion) | Raw ESP32 logs, one CSV per test (servo command, PWM and battery voltage in the file name); method in [`docs/route-following-bench.md`](docs/route-following-bench.md) | [`logs_tof/`](logs_tof/) (`arco_*`, `freno*`, `grip_*`, `rev_*`) |
 | Encoder counts per mm, ToF static error, calibration laps | [§2.4](#24-sensors--selection-placement-and-calibration), [§3.10](#310-testing-tuning-and-validation) | Sketches [`CalibFox`](src/ESP32/CalibFox/), [`EncoderTest`](src/ESP32/EncoderTest/), [`TofTest4`](src/ESP32/TofTest4/) | [`logs_tof/calib_*`](logs_tof/), `ronda_*` |
 | Bird's-eye-view calibration and camera pose | [§1.4](#14-camera-mount), [§2.4](#24-sensors--selection-placement-and-calibration) | `python -m pure_pursuit.calibrate` (crosses on the floor), `python pure_pursuit/twin/tools/calib/calib_camara.py` (pose from the homography) | [`bev_calib.npz`](src/RASPI/cam/pure_pursuit/bev_calib.npz), calibration images in [`pure_pursuit/twin/calib/`](src/RASPI/cam/pure_pursuit/twin/calib/) |
+| Figures in this document (route, strategy, steering, sensors, parts) | §1.3, §1.5, §2.4, §3.7, §3.10 | `python docs/img/make_figures.py` from the repository root (the strategy figure runs the real planner) | Logs in [`logs_tof/`](logs_tof/), STL in [`models/v2/stl/`](models/v2/stl/), mounts in `config.py` |
 
 **Software versions we use.** Raspberry Pi OS (Debian 13 "trixie", 64-bit) with the apt OpenCV, NumPy and Picamera2; Python 3.11+ on the PC (we run 3.14); ESP32 Arduino core 3.x with the Pololu VL53L1X library; KiCad 10; SolidWorks for the CAD (STEP and STL exported for anyone without it). Python dependencies: [`requirements.txt`](requirements.txt) (car) and [`src/RASPI/cam/requirements-sim.txt`](src/RASPI/cam/requirements-sim.txt) (simulator).
 
@@ -1295,7 +1323,7 @@ Prices in USD, as paid (including shipping where it applied).
 | 3S LiPo 2200 mAh | 1 | 13 | 13 | |
 | LEGO wheels, tires, axles, bushings | — | — | 12 | |
 | PLA filament (~200 g) | — | — | 5 | |
-| Screws, nuts, standoffs | — | — | 2 | |
+| Screws (all M3 × 10 mm), nuts, standoffs | — | — | 2 | |
 | **Total** | | | **340** | Parts in the car; spare boards, test prints and the lost Pi 5 not included |
 
 ---
