@@ -404,8 +404,96 @@ def fig_tof():
     print("tof_roi_error.png")
 
 
+def fig_wiring():
+    """§2.3 — the whole wiring on one page: power rails and every signal with its GPIO
+    (from the RevB schematics, the ESP32 pin map and the cables table)."""
+    from matplotlib.patches import FancyBboxPatch
+    C = {"bat": "#d62728", "5v": "#ff7f0e", "pwm": "#7b3fbf", "i2c": "#1f77b4",
+         "uart": "#2ca02c", "enc": "#8c564b", "sig": "#555555"}
+    fig, ax = plt.subplots(figsize=(16, 9.6))
+    ax.set_xlim(0, 18); ax.set_ylim(0.3, 11.4); ax.axis("off"); ax.grid(False)
+
+    def box(x, y, w, h, title, sub="", fc="#f4f3ee", ec="#333333"):
+        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.12",
+                                    fc=fc, ec=ec, lw=1.4))
+        ax.text(x + w / 2, y + h / 2 + (0.14 if sub else 0), title, ha="center", va="center",
+                fontsize=10.5, weight="bold")
+        if sub:
+            ax.text(x + w / 2, y + h / 2 - 0.2, sub, ha="center", va="center", fontsize=8.3, color="#444")
+
+    def wire(pts, color, label="", at=0, dx=0.0, dy=0.13, lw=2.6, ha="center"):
+        xs, ys = zip(*pts)
+        ax.plot(xs, ys, color=color, lw=lw, solid_capstyle="round", zorder=1)
+        if label:
+            (x0, y0), (x1, y1) = pts[at], pts[at + 1]
+            ax.text((x0 + x1) / 2 + dx, (y0 + y1) / 2 + dy, label, color=color, fontsize=8.6,
+                    ha=ha, va="bottom", weight="bold")
+
+    # boxes
+    box(0.3, 8.8, 2.4, 1.2, "3S LiPo", "11.1 V · 2200 mAh · T-plug", fc="#fde2e1")
+    box(3.6, 8.8, 2.2, 1.2, "SW2 switch", "+ C1 470 µF (logic)")
+    box(6.6, 9.1, 2.6, 1.0, "MINI560 #2", "+5V_PI only (power board)", fc="#ffe9d4")
+    box(6.6, 7.4, 2.6, 1.2, "MINI560 #1", "+5 V: ESP32, servo, encoder,\nTB6612 logic, shifter, 3.3 V reg.", fc="#ffe9d4")
+    box(6.6, 5.8, 2.6, 1.0, "3.3 V regulator (J6)", "ToF ×4 · BNO085 · pull-ups", fc="#fff6c9")
+    box(3.4, 3.4, 2.4, 1.4, "TB6612FNG", "ROB-14450 · VM = battery")
+    box(0.3, 3.4, 2.4, 1.4, "N30 30:1 motor", "7 CPR Hall encoder")
+    box(10.1, 8.2, 3.0, 2.0, "Raspberry Pi 5", "vision · map · route planner", fc="#e3f0e3")
+    box(10.1, 3.0, 3.0, 3.8, "ESP32 DevKitC", "odometry · pure pursuit\nspeed loop · state machine", fc="#e1ecf7")
+    box(10.1, 1.0, 3.0, 1.0, "Level shifter", "BOB-12009 · 5 V ↔ 3.3 V")
+    box(14.7, 9.5, 3.0, 0.8, "Camera IMX219 NoIR", "")
+    box(14.7, 8.7, 3.0, 0.6, "Start button SW1", "")
+    box(14.7, 7.9, 3.0, 0.6, "READY LED D2", "")
+    box(14.7, 6.0, 3.0, 0.8, "Servo SG90", "5 V · Dupont")
+    box(14.7, 4.6, 3.0, 1.0, "VL53L1X ToF ×4", "3.3 V · JST-ZH 5-pin, 26 AWG")
+    box(14.7, 3.3, 3.0, 0.8, "BNO085 IMU", "3.3 V · Dupont")
+    box(14.7, 1.0, 3.0, 1.0, "HC-SR04 ×3", "5 V · JST-ZH 4-pin (cross-check)")
+
+    # power
+    wire([(2.7, 9.4), (3.6, 9.4)], C["bat"], "16 AWG", dy=0.1)
+    wire([(5.8, 9.6), (6.6, 9.6)], C["bat"], "11.1 V", dy=0.06)
+    wire([(5.8, 9.05), (6.2, 9.05), (6.2, 8.0), (6.6, 8.0)], C["bat"])
+    wire([(4.6, 8.8), (4.6, 4.8)], C["bat"], "11.1 V → VM", dx=0.08, dy=0, ha="left")
+    wire([(9.2, 9.6), (9.65, 9.6), (9.65, 9.2), (10.1, 9.2)], C["5v"])
+    ax.text(9.65, 8.68, "5 V → Pi\nGPIO pins", color=C["5v"], fontsize=8.6, weight="bold", ha="center")
+    wire([(9.2, 8.0), (10.6, 8.0), (10.6, 6.8)], C["5v"], "5 V", dy=0.04)
+    wire([(7.9, 7.4), (7.9, 6.8)], C["5v"], "5 V", dx=0.08, dy=-0.1, ha="left")
+
+    # Pi side
+    wire([(11.6, 8.2), (11.6, 6.8)], C["uart"], "UART 460 800 baud\nESP 17/16 ↔ Pi 14/15", dx=0.1, dy=-0.4, ha="left")
+    wire([(13.1, 9.9), (14.7, 9.9)], C["sig"], "CSI 22→15 pin")
+    wire([(13.1, 9.0), (14.7, 9.0)], C["sig"], "GPIO 17")
+    wire([(13.1, 8.5), (13.9, 8.5), (13.9, 8.2), (14.7, 8.2)], C["sig"], "GPIO 27", at=0, dy=0.05)
+
+    # ESP32 side
+    wire([(13.1, 6.4), (14.7, 6.4)], C["pwm"], "GPIO 13 · 50 Hz")
+    wire([(13.1, 5.1), (14.7, 5.1)], C["i2c"], "I²C 21/22")
+    ax.text(13.9, 4.9, "XSHUT 0/15/4/5", color=C["i2c"], fontsize=8.6, weight="bold", ha="center", va="top")
+    wire([(14.7, 3.7), (13.1, 3.7)], C["uart"], "RVC → GPIO 25")
+    wire([(10.1, 4.1), (5.8, 4.1)], C["pwm"], "PWM 23 · DIR 18/19")
+    wire([(3.4, 4.1), (2.7, 4.1)], C["bat"], "A1/A2", dy=0.1)
+    wire([(1.5, 3.4), (1.5, 2.6), (10.6, 2.6), (10.6, 3.0)], C["enc"],
+         "Encoder A/B → GPIO 34/36 (PCNT ×4, 4k7 pull-ups) · JST-ZH 6-pin", at=1, dy=0.05)
+    wire([(11.6, 3.0), (11.6, 2.0)], C["sig"], "ECHO 32/35/33", dx=0.1, dy=-0.1, ha="left")
+    wire([(13.1, 1.5), (14.7, 1.5)], C["sig"], "ECHO (5 V)", dy=0.05)
+    wire([(13.1, 3.1), (15.4, 3.1), (15.4, 2.0)], C["sig"], "TRIG 27/26/14 (direct)", at=1, dx=0.1, dy=-0.1, ha="left")
+
+    # legend
+    items = [("11.1 V battery", C["bat"]), ("5 V", C["5v"]), ("PWM / motor control", C["pwm"]),
+             ("I²C", C["i2c"]), ("UART", C["uart"]), ("Encoder", C["enc"]), ("Other signals", C["sig"])]
+    for i, (name, col) in enumerate(items):
+        x = [0.35, 2.55, 3.85, 6.55, 7.65, 9.05, 10.65][i]
+        ax.plot([x, x + 0.45], [0.55, 0.55], color=col, lw=3)
+        ax.text(x + 0.55, 0.55, name, va="center", fontsize=8.8)
+    ax.text(0.3, 11.05, "Wiring of the v2 car", fontsize=14, weight="bold")
+    ax.text(0.3, 10.65, "Ground not drawn (common to all). Power board RevB_2: regulators, TB6612, sensor connectors; "
+            "logic board RevB_1: ESP32, switch, level shifter. Schematics: electrical/export/.",
+            fontsize=8.8, color="#444")
+    fig.savefig(OUT / "wiring_diagram.png", bbox_inches="tight", dpi=120)
+    print("wiring_diagram.png")
+
+
 FIGS = {"route": fig_route, "strategy": fig_strategy, "parts": fig_parts, "steering": fig_steering,
-        "sensors": fig_sensors, "tof": fig_tof}
+        "sensors": fig_sensors, "tof": fig_tof, "wiring": fig_wiring}
 
 if __name__ == "__main__":
     for name in sys.argv[1:] or FIGS:

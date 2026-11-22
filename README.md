@@ -140,16 +140,20 @@ Sections **1 to 5 follow the five criteria of the WRO 2026 Future Engineers docu
 
 <table>
   <tr>
-    <td align="center"><img src="v-photos/front.jpeg" width="300" alt="Front view"><br><b>Front</b></td>
-    <td align="center"><img src="v-photos/rear.jpeg" width="300" alt="Rear view"><br><b>Rear</b></td>
-    <td align="center"><img src="v-photos/top.jpeg" width="300" alt="Top view"><br><b>Top</b></td>
+    <td align="center"><a href="v-photos/labels/front_labels.jpg"><img src="v-photos/labels/front_labels.jpg" width="440" alt="Front view with labelled parts"></a><br><b>Front</b></td>
+    <td align="center"><a href="v-photos/labels/rear_labels.jpg"><img src="v-photos/labels/rear_labels.jpg" width="440" alt="Rear view with labelled parts"></a><br><b>Rear</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="v-photos/left.jpeg" width="300" alt="Left side"><br><b>Left</b></td>
-    <td align="center"><img src="v-photos/right.jpeg" width="300" alt="Right side"><br><b>Right</b></td>
-    <td align="center"><img src="v-photos/bottom.jpeg" width="300" alt="Bottom view"><br><b>Bottom</b></td>
+    <td align="center"><a href="v-photos/labels/left_labels.jpg"><img src="v-photos/labels/left_labels.jpg" width="440" alt="Left view with labelled parts"></a><br><b>Left</b></td>
+    <td align="center"><a href="v-photos/labels/right_labels.jpg"><img src="v-photos/labels/right_labels.jpg" width="440" alt="Right view with labelled parts"></a><br><b>Right</b></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="v-photos/labels/top_labels.jpg"><img src="v-photos/labels/top_labels.jpg" width="440" alt="Top view with labelled parts"></a><br><b>Top</b></td>
+    <td align="center"><a href="v-photos/bottom.jpeg"><img src="v-photos/bottom.jpeg" width="330" alt="Bottom view"></a><br><b>Bottom</b></td>
   </tr>
 </table>
+
+Each part is labelled on the photo; click a photo for full size. The unlabelled originals (the six views the rules ask for) are in [`v-photos/`](v-photos/), and [`docs/img/make_labels.py`](docs/img/make_labels.py) draws the labels.
 
 The v1 photos are in `v-photos/v1/` for the [v1 document](docs/v1-national/README.md).
 
@@ -462,6 +466,10 @@ v1 had one board shaped around the Raspberry Pi 4. v2 adds four ToF sensors (eac
 > ⚠️ **Assembly warning learned the hard way.** The two boards are almost symmetric and the stacking headers are not keyed. On 2026-11-06 we mounted the logic board rotated 180°: the battery pin landed on the Pi's 5 V net and **killed a Raspberry Pi 5** (PMIC failure, ~11 V on the 5 V rail). We now mark the orientation on both boards and measure `TO_PI` pins 7/8 = 5.0–5.2 V **without the Pi** before mounting it. Next revision: keyed headers, a PTC fuse and a 5 V TVS diode (SMBJ5.0A) on +5V_PI. Details in [§4.5](#45-risks-failure-modes-and-mitigations).
 
 ### Wiring / pin map (ESP32)
+
+<p align="center"><a href="docs/img/wiring_diagram.png"><img src="docs/img/wiring_diagram.png" width="100%" alt="Wiring of the v2 car: power rails and every signal with its GPIO"></a></p>
+
+*The whole car on one page: power (red 11.1 V, orange 5 V) and every signal with its GPIO. The exact pin-by-pin table is below; the schematics are in [`electrical/export/`](electrical/export/).*
 
 <details>
 <summary><b>ESP32 pin map</b> — 14 signals (click to open)</summary>
@@ -1278,7 +1286,7 @@ Every number in this document comes from a run, a log or a script that is in thi
 | Turning radius, braking, grip, speed per PWM | [§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion) | Raw ESP32 logs, one CSV per test (servo command, PWM and battery voltage in the file name); method in [`docs/route-following-bench.md`](docs/route-following-bench.md) | [`logs_tof/`](logs_tof/) (`arco_*`, `freno*`, `grip_*`, `rev_*`) |
 | Encoder counts per mm, ToF static error, calibration laps | [§2.4](#24-sensors--selection-placement-and-calibration), [§3.10](#310-testing-tuning-and-validation) | Sketches [`CalibFox`](src/ESP32/CalibFox/), [`EncoderTest`](src/ESP32/EncoderTest/), [`TofTest4`](src/ESP32/TofTest4/) | [`logs_tof/calib_*`](logs_tof/), `ronda_*` |
 | Bird's-eye-view calibration and camera pose | [§1.4](#14-camera-mount), [§2.4](#24-sensors--selection-placement-and-calibration) | `python -m pure_pursuit.calibrate` (crosses on the floor), `python pure_pursuit/twin/tools/calib/calib_camara.py` (pose from the homography) | [`bev_calib.npz`](src/RASPI/cam/pure_pursuit/bev_calib.npz), calibration images in [`pure_pursuit/twin/calib/`](src/RASPI/cam/pure_pursuit/twin/calib/) |
-| Figures in this document (route, strategy, steering, sensors, parts) | §1.3, §1.5, §2.4, §3.7, §3.10 | `python docs/img/make_figures.py` from the repository root (the strategy figure runs the real planner) | Logs in [`logs_tof/`](logs_tof/), STL in [`models/v2/stl/`](models/v2/stl/), mounts in `config.py` |
+| Figures in this document (route, strategy, steering, sensors, parts, wiring) and the labelled photos | §0, §1.3, §1.5, §2.3, §2.4, §3.7, §3.10 | `python docs/img/make_figures.py` and `python docs/img/make_labels.py` from the repository root (the strategy figure runs the real planner) | Logs in [`logs_tof/`](logs_tof/), STL in [`models/v2/stl/`](models/v2/stl/), mounts in `config.py` |
 
 **Software versions we use.** Raspberry Pi OS (Debian 13 "trixie", 64-bit) with the apt OpenCV, NumPy and Picamera2; Python 3.11+ on the PC (we run 3.14); ESP32 Arduino core 3.3.4 with the Pololu VL53L1X library 1.3.1; KiCad 10; SolidWorks for the CAD (STEP and STL exported for anyone without it). Python dependencies: [`requirements.txt`](requirements.txt) (car) and [`src/RASPI/cam/requirements-sim.txt`](src/RASPI/cam/requirements-sim.txt) (simulator).
 
