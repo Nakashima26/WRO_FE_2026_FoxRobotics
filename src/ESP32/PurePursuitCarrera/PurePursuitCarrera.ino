@@ -1124,7 +1124,7 @@ const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
 const float         PARK_KD_RATE              = 0.30f;
 const int           PARK_SERVO_MAX            = 35;
-const int           PARK_PWM                  = 87;
+const int           PARK_PWM                  = 105;  // 87 -> 105 2026-11-21 (twin: -0.3 s, 0 fallas nuevas en 576)
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
@@ -1278,7 +1278,7 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 // mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
 // arriba quedan para el carro sin encoder y como timeouts de seguridad.
 const bool          PARK_POR_ENCODER          = true;
-PARK_AJ float         PARK_POSTE2_MM            = 135.0f;  // 80 -> 135: el ToF ve el poste 55 mm antes que el sonar, el eje trasero para donde siempre (w0 ~285)  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
+PARK_AJ float         PARK_POSTE2_MM            = 110.0f;  // 135 -> 110 2026-11-21 con PARK_PWM 105  // 80 -> 135: el ToF ve el poste 55 mm antes que el sonar, el eje trasero para donde siempre (w0 ~285)  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
 PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14; 2026-10-22: 100 -> 110. Con hueco 264 y U a 200, 100 deja la semilla 18 a 8 mm de la madera de enfrente; 120 choca en los dos postes; 110 termina 24/24
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
