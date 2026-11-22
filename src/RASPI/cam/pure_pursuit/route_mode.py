@@ -1036,6 +1036,7 @@ class RouteMode:
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
+        self._unk_pts = np.asarray([section_to_world(sec, *SEATS[seat]) for sec, seat in unknown], dtype=float).reshape(-1, 2)
         prof = self._profile_pwm(self._sign_xy(conf, empty),
                                  lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)), l23=tc is not None and 4 <= tc < 12,
                                  l1=tc is not None and 1 <= tc < 4)   # en tc=0 no: s33 choca Green E/T1 en la salida
@@ -1304,7 +1305,12 @@ class RouteMode:
                 # de la esquina hacia una señal cercana. Se limita solo esa
                 # curva; el mismo sobre de frenado anticipa y suelta el freno.
                 vg = K * (float(corner_sign["pwm"]) - pwm0)
-                near_curve = ((dd < float(corner_sign.get("mm", 350.0)))
+                dd_c = dd
+                if corner_sign.get("unk_only"):
+                    # solo asientos aún sin resolver (la ruta puede cambiar de lado): los confirmados ya los traza la DP
+                    u = getattr(self, "_unk_pts", None)
+                    dd_c = np.full_like(dd, 1e9) if u is None or not len(u) else np.hypot(pxy[:, None, 0] - u[None, :, 0], pxy[:, None, 1] - u[None, :, 1]).min(axis=1)
+                near_curve = ((dd_c < float(corner_sign.get("mm", 350.0)))
                               & (kmax > 1.0 / float(corner_sign.get("radius_mm", 400.0))))
                 v_c = np.where(near_curve, np.minimum(v_c, vg), v_c)
                 if np.any(near_curve):

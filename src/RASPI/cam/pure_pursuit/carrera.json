@@ -76,7 +76,7 @@
  "ROUTE_FULL_W_CLEAR": 4.0,
  "ROUTE_GHOST_FALLBACK": true,
  "ROUTE_HARD_CLEAR_MM": 70.0,
- "ROUTE_L1_CORNER_SIGN": {"pwm": 150, "mm": 300.0, "radius_mm": 300.0},
+ "ROUTE_L1_CORNER_SIGN": {"pwm": 150, "mm": 300.0, "radius_mm": 300.0, "unk_only": true},
  "ROUTE_L1_MIN_PWM": 235,
  "ROUTE_L1_UPLOAD_PWM": 255,
  "ROUTE_L23_A_BRAKE_MM_S2": 900,

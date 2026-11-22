@@ -1797,4 +1797,4 @@ ROUTE_FINAL_W = 20.0
 LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas que no suman el ancho (tc3..11)
 
 # N20: freno selectivo en curva de vuelta 1 junto a una señal. Opt-in.
-ROUTE_L1_CORNER_SIGN = None
+ROUTE_L1_CORNER_SIGN = None   # {pwm, mm, radius_mm, unk_only}: tope en curvas cerradas cerca de señales (unk_only: solo asientos sin resolver)
