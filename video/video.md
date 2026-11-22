@@ -4,11 +4,15 @@
 
 ### Open Challenge — 3 laps autonomous
 
-**[TODO: YouTube link]**
+[![Open Challenge v2](https://img.youtube.com/vi/NgGNFpsWpc8/maxresdefault.jpg)](https://youtu.be/NgGNFpsWpc8)
+
+[https://youtu.be/NgGNFpsWpc8](https://youtu.be/NgGNFpsWpc8)
 
 ### Obstacle Challenge — 3 laps with obstacles + parking
 
-**[TODO: YouTube link]**
+[![Obstacle Challenge v2](https://img.youtube.com/vi/Qk4TaZrQ-Js/maxresdefault.jpg)](https://youtu.be/Qk4TaZrQ-Js)
+
+[https://youtu.be/Qk4TaZrQ-Js](https://youtu.be/Qk4TaZrQ-Js)
 
 ---
 

@@ -18,12 +18,10 @@ This README documents **the car that competes at the WRO 2026 International Fina
 
 ## Videos
 
-<!-- When the videos are on YouTube, replace each TODO with a thumbnail link:
-     [![Obstacle Challenge v2](https://img.youtube.com/vi/VIDEO_ID/0.jpg)](https://youtu.be/VIDEO_ID) -->
-
 | Obstacle Challenge — v2 (3 laps + parking) | Open Challenge — v2 (3 laps) |
 |:---:|:---:|
-| **[TODO: YouTube link]** | **[TODO: YouTube link]** |
+| [![Obstacle Challenge v2](https://img.youtube.com/vi/Qk4TaZrQ-Js/maxresdefault.jpg)](https://youtu.be/Qk4TaZrQ-Js) | [![Open Challenge v2](https://img.youtube.com/vi/NgGNFpsWpc8/maxresdefault.jpg)](https://youtu.be/NgGNFpsWpc8) |
+| <https://youtu.be/Qk4TaZrQ-Js> | <https://youtu.be/NgGNFpsWpc8> |
 
 | Real car vs digital twin on the same field |
 |:---:|
