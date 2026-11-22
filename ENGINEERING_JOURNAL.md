@@ -485,17 +485,17 @@ Found on the way: the main loop doesn't wait for a new camera frame, so at 40 fp
 - Per-frame work on the Pi and the twin optimized with bit-identical results (DP planner, color masks in one native pass, non-blocking USB log on the ESP32).
 
 ### 2026-11-11 — Camera at 40 fps, speed loop, runs 41 and 48 clean
-- Runs 35–36 completed but weaved (+8% path vs the twin). The Pi ran at 22 fps because the image was scaled on the CPU → Picamera2 with the ISP doing the scaling, ~40 fps (`66ca91aa`); the loop now waits for a new frame (`ed341d3f`).
+- Runs 35–36 completed but weaved (+8% path vs the twin). The Pi ran at 22 fps because the image was scaled on the CPU → Picamera2 with the ISP doing the scaling, ~40 fps (`924a084a`); the loop now waits for a new frame (`756c3fc7`).
 - Runs 37–38: lost lines while the motor ran (`ue`≈400/s) → bad UART cable, replaced.
-- **Speed loop with the encoder** (feed-forward + PI, `MOTOR_LAZO_VEL`, `2318dce6`, `e89a6c64`): the start maneuver no longer changes with the battery charge.
+- **Speed loop with the encoder** (feed-forward + PI, `MOTOR_LAZO_VEL`, `cc9db82c`, `7eafbade`): the start maneuver no longer changes with the battery charge.
 - **Runs 41 and 48: clean races, 12 corners.**
-- Lateral and rear ToF set to ROI 8 in the race firmware (it was never applied, `8af0b2a2`); lateral ToF bias at long range measured (`d6937912`).
-- ERR-30 (lone green mapped at the start of its straight from votes taken while turning, fixed `a22bb3e0`) and ERR-31 (start without orange-line votes, open) — [engineering log](docs/engineering-log.md).
+- Lateral and rear ToF set to ROI 8 in the race firmware (it was never applied, `0e8f8898`); lateral ToF bias at long range measured (`34d24bd3`).
+- ERR-30 (lone green mapped at the start of its straight from votes taken while turning, fixed `23af434a`) and ERR-31 (start without orange-line votes, open) — [engineering log](docs/engineering-log.md).
 
 ### 2026-11-12 — Fixed exposure; the parking-lot exit
-- Runs 57, 59, 60 hit the island after the lot: auto-exposure inside the lot burned the floor for ~1 s when leaving it, and the orange-line votes were rejected while the car was still turning. Fix: **fixed exposure per venue** (`c6757575`, measured with `mide_exposicion.py`) and the turn limit for line votes 3° → 10° (`1000d3cf`).
+- Runs 57, 59, 60 hit the island after the lot: auto-exposure inside the lot burned the floor for ~1 s when leaving it, and the orange-line votes were rejected while the car was still turning. Fix: **fixed exposure per venue** (`c41e0a7a`, measured with `mide_exposicion.py`) and the turn limit for line votes 3° → 10° (`9cb39aa0`).
 - Runs 62, 64 completed; open: the lone pillar after a corner (E/X1 vs E/X2) can flip in lap 1.
-- Recording stops 5 s after the car stops (`31edf3ab`); run 62's video went from 209 MB to its real length.
+- Recording stops 5 s after the car stops (`a811bb05`); run 62's video went from 209 MB to its real length.
 
 ## Phase 15 — Documentation for the international final (2026-11-16 →)
 

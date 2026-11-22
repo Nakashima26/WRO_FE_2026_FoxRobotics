@@ -1,6 +1,6 @@
 # Checklist de optimización R5 (completa)
 
-Perfil: carrera seed 5 en `4472197`, cProfile, 6,25 s; sin perfil son 4,3 s user.
+Perfil: carrera seed 5 en `fdb966d`, cProfile, 6,25 s; sin perfil son 4,3 s user.
 El % es la parte de la carrera perfilada que consume cada punto. La ganancia real
 será menor que ese %.
 
@@ -12,7 +12,7 @@ Reglas:
   aparece un punto de **≥3%**.
 
 ## Twin (solo simulador; acelera el optimizador)
-- [x] T1 (Codex) `sync_native` / `drain_history`: la historia se vacía en cada `loop` (21k) creando arreglos ctypes y tuplas. 5,8% → **hecho** (`24c4b07`): historia SIL sin copias, −9,9% CPU, mejora en 6/6.
+- [x] T1 (Codex) `sync_native` / `drain_history`: la historia se vacía en cada `loop` (21k) creando arreglos ctypes y tuplas. 5,8% → **hecho** (`22ef528`): historia SIL sin copias, −9,9% CPU, mejora en 6/6.
 - [x] T2 (Codex) ToF: 85k callbacks C→Python, la mayoría devuelven la lectura retenida. Mover la retención al SIL. 9% → **descartado**: −0,66%, mejora en 5/6.
 - [x] T3 (Codex) chequeo de colisión cada 5 ms (`collision`, 14k llamadas en Python). 4,3% → **descartado**: −1,34%, mejora en 3/6.
 - [x] T4 (Claude) render: `_fill_face` de quads parcialmente detrás del plano cercano. 2,4% → **hecho**: `_clip_near` con floats de Python; imagen idéntica en 1200 cuadros; render 0,466→0,441 ms (~0,8% de la carrera, bajo el umbral pero se queda: 4 líneas, idéntico).
@@ -29,11 +29,11 @@ gyro callbacks 1,2%, prints a pi.log 1,1%, importaciones 0,13 s, `hsv_masks` (ya
 ## Resultado (en serie, seeds 5 y 13, 3 repeticiones; `/usr/bin/time` user)
 | Versión | s5 | s13 |
 | --- | ---: | ---: |
-| `32c6b77` (inicio del día) | 5,13 | 5,36 |
-| `4472197` (R4: ToF + render + SIL) | 4,40 | 4,61 |
-| `0acbca1` (R5: T1 + T4) | 4,00 | 4,14 |
+| `c515ae3` (inicio del día) | 5,13 | 5,36 |
+| `fdb966d` (R4: ToF + render + SIL) | 4,40 | 4,61 |
+| `d5a2246` (R5: T1 + T4) | 4,00 | 4,14 |
 
-R5 baja ~10% respecto a R4; en total, ~22% respecto a `32c6b77`. 48/48 carreras
+R5 baja ~10% respecto a R4; en total, ~22% respecto a `c515ae3`. 48/48 carreras
 idénticas. Suite: 402 passed, 2 skipped, 1 xfailed.
 
 ## Perfil final y regla del ≥3%

@@ -3,7 +3,7 @@
 Medición del 10 de noviembre de 2026, Mac M5 Pro. Estos resultados son locales;
 no se ha medido la Raspberry Pi real.
 
-Base de esta comparación: `e5d0b17`, que **ya contiene las optimizaciones
+Base de esta comparación: `71ce3a5`, que **ya contiene las optimizaciones
 anteriores**. No son porcentajes acumulados desde el código original.
 
 ## Carrera completa: cambios juntos
@@ -23,8 +23,8 @@ Las cifras principales son medias de las dos tandas.
 
 | Versión | CPU user (s/48) | Tiempo real (s/48) | Menos CPU vs base |
 | --- | ---: | ---: | ---: |
-| Base `e5d0b17` | 225.700 | 63.473 | — |
-| DP + twin `d6dd439` | 211.287 | 59.455 | 6.39% |
+| Base `71ce3a5` | 225.700 | 63.473 | — |
+| DP + twin `bfefcc6` | 211.287 | 59.455 | 6.39% |
 | DP + twin + máscaras nativas | 204.300 | 57.656 | 9.48% |
 
 La pasada nueva de visión ahorra otro **3.31% de CPU** sobre R2. Todos los cambios

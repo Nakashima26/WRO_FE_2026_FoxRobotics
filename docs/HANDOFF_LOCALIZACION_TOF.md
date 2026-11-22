@@ -5,10 +5,10 @@ Aquí va lo que se aprendió, lo que ya quedó en `main` y lo que falta.
 
 ## Estado al cerrar
 
-- **ESP:** firmware de carrera de `e89a6c64`, con `MOTOR_LAZO_VEL 1` (control de velocidad prendido).
+- **ESP:** firmware de carrera de `7eafbade`, con `MOTOR_LAZO_VEL 1` (control de velocidad prendido).
   Flasheado por COM9. La versión de banco (`FOX_BANCO_SIN_MOTOR`) **no** se llegó a flashear:
   falló la subida porque el ESP no estaba conectado a la PC.
-- **Pi:** en `e89a6c64`, servicio `wro-runtime` activo. El log del servicio es persistente
+- **Pi:** en `7eafbade`, servicio `wro-runtime` activo. El log del servicio es persistente
   (`/var/log/journal`): se puede leer el de un arranque anterior con `journalctl -u wro-runtime -b -1`.
 - **Logs y videos de las corridas:** en el Pi, `videos_orillas/orillas35..42`. Los de la 35, 36
   y 40 están en `video/corridas_2026-11-11/` (sin commitear).
@@ -19,7 +19,7 @@ Aquí va lo que se aprendió, lo que ya quedó en `main` y lo que falta.
   y ~800 con la pila llena. Con la pila llena la salida del estacionamiento cambiaba
   (se ladeaba −52..−56° contra −45°) y el carro ubicaba el cajón en +337..+458 mm en vez de +170.
   Las corridas 37, 38 y 40 salieron mal.
-- **Arreglo (`2318dce6`, prendido en `e89a6c64`):** el PWM que piden los estados se lee como
+- **Arreglo (`cc9db82c`, prendido en `7eafbade`):** el PWM que piden los estados se lee como
   velocidad objetivo con el modelo a ~12 V (adelante 3.82·(pwm−45.5), reversa 3.61·(pwm−61)),
   con tope `LAZO_V_MAX` = 700 mm/s. En `setMotorTope()` hay feedforward + PI sobre la velocidad
   del encoder (Kp 0.10, Ki 0.60, I ±80, anti-windup). No se mete al frenar con contramarcha.
@@ -96,7 +96,7 @@ Aquí va lo que se aprendió, lo que ya quedó en `main` y lo que falta.
   - Cámara con Picamera2 escalando en el ISP: 40 fps con 5% de CPU.
   - El grabber espera frame nuevo y `PROCESS_EVERY 1`: ~33 Hz.
   - Llega a 77–84 °C sin ventilador.
-- **Grabación:** se cortaba a los ~7 s; arreglado en `35b35cf7`. El video de la 40 grabó casi
+- **Grabación:** se cortaba a los ~7 s; arreglado en `160bb627`. El video de la 40 grabó casi
   todo la mesa, no la pista.
 - **Log:** journald todavía suprime líneas (`Suppressed N messages`) a pesar del drop-in
   `LogRateLimitIntervalSec=0`; falta revisar el límite global.

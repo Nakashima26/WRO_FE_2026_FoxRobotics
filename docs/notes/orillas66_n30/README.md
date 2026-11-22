@@ -1,6 +1,6 @@
 # orillas66 — N30 con la carrera de Jesse (2026-11-17 14:34)
 
-Seed **990001** (CW). ESP y Pi en `e17078ec` (`LAZO_V_255` 1575, `LAZO_V_MAX_L1` 850,
+Seed **990001** (CW). ESP y Pi en `af8097e4` (`LAZO_V_255` 1575, `LAZO_V_MAX_L1` 850,
 rectas de vueltas 2-3 hasta 1575 mm/s, `carrera.json` con 74 valores). ToF frontal ya
 funcionando.
 

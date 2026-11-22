@@ -141,7 +141,7 @@ def test_tof_black_wall_range(rng):
 
 
 def test_tof_short_map_measured(rng):
-    """Short ROI 8 (firmware 8af0b2a): < 1 cm hasta 60 cm y -4 cm a 80 (calib 2026-10-21)."""
+    """Short ROI 8 (firmware 0e8f889): < 1 cm hasta 60 cm y -4 cm a 80 (calib 2026-10-21)."""
     params = replace(TwinParams().tof, noise_sigma_mm=0.0, noise_rel=0.0)
     world = _EastWallWorld(OUTER_HALF_MM)
     lateral = params.mounts[1].right_mm

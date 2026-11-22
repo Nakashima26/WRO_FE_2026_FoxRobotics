@@ -494,8 +494,8 @@ The inner walls are black, which absorbs most of the 940 nm light. What we measu
 
 | Finding (evidence) | Change |
 |---|---|
-| The default 16 × 16 region of interest sees the white **floor** at long range and reads short: static test at 60 / 80 cm → −50 / −190 mm. On the track the right sensor saturated at 460–500 mm beyond ~45 cm (runs 35–42) and dragged the pose toward that wall | Left/right/rear use **ROI 8 × 8** (static error −8 / −40 mm at 60 / 80 cm), commit `8af0b2a2` |
-| On the black wall many valid distances come with **range status 2** (signal fail) or 7 (wrap target fail) | Short-mode sensors accept status 2 up to 900 mm (`889aa0ce`); the front (Long mode) accepts only status 0, because its status 2 reads ~+20 cm long |
+| The default 16 × 16 region of interest sees the white **floor** at long range and reads short: static test at 60 / 80 cm → −50 / −190 mm. On the track the right sensor saturated at 460–500 mm beyond ~45 cm (runs 35–42) and dragged the pose toward that wall | Left/right/rear use **ROI 8 × 8** (static error −8 / −40 mm at 60 / 80 cm), commit `0e8f8898` |
+| On the black wall many valid distances come with **range status 2** (signal fail) or 7 (wrap target fail) | Short-mode sensors accept status 2 up to 900 mm (`0e8d54b1`); the front (Long mode) accepts only status 0, because its status 2 reads ~+20 cm long |
 | The front sensor reads ~+20 cm long beyond 60 cm and is only reliable ≤ 80 cm, and only if mounted level | The localizer uses the front sensor only within its reliable range; the start fix gives it no vote; the mount is rigid and level |
 | A sensor can freeze (same value) or fail at boot | Firmware skips a sensor that failed init and reports it (`ltf=` field in the ACK); in the open-round firmware a reading stale for > 300 ms re-initializes that sensor through its XSHUT pin |
 
@@ -523,10 +523,10 @@ UART-RVC mode: the sensor streams a 19-byte packet with yaw, pitch, roll and acc
 
 | Step | What and why | Where |
 |---|---|---|
-| **Capture** | Picamera2: full sensor mode 1640 × 1232, scaled to **640 × 480 by the Pi 5's image processor**. Our first Pi 5 pipeline scaled on the CPU (GStreamer) and limited the loop to 20–23 fps at 245 % CPU; the ISP path delivers ~40 fps at 5 % CPU with the same framing (`66ca91aa`) | `vision.open_camera` |
+| **Capture** | Picamera2: full sensor mode 1640 × 1232, scaled to **640 × 480 by the Pi 5's image processor**. Our first Pi 5 pipeline scaled on the CPU (GStreamer) and limited the loop to 20–23 fps at 245 % CPU; the ISP path delivers ~40 fps at 5 % CPU with the same framing (`924a084a`) | `vision.open_camera` |
 | **Lens shading** | The NoIR lens has no IR filter, and the Pi 5's default lens-shading table turned the frame edges magenta (R/G 1.31–1.40 at the corners) — close to the pink parking walls and red pillars. We calibrated our own table from 5 raw photos of a white sheet with the official tuning tool: R/G and B/G = 1.00 ± 0.01 at the center and all corners | [`camera_tuning/`](src/RASPI/cam/camera_tuning/README.md) |
 | **White balance** | Fixed gains `<1.10, 1.37>` (auto white balance drifts with the colored walls in view) | `vision.py` |
-| **Exposure** | History: with auto exposure, inside the magenta parking lot the exposure rose 2.3×; leaving the lot the floor was burned for ~1 s, the orange line was seen late and the car hit the island (run 57), so from 2026-11-12 we used a **fixed** exposure measured per venue. Measured by day, that fixed value made the image too dark at night, so after the 2026-11-19 remount the car runs on **automatic exposure** again and the fixed profile is kept as an option (§5.4). Next: set the exposure from the floor brightness instead of the whole image (§6) | `pure_pursuit/mide_exposicion.py`, `camera_tuning/exposicion.json`, `c6757575` |
+| **Exposure** | History: with auto exposure, inside the magenta parking lot the exposure rose 2.3×; leaving the lot the floor was burned for ~1 s, the orange line was seen late and the car hit the island (run 57), so from 2026-11-12 we used a **fixed** exposure measured per venue. Measured by day, that fixed value made the image too dark at night, so after the 2026-11-19 remount the car runs on **automatic exposure** again and the fixed profile is kept as an option (§5.4). Next: set the exposure from the floor brightness instead of the whole image (§6) | `pure_pursuit/mide_exposicion.py`, `camera_tuning/exposicion.json`, `c41e0a7a` |
 | **Color classes** | Pillars are classified by hue **and** channel ratios, measured on our track (~950 lux): red H 170–177, S 144–158, G/R 0.38–0.44; pink wall H 139, G/R 0.67, B/R 1.19; orange tape G/R 0.76–0.78; green H 71, G/R 1.95. Ratios stay stable when the venue light changes; hue near red wraps around and shifts. Thresholds: red S ≥ 110, G/R ≤ 0.60, B/R ≤ 0.70 | `vision.py`, [`calibra_luz.py`](src/RASPI/cam/pure_pursuit/calibra_luz.py) |
 | **Bird's-eye view (BEV)** | Homography from floor crosses at known positions (rear-axle frame) → 1 px = 2 mm on the floor. Recalibrated after the 2026-11-19 remount with 7 crosses at 250 / 400 / 650 mm from the rear axle: fit error 25 mm mean, 46 mm max (the previous mount: 17 / 36 mm); the residual pattern is lens barrel distortion. A perspective-n-point fit of the same homography gives the camera pose used by the twin (§1.4) | `bev.py`, `calibrate.py`, `bev_calib.npz` |
 
@@ -920,37 +920,37 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 |---|---|---|---|---|
 | 11-07 | first test | Car did not move | Pi→ESP UART not arriving; then FIFO overflow (`rn=0`) → `Serial2` on core 0, 4 KB buffer (`1360188`) | Fixed |
 | 11-09 | track tests | Car turned before the walls | BNO085 yaw sign lost when merging branches → pose mirrored; ISR encoder losing counts → PCNT | Fixed |
-| 11-11 | 35–36 | Completed with weaving (8 % more distance than the twin) | Pi at 22 fps (CPU scaling) → Picamera2 ISP, 40 fps (`66ca91aa`) | Fixed |
+| 11-11 | 35–36 | Completed with weaving (8 % more distance than the twin) | Pi at 22 fps (CPU scaling) → Picamera2 ISP, 40 fps (`924a084a`) | Fixed |
 | 11-11 | 37–38 | Lost V2 lines while the motor ran (`ue`≈400/s) | Bad UART cable → replaced, `ue`=0 | Fixed |
 | 11-11 | **41** | **Clean race, 12 corners**, speed loop on | — | Pass |
 | 11-11 | **48** | **Clean race, 12 corners**; parking sequence started but the car did not end fully inside the lot | Parking still being tuned (see §3.10.5) | Race: pass · Park: open |
-| 11-11 | 50, 52 | Lone green (E/X2) mapped at the start of its straight | ERR-30: off-axis votes while turning (`a22bb3e0`) | Fixed offline |
+| 11-11 | 50, 52 | Lone green (E/X2) mapped at the start of its straight | ERR-30: off-axis votes while turning (`23af434a`) | Fixed offline |
 | 11-11 | 51 | Hit 2nd green after the lot | ERR-31: lot fix without orange-line votes | Open |
-| 11-12 | 57, 59, 60 | Hit the island after the lot | Auto-exposure burn + line votes rejected while still turning → fixed exposure (`c6757575`), turn limit 3°→10° (`1000d3cf`) | Fixed |
+| 11-12 | 57, 59, 60 | Hit the island after the lot | Auto-exposure burn + line votes rejected while still turning → fixed exposure (`c41e0a7a`), turn limit 3°→10° (`9cb39aa0`) | Fixed |
 | 11-12 | 62, 64 | Completed; lot error +196/+201 mm vs ~+230 real; near-miss at E/X in lap 1 | E/X1 ↔ E/X2 flip in lap 1 | Open |
 | 11-20 | **98** | Seed 23 layout, CCW: **3 laps in ~31 s, no pillar touched, no wrong side**; after the U-turn the parking anchor was behind the real car, it reversed too late and touched the wall | Lot localization in the return leg | Race: pass · Park: open |
 | 11-20 | **99** | Same layout repeated: identical timing (laps 31 s, park 14 s), no pillar touched; ended 19° from parallel (run 98: 27°) after 11 steering reversals inside the lot | Same as run 98 | Race: pass · Park: open |
-| 11-20 | 100–102 | Same layout at noon: hit the island ~4 s after the start, all three | Lot fix matched the orange tape to the wrong corner: the right tape gave +166..+192 mm, just outside the ±150 mm vote window, so the vote jumped to a tape 1.4 m away (−565 mm). Window 150 → 300 mm and lot position clamped to the legal range (`41dc72be`) | Fixed |
+| 11-20 | 100–102 | Same layout at noon: hit the island ~4 s after the start, all three | Lot fix matched the orange tape to the wrong corner: the right tape gave +166..+192 mm, just outside the ±150 mm vote window, so the vote jumped to a tape 1.4 m away (−565 mm). Window 150 → 300 mm and lot position clamped to the legal range (`82dadba2`) | Fixed |
 | 11-20 | **103** | Lot fix correct (+0 mm); **3 laps, 12 corners in ~30 s**; grazed the red pillar in section 2 (lap 1) | The red is not visible from the lot straight; it is confirmed after the corner and the route shifts ~590 mm sideways at PWM ~200 | Open |
-| 11-20 | **104** | Lot fix correct (−33 mm); 3 laps in ~31 s and **parked fully inside and parallel** (first full parallel park of the v2 car); hit the same red pillar | Route passes the outer-row red with ~81 mm clearance, but the lateral pose was ~200 mm toward the inside (side ToF reads short beyond ~45 cm, §3.10.5). Lap-1 corner slowdown near a pillar added (`4de45492`) but did not trigger because of the pose error | Open |
-| 11-21 | 129 | Lot fix +132 mm off after setting a 14-frame camera lag | The 14 frames came from a replay error (the vote's frame in the recording is 16 frames later than assumed); real camera→pose lag is ~0 → lag 0 (`e129e2d1`) | Fixed |
-| 11-21 | 130–131 | Lot fix with the blue tape: CW 4.4 cm, CCW 2.9 cm from the measured lot | ERR-31: CCW exits saw no usable orange line → vote also on the blue tape (`13b31a2f`) and CCW exit odometry offset −86 mm (`cdec20bb`) | Fixed |
+| 11-20 | **104** | Lot fix correct (−33 mm); 3 laps in ~31 s and **parked fully inside and parallel** (first full parallel park of the v2 car); hit the same red pillar | Route passes the outer-row red with ~81 mm clearance, but the lateral pose was ~200 mm toward the inside (side ToF reads short beyond ~45 cm, §3.10.5). Lap-1 corner slowdown near a pillar added (`80d25e59`) but did not trigger because of the pose error | Open |
+| 11-21 | 129 | Lot fix +132 mm off after setting a 14-frame camera lag | The 14 frames came from a replay error (the vote's frame in the recording is 16 frames later than assumed); real camera→pose lag is ~0 → lag 0 (`40db744a`) | Fixed |
+| 11-21 | 130–131 | Lot fix with the blue tape: CW 4.4 cm, CCW 2.9 cm from the measured lot | ERR-31: CCW exits saw no usable orange line → vote also on the blue tape (`ca734e1e`) and CCW exit odometry offset −86 mm (`2764bc12`) | Fixed |
 | 11-21 | 132 | Turned too much at corner 1 and touched the island | Seen once in 6 runs; not reproduced | Open |
-| 11-21 | 135, 137 | Hit (135) / grazed (137) the red pillar of S/T1 | ERR-32: the planner map dropped the red half a second before corner 1 and planned over it → map frozen once the lot is fixed (`424138c9`) | Fixed |
+| 11-21 | 135, 137 | Hit (135) / grazed (137) the red pillar of S/T1 | ERR-32: the planner map dropped the red half a second before corner 1 and planned over it → map frozen once the lot is fixed (`ae97f4d3`) | Fixed |
 | 11-21 | **138** | CCW: **3 laps in 29 s, no pillar touched, no wrong side** (OBS-06); parking not finished | — | Race: pass · Park: open |
-| 11-21 | 140 | CW: U-turn before parking hit the back wall | ERR-33: the U started ~25 cm from the wall because the car moved away first even with little straight left → U right away when < 650 mm remain (`2d186d87`) | Fixed |
+| 11-21 | 140 | CW: U-turn before parking hit the back wall | ERR-33: the U started ~25 cm from the wall because the car moved away first even with little straight left → U right away when < 650 mm remain (`e2ddbcbc`) | Fixed |
 | 11-21 | **142** | CW: 3 laps clean, U-turn OK (17–26 cm from the wall); parallel park jammed ~24° off | Entry reverse swing of ~48° is too much | Open |
 
 **Formal validation matrix for the release** (to be filled with the final firmware; each row = one full round with a random layout and a random lot position):
 
 | Run | Direction | Lot position | Score | Time | Collisions | Wrong side | Park | Battery V | Commit | Status |
 |---|---|---|---:|---:|---:|---:|---|---:|---|---|
-| OBS-01 | CW | random layout, lot 1151 mm (run 106) | 54 / 62 | ≈42 s (laps 30.2 s) | 0 (passed the red after corner 10 at 5 mm in lap 3, not moved) | 0 | Partial (14° off, partly inside; oscillates while settling) | 12.4 | `4de45492` | Park partial |
-| OBS-02 | CW | random layout, lot 1177 mm (run 107) | 54 / 62 | ≈39 s (laps 29.8 s) | 0 (closest 69 mm, after corner 6) | 0 | Partial (19° off, partly inside) | ≈12.3 | `4de45492` | Park partial |
-| OBS-03 | CW | random layout, lot 1140 mm (run 111) | 44 / 62 | ≈44 s | 1 (lone green in the middle of a straight, lap 2: mapped one column off) | 0 | Partial (16° off, partly inside) | — | `4de45492` | Collision + park partial |
-| OBS-04 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (touched wall) | 11.72 | `68bd18b2` | Park fail |
-| OBS-05 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (19° off, not inside) | 11.68 | `68bd18b2` | Park fail |
-| OBS-06 | CCW | random layout, lot ≈1170 mm (run 138) | 47 / 62 | laps 29 s | 0 | 0 | Fail (log ends during the U-turn, not inside) | — | `e473a322` | Park fail |
+| OBS-01 | CW | random layout, lot 1151 mm (run 106) | 54 / 62 | ≈42 s (laps 30.2 s) | 0 (passed the red after corner 10 at 5 mm in lap 3, not moved) | 0 | Partial (14° off, partly inside; oscillates while settling) | 12.4 | `80d25e59` | Park partial |
+| OBS-02 | CW | random layout, lot 1177 mm (run 107) | 54 / 62 | ≈39 s (laps 29.8 s) | 0 (closest 69 mm, after corner 6) | 0 | Partial (19° off, partly inside) | ≈12.3 | `80d25e59` | Park partial |
+| OBS-03 | CW | random layout, lot 1140 mm (run 111) | 44 / 62 | ≈44 s | 1 (lone green in the middle of a straight, lap 2: mapped one column off) | 0 | Partial (16° off, partly inside) | — | `80d25e59` | Collision + park partial |
+| OBS-04 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (touched wall) | 11.72 | `8b26bfd9` | Park fail |
+| OBS-05 | CCW | seed 23, lot 1653 mm from SE corner | 47 / 62 | 45 s (laps 31 s) | 0 | 0 | Fail (19° off, not inside) | 11.68 | `8b26bfd9` | Park fail |
+| OBS-06 | CCW | random layout, lot ≈1170 mm (run 138) | 47 / 62 | laps 29 s | 0 | 0 | Fail (log ends during the U-turn, not inside) | — | `9f6a3ec8` | Park fail |
 
 ### 3.10.5 Known limitations
 
@@ -1251,9 +1251,9 @@ WRO_FE_2026_FoxRobotics/
 
 **Commit history.** ~890 commits by three authors since the start of the season. Commit messages are written in Spanish, the team's working language, and describe **the change and the evidence behind it**: the run number, the twin result or the measurement. Two examples from the history:
 
-> *Parking: PARK_UTURN_ALEJAR_CM 40 → 45. After the U-turn the car ended 13–17 cm from the wall (target 23) and hit the lot's wooden wall on the way back (seeds 31, 45, 19). Twin: 88 → 91 OK, park failures 8 → 5, no new failures; 43 gives 91, 47 gives 89, 50 gives 88.* (`d896330a`, translated)
+> *Parking: PARK_UTURN_ALEJAR_CM 40 → 45. After the U-turn the car ended 13–17 cm from the wall (target 23) and hit the lot's wooden wall on the way back (seeds 31, 45, 19). Twin: 88 → 91 OK, park failures 8 → 5, no new failures; 43 gives 91, 47 gives 89, 50 gives 88.* (`2c587024`, translated)
 
-> *Camera remounted 2026-11-19: BEV recalibrated (7 crosses at 250/400/650 mm from the rear axle) and automatic exposure.* (`8ebd198c`, translated)
+> *Camera remounted 2026-11-19: BEV recalibrated (7 crosses at 250/400/650 mm from the rear axle) and automatic exposure.* (`3fdc89d9`, translated)
 
 So the history is also an engineering record: `git log -- <file>` shows why each value in [`config.py`](src/RASPI/cam/pure_pursuit/config.py) or the firmware has the value it has. Dated decisions (DEC-xx), incidents (ERR-xx) and milestones are in the [engineering log](docs/engineering-log.md); the phase-by-phase story is in the [Engineering Journal](ENGINEERING_JOURNAL.md).
 

@@ -279,7 +279,7 @@ class ToFMount:
 
 @dataclass
 class ToFParams:
-    # ROI 8x8 en los 4 (firmware 8af0b2a): cono ~13-14° total (NOTAS_TOF.md). Con ROI 16 eran 13.5.
+    # ROI 8x8 en los 4 (firmware 0e8f889): cono ~13-14° total (NOTAS_TOF.md). Con ROI 16 eran 13.5.
     half_fov_deg: float = 7.0
     ray_step_deg: float = 1.5
     # Pared negra visible a 80 cm en Short y a 150 cm en Long (calib 2026-10-21 tof); 250 era del VL53L0X.
@@ -287,7 +287,7 @@ class ToFParams:
     # Lectura medida contra distancia real, pared negra, Short ROI 16 (lo que usa el firmware en L/R/atrás):
     # +19 mm cerca y desde ~60 cm el cono ve el piso (800 -> 610, se satura). Solo para los ids de abajo.
     short_map_true_mm: tuple[float, ...] = (100.0, 200.0, 300.0, 450.0, 600.0, 800.0)
-    # ROI 8 (firmware desde 8af0b2a + status 2 hasta 900 desde 889aa0c): lateral izq Short ROI 8 50 ms, calib 2026-10-21.
+    # ROI 8 (firmware desde 0e8f889 + status 2 hasta 900 desde 0e8d54b): lateral izq Short ROI 8 50 ms, calib 2026-10-21.
     short_map_read_mm: tuple[float, ...] = (96.0, 195.0, 297.0, 450.0, 592.0, 760.0)
     short_map_ids: tuple[int, ...] = (0, 1, 2)
     # Curva propia por id (reemplaza la de arriba). Derecho (1): corridas 35-42 del 2026-11-11, real

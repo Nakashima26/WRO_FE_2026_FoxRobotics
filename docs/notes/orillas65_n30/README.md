@@ -2,7 +2,7 @@
 
 Seed **990001** (CW, salida en W hacia N, cajón en W). Firmware
 `PurePursuitCarrera` de `e994bba0` (N30: 7.523 cuentas/mm, `MOTOR_K` 6.51/22.9,
-`vMando()` con `LAZO_V_255` = 1575). Pi en `31edf3a` (código de carrera idéntico a main).
+`vMando()` con `LAZO_V_255` = 1575). Pi en `a811bb0` (código de carrera idéntico a main).
 
 **Resultado: no completó.** La salida del cajón (INICIO) fue mucho más rápida
 de lo afinado, el carro se pegó/empujó contra algo con la llanta patinando, la

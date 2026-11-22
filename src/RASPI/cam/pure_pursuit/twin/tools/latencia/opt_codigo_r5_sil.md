@@ -1,11 +1,11 @@
 # Optimización CPU R5 del SIL
 
-Base: `4472197`. Rama: `opt-r5-sil`. Solo este worktree; sin cambios al `.ino` ni a la conducción.
+Base: `fdb966d`. Rama: `opt-r5-sil`. Solo este worktree; sin cambios al `.ino` ni a la conducción.
 
 ## T1 — hecho
 
 CPU user en serie (suma de seis parejas): **27.70 → 24.95 s (−9.93%)**.
-Mejora en las seis parejas. Banco: **48/48 idénticas** frente a `4472197`.
+Mejora en las seis parejas. Banco: **48/48 idénticas** frente a `fdb966d`.
 Suite: **402 passed, 2 skipped, 1 xfailed** (ocho variantes adicionales).
 
 Se consulta el anillo SIL directamente por cuadro y al registrar semillas. La
@@ -42,7 +42,7 @@ La variante retenía lectura y última muestra por sensor dentro del SIL. Usaba
 en Python. Solo invocaba Python al tocar muestra nueva; cambiar callbacks
 invalidaba la retención. Los tests comprobaron valores, tiempos exactos, RNG,
 periodos por sensor, límites de muestra, tiempo repetido/retroceso, índices
-inválidos y reemplazo del callback. Banco: **48/48 idénticas** frente a `4472197`;
+inválidos y reemplazo del callback. Banco: **48/48 idénticas** frente a `fdb966d`;
 suite de la variante: **404 passed, 2 skipped, 1 xfailed**.
 
 | Seed | Repetición | T1 user (s) | T1+T2 user (s) |
@@ -68,7 +68,7 @@ cálculo de penetración de `ignored_contacts` compartían el mismo cuerpo, sin
 cambiar el orden de causas, predicados ni la reconstrucción de World tras derribar
 una señal. Las pruebas de referencia cubrieron múltiples listas de `ignore`,
 campos mutables y eliminación sucesiva de señales. Banco: **48/48 idénticas**
-frente a `4472197`; suite de la variante: **404 passed, 2 skipped, 1 xfailed**.
+frente a `fdb966d`; suite de la variante: **404 passed, 2 skipped, 1 xfailed**.
 
 | Seed | Repetición | T1 user (s) | T1+T3 user (s) |
 |---|---:|---:|---:|
@@ -82,7 +82,7 @@ frente a `4472197`; suite de la variante: **404 passed, 2 skipped, 1 xfailed**.
 ## Confirmación final frente a la base
 
 Tras descartar T2 y T3, el código retenido coincide con T1. Una segunda serie
-independiente contra `4472197` confirma **26.69 → 24.16 s user
+independiente contra `fdb966d` confirma **26.69 → 24.16 s user
 (−9.48%)**, con mejora en las seis parejas y STOP/trace idénticos.
 
 | Seed | Repetición | Base user (s) | Final user (s) |
@@ -97,7 +97,7 @@ independiente contra `4472197` confirma **26.69 → 24.16 s user
 ## Protocolo y artefactos
 
 Artefactos ignorados por Git en `src/RASPI/cam/runs/r5-sil.noindex/`.
-`base/` se extrajo mediante `git archive 4472197 src | tar -x -C <base>`.
+`base/` se extrajo mediante `git archive fdb966d src | tar -x -C <base>`.
 `bench.py` ejecuta `eval.sh` con `COSTO=0`, `FOX_PY` apuntando al venv del repo
 principal y `LAT_OUT=.../results.noindex` para el banco definitivo (`base-final` / `final`).
 Los bancos y series intermedios usaron `LAT_OUT=.../r5-sil.noindex/results`; sus

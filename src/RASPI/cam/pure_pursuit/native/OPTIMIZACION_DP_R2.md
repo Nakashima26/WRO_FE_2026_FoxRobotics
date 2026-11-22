@@ -1,6 +1,6 @@
 # DP de ruta: segunda ronda
 
-Base: `e5d0b17dfb28af80fa717f8126b6068a41986415`, rama `opt-dp-r2`.
+Base: `71ce3a5eb72932d8b6e1149815e05bc2d3736079`, rama `opt-dp-r2`.
 Medición local: Apple M5 Pro (arm64), Apple clang 21.0.0, Python 3.14.8.
 No se dispone de una Pi 5: estos tiempos corresponden exclusivamente al Mac.
 

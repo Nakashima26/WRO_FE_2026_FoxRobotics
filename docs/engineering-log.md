@@ -191,28 +191,28 @@ Logged in the README: [ERR-08](v1-national/README.md#err-08--raspberry-pi-underv
 - **Observed:** 2026-11-11, runs orillas50 and orillas52. The lone green pillar in the middle of the third straight (E/X2) was mapped at the start of that straight (E/T2, later E/T4), so the route never passed it on the correct side.
 - **Diagnosis:** We replayed the real Pi logs through `DigitalMap` and printed every vote for that pillar. Votes taken on the straight landed next to X2. Votes taken while the car was still coming out of the NE corner (heading 102–118° against 180° for the straight, pillar 25–35° off the car's axis) landed ~400 mm earlier, near the T2/T4 column. The heading lags during the turn, and an off-axis pillar turns a small heading error into a large position error. There were more of these votes, and the seat hysteresis then kept the wrong seat.
 - **First attempt:** Dropping every vote more than 20° off-axis fixed the real replays, but in the twin it confirmed pillars seen at the entry of a straight too late (S/T1, S/T2): 2 of 3 seeds crashed.
-- **Fix:** A vote more than 20° off-axis, taken while the car is still more than 25° away from that straight's heading, still counts, but it can't confirm the pillar or set its distance (`DIGITAL_MAP_VOTE_MAX_BEARING_DEG`, `DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG`). Commit `a22bb3e0`.
+- **Fix:** A vote more than 20° off-axis, taken while the car is still more than 25° away from that straight's heading, still counts, but it can't confirm the pillar or set its distance (`DIGITAL_MAP_VOTE_MAX_BEARING_DEG`, `DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG`). Commit `23af434a`.
 - **Result:** Replays of real runs 48/50/52: run 52 now maps E/X2, and every other pillar matches the old result. E/X2 is confirmed ~0.5 m before the car reaches it. Twin: 3/3 seeds clean.
 - **Status:** Fixed offline; to be confirmed on the car.
 
 #### ERR-31 — Second green after leaving the parking lot hit when the orange line was not seen
 - **Observed:** 2026-11-11, run orillas51. The car dodged the first green after leaving the lot but hit the second one (N/T2).
 - **Diagnosis:** At the start the car corrects its position from the orange line. In run 51 it saw no line votes (n=0), so it fell back to the mean of the side ToF and was off by +322 mm. After the first corner that error becomes a lateral error, so N/T2 was mapped as N/T4 and the route took the wrong side. In run 52 the line was seen (n=5, correction +128 mm) and the same pillar was dodged.
-- **Fix (2026-11-21):** In CCW the orange line crosses the exit at ~30° and was often rejected, while the blue tape crosses the lane almost square (|n·a| 0.87). The start fix now also votes on the blue tape (HSV mask, largest blob, median offset per pixel, `13b31a2f`). Replaying the recordings showed the camera→pose lag is ~0, not 14 frames (the vote's frame in `_bev.bin` is 16 frames later than we had assumed; `e129e2d1`). CCW exits overshoot ~86 mm in odometry (runs 126/128/131: 83/88/86 mm), so the lot is shifted by that amount while the pose takes the full correction (`cdec20bb`).
+- **Fix (2026-11-21):** In CCW the orange line crosses the exit at ~30° and was often rejected, while the blue tape crosses the lane almost square (|n·a| 0.87). The start fix now also votes on the blue tape (HSV mask, largest blob, median offset per pixel, `ca734e1e`). Replaying the recordings showed the camera→pose lag is ~0, not 14 frames (the vote's frame in `_bev.bin` is 16 frames later than we had assumed; `40db744a`). CCW exits overshoot ~86 mm in odometry (runs 126/128/131: 83/88/86 mm), so the lot is shifted by that amount while the pose takes the full correction (`2764bc12`).
 - **Result:** Runs 130 (CW) and 131 (CCW): 4.4 and 2.9 cm from the measured lot along the straight; runs 134–142 decided 1125–1194 mm for a lot at ~1170 mm. Across the lane it still reads ~4 cm too wide.
 - **Status:** Fixed.
 
 #### ERR-32 — Red pillar of the first straight dropped from the plan just before corner 1
 - **Observed:** 2026-11-21, runs orillas135 (hit) and orillas137 (grazed), CCW, red pillar at S/T1.
-- **Diagnosis:** The planner's map only stopped dropping pillars from corner 4 on. Half a second before corner 1 the provisional red at S/T1 lost its votes and disappeared from the map; the next plan went straight over it. The new log line (`[DMAP] … BORRADA`, confirmed pillars in every `[ROUTE] plan`, `4de56bc1`) showed the drop.
-- **Fix:** The map no longer drops pillars once the lot position is fixed (`ROUTE_MAP_FREEZE_TC` 4 → 0, `424138c9`).
+- **Diagnosis:** The planner's map only stopped dropping pillars from corner 4 on. Half a second before corner 1 the provisional red at S/T1 lost its votes and disappeared from the map; the next plan went straight over it. The new log line (`[DMAP] … BORRADA`, confirmed pillars in every `[ROUTE] plan`, `d4ae71a0`) showed the drop.
+- **Fix:** The map no longer drops pillars once the lot position is fixed (`ROUTE_MAP_FREEZE_TC` 4 → 0, `ae97f4d3`).
 - **Result:** Run 138, same layout: 3 laps in 29 s without touching a pillar.
 - **Status:** Fixed.
 
 #### ERR-33 — U-turn before parking hit the back wall
 - **Observed:** 2026-11-21, run orillas140, CW.
 - **Diagnosis:** Before the U-turn the firmware first moves away from the inner wall. When the car reaches that phase with little straight left, the move-away uses it up and the U starts ~25 cm from the back wall, too close for the turning radius.
-- **Fix:** If less than 650 mm of straight remain, the U starts right away (`PARK_UTURN_ALEJAR_REST_MM`, `PurePursuitCarrera.ino`, `2d186d87`).
+- **Fix:** If less than 650 mm of straight remain, the U starts right away (`PARK_UTURN_ALEJAR_REST_MM`, `PurePursuitCarrera.ino`, `e2ddbcbc`).
 - **Result:** Run 142: the U started 17–26 cm from the wall and finished without contact. The parallel maneuver after it is still open (ended ~24° off).
 - **Status:** Fixed (U-turn).
 

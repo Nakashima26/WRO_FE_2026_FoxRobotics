@@ -1,6 +1,6 @@
 # CPU del twin: integración directa desde SIL
 
-Base: `911a6b1`. Rama: `opt-r4-sil`. Medición en Mac arm64, 10 de noviembre de 2026.
+Base: `33c2f68`. Rama: `opt-r4-sil`. Medición en Mac arm64, 10 de noviembre de 2026.
 Se revisó `c2e0546`; esta implementación usa directamente el kernel existente,
 mediante su puntero de función, desde el SIL.
 
@@ -70,7 +70,7 @@ con el avance C, incluyendo los avances de varios subpasos durante el arranque.
 Las variantes cubren parámetros normales, holgura/retardo, motor inverso y frenado/
 límites laterales. Los tests existentes verifican además el kernel contra `Vehicle`.
 
-La base se extrajo con `git archive 911a6b1 src | tar -x -C <directorio>.noindex`
+La base se extrajo con `git archive 33c2f68 src | tar -x -C <directorio>.noindex`
 desde la raíz del worktree, incluyendo `src` completo. Para cada implementación
 se ejecutó desde su correspondiente `src/RASPI/cam`:
 
@@ -104,7 +104,7 @@ y el pequeño wrapper shell. Las seis parejas cronometradas también coinciden e
 
 En `src/RASPI/cam/runs/` (ignorados por Git):
 
-- `r4-sil-base.noindex/`: copia de referencia de `911a6b1`.
+- `r4-sil-base.noindex/`: copia de referencia de `33c2f68`.
 - `r4-sil-results.noindex/base/` y `final/`: los dos bancos de 48 carreras.
 - `r4-sil-results.noindex/serie-*-r*/`: las doce carreras medidas en serie.
 - `r4-sil-results.noindex/time-*.txt` y `serie.json`: tiempos originales y datos.

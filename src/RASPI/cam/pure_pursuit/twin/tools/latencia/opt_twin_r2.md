@@ -1,6 +1,6 @@
 # Segunda ronda: simulador completo
 
-Base: e5d0b17dfb28af80fa717f8126b6068a41986415. Rama: opt-twin-r2.
+Base: 71ce3a5eb72932d8b6e1149815e05bc2d3736079. Rama: opt-twin-r2.
 Medido el 10 de noviembre de 2026 con el Python de FoxRobotics.
 
 ## Perfil completo
