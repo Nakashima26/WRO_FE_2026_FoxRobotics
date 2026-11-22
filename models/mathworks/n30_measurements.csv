@@ -1,0 +1,6 @@
+mode,pwm,initial_mm_s,encoder_stop_mm,tape_stop_mm
+short,100,500,26,NaN
+coast,150,803,329,NaN
+short,180,1066,64,NaN
+short,255,1502,88,240
+coast,255,1409,944,NaN
