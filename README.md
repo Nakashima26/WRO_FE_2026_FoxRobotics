@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/img/banner.png" width="100%" alt="FoxRobotics — WRO 2026 Future Engineers self-driving car, International Final, car v2"></p>
+
 # WRO 2026 — Future Engineers | FoxRobotics Self-Driving Car
 
 > **Team:** FoxRobotics · **Members:** Erick Blanco · Jesse Banda · César Emiliano Ahumada · **Coach:** Daniel Millan
