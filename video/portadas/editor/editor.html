@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Editor de recorte — portada</title>
+<style>
+  body { margin: 0; font: 14px system-ui, sans-serif; background: #1a1a1a; color: #eee; display: flex; height: 100vh; }
+  #panel { width: 250px; padding: 14px; background: #111; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  #vista { flex: 1; overflow: auto; position: relative; background: #333; }
+  canvas { display: block; cursor: none; image-rendering: auto; }
+  button { padding: 8px; border: 0; border-radius: 6px; background: #333; color: #eee; cursor: pointer; font-size: 14px; }
+  button.on { background: #ffe600; color: #111; font-weight: 600; }
+  button.guardar { background: #2e7d32; }
+  label { display: flex; flex-direction: column; gap: 4px; }
+  .fila { display: flex; gap: 6px; } .fila button { flex: 1; }
+  small { color: #999; line-height: 1.4; }
+  #estado { color: #8f8; min-height: 1.2em; }
+  #pincel { position: fixed; pointer-events: none; border: 1px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <b>Recorte del carro</b>
+  <div class="fila">
+    <button id="bBorrar" class="on">Borrar (B)</button>
+    <button id="bRest">Restaurar (R)</button>
+  </div>
+  <label>Tamaño del pincel: <span id="tamTxt">20</span> px
+    <input id="tam" type="range" min="2" max="120" value="20"></label>
+  <label>Dureza del borde
+    <input id="dureza" type="range" min="0" max="100" value="70"></label>
+  <label>Zoom: <span id="zoomTxt">100</span>%
+    <input id="zoom" type="range" min="50" max="400" step="25" value="100"></label>
+  <label>Fondo
+    <select id="fondo"><option value="#ffe600">Amarillo (portada)</option><option value="#141414">Oscuro</option><option value="#ff00ff">Magenta (ver errores)</option></select></label>
+  <div class="fila">
+    <button id="bDeshacer">Deshacer (Ctrl+Z)</button>
+  </div>
+  <button id="bOrig">Ver foto original (mantén O)</button>
+  <button id="bGuardar" class="guardar">Guardar y regenerar portadas</button>
+  <div id="estado"></div>
+  <small>Borrar quita fondo; Restaurar regresa pixeles de la foto original.<br>
+  Rueda del mouse: tamaño del pincel. Ctrl+rueda: zoom.<br>
+  Al guardar se reescribe <code>carro_recorte.png</code> y se generan las dos portadas.</small>
+  <img id="preview" style="width:100%;border-radius:4px;display:none">
+</div>
+<div id="vista"><canvas id="c"></canvas></div>
+<div id="pincel"></div>
+<script>
+const foto = new Image(), masc = new Image();
+foto.src = 'foto.jpeg'; masc.src = 'mascara.png?' + Date.now();
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H, alfa, rgb, modo = 'borrar', pintando = false, historial = [], verOrig = false;
+const $ = id => document.getElementById(id);
+
+Promise.all([foto.decode(), masc.decode()]).then(() => {
+  W = foto.width; H = foto.height; c.width = W; c.height = H;
+  const t = document.createElement('canvas'); t.width = W; t.height = H; const tc = t.getContext('2d');
+  tc.drawImage(foto, 0, 0); rgb = tc.getImageData(0, 0, W, H);
+  tc.clearRect(0, 0, W, H); tc.drawImage(masc, 0, 0);
+  const m = tc.getImageData(0, 0, W, H).data; alfa = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) alfa[i] = m[i * 4 + 3] / 255;
+  aplicaZoom(); dibuja();
+});
+
+function dibuja() {
+  const img = ctx.createImageData(W, H), d = img.data, s = rgb.data;
+  const f = $('fondo').value, fr = parseInt(f.slice(1, 3), 16), fg = parseInt(f.slice(3, 5), 16), fb = parseInt(f.slice(5, 7), 16);
+  for (let i = 0; i < W * H; i++) {
+    const a = verOrig ? 1 : alfa[i], j = i * 4;
+    d[j] = s[j] * a + fr * (1 - a); d[j + 1] = s[j + 1] * a + fg * (1 - a); d[j + 2] = s[j + 2] * a + fb * (1 - a); d[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function aplicaZoom() {
+  const z = $('zoom').value / 100; $('zoomTxt').textContent = Math.round(z * 100);
+  c.style.width = W * z + 'px'; c.style.height = H * z + 'px';
+}
+
+function pinta(e) {
+  const r = c.getBoundingClientRect(), z = r.width / W;
+  const x = (e.clientX - r.left) / z, y = (e.clientY - r.top) / z, rad = $('tam').value / 2;
+  const dur = $('dureza').value / 100, objetivo = modo === 'borrar' ? 0 : 1;
+  const x0 = Math.max(0, Math.floor(x - rad)), x1 = Math.min(W - 1, Math.ceil(x + rad));
+  const y0 = Math.max(0, Math.floor(y - rad)), y1 = Math.min(H - 1, Math.ceil(y + rad));
+  for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+    const dist = Math.hypot(xx - x, yy - y) / rad; if (dist > 1) continue;
+    const k = dist <= dur ? 1 : 1 - (dist - dur) / (1 - dur + 1e-6);
+    const i = yy * W + xx; alfa[i] = alfa[i] + (objetivo - alfa[i]) * k;
+  }
+  dibuja();
+}
+
+function cursor(e) {
+  const p = $('pincel'), r = c.getBoundingClientRect(), z = r.width / W, d = $('tam').value * z;
+  p.style.width = p.style.height = d + 'px'; p.style.left = e.clientX - d / 2 + 'px'; p.style.top = e.clientY - d / 2 + 'px';
+  p.style.borderColor = modo === 'borrar' ? '#f44' : '#4f4';
+}
+
+c.addEventListener('pointerdown', e => { historial.push(alfa.slice()); if (historial.length > 30) historial.shift(); pintando = true; c.setPointerCapture(e.pointerId); pinta(e); });
+c.addEventListener('pointermove', e => { cursor(e); if (pintando) pinta(e); });
+c.addEventListener('pointerup', () => pintando = false);
+c.addEventListener('pointerleave', () => $('pincel').style.display = 'none');
+c.addEventListener('pointerenter', () => $('pincel').style.display = 'block');
+c.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (e.ctrlKey) { const z = $('zoom'); z.value = +z.value + (e.deltaY < 0 ? 25 : -25); aplicaZoom(); }
+  else { const t = $('tam'); t.value = +t.value + (e.deltaY < 0 ? 2 : -2); $('tamTxt').textContent = t.value; }
+  cursor(e);
+}, { passive: false });
+
+function setModo(m) { modo = m; $('bBorrar').classList.toggle('on', m === 'borrar'); $('bRest').classList.toggle('on', m === 'rest'); }
+$('bBorrar').onclick = () => setModo('borrar'); $('bRest').onclick = () => setModo('rest');
+$('tam').oninput = () => $('tamTxt').textContent = $('tam').value;
+$('zoom').oninput = aplicaZoom; $('fondo').onchange = dibuja;
+function deshacer() { if (historial.length) { alfa = historial.pop(); dibuja(); } }
+$('bDeshacer').onclick = deshacer;
+$('bOrig').onpointerdown = () => { verOrig = true; dibuja(); };
+$('bOrig').onpointerup = $('bOrig').onpointerleave = () => { if (verOrig) { verOrig = false; dibuja(); } };
+document.addEventListener('keydown', e => {
+  if (e.key === 'b' || e.key === 'B') setModo('borrar');
+  else if (e.key === 'r' || e.key === 'R') setModo('rest');
+  else if (e.ctrlKey && e.key === 'z') { e.preventDefault(); deshacer(); }
+  else if ((e.key === 'o' || e.key === 'O') && !verOrig) { verOrig = true; dibuja(); }
+});
+document.addEventListener('keyup', e => { if ((e.key === 'o' || e.key === 'O') && verOrig) { verOrig = false; dibuja(); } });
+
+$('bGuardar').onclick = async () => {
+  $('estado').textContent = 'Guardando…';
+  const t = document.createElement('canvas'); t.width = W; t.height = H; const tc = t.getContext('2d');
+  const img = tc.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) { const j = i * 4; img.data[j] = rgb.data[j]; img.data[j + 1] = rgb.data[j + 1]; img.data[j + 2] = rgb.data[j + 2]; img.data[j + 3] = Math.round(alfa[i] * 255); }
+  tc.putImageData(img, 0, 0);
+  const blob = await new Promise(r => t.toBlob(r, 'image/png'));
+  const resp = await fetch('/guardar', { method: 'POST', body: blob });
+  $('estado').textContent = resp.ok ? 'Listo: portadas regeneradas' : 'Error: ' + await resp.text();
+  if (resp.ok) { const p = $('preview'); p.src = '/portada_open.png?' + Date.now(); p.style.display = 'block'; }
+};
+</script>
+</body>
+</html>
