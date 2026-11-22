@@ -40,5 +40,16 @@
     "ignored_contacts": [],
     "pass_side_violations": [],
     "sign_contacts": []
+  },
+  "replay": {
+    "panels": [
+      "simulated_field",
+      "controller_estimated_map",
+      "simulated_onboard_camera",
+      "controller_birds_eye_view"
+    ],
+    "capture": "Closed-loop benchmark rerun with the twin frame callback",
+    "preview_speed": 2.0,
+    "video_fps": 24
   }
 }

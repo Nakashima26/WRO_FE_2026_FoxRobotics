@@ -6,7 +6,7 @@ The full-course twin runs the competition software. Simulink gives us a block-le
 
 [![The N30 completes three laps and parks](evidence/n30_best_race.gif)](evidence/n30_best_race.mp4)
 
-The fastest clean finish in the 288-case `p0` N30 reference bank took **29.533 s** in simulated race time. Field seed **9** and sensor-noise seed **2** completed three laps (8.811, 7.410 and 6.586 s) and finished parking with zero contacts and zero wrong-side pillar passes. The GIF plays at 2×. The full-speed video reconstructs the camera and bird’s-eye images from the race trace. [Full-speed video](evidence/n30_best_race.mp4) · [Run metrics and field layout](evidence/n30_best_race.json)
+The fastest clean finish in the 288-case `p0` N30 reference bank took **29.533 s** in simulated race time. Field seed **9** and sensor-noise seed **2** completed three laps (8.811, 7.410 and 6.586 s) and finished parking with zero contacts and zero wrong-side pillar passes. The GIF plays at 2×. The video captures four panels from a closed-loop benchmark rerun: the simulated field and actual path, the Pi’s estimated map and DP route, the simulated onboard camera, and the controller’s bird’s-eye view. On the estimated map, a solid colored dot is a confirmed pillar, a colored outline is tentative, an X is a seat treated as empty, and a gray circle is unresolved. [Full-speed video](evidence/n30_best_race.mp4) · [Run metrics and field layout](evidence/n30_best_race.json)
 
 To reproduce the metrics from the [benchmark source revision](https://github.com/Nakashima26/WRO_FE_2026_FoxRobotics/tree/d771e9129ccaedd97af892a2ec5c29baf5602881), use a Python environment with NumPy and OpenCV and run from `src/RASPI/cam`:
 
