@@ -3896,6 +3896,12 @@ static void parkPlAnclaMadera() {
 
 // Termina el ajuste si la huella barrida hasta detenerse cabe en el cajon.
 PARK_AJ bool PARK_PL_CIERRE_HUELLA = true;
+PARK_AJ bool PARK_PL_ARCO_CALIBRADO = false;
+// Radio efectivo del contravolante en reversa, incluido el transitorio del servo.
+PARK_AJ float PARK_PL_RI_INT_MM = 104.0f;
+PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;
+PARK_AJ float PARK_PL_ARCO_W_MM = 48.0f;
+
 static bool parkPlHuellaDentro(float w, float h, float th, float avance) {
   if (fabsf(th) > 12.0f) return false;
   const float c = cosf(th * DEG_TO_RAD), s = sinf(th * DEG_TO_RAD);
@@ -3941,10 +3947,10 @@ float parkPlanHolgura(float w, float h, float thDeg) {
 }
 
 // Angulo th1 del plan RECTA: arco EXT (radio RI) hasta th1, recta, arco INT de vuelta a 0; desde (w0,h0) llega a (wf,hf).
-float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float R) {
+float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float rExt, float rInt) {
   float dW = w0 - wf, dH = h0 - hf, t0 = th0Deg * DEG_TO_RAD, th = 1.05f;
   for (int k = 0; k < 12; k++)
-    th = atan2f(dH - R * (cosf(t0) - cosf(th)) - R * (1.0f - cosf(th)), dW - R * (sinf(th) - sinf(t0)) - R * sinf(th));
+    th = atan2f(dH - rExt * (cosf(t0) - cosf(th)) - rInt * (1.0f - cosf(th)), dW - rExt * (sinf(th) - sinf(t0)) - rInt * sinf(th));
   return constrain(th * RAD_TO_DEG, 25.0f, 80.0f);
 }
 
@@ -7501,6 +7507,9 @@ void loop() {
         float th = -haciaPared * (anguloGyro - parkRumboRef);   // nariz hacia la isla (+)
         // El rumbo de la pared medido con los sonares trae hasta ~10 grados de error; el del carril (pose del tapete) no.
         if (PARK_PL_THLANE && !isnan(parkThCarril())) th = parkThCarril();
+        const bool arcoCalibrado = PARK_PL_ARCO_CALIBRADO && PARK_PL_RECTA && parkDirecto && !parkRevModo;
+        const float rInt = arcoCalibrado ? PARK_PL_RI_INT_MM : PARK_PL_RI;
+        const float hFinal = arcoCalibrado ? PARK_PL_ARCO_H_MM : PARK_PL_HEND;
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
@@ -7526,7 +7535,9 @@ void loop() {
                 wf = PARK_PL_WF_DIRECT_NEAR;
               if (parkDirecto && parkRevModo) wf += PARK_REV_DWF;
               if (parkDirecto && h0 < PARK_PL_H_BAJA_MM) wf += PARK_PL_WF_H_BAJA;   // entrada muy pegada a la pared (n4 s24 h0 268): el plan se queda sin altura para la recta y la cola roza el poste 2
-              float t = parkPlanT1Solve(w0, h0, th, wf, PARK_PL_HEND, PARK_PL_RI);
+              // Deja la nariz pasar por fuera de la punta de la segunda madera.
+              if (arcoCalibrado) wf = PARK_PL_ARCO_W_MM;
+              float t = parkPlanT1Solve(w0, h0, th, wf, hFinal, PARK_PL_RI, rInt);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
@@ -7564,7 +7575,7 @@ void loop() {
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
         parkPlanPose(pw, ph);
-        if (PARK_PL_CIERRE_HUELLA && parkPlanI >= 2
+        if (PARK_PL_CIERRE_HUELLA && parkPlanI >= 2 - (arcoCalibrado ? 1 : 0)
             && parkPlHuellaDentro(pw, ph, th, encVelMmS * 0.18f)) {
           finalizarPark("PLAN huella dentro");
           break;
@@ -7585,7 +7596,7 @@ void loop() {
         if (i == 0 && PARK_PL_RECTA) {
           if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
           if (parkPlanRectaOn) {
-            float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
+            float thr = hFinal + rInt * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
             fin = ph <= thr; why = "RECTA";
             // Con la nariz pegada al poste 2 (sonar ext <= 2 cm al terminar la recta: holgura real 2-6 mm, la pose dice ~20) el arco INT la metia en la madera (n3 s23, n2 s11; avanzar no abre: la holgura sigue en 5.5 mm). La cola tiene ~59 mm al poste 1: la recta sigue PARK_PL_RECTA_EXTRA_MM mas, alejando la nariz.
             if (fin && PARK_PL_RECTA_EXTRA_MM > 0.0f && th > 30.0f && extRaw >= 1 && extRaw <= PARK_PL_RECTA_EXT_CM) {
