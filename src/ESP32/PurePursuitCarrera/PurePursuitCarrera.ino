@@ -279,6 +279,7 @@ volatile int uartErrTipo[8] = {0};                 // por tipo: [3] FIFO_OVF, [4
 int lineasV2 = 0, lineasRT = 0, lineasOtras = 0;
 int lineasMalas = 0;                                // lc= : líneas con checksum malo (descartadas)    // lv/lr/lo : líneas recibidas por tipo
 float rutaPaso    = 20.0f;   // mm entre puntos
+float rutaPasoB   = 20.0f;   // paso de la carga en curso (se copia en RTE con los puntos)
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
 bool  piSteerPi   = false;   // ps=1: mientras sube la ruta, girar con obs de la Pi (ruta nueva) en vez de la ruta vieja
@@ -3998,8 +3999,8 @@ void parseRuta(const String &line) {
   if (line.startsWith("RTB,")) {
     int c1 = line.indexOf(',', 4);
     rutaCarga = constrain(line.substring(4, c1 < 0 ? line.length() : c1).toInt(), 0, RUTA_MAX);
-    if (c1 >= 0) rutaPaso = line.substring(c1 + 1).toFloat();
-    if (rutaPaso < 1.0f) rutaPaso = 20.0f;
+    if (c1 >= 0) rutaPasoB = line.substring(c1 + 1).toFloat();
+    if (rutaPasoB < 1.0f) rutaPasoB = 20.0f;
     rutaRecib = 0;
     return;
   }
@@ -4033,6 +4034,7 @@ void parseRuta(const String &line) {
       // Doble buffer: hasta aquí el ESP siguió la ruta anterior completa.
       memcpy(rutaX, rutaXb, sizeof(float) * n);
       memcpy(rutaY, rutaYb, sizeof(float) * n);
+      rutaPaso = rutaPasoB;
       rutaN = n;
       rutaI = -1;
     }
