@@ -3844,7 +3844,7 @@ void parkPlanPose(float &w, float &h) {
   h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
 }
 // Reancla la reversa con el centro de la segunda madera medido en el escaneo final.
-PARK_AJ bool PARK_PL_TOF_ANCLA = false;
+PARK_AJ bool PARK_PL_TOF_ANCLA = true;
 #if FOX_TOF
 static float parkPlHitMin, parkPlHitMax, parkPlSampleAlong;
 static unsigned long parkPlSampleMs;
@@ -3895,7 +3895,7 @@ static void parkPlAnclaMadera() {
 #endif
 
 // Termina el ajuste si la huella barrida hasta detenerse cabe en el cajon.
-PARK_AJ bool PARK_PL_CIERRE_HUELLA = false;
+PARK_AJ bool PARK_PL_CIERRE_HUELLA = true;
 static bool parkPlHuellaDentro(float w, float h, float th, float avance) {
   if (fabsf(th) > 12.0f) return false;
   const float c = cosf(th * DEG_TO_RAD), s = sinf(th * DEG_TO_RAD);
