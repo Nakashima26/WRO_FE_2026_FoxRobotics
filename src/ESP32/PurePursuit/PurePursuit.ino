@@ -1850,6 +1850,13 @@ PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: cort
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+// Centrado final (2026-11-23, 3265): la reversa del zigzag corta en el ToF trasero (~3 cm) y el avance antes,
+// por holgura de la pose; sin objetivo longitudinal quedaba tB 29 / tF 111 mm. Al cerrar, recto hasta dF ~ dB.
+PARK_AJ int          PARK_PL_CENTRAR             = 1;
+PARK_AJ float        PARK_PL_CENTRAR_TOL_CM      = 1.5f;   // |dF - dB - OFF| que ya cuenta como centrado
+PARK_AJ float        PARK_PL_CENTRAR_OFF_CM      = 0.0f;   // dF - dB objetivo
+PARK_AJ float        PARK_PL_CENTRAR_TH_MAX      = 12.0f;  // mas chueco, el tramo recto se mete de lado: no centra
+PARK_AJ int          PARK_PL_CENTRAR_MS          = 2000;
 PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
@@ -2955,6 +2962,15 @@ void finalizarPark(const char *motivo) {
   Serial.print  (" dF="); Serial.println(distF_filtrada);
   Serial.println("  RACE FINISHED -> STOP");
   Serial.println("==================================================");
+}
+
+// Cierre del plan con centrado longitudinal (fase 43); si no aplica, cierra ya.
+const char *parkCentrarMotivo = ""; int parkCentrarDir = 0; float parkCentrarMm = 0.0f;
+void parkCerrarCentrando(const char *motivo, float th) {
+  if (!PARK_PL_CENTRAR || fabsf(th) > PARK_PL_CENTRAR_TH_MAX) { finalizarPark(motivo); return; }
+  parkCentrarMotivo = motivo; parkCentrarDir = 0;
+  motorCoast(); escribirServo(centroServo);
+  parkFase = 43; parkFaseMs = millis(); parkOdom0 = odomMm;
 }
 
 // Lado de la pared del lote (true = izquierda). El lote SIEMPRE está en la pared
@@ -7748,6 +7764,39 @@ void loop() {
         break;
       }
 
+      // ── Fase 43: centrado final recto entre las maderas (ver PARK_PL_CENTRAR) ──
+      if (parkFase == 43) {
+        escribirServo(centroServo);
+        if (parkCentrarDir == 0) {
+          motorCoast();
+          if (millis() - parkFaseMs < (unsigned long)PARK_PL_PAUSA_MS) break;   // que pare y el volante llegue al centro
+          float dF = distF_filtrada, dB = distB_filtrada, err = dF - dB - PARK_PL_CENTRAR_OFF_CM;   // >0: sobra adelante
+          Serial.print("PARK centrar dF="); Serial.print(dF, 1); Serial.print(" dB="); Serial.print(dB, 1);
+          if (dF <= 0.0f || dF > 20.0f || dB <= 0.0f || dB > 20.0f || fabsf(err) <= PARK_PL_CENTRAR_TOL_CM) {
+            Serial.println(" -> ya");
+            finalizarPark(parkCentrarMotivo); break;
+          }
+          parkCentrarDir = err > 0.0f ? 1 : -1; parkCentrarMm = fabsf(err) * 5.0f;   // la mitad, en mm
+          Serial.print(parkCentrarDir > 0 ? " -> ADELANTE " : " -> REVERSA "); Serial.println(parkCentrarMm, 0);
+          parkFaseMs = millis(); parkOdom0 = odomMm;
+        }
+        if (parkCentrarDir > 0) motorAdelante(); else motorReversa();
+        parkArranquePwm = PARK_PL_ARRANQUE_PWM;
+        setMotor(parkCentrarDir > 0 ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV);
+        parkArranquePwm = 0;
+        float v = fabsf(encVelMmS);
+        bool fin = parkRecorridoMm() >= parkCentrarMm - v * 0.10f;   // ~0.1 s de coast
+        if (parkCentrarDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * v * 0.1f) fin = true;
+        if (parkCentrarDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) fin = true;
+        if (millis() - parkFaseMs >= (unsigned long)PARK_PL_CENTRAR_MS) fin = true;
+        if (fin) {
+          Serial.print("PARK centrar fin mm="); Serial.print(parkRecorridoMm(), 0); Serial.print(" dF="); Serial.print(distF_filtrada, 1);
+          Serial.print(" dB="); Serial.println(distB_filtrada, 1);
+          finalizarPark(parkCentrarMotivo);
+        }
+        break;
+      }
+
       // ── Fase 2: COAST con servo RECTO (deja que pare), luego REV SWING ───
       if (parkFase == 2) {
         motorCoast();
@@ -7851,7 +7900,8 @@ void loop() {
         parkPlanPose(pw, ph);
         if (PARK_PL_CIERRE_HUELLA && parkPlanI >= 2 - (arcoCalibrado ? 1 : 0)
             && parkPlHuellaDentro(pw, ph, th, encVelMmS * 0.18f)) {
-          finalizarPark("PLAN huella dentro");
+          motorCoast();
+          parkCerrarCentrando("PLAN huella dentro", th);
           break;
         }
         float clr = parkPlanHolgura(pw, ph, th);
@@ -7933,7 +7983,7 @@ void loop() {
           parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
-            finalizarPark(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados");
+            parkCerrarCentrando(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados", th);
           }
         }
         break;
