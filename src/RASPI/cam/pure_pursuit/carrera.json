@@ -124,6 +124,7 @@
  "ROUTE_UPLOAD_STEP_MM": 80.0,
  "ROUTE_WARM_PLAN": true,
  "ROUTE_W_CLEAR": 16,
+ "ROUTE_PARK_REFINE": true,
  "_fuente": "carrera_bench.json",
  "_preset": "ruta_perfil"
 }

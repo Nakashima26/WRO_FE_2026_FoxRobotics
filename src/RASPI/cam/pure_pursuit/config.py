@@ -1467,6 +1467,11 @@ ROUTE_PROFILE_PWM0 = 25.0
 # (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
 ROUTE_PROFILE_MIN_PWM = None
 ROUTE_L23_MIN_PWM = 190    # piso del perfil en vueltas 2-3 (tc 4..11). Con el lazo sin tope en 2-3 (255 = no frenar) chocaban señales; 170 frena cerca de señales/isla. None = ROUTE_PROFILE_MIN_PWM
+# Tope en curvas de vueltas 2-3: {pwm, mm, radius_mm}.
+# inside_exit_only limita a señales confirmadas con paso por la isla, en los primeros exit_mm de recta.
+ROUTE_L23_CORNER_SIGN = None
+ROUTE_CORNER_EXIT_CLEAR_MM = 0.0  # reserva blanda ante señales en los primeros 500 mm de recta
+ROUTE_CORNER_EXIT_INSIDE_EXTRA_MM = 0.0  # reserva adicional si se pasa del lado de la isla
 ROUTE_L1_SOFT_CLEAR_MM = None  # margen blando de la ruta en vuelta 1 desde tc>=1 (con asientos sin ver). None = ROUTE_SOFT_CLEAR_MM
 ROUTE_L1_MIN_PWM = None    # piso del perfil en vuelta 1 (1<=tc<4). None = ROUTE_PROFILE_MIN_PWM
 ROUTE_L1_UPLOAD_PWM = None # tope en vuelta 1 (1<=tc<4) mientras sube la ruta al ESP. None = ROUTE_UPLOAD_PWM
@@ -1513,6 +1518,7 @@ ROUTE_FIX_LINE_TOF_LR = None
 ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
 # Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
 ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
+ROUTE_PARK_REFINE = False  # Solo Pi: refina pka con las dos maderas vistas por el ToF exterior.
 # Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
 ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es la del MISMO frame que la pose; el "lag 14" medido salía de que en el _bev.bin el frame del voto m es el 6+m+16, no 6+m (centroide del carro reproducido a 0.5 mm con +16). Con 0: 129 -> -5 mm
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
@@ -1802,4 +1808,5 @@ ROUTE_FINAL_W = 20.0
 LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas que no suman el ancho (tc3..11)
 
 # N20: freno selectivo en curva de vuelta 1 junto a una señal. Opt-in.
+# selective: conservar el freno cerca del cajon o de la fila X al salir de curva; fuera rigen other_mm y other_pwm.
 ROUTE_L1_CORNER_SIGN = None   # {pwm, mm, radius_mm, unk_only}: tope en curvas cerradas cerca de señales (unk_only: solo asientos sin resolver)

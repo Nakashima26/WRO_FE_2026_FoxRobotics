@@ -38,6 +38,7 @@ from . import ring_route as RR
 from .digital_map import feet_world
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
+from .park_refine import ParkRefine
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
                         SECTIONS_CW, SIGN_MM, blue_segments, orange_segments, section_to_world, world_to_section)
 
@@ -153,6 +154,8 @@ def _route_params():
         hard_clear_mm=float(getattr(C, "ROUTE_HARD_CLEAR_MM", 55.0)),
         soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
         w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),
+        corner_exit_clear_mm=float(getattr(C, "ROUTE_CORNER_EXIT_CLEAR_MM", 0.0)),
+        corner_exit_inside_extra_mm=float(getattr(C, "ROUTE_CORNER_EXIT_INSIDE_EXTRA_MM", 0.0)),
         time_cost=bool(getattr(C, "ROUTE_TIME_COST", False)),
         # ROUTE_PLAN_VMIN_PWM: piso de velocidad que ve la DP (con BASE_PWM=255 el costo de tiempo no distingue curvas).
         v_min_mm_s=K * (float(getattr(C, "ROUTE_PLAN_VMIN_PWM", None) or getattr(C, "ROUTE_PROFILE_BASE_PWM", 155)) - pwm0),
@@ -316,6 +319,8 @@ class RouteMode:
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
         self.axis = (0.0, 0.0)
         self.maneuver_loc = None     # pose del visor durante E/G
+        self._park_refine = None
+        self._park_refined_w = None
         self.park_w = None           # w0 del cajón en uso (supuesto o medido)
         _pf = getattr(C, "ROUTE_PRUEBA_CAJON_FILE", None)
         self._prueba_cajon = bool(_pf) and os.path.exists(str(_pf))
@@ -780,6 +785,22 @@ class RouteMode:
             if delta is not None:
                 pose = self._apply_fix(dm, ack, delta, forced)
                 conf, empty = self._resolved(dm)
+        if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
+            if self._park_refine is None:
+                self._park_refine = ParkRefine(dm.parking, dm.direction, self.park_w)
+            new_return = (_ack_est(ack) in ("S", "C", "R")
+                          and self._park_refine.update(tc, ack, pose, self.loc))
+            # Use third-pass returns while the ESP is still following the
+            # route at tc=11. The firmware may start parking during this turn.
+            if tc == 11 and (new_return or self._park_refined_w is None):
+                result = self._park_refine.estimate()
+                # The prior's p90 was about 43 mm. Only act on large disagreements.
+                if result is None or abs(result[0] - self.park_w) < 70:
+                    result = (self.park_w, 0)
+                if result[0] != self._park_refined_w:
+                    self._park_refined_w, passes = result
+                    print(f"[PARKREF] w0={self._park_refined_w:.0f} p0={self.park_w:.0f} "
+                          f"passes={passes} tc={tc:.0f}", flush=True)
         if lap1 and self.fixed:
             self._update_views(conf, empty, pose)
             conf, empty = self._resolved(dm)
@@ -1052,9 +1073,14 @@ class RouteMode:
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
         self._unk_pts = np.asarray([section_to_world(sec, *SEATS[seat]) for sec, seat in unknown], dtype=float).reshape(-1, 2)
-        prof = self._profile_pwm(self._sign_xy(conf, empty),
-                                 lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)), l23=tc is not None and 4 <= tc < 12,
-                                 l1=tc is not None and 1 <= tc < 4)   # en tc=0 no: s33 choca Green E/T1 en la salida
+        prof = self._profile_pwm(
+            self._sign_xy(conf, empty),
+            lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)),
+            l23=tc is not None and 4 <= tc < 12,
+            l1=tc is not None and 1 <= tc < 4,
+            conf=conf,
+            parking=dm.parking,
+        )
         if prof is not None and tc == 4 and self._l23_entry_cap and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
@@ -1117,7 +1143,8 @@ class RouteMode:
             self.esp_route = self.route
         line = "\n".join(lines) if lines else None
         if self.fixed and self.park_w is not None:
-            self.pka = _stall_far_along(dm.parking, dm.direction, self.park_w)
+            park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
+            self.pka = _stall_far_along(dm.parking, dm.direction, park_w)
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
@@ -1212,7 +1239,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None, lap2=False, l23=False, l1=False) -> int | None:
+    def _profile_pwm(self, signs=None, lap2=False, l23=False, l1=False, conf=None, parking=None) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -1315,18 +1342,61 @@ class RouteMode:
                     tight_on = True
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
             corner_sign = getattr(C, "ROUTE_L1_CORNER_SIGN", None)
-            if corner_sign and not l23 and self.fixed and float(getattr(self, "_tc_max", 0) or 0) < 4:
+            if l23:
+                corner_sign = getattr(C, "ROUTE_L23_CORNER_SIGN", None)
+            elif not self.fixed or float(getattr(self, "_tc_max", 0) or 0) >= 4:
+                corner_sign = None
+            if corner_sign:
                 # El piso normal del perfil permite ~700 mm/s incluso al salir
                 # de la esquina hacia una señal cercana. Se limita solo esa
                 # curva; el mismo sobre de frenado anticipa y suelta el freno.
                 vg = K * (float(corner_sign["pwm"]) - pwm0)
                 dd_c = dd
-                if corner_sign.get("unk_only"):
+                if l23 and corner_sign.get("inside_exit_only"):
+                    # Re-paso por el interior al salir de curva: seleccionar por
+                    # lado reglamentario y posición longitudinal del asiento.
+                    pts = []
+                    exit_end = 1000.0 + float(corner_sign.get("exit_mm", 500.0))
+                    for (sec, seat), color in (conf or {}).items():
+                        if (color == "Red") != (r.direction == "CW"):
+                            continue
+                        xy = section_to_world(sec, *SEATS[seat])
+                        along, _ = RR._sec(sec, r.direction).frame(*xy)
+                        if 1000.0 <= along <= exit_end:
+                            pts.append(xy)
+                    if pts:
+                        sx, sy = np.asarray(pts).T
+                        dd_c = np.hypot(pxy[:, None, 0] - sx, pxy[:, None, 1] - sy).min(axis=1)
+                    else:
+                        dd_c = np.full_like(dd, np.inf)
+                elif corner_sign.get("unk_only"):
                     # solo asientos aún sin resolver (la ruta puede cambiar de lado): los confirmados ya los traza la DP
                     u = getattr(self, "_unk_pts", None)
                     dd_c = np.full_like(dd, 1e9) if u is None or not len(u) else np.hypot(pxy[:, None, 0] - u[None, :, 0], pxy[:, None, 1] - u[None, :, 1]).min(axis=1)
-                near_curve = ((dd_c < float(corner_sign.get("mm", 350.0)))
+                reach = float(corner_sign.get("mm", 350.0))
+                if not l23 and corner_sign.get("selective") and parking:
+                    # Preserve the original reach around the stall and around
+                    # confirmed outer-row signs immediately after a corner.
+                    risk = [section_to_world(parking, 0.0, self.park_w)]
+                    for sec, seat in conf or ():
+                        if seat.startswith("X"):
+                            xy = section_to_world(sec, *SEATS[seat])
+                            along, _ = RR._sec(sec, r.direction).frame(*xy)
+                            if 1000.0 <= along <= 1500.0:
+                                risk.append(xy)
+                    sx, sy = np.asarray(risk).T
+                    risk_mm = float(corner_sign.get("risk_mm", 550.0))
+                    close = np.any(np.hypot(pxy[:, None, 0] - sx,
+                                            pxy[:, None, 1] - sy) < risk_mm, axis=1)
+                    if "other_pwm" in corner_sign:
+                        other_v = K * (float(corner_sign["other_pwm"]) - pwm0)
+                        vg = np.where(close, vg, other_v)
+                    reach = np.where(close, reach, float(corner_sign.get("other_mm", 240.0)))
+                near_curve = ((dd_c < reach)
                               & (kmax > 1.0 / float(corner_sign.get("radius_mm", 400.0))))
+                if l23 and "a_lat_mm_s2" in corner_sign:
+                    # Escalar el tope con la demanda lateral de la curva.
+                    vg = np.maximum(vg, np.sqrt(float(corner_sign["a_lat_mm_s2"]) / np.maximum(kmax, 1e-12)))
                 v_c = np.where(near_curve, np.minimum(v_c, vg), v_c)
                 if np.any(near_curve):
                     corner_floor = int(corner_sign["pwm"])

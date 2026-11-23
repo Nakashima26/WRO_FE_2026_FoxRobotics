@@ -88,6 +88,8 @@ class RouteParams:
     view_max_mm: float = 550.0
     view_half_deg: float = 40.0
     step_mm: float = 10.0           # muestreo de la ruta final
+    corner_exit_clear_mm: float = 0.0  # reserva blanda ante señales al salir de curva
+    corner_exit_inside_extra_mm: float = 0.0  # reserva adicional si se pasa hacia la isla
 
 
 def _order(direction: str, start: str = "N") -> list[str]:
@@ -452,6 +454,18 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
     for sname, seat in (unknown or ()):
         if sname in order and seat in SEATS and (sname, seat) not in seats:
             centers.append(section_to_world(sname, *SEATS[seat]))
+    exit_signs = {}
+    if prm.corner_exit_clear_mm > 0.0:
+        for sname, seat in set(seats).union(unknown or ()):
+            if sname not in order or seat not in SEATS:
+                continue
+            xy = section_to_world(sname, *SEATS[seat])
+            along, _ = secs[order.index(sname)].frame(*xy)
+            if 1000.0 <= along <= 1500.0:
+                color = seats.get((sname, seat))
+                inside = color is not None and (color == "Red") == (direction == "CW")
+                exit_signs[xy] = prm.corner_exit_clear_mm + (prm.corner_exit_inside_extra_mm if inside else 0.0)
+    exit_clear = np.full_like(clear, np.inf) if exit_signs else None
     r_sign = SIGN_MM / 2.0 * math.sqrt(2.0)
     for cx, cy in centers:
         sk = (gridkey, float(cx), float(cy))
@@ -467,11 +481,21 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
                 dsg = dsg[low]
             _SIGN_CACHE[sk] = (idx, dsg)
         idx, dsg = _SIGN_CACHE[sk]
-        if len(idx) == 0:
-            continue
         cf = clear.reshape(-1)
         cf[idx] = np.minimum(cf[idx], dsg)
+        if (cx, cy) in exit_signs:
+            # El caché descarta celdas donde gana la pared; para la reserva
+            # necesitamos la distancia a la señal incluso en esas celdas.
+            ks = np.flatnonzero(np.hypot(O[:, 0] - cx, O[:, 1] - cy) < 1150.0)
+            distances = _rect_dist_pose(
+                np.array([cx]), np.array([cy]), xx[ks], yy[ks], hd[ks], shd[ks], chd[ks]
+            )[..., 0] - r_sign
+            exit_clear[ks] = np.minimum(exit_clear[ks], distances - exit_signs[cx, cy])
     bad = clear < prm.hard_clear_mm
+    if exit_clear is not None:
+        # Anticipar la separación al elegir el arco. El umbral duro y
+        # las restricciones de lado se calculan con la huella original.
+        np.minimum(clear, exit_clear, out=clear)
     # w·clip((soft - clear)/soft, 0)² en un solo buffer (mismas operaciones por elemento)
     pen = np.subtract(prm.soft_clear_mm, clear)
     pen /= prm.soft_clear_mm
