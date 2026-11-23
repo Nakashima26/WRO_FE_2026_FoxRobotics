@@ -1577,6 +1577,13 @@ ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es
 ROUTE_FIX_BLUE = True
 # Cajón = pose ubicada por la cinta + esto (la odometría de la salida se pasa siempre igual; la pose sí se corre con el δ completo).
 ROUTE_FIX_POSE_MARGIN_MM = None   # el δ de la pose puede salir esto del rango del cajón (None = recortado igual que el cajón)
+# Cinta azul vista DESPUÉS de fijar el arranque (aún tc=0): la mediana de N votos seguidos corrige la pose
+# (no el cajón). 2026-11-23: run 185 decidió 14 frames antes de ver la cinta -> ToF δ −46 al revés,
+# la isla corrigió +203 mm en la esquina 1. 0/None = apagado.
+ROUTE_FIX_POST_BLUE_N = 3
+ROUTE_FIX_POST_BLUE_SPAN_MM = 60.0   # rango máximo entre esos N votos
+ROUTE_FIX_POST_BLUE_MAX_MM = 250.0   # resto mayor que esto = otra cinta / falso: no se aplica
+ROUTE_FIX_POST_BLUE_MIN_MM = 15.0    # resto menor: no vale la pena mover la pose
 ROUTE_FIX_PARK_ADJ_MM = {"CW": 0.0, "CCW": -86.0}   # 2026-11-21: CCW 126/128/131 medido +83/+88/+86; CW 121/130 −2/−29
 ROUTE_FIX_BLUE_HSV = ((95, 70, 60), (115, 255, 200))
 ROUTE_FIX_BLUE_MIN_AREA = 150

@@ -317,6 +317,8 @@ class RouteMode:
         self._pend_n = 0             # cuadros esperando evidencia del cajón con la media plana
         self._line_d: list = []      # δ por lectura de la línea naranja (ROUTE_FIX_LINE)
         self._line_vote_src: list[str] = []  # fuente de cada voto en _line_d (recta, pix, linea, azul)
+        self._post_blue_d: list[float] = []  # votos de la cinta azul tras fijar el arranque (_post_blue)
+        self._post_blue_done = False
         self._pix_ok = None          # None = aún no se sabe si la cinta de esta recta sirve para pixeles
         self.fixed = not self.blind
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
@@ -802,6 +804,10 @@ class RouteMode:
                     delta = self._pillar_pair_delta(dm, delta, p_shift)
                 pose = self._apply_fix(dm, ack, delta, forced)
                 conf, empty = self._resolved(dm)
+        elif (getattr(C, "ROUTE_FIX_BLUE", False) and not self._post_blue_done
+              and tc is not None and tc <= 0):
+            self._post_blue(dm, ack, pose)
+            pose = self.loc.pose()
         if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
             if self._park_refine is None:
                 self._park_refine = ParkRefine(dm.parking, dm.direction, self.park_w)
@@ -1661,24 +1667,67 @@ class RouteMode:
         (los falsos son manchas chicas), pixeles a fwd <= ROUTE_FIX_BLUE_FAR_MM llevados al tapete con la
         pose de hace ROUTE_FIX_LINE_LAG_FRAMES; voto = mediana del δ por pixel contra el segmento azul
         más cercano. Offline 2026-11-21 (lag 14): 126 −82 vs −83 medido, 128 −118 vs −88."""
+        res = self._blue_delta(dm, pose)
+        if res is None:
+            return
+        d, n, c, pose = res
+        self._line_vote_append(d, "azul")
+        print(f"[FIXVOTE] azul d={d:+.0f} n={n} c=({c[0]:.0f},{c[1]:.0f}) "
+              f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+
+    def _post_blue(self, dm, ack, pose) -> None:
+        """Cinta azul vista DESPUÉS de fijar el arranque, aún en la recta 1: corrige solo la pose.
+
+        La cinta solo se ve los últimos ~15 frames de la recta y el arranque forzado se decide en ese mismo
+        momento (2026-11-23: run 184 votó en el primer frame útil; la 185 decidió 14 frames antes con los ToF,
+        δ −46 al revés, y la isla corrigió +203 mm en la esquina 1). La cinta es un punto fijo del tapete:
+        con la pose ya corrida, la mediana de sus votos es el error que queda. El cajón no se toca."""
+        n_min = int(getattr(C, "ROUTE_FIX_POST_BLUE_N", 0) or 0)
+        if n_min <= 0 or self._post_blue_done:
+            return
+        res = self._blue_delta(dm, pose, rng=float(getattr(C, "ROUTE_FIX_POST_BLUE_MAX_MM", 250.0)) + 100.0)
+        if res is None:
+            return
+        self._post_blue_d.append(res[0])
+        if len(self._post_blue_d) < n_min:
+            return
+        last = self._post_blue_d[-n_min:]
+        if max(last) - min(last) > float(getattr(C, "ROUTE_FIX_POST_BLUE_SPAN_MM", 60.0)):
+            return
+        r = float(np.median(last))
+        cap = float(getattr(C, "ROUTE_FIX_POST_BLUE_MAX_MM", 250.0))
+        self._post_blue_done = True
+        if abs(r) > cap or abs(r) < float(getattr(C, "ROUTE_FIX_POST_BLUE_MIN_MM", 15.0)):
+            print(f"[ROUTE] cinta azul tras el arranque: resto {r:+.0f} mm, no se aplica "
+                  f"(votos {', '.join(f'{d:+.0f}' for d in self._post_blue_d)})", flush=True)
+            return
+        ax, ay = self.axis
+        self.loc.shift(r * ax, r * ay)
+        self.shift = float(self.shift) + r
+        self._sync_map(dm, ack, self.loc.pose())
+        print(f"[ROUTE] cinta azul tras el arranque: pose {r:+.0f} mm (δ pose total {self.shift:+.0f}; "
+              f"votos {', '.join(f'{d:+.0f}' for d in self._post_blue_d)})", flush=True)
+
+    def _blue_delta(self, dm, pose, rng=None):
+        """(δ, n pixeles, centroide, pose usada) de la cinta azul en este frame, o None."""
         hsv = getattr(self, "bev_hsv", None)
         if hsv is None:
-            return
+            return None
         lo_hsv, hi_hsv = getattr(C, "ROUTE_FIX_BLUE_HSV", ((95, 70, 60), (115, 255, 200)))
         mk = cv2.inRange(hsv, np.array(lo_hsv, np.uint8), np.array(hi_hsv, np.uint8))
         mk = cv2.morphologyEx(mk, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         nc, lab, st, _ = cv2.connectedComponentsWithStats(mk)
         if nc < 2:
-            return
+            return None
         k = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
         if st[k, cv2.CC_STAT_AREA] < int(getattr(C, "ROUTE_FIX_BLUE_MIN_AREA", 150)):
-            return
+            return None
         ys, xs = np.nonzero(lab == k)
         fwd = (float(C.ROBOT_BEV_Y) - ys) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0)) + self._fwd_add(dm)
         lat = (xs - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
         sel = fwd <= float(getattr(C, "ROUTE_FIX_BLUE_FAR_MM", 700.0))
         if int(sel.sum()) < int(getattr(C, "ROUTE_FIX_BLUE_MIN_PIX", 80)):
-            return
+            return None
         fwd, lat = fwd[sel], lat[sel]
         lag = int(getattr(C, "ROUTE_FIX_LINE_LAG_FRAMES", 0))
         if len(self._pre_poses) > lag:
@@ -1691,6 +1740,8 @@ class RouteMode:
         span = PARK_W_MAX - PARK_W_MIN
         mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
         lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
+        if rng is not None:
+            lo, hi = -float(rng), float(rng)   # tras el arranque: el resto es chico, alrededor de 0
         best = None
         for (sx, sy), (ex, ey) in blue_segments():
             u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
@@ -1703,10 +1754,8 @@ class RouteMode:
             if lo <= d <= hi and (best is None or dist < best[1]):
                 best = (d, dist)
         if best is None:
-            return
-        self._line_vote_append(best[0], "azul")
-        print(f"[FIXVOTE] azul d={best[0]:+.0f} n={len(fwd)} c=({c[0]:.0f},{c[1]:.0f}) "
-              f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+            return None
+        return best[0], len(fwd), c, pose
 
     def _pix_line_vote(self, dm, pose, pix) -> None:
         """Voto del cajón buscando UNA LÍNEA con la dirección de la cinta, no la mediana de todo lo naranja.
