@@ -128,6 +128,9 @@ class Localizer:
         self.n_reanchor = 0
         self._rej = {}
         self._prev_z = {}
+        self.anchor_segs = None          # señales reales (DigitalMap.confirmed) como referencia del ToF lateral
+        self._anchor_key = None
+        self.n_sign = 0
 
     def set_map(self, seats: dict, unknown, parking: str | None, park_w: float | None = None) -> None:
         """Señales conocidas + asientos sin resolver (tapan el rayo igual)."""
@@ -140,6 +143,61 @@ class Localizer:
         self.segs = build_segments(allseats, parking, self.park_w)
         if C.LOC_RACE_TOF_OCCLUSION_MM is not None:
             self.occlusion_segs = build_segments(seats, parking, self.park_w)
+
+    def set_anchors(self, seats: dict) -> None:
+        """Señales confirmadas por el mapa (sin fantasmas de fila) que el ToF lateral puede usar de referencia."""
+        key = tuple(sorted(seats))
+        if key == self._anchor_key:
+            return
+        self._anchor_key = key
+        if not seats:
+            self.anchor_segs = None
+            return
+        a, b, k = build_segments(seats, None)
+        m = k == _SIGN
+        self.anchor_segs = (a[m], b[m], k[m])
+
+    def _sign_cone(self, state, mount) -> float:
+        """Distancia a la cara de señal más cercana dentro del cono del ToF (el VL53 devuelve lo más cercano)."""
+        x, y, h = state
+        right, fwd, angle = mount
+        origin = (x + fwd * math.sin(h) + right * math.cos(h), y + fwd * math.cos(h) - right * math.sin(h))
+        half = float(getattr(C, "LOC_TOF_SIGN_HALF_DEG", 7.0))   # ROI 8 del firmware: cono ~14° total (twin/params.py)
+        ang = h + math.radians(angle) + np.radians(np.linspace(-half, half, 11))
+        dirs = np.column_stack((np.sin(ang), np.cos(ang)))
+        d, _k, _c = raycast(np.broadcast_to(origin, dirs.shape), dirs, self.anchor_segs)
+        return float(np.min(d))
+
+    def _sign_update(self, key, mount, z, zs, ack) -> None:
+        """Corrección EKF con el eco de una señal conocida (orillas162: 369 ecos cortos con señal en el cono,
+        residuo mediano 11 mm; donde la pose decía 267 mm al bloque el ToF lo tenía a 30)."""
+        H = np.zeros(3)
+        for j, eps in ((0, 2.0), (1, 2.0), (2, math.radians(0.5))):
+            s2 = self.x.copy()
+            s2[j] += eps
+            z2 = self._sign_cone(s2, mount)
+            if not math.isfinite(z2):
+                return
+            H[j] = (z2 - zs) / eps
+        sig = float(getattr(C, "LOC_TOF_SIGN_SIGMA_MM", 15.0)) + 0.02 * z
+        nu = z - zs
+        S = float(H @ self.P @ H + sig * sig)
+        if nu * nu / S > 9.0:
+            self.n_rej += 1
+            return
+        K = self.P @ H / S
+        dx = K * nu
+        self.x = self.x + dx
+        self.P = (np.eye(3) - np.outer(K, H)) @ self.P
+        self.n_used += 1
+        self.n_sign += 1
+        self.last[key] = (round(z), round(zs))
+        log_mm = getattr(C, "LOC_LOG_UPD_MM", None)
+        if log_mm is not None and math.hypot(dx[0], dx[1]) >= float(log_mm):
+            print(f"[LOCUPD] {key} z={z:.0f} esp={zs:.0f} nu={nu:+.0f} sup=bloque "
+                  f"dx={dx[0]:+.0f} dy={dx[1]:+.0f} dh={math.degrees(dx[2]):+.2f} "
+                  f"pose=({self.x[0]:.0f},{self.x[1]:.0f},{math.degrees(self.x[2]):.0f}) tc={_ack_num(ack, 'tc')}",
+                  flush=True)
 
     def shift(self, dx: float, dy: float) -> None:
         """Cambio de marco (arranque ciego resuelto): la pose se corre (dx, dy)."""
@@ -367,9 +425,27 @@ class Localizer:
             if kind == "tof" and (z < 20.0 or z > float(getattr(C, "LOC_TOF_MAX_MM", {}).get(key, 240.0))):
                 continue
             mount = C.SENSOR_MOUNTS[mname]
+            smax = getattr(C, "LOC_TOF_SIGN_MAX_MM", None)
+            if (smax is not None and kind == "tof" and key in ("tL", "tR") and self.anchor_segs is not None
+                    and not shifts and z <= float(smax)):
+                zs = self._sign_cone(self.x, mount)
+                if zs <= float(smax):
+                    # Pared/isla/madera sin señales: con la señal en el rayo central la "pared" era la señal misma
+                    # (zs == zw) y el eco se tiraba justo en las pasadas pegadas (orillas164 S/X2: z=29 esperado 105).
+                    a_, b_, k_ = self.segs
+                    m_ = k_ != _SIGN
+                    zw = self._expect(self.x, mount, kind, (a_[m_], b_[m_], k_[m_]))[0]
+                    # La señal queda delante de la pared en el cono y la lectura se parece más a ella que a la pared.
+                    if zs < zw - 60.0 and abs(z - zs) < abs(z - zw):
+                        self._sign_update(key, mount, z, zs, ack)
+                        continue
             zh, surf, cosi = self._expect(self.x, mount, kind)
             if surf not in (_WALL, _ISLAND) or not math.isfinite(zh):
                 continue
+            if (kind == "tof" and getattr(C, "LOC_TOF_EXPECT_GATE", False)
+                    and zh > float(getattr(C, "LOC_TOF_EXPECT_MAX_MM", {}).get(
+                        key, getattr(C, "LOC_TOF_MAX_MM", {}).get(key, 240.0)))):
+                continue   # la superficie queda más lejos que el rango útil: la lectura puede venir saturada
             if shifts:
                 stable = True
                 for dx, dy in shifts:
@@ -382,7 +458,7 @@ class Localizer:
                         break
                 if not stable:
                     continue
-            if kind == "tof" and cosi < math.cos(math.radians(35.0)):
+            if kind == "tof" and cosi < math.cos(math.radians(float(getattr(C, "LOC_TOF_MAX_INC_DEG", 35.0)))):
                 continue
             # Jacobiano numérico
             H = np.zeros(3)
@@ -398,6 +474,9 @@ class Localizer:
             if not ok:
                 continue
             sig = (8.0 + 0.01 * z) if kind == "us" else (6.0 + 0.01 * z)
+            far0 = getattr(C, "LOC_TOF_FAR_FROM_MM", None)
+            if kind == "tof" and far0 is not None and z > float(far0):
+                sig += float(getattr(C, "LOC_TOF_FAR_SIGMA_PER_MM", 0.0)) * (z - float(far0))
             R = sig * sig
             nu = z - zh
             S = float(H @ self.P @ H + R)
@@ -429,7 +508,15 @@ class Localizer:
                       f"pose=({self.x[0]:.0f},{self.x[1]:.0f})", flush=True)
             self._rej.pop(key, None)
             K = self.P @ H / S
-            self.x = self.x + K * nu
+            dx = K * nu
+            self.x = self.x + dx
             self.P = (np.eye(3) - np.outer(K, H)) @ self.P
             self.n_used += 1
             self.last[key] = (round(z), round(zh))
+            log_mm = getattr(C, "LOC_LOG_UPD_MM", None)
+            if log_mm is not None and math.hypot(dx[0], dx[1]) >= float(log_mm):
+                print(f"[LOCUPD] {key} z={z:.0f} esp={zh:.0f} nu={nu:+.0f} "
+                      f"sup={'pared' if surf == _WALL else 'isla'} cos={cosi:.2f} "
+                      f"dx={dx[0]:+.0f} dy={dx[1]:+.0f} dh={math.degrees(dx[2]):+.2f} "
+                      f"pose=({self.x[0]:.0f},{self.x[1]:.0f},{math.degrees(self.x[2]):.0f}) tc={_ack_num(ack, 'tc')}",
+                      flush=True)

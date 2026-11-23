@@ -701,6 +701,8 @@ class RouteMode:
         # Parado en el cajón la pose del arranque es exacta: un ToF a 84 mm corría y +16 mm (gemelo s26).
         quieto = (getattr(C, "ROUTE_LOC_HOLD_AT_START", None) and not self.fixed
                   and _ack_num(ack or "", "px") == 0 and _ack_num(ack or "", "py") == 0)
+        if getattr(C, "LOC_TOF_SIGN_MAX_MM", None) is not None:
+            self.loc.set_anchors(dm.confirmed)   # solo lo que el mapa confirmó: los fantasmas de fila no anclan
         self.loc.update(ack, correct=(est in ("S", "C", "R") and ack_est in ("S", "C", "R") and not quieto),
                         shifts=shifts)
         pose = self.loc.pose() if self.loc.odom is not None else (dm.pose_xy[0], dm.pose_xy[1], float(dm.heading))
