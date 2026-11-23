@@ -7874,9 +7874,9 @@ void loop() {
         }
         // Zigzag (2026-11-23, orillas174): los tramos de 2-4 cm con pausa no enderezaban (35 -> 20 grados en
         // 8 tramos, 5-8 cm libres sin usar). Ahora cada tramo sigue hasta theta ~0 (BNO) o hasta que el ToF
-        // de enfrente/atrás llegue al límite; la huella de la pose (~10 mm de error) ya no lo corta.
-        bool zz = (i == 6);
-        if (!fin && i >= 1 && cerca && (!zz || cercaTof)) { fin = true; why = "HOLGURA"; }
+        // de enfrente/atrás llegue al límite. La huella de la pose SÍ corta (gemelo s4: con el carro a 37°
+        // el ToF frontal no ve la madera -lee 200 hasta 8 mm- y el tramo largo la chocaba).
+        if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
         {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
             // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
             static float th0 = 0.0f, od0 = 0.0f; static unsigned long t0 = 0, sinAvance = 0; static int leg0 = -1;
