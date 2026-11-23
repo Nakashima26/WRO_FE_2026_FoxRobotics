@@ -1456,6 +1456,8 @@ ROUTE_PROV_RULES = False
 ROUTE_HALF_SEEN = True
 ROUTE_CONF_GHOST_TC = 4   # vuelta 1 (tc < esto): la señal confirmada también esquiva la otra fila de su columna si la mediana lateral cae a <= ROUTE_CONF_GHOST_TOL_MM; None = apagado
 ROUTE_CONF_GHOST_TOL_MM = 150.0
+ROUTE_GHOST_HOLD_TC = 4   # desde qué esquina rige ROUTE_GHOST_HOLD_MM (vuelta 1 los fantasmas sí deben entrar cerca)
+ROUTE_GHOST_HOLD_MM = None   # fantasma de fila a menos de esto (mm) del carro: no entra ni sale del plan (run 180: N/X1R parpadeando a media recta); None = apagado
 ROUTE_COL_GHOST_TC = None   # tc < esto: detecciones que ninguna señal conocida explica (>250 mm de todas) dejan como obstáculo los asientos de su fila a <= ROUTE_COL_GHOST_TOL_MM (orillas110/111: E/X1 tomado como E/T1); None = apagado
 ROUTE_COL_GHOST_TOL_MM = 320.0
 ROUTE_COL_GHOST_FAR_MM = 250.0   # una detección es "sin explicar" si queda a más de esto de toda señal conocida de su color
@@ -1610,6 +1612,7 @@ ROUTE_UPLOAD_DIFF_MM = None
 ROUTE_UPLOAD_STEP_MM = 40.0   # separación de puntos de la ruta subida al ESP (más = menos líneas RTP = subida más corta)
 ROUTE_UPLOAD_LINES = 1        # líneas de subida de ruta por frame (>1 necesita baud > 115200 en Pi y ESP)
 ROUTE_UPLOAD_HORIZON_MM = 700.0
+ROUTE_UPLOAD_RAMP_PWM = None  # tope de subida: baja a lo más esto por cuadro desde el último mando (sin frenón); None = de golpe
 # Holguras y pesos del planificador (ring_route.RouteParams); los valores son los de por defecto.
 ROUTE_HARD_CLEAR_MM = 55.0   # holgura mínima de la huella (duro), RouteParams.hard_clear_mm
 ROUTE_SOFT_CLEAR_MM = 140.0  # debajo de esto se castiga, RouteParams.soft_clear_mm

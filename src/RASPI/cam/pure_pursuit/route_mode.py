@@ -291,6 +291,7 @@ class RouteMode:
         self.empty: set = set()
         self.view_count: dict = {}
         self.rv = None
+        self._rv_last = None
         self.visible: set = set()
         self.stopped = 0
         self.last_print = None
@@ -656,6 +657,7 @@ class RouteMode:
             self._l23_entry_cap = replan_frames is None or (
                 self._plan_frame is not None and self._step_frame - self._plan_frame <= replan_frames
             )
+        self._rv_last = 255 if self.rv is None else self.rv   # último mando (ROUTE_UPLOAD_RAMP_PWM)
         self.rv = None
         ack_est = _ack_est(ack)
         if (C.LOC_MANEUVER_VIEW and armed and self.fixed and self.loc is not None
@@ -897,6 +899,22 @@ class RouteMode:
                     tw = (sec, other)
                     if other != seat and tw not in conf and tw not in plan_seats:
                         ghosts2[tw] = col
+            hold_mm = getattr(C, "ROUTE_GHOST_HOLD_MM", None)
+            if (hold_mm is not None and self.fixed
+                    and float(getattr(self, "_tc_max", 0) or 0) >= float(getattr(C, "ROUTE_GHOST_HOLD_TC", 4))):
+                # Cerca del carro el fantasma de fila no entra ni sale (run 180: N/X1R parpadeó 4 veces en 0.4 s
+                # a media recta; cada replan subía la ruta con tope de PWM y el volantazo frenando corrió la pose).
+                prev = getattr(self, "_ghost2_prev", {})
+                def _near(k):
+                    sx, sy = section_to_world(k[0], *SEATS[k[1]])
+                    return math.hypot(sx - pose[0], sy - pose[1]) < float(hold_mm)
+                g = {k: c for k, c in ghosts2.items() if k in prev or not _near(k)}
+                g.update({k: c for k, c in prev.items()
+                          if k not in g and k not in conf and k not in plan_seats and _near(k)})
+                if set(g) != set(ghosts2):
+                    print(f"[ROUTE] fantasma retenido cerca: " + " ".join(f"{s}/{o}" for s, o in sorted(set(g) ^ set(ghosts2))), flush=True)
+                ghosts2 = g
+            self._ghost2_prev = dict(ghosts2)
             if ghosts2:
                 self._ghost_fb = ({k: v for k, v in plan_seats.items()}, list(plan_unknown))   # sin fantasmas, por si el plan sale infactible
                 half_seats |= set(ghosts2)
@@ -1074,6 +1092,10 @@ class RouteMode:
                 # vuelta 1 tras la primera esquina (1<=tc<4): tope propio mientras sube la ruta. En tc=0 no:
                 # la ruta recién ubicado el cajón cambia de lado (n2 s33 chocó Green E/T1 a 160). U/parking igual.
                 cap = 0 if self.hold else (int(_l1u) if _l1u is not None and _tc is not None and 1 <= _tc < 4 else _pwm("ROUTE_UPLOAD_PWM"))
+                ramp = getattr(C, "ROUTE_UPLOAD_RAMP_PWM", None)
+                if ramp is not None and cap > 0 and self._rv_last is not None:
+                    # Sin frenón: el tope baja desde el último mando a ramp PWM por cuadro (el ESP sigue la ruta vieja).
+                    cap = max(cap, int(self._rv_last) - int(ramp))
                 self.rv = cap if self.rv is None else min(self.rv, cap)
         else:
             self.hold = False

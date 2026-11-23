@@ -1840,6 +1840,7 @@ PARK_AJ int          PARK_PL_ATASCO_MS           = 250;
 PARK_AJ float        PARK_PL_ATASCO_MM           = 4.0f;
 PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
 PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
+PARK_AJ float        PARK_PL_CIEGO_MM            = 40.0f;   // zigzag adelante sin lectura del ToF frontal: tope del tramo (2026-11-23)
 PARK_AJ int          PARK_PL_AVANCE_MS           = 900;     // tramo sin cambio de ángulo (BNO) ni encoder por esto -> se corta (2026-11-23)
 PARK_AJ int          PARK_PL_PAUSA_MS            = 220;     // parado con el volante girando antes de cada tramo nuevo
 PARK_AJ float        PARK_PL_Z1_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
@@ -1933,6 +1934,10 @@ const float         PARK_PUNTA_KPOS            = 1.4f;   // grados de rumbo obje
 // baja a ~30 a los 4 s; hacia la pared (-5°) mínimo ~27 (la zona CERCA sigue mandando).
 const float         PARK_PUNTA_KI_POS          = 0.4f;
 const float         PARK_PUNTA_I_MAX_DEG       = 6.0f;   // tope de lo que aporta el integral (±grados)
+PARK_AJ float        PARK_PARED_LOOK_MM         = 300.0f; // fase 0: punto adelante del seguidor de pared (0 = KPOS lineal de antes)
+PARK_AJ float        PARK_PARED_KD              = 0.5f;   // D del rumbo en fase 0 con LOOK (antes PARK_PUNTA_KD_RATE 0.3)
+PARK_AJ float        PARK_LEJOS_CM              = 5.0f;   // fase 0: más de esto por encima de PARK_PARED_CM = lejos (2026-11-23)
+PARK_AJ float        PARK_ANG_MAX_LEJOS_DEG     = 20.0f;  // tope de rumbo hacia la pared estando lejos
 const float         PARK_PUNTA_ANG_MAX_DEG     = 8.0f;   // tope del rumbo objetivo (15 -> 8: orillas953 llegó al 1er
                                                          // poste a +10.8° y el arco relativo entró chueco)
 const float         PARK_PUNTA_KP_ANG          = 2.0f;   // servo por grado de error de rumbo
@@ -3442,8 +3447,8 @@ void vigilarUturn(long distL, long distR, long distF) {
 
 // Servo "recto" hacia un heading (gyro PD) para ESTACIONANDO_PUNTA. Convención
 // del proyecto: servo > centro = izquierda; anguloGyro/gyroRate > 0 = CCW (izq).
-void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG) {
-  float out = kpAng * (rumboRef - anguloGyro) - PARK_PUNTA_KD_RATE * gyroRate;
+void servoRumboPunta(float rumboRef, float kpAng = PARK_PUNTA_KP_ANG, float kd = PARK_PUNTA_KD_RATE) {
+  float out = kpAng * (rumboRef - anguloGyro) - kd * gyroRate;
   out = constrain(out, (float)-PARK_PUNTA_SERVO_MAX, (float)PARK_PUNTA_SERVO_MAX);
   escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
 }
@@ -7305,17 +7310,33 @@ void loop() {
           // Wall follower ParkinHalf (mismas GANANCIAS que ESTACIONANDO_PUNTA
           // fase 0, pero con el objetivo del paralelo: PARK_PARED_CM).
           float distPared = PARK_PARED_CM + parkErrPared;   // == extRaw
-          float rumboRaw  = PARK_PUNTA_KPOS * parkErrPared
-                            + PARK_PUNTA_KI_POS * puntaIntPared
-                            + PARK_PUNTA_KPOS_CERCA * min(0.0f, distPared - PARK_PUNTA_CERCA_CM);
+          float rumboRaw;
+          if (PARK_PARED_LOOK_MM > 0.0f) {
+            // 2026-11-23 (orillas179 oscilaba a 34-39 cm): punto adelante en vez de KPOS lineal. El rumbo
+            // objetivo apunta a la línea de PARK_PARED_CM a LOOK_MM adelante: entra con ángulo si va
+            // lejos y llega a la línea ya derecho. El ToF lateral mide oblicuo con el carro inclinado
+            // (lectura/cos): se corrige con el rumbo contra la pared para no realimentar la oscilación.
+            float angRel = fabsf(anguloGyro - parkRumboParalelo());
+            if (angRel > 45.0f) angRel = 45.0f;
+            float errCm = (parkErrPared != 0.0f) ? distPared * cosf(angRel * 0.0174533f) - PARK_PARED_CM : 0.0f;
+            rumboRaw = atan2f(errCm * 10.0f, PARK_PARED_LOOK_MM) * 57.2958f + PARK_PUNTA_KI_POS * puntaIntPared;
+          } else {
+            rumboRaw  = PARK_PUNTA_KPOS * parkErrPared
+                        + PARK_PUNTA_KI_POS * puntaIntPared
+                        + PARK_PUNTA_KPOS_CERCA * min(0.0f, distPared - PARK_PUNTA_CERCA_CM);
+          }
           float limAlejar = (distPared < PARK_PUNTA_CERCA_CM) ? PARK_PUNTA_ANG_MAX_CERCA_DEG
                                                               : PARK_PUNTA_ANG_MAX_DEG;
           // El cap solo limita la autoridad de POSICIÓN; el rumbo paralelo
           // medido va por fuera. Antes todo el objetivo vivía dentro del cap:
           // con un sesgo de 17° (1056) el máximo permitido (+12°) seguía
           // apuntando 5° HACIA la pared y el carro no podía salir nunca.
+          // Lejos de la pared (orillas179: salió de la U a 37-40 cm con objetivo 23 y el tope de 8° hacia la
+          // pared a ~0.6 m/s no alcanzó a acercarlo antes de la ventana del cajón): más ángulo hacia la pared
+          // y sin el tramo rápido hasta quedar a PARK_LEJOS_CM del objetivo.
+          const bool lejosPared = parkErrPared > PARK_LEJOS_CM;
           float rumboObj  = parkRumboParalelo()
-                            + haciaPared * constrain(rumboRaw, -limAlejar, PARK_PUNTA_ANG_MAX_DEG);
+                            + haciaPared * constrain(rumboRaw, -limAlejar, lejosPared ? PARK_ANG_MAX_LEJOS_DEG : PARK_PUNTA_ANG_MAX_DEG);
           motorAdelante();
           // Sin U: mientras no este sobre la linea de escaneo sigue la ruta de la Pi (que rodea la senal de la entrada); despues, la pared.
           float ruedaScan;
@@ -7324,7 +7345,7 @@ void loop() {
             parkSinULinea = !rutaSteer(ruedaScan) ? true : false;
           else if (parkDirecto) parkSinULinea = true;
           if (parkDirecto && !parkSinULinea) escribirServo(rutaServo(ruedaScan));
-          else servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR);
+          else servoRumboPunta(rumboObj, PARK_PUNTA_KP_ANG_SEGUIR, PARK_PARED_LOOK_MM > 0.0f ? PARK_PARED_KD : PARK_PUNTA_KD_RATE);
           // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
           // El PWM no cae en seco: tau de tracción ~0.17 s. 2 tau bastan para llegar
           // a la velocidad lenta; el piso PARK_SCAN_RAPIDO_MM sigue de tope.
@@ -7336,7 +7357,7 @@ void loop() {
             float d = vLen * T + (vRap - vLen) * tau * (1.0f - expf(-T / tau)) + 50.0f;
             if (d < dFreno) dFreno = d;
           }
-          bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0
+          bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0 && !lejosPared
                         && !isnan(rutaPka)
                         && (parkDirecto ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno);
           int pwmEsc = PARK_PUNTA_PWM;
@@ -7888,9 +7909,16 @@ void loop() {
         }
         // Zigzag (2026-11-23, orillas174): los tramos de 2-4 cm con pausa no enderezaban (35 -> 20 grados en
         // 8 tramos, 5-8 cm libres sin usar). Ahora cada tramo sigue hasta theta ~0 (BNO) o hasta que el ToF
-        // de enfrente/atrás llegue al límite. La huella de la pose SÍ corta (gemelo s4: con el carro a 37°
-        // el ToF frontal no ve la madera -lee 200 hasta 8 mm- y el tramo largo la chocaba).
-        if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
+        // de enfrente/atrás llegue al límite; la huella de la pose no lo corta (orillas177: con el corte por
+        // pose cada tramo paraba a 1-2 cm con 15 cm libres atrás y quedó a 68°; sin él, 176 y 178 paralelos).
+        // Adelante a ciegas (ToF frontal sin lectura) el tramo se limita a PARK_PL_CIEGO_MM: gemelo s4 a 37°,
+        // el ToF frontal no veía la madera (200 hasta 8 mm) y el tramo largo la chocaba.
+        bool zz = (i == 6);
+        // Reversa del zigzag: solo el ToF trasero (orillas177: la pose cortaba con 15 cm libres). Adelante sí
+        // corta la pose: la esquina de la nariz toca la madera antes de que el ToF frontal la vea (gemelo
+        // 34/48 sin este corte vs 44/48).
+        if (!fin && i >= 1 && cerca && (!zz || cercaTof || parkPlanDir > 0)) { fin = true; why = "HOLGURA"; }
+        if (!fin && zz && parkPlanDir > 0 && (distF_filtrada <= 0 || distF_filtrada >= 100) && mm >= PARK_PL_CIEGO_MM) { fin = true; why = "CIEGO"; }
         {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
             // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
             static float th0 = 0.0f, od0 = 0.0f; static unsigned long t0 = 0, sinAvance = 0; static int leg0 = -1;
