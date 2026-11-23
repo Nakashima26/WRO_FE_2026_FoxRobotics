@@ -1505,6 +1505,8 @@ ROUTE_PROFILE_BRAKE_FLOOR_PWM = 60
 ROUTE_FIX_STEP_MM = None
 # Arranque forzado: δ del cajón = mediana de lo que dice la línea naranja (recta del BEV en la columna central) si hay ≥ ROUTE_FIX_LINE_MIN lecturas; None = solo sonar
 ROUTE_FIX_LINE = None
+# Contrasta el avance de la cinta con un par de pilares de rectas distintas.
+ROUTE_FIX_PILLAR_PAIR = False
 # 3 -> 1 (2026-11-11, orillas47): con 2 votos cayó a la media del sonar, +339 con la verdad en +170 (41/42 con
 # 3-4 votos: +170 y estacionó), y el ESP tomó el estacionamiento ya al lado de la madera. Gemelo (8 semillas,
 # [PRUEBA]): los votos de la línea quedan a ~+40 de la verdad y entre sí a ±15; la media del sonar a 100-300.

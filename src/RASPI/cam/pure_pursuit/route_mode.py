@@ -783,6 +783,8 @@ class RouteMode:
                     self._pend_n += 1
                     delta = None
             if delta is not None:
+                if C.ROUTE_FIX_PILLAR_PAIR and len(self._line_d) >= 3:
+                    delta = self._pillar_pair_delta(dm, delta)
                 pose = self._apply_fix(dm, ack, delta, forced)
                 conf, empty = self._resolved(dm)
         if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
@@ -1681,6 +1683,44 @@ class RouteMode:
             print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
                   f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
+
+    def _pillar_pair_delta(self, dm, delta: float) -> float:
+        """Contrasta el ajuste de la cinta con un par inequívoco de asientos."""
+        ax, ay = self.axis
+        step = 1 if dm.direction == "CW" else -1
+        next_sec = SECTIONS_CW[(SECTIONS_CW.index(dm.parking) + step) % len(SECTIONS_CW)]
+        seats = {
+            (sec, seat): section_to_world(sec, h, w)
+            for sec in (dm.parking, next_sec)
+            for seat, (h, w) in SEATS.items()
+            if sec != dm.parking or seat not in PARKING_FORBIDDEN_SEATS
+        }
+        votes: dict[tuple[str, str], list[float]] = {}
+        for feet, pose, heading, *_ in dm._deferred or ():
+            frame_votes: dict[tuple[str, str], list[float]] = {}
+            for x, y, _, _, _ in feet_world(feet, pose, heading):
+                for key, (sx, sy) in seats.items():
+                    dx, dy = sx - x, sy - y
+                    shift = dx * ax + dy * ay
+                    if (abs(dx * ay - dy * ax) <= SIGN_MM
+                            and PARK_W_MIN <= self.fix.w0_guess + shift <= PARK_W_MAX):
+                        frame_votes.setdefault(key, []).append(shift)
+            for key, values in frame_votes.items():
+                # Dos pies en competencia no informan de este asiento.
+                if len(values) == 1:
+                    votes.setdefault(key, []).extend(values)
+
+        shifts = {sec: [] for sec in (dm.parking, next_sec)}
+        for (sec, _), values in votes.items():
+            if len(values) >= 5:
+                shifts[sec].append(float(np.median(values)))
+        pairs = [(a + b) / 2 for a in shifts[dm.parking] for b in shifts[next_sec]
+                 if abs(a - b) <= SIGN_MM]
+        # La cinta conserva la prioridad para discrepancias pequeñas o pares ambiguos.
+        if len(pairs) == 1 and abs(pairs[0] - delta) >= 3 * SIGN_MM:
+            print(f"[ROUTE] avance por par de pilares: {delta:+.0f} -> {pairs[0]:+.0f} mm", flush=True)
+            return pairs[0]
+        return delta
 
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""
