@@ -297,6 +297,12 @@ const unsigned long RUTA_SUB_HOLD_MS = 150;
 int rutaSubCap = -1;                       // tope vigente (-1 = ninguno)
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
+// 2026-11-23 (orillas155): la Pi corrige rtx/rty/rth a saltos de 45-116 mm y el volante daba un golpe (vuelta 3,
+// recta 3: +116 mm a lo largo -> giro adelantado hacia la isla, ToF der 7 cm). Solo el pure pursuit usa una copia
+// de la transformación que sigue a la de la Pi con constante RUTA_TF_SUAVE_S; un salto mayor a RUTA_TF_SALTO_MM
+// (ubicación del cajón al arrancar) se aplica entero. Estacionamiento, along y demás siguen con la exacta. 0 = apagado.
+const float RUTA_TF_SUAVE_S     = 0.0f;    // 0.25 probado en orillas156: no quitó la oscilación (los saltos vienen del localizador)
+const float RUTA_TF_SALTO_MM    = 250.0f;
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
 const int RUTA_PWM_MAX = 0;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
@@ -4157,8 +4163,38 @@ bool rutaSteer(float &ruedaDeg) {
   if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
   float x, y;
   rutaPoseTapete(x, y);
-  const float x0 = x, y0 = y;
   float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
+  if (RUTA_TF_SUAVE_S > 0.0f) {
+    // Transformación suavizada (ver RUTA_TF_SUAVE_S): misma fórmula que rutaPoseTapete.
+    static bool tfIni = false;
+    static float sTx = 0.0f, sTy = 0.0f, sTh = 0.0f;
+    static unsigned long tfMs = 0;
+    unsigned long nowMs = millis();
+    float dth = rutaTh - sTh;
+    while (dth > 180.0f) dth -= 360.0f;
+    while (dth < -180.0f) dth += 360.0f;
+    float sx, sy;
+    {
+      float th = sTh * DEG_TO_RAD;
+      sx = sTx + poseXf * sinf(th) - poseYf * cosf(th);
+      sy = sTy + poseXf * cosf(th) + poseYf * sinf(th);
+    }
+    if (!tfIni || hypotf(x - sx, y - sy) > RUTA_TF_SALTO_MM) {
+      sTx = rutaTx; sTy = rutaTy; sTh = rutaTh; tfIni = true;
+    } else {
+      float dt = (nowMs - tfMs) / 1000.0f;
+      float a = (dt > 0.0f && dt < 0.5f) ? 1.0f - expf(-dt / RUTA_TF_SUAVE_S) : 1.0f;
+      sTx += (rutaTx - sTx) * a;
+      sTy += (rutaTy - sTy) * a;
+      sTh += dth * a;
+    }
+    tfMs = nowMs;
+    float th = sTh * DEG_TO_RAD;
+    x = sTx + poseXf * sinf(th) - poseYf * cosf(th);
+    y = sTy + poseXf * cosf(th) + poseYf * sinf(th);
+    h = (sTh - anguloTotal) * DEG_TO_RAD;
+  }
+  const float x0 = x, y0 = y;
   if (RUTA_LAG_S > 0.0f) {
     // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
     // carro estará cuando el comando haga efecto (velocidad y giro filtrados, arco a rumbo medio).
