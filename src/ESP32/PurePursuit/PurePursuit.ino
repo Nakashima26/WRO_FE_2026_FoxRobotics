@@ -1858,6 +1858,14 @@ PARK_AJ float        PARK_PL_CENTRAR_OFF_CM      = 0.0f;   // dF - dB objetivo
 PARK_AJ float        PARK_PL_CENTRAR_TH_MAX      = 12.0f;  // mas chueco, el tramo recto se mete de lado: no centra
 PARK_AJ int          PARK_PL_CENTRAR_MS          = 2000;
 PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
+// Piso en movimiento (2026-11-23, 4532): fuera del arranque el lazo bajaba la salida a 36-55 (por debajo de lo que
+// sostiene la friccion cinetica), el carro se volvia a pegar y el anti-atasco lo despegaba: tramos a 25-40 mm/s,
+// fase 40 en 10 s. Medido en las corridas reales (11.5 V): volante a tope 80-99 PWM -> ~75 mm/s sin pegarse,
+// recto 60-79 -> ~100 mm/s. Se interpola por el giro del volante y solo actua debajo del 90 % de la velocidad
+// pedida (vMando del PWM del tramo): no pasa de lo que el plan ya pide. 0 = apagado.
+PARK_AJ int          PARK_PL_PISO_RECTO          = 72;
+PARK_AJ int          PARK_PL_PISO_LOCK           = 88;
+PARK_AJ float        PARK_PL_PISO_VMAX           = 80.0f;   // mm/s: arriba de esto el piso no empuja (gemelo: a 120 mm/s el avance del zigzag tocaba la madera)
 const int            PARK_PL_LEGS                = 8;
 const bool           PARK_PL_ZZ                  = true;   // tras el tramo 2 solo zigzag (sin recta ni tramos 4-6)
 bool                 parkSinULinea               = false;
@@ -2253,7 +2261,7 @@ int lazoVelocidad(int pwm) {
 
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
-int parkArranquePwm = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
+int parkArranquePwm = 0, parkPisoMov = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
 
 // ── Anti-atasco general por encoder (2026-11-23) ───────────────────────────
 // orillas169 (park, volante a tope): reversa pedida y el encoder quieto ~0.9 s
@@ -2332,7 +2340,12 @@ void setMotorTope(int velocidad, int tope) {
   {
     int pedido = velocidad;
     velocidad = lazoVelocidad(velocidad);
-    if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+    if (parkArranquePwm > 0 && velocidad > 0) {
+      float v = fabsf(encVelMmS);
+      // el piso de movimiento solo mientras no llegue a la velocidad que el plan ya pide: no acelera de mas
+      if (v < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+      else if (v < min(0.9f * vMando((float)pedido, motorDirActual), PARK_PL_PISO_VMAX)) velocidad = max(velocidad, parkPisoMov);
+    }
     velocidad = antiAtasco(pedido, velocidad);
   }
 #endif
@@ -7781,9 +7794,9 @@ void loop() {
           parkFaseMs = millis(); parkOdom0 = odomMm;
         }
         if (parkCentrarDir > 0) motorAdelante(); else motorReversa();
-        parkArranquePwm = PARK_PL_ARRANQUE_PWM;
+        parkArranquePwm = PARK_PL_ARRANQUE_PWM; parkPisoMov = PARK_PL_PISO_RECTO;
         setMotor(parkCentrarDir > 0 ? PARK_PL_PWM_FWD : PARK_PL_PWM_REV);
-        parkArranquePwm = 0;
+        parkArranquePwm = 0; parkPisoMov = 0;
         float v = fabsf(encVelMmS);
         bool fin = parkRecorridoMm() >= parkCentrarMm - v * 0.10f;   // ~0.1 s de coast
         if (parkCentrarDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * v * 0.1f) fin = true;
@@ -7893,8 +7906,13 @@ void loop() {
           pwm = min(pwm + extra, 255);
         }
         parkArranquePwm = PARK_PL_ARRANQUE_PWM;
+        {
+          int s = parkPlanRectaOn ? centroServo : parkPlanSrv;
+          float f = constrain(fabsf((float)(s - centroServo)) / max(1.0f, fabsf((float)(servoHaciaPared - centroServo))), 0.0f, 1.0f);
+          parkPisoMov = (int)lroundf(PARK_PL_PISO_RECTO + f * (PARK_PL_PISO_LOCK - PARK_PL_PISO_RECTO));
+        }
         setMotor(pwm);
-        parkArranquePwm = 0;
+        parkArranquePwm = 0; parkPisoMov = 0;
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
         parkPlanPose(pw, ph);
