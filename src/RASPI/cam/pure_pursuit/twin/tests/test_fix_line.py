@@ -50,6 +50,22 @@ def test_line_vote_rejects_recta_against_pix(monkeypatch):
     assert rm._line_d == [-100.0]
 
 
+def test_pix_inicio_skips_when_tof_informative(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", True, raising=False)
+    rm = _rm({"seen": True, "src": "col", "near_y": 200.0, "band": 300,
+              "line": (1.0, 0.0, 0.0, 100.0), "_pix_all": np.zeros((30, 2))})
+    rm.fixed = False
+    class _Fix:
+        n_inform = 5
+        def estimate(self, _):
+            return -100.0, 0.8
+        logp = np.array([0.0])
+        deltas = np.array([-100.0])
+    rm.fix = _Fix()
+    rm._line_ok = lambda d: True
+    assert rm._pix_inicio_vote_ok(-600.0) is False
+
+
 def test_line_vote_ignores_unseen_or_dead_reckoned():
     pose = (0.0, 0.0, 0.0)
     line = (1.0, 0.5, 0.0, 155.0)

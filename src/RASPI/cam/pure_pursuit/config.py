@@ -1395,6 +1395,10 @@ ROUTE_FIX_PIX_AT_INICIO = False
 LINE_PIX_INICIO_HALF_COLS = 200   # banda lateral más ancha en INICIO (cinta vista por columna lejana)
 ROUTE_FIX_PIX_INICIO_MIN_Y = 150.0   # px BEV: no votar pix_line en INICIO si la cinta queda pegada al robot
 ROUTE_FIX_PIX_INICIO_MAX_BAND = 750  # masas enormes de naranja en el BEV (p. ej. fila entera) no son cinta de esquina
+# True: pix_line en INICIO solo si ToF aún no informa (s34); con sonar ya informativo (s3/s5) no pisa el pico.
+ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK = False
+ROUTE_FIX_PIX_INICIO_TOF_MASS_MAX = 0.2   # con masa ≥ esto y lecturas, ToF cuenta como decidido
+ROUTE_FIX_PIX_DELTA_BIAS_MM = 0.0   # suma al δ de votos pix/pix_line (sesgo BEV calibrada, ver bev_calib PnP)
 # Rechaza votos recta que discrepan de pix o de una serie recta con drift; prefiere pix al decidir.
 ROUTE_FIX_LINE_VOTE_REJECT = False
 ROUTE_FIX_LINE_VOTE_K_MAD = 2.5

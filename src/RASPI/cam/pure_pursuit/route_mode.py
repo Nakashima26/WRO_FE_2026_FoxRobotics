@@ -270,7 +270,8 @@ def pix_line_delta(pix, pose, axis, direction, fwd_add: float = 0.0):
     c, dmed, dh, sp, tot = best
     if sp < min_span:
         return None
-    return dmed, f"n={c}/{tot} largo={sp:.0f} dh={dh:+.0f}"
+    bias = float(getattr(C, "ROUTE_FIX_PIX_DELTA_BIAS_MM", 0.0))
+    return dmed + bias, f"n={c}/{tot} largo={sp:.0f} dh={dh:+.0f}"
 
 
 class RouteMode:
@@ -1479,6 +1480,17 @@ class RouteMode:
         rv = [self._line_d[i] for i, s in enumerate(srcs) if s == "recta"]
         return float(max(rv) - min(rv)) if len(rv) >= 2 else 0.0
 
+    def _pix_inicio_vote_ok(self, d: float) -> bool:
+        """Con ToF ya informativo en el cajón, no añadir pix_line (parkc3 s3/s5); s34 sigue con masa baja."""
+        if self.fix is None:
+            return True
+        ni = int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3))
+        if getattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", False) and self.fix.n_inform > 0:
+            return False
+        if self.fix.n_inform >= ni and not self._line_ok(d):
+            return False
+        return True
+
     def _line_vote_append(self, d: float, src: str) -> bool:
         d = float(d)
         if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
@@ -1539,8 +1551,15 @@ class RouteMode:
                 if pall is None or len(np.asarray(pall)) == 0:
                     pall = o.get("_pix")
                 if pall is not None and len(pall) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
-                    self._pix_line_vote(dm, pose, np.asarray(pall, float))
-                    return
+                    res = pix_line_delta(np.asarray(pall, float), pose, np.array(self.axis), dm.direction,
+                                         self._fwd_add(dm))
+                    if res is not None and self._pix_inicio_vote_ok(res[0]):
+                        self._pix_line_vote(dm, pose, np.asarray(pall, float))
+                        return
+                    weak = (getattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", False)
+                            and self.fix is not None and self.fix.n_inform > 0)
+                    if not weak:
+                        return
         vx, vy, x0, y0 = o["line"]
         if abs(vx) < 1e-6:
             return
@@ -1655,9 +1674,7 @@ class RouteMode:
         if res is None:
             return
         d, info = res
-        if (getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and not self.fixed and self.fix is not None
-                and self.fix.n_inform >= int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3))
-                and not self._line_ok(d)):
+        if getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and not self.fixed and not self._pix_inicio_vote_ok(d):
             return
         self._line_vote_append(d, "linea")
         print(f"[FIXVOTE] linea d={d:+.0f} {info} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
@@ -1732,7 +1749,8 @@ class RouteMode:
         d = (ns - P @ n) / (n @ a)
         d = d[(d >= lo) & (d <= hi)]
         if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
-            self._line_vote_append(float(np.median(d)), "pix")
+            d_pix = float(np.median(d)) + float(getattr(C, "ROUTE_FIX_PIX_DELTA_BIAS_MM", 0.0))
+            self._line_vote_append(d_pix, "pix")
             print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
                   f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
