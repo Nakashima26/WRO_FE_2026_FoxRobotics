@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import copy
 import math
 import os
 import time
@@ -539,9 +540,7 @@ class Sim:
         tof = ToF(self.params.tof, rng)
         w_max = max_wheel_deg(self.params.steering)
 
-        # Montaje de la foto, no el PnP del .npz (ese daba ~25° con un lente inventado).
-        cam = CameraModel(self.params.camera, self.params)
-        bev, bev_err = cam.build_bev()
+        cam, bev, bev_err, calib_report = CameraModel.twin_camera_and_bev(self.params)
         self.camera_report = {
             "tilt_deg": cam.params.tilt_deg,
             "hfov_deg": cam.params.hfov_deg,
@@ -549,12 +548,15 @@ class Sim:
             "forward_from_rear_axle_mm": cam.params.forward_from_rear_axle_mm,
             "bev_fit_err_px": bev_err,
         }
+        if calib_report is not None:
+            self.camera_report["from_calib"] = True
         print(
             f"[CAM] tilt={cam.params.tilt_deg:.1f}° "
             f"hfov={cam.params.hfov_deg:.1f}° "
             f"h={cam.params.height_mm:.0f}mm "
             f"adelante={cam.params.forward_from_rear_axle_mm:.0f}mm "
             f"bev_err={bev_err:.2f}px "
+            f"bev={'npz' if calib_report else 'sintética'} "
             f"lente={'equidistante' if cam.params.equidistant else 'pinhole'} "
             f"bev={C.BEV_W}x{C.BEV_H} robot_y={C.ROBOT_BEV_Y} "
             f"vel x{self.speed_scale:.2f}"
@@ -621,6 +623,12 @@ class Sim:
             if self.battery is not None:
                 row["pack_voltage_v"] = self.battery.terminal_voltage_v
                 row["pack_current_a"] = self.battery.pack_current_a
+            if C.LOC_MANEUVER_VIEW:
+                route = getattr(runtime, "_rmode", None)
+                loc = route.maneuver_loc if route is not None else None
+                if loc is not None:
+                    tx, ty, th = loc.transform()
+                    row.update(view_tx=tx, view_ty=ty, view_th=th, view_fused=loc.n_used)
             row.update(extra)
             trace.append(row)
 
@@ -777,6 +785,20 @@ class Sim:
                 freeze_at_tc = int(getattr(C, "DIGITAL_MAP_FREEZE_AT_TC", 0) or 0)
                 map_frozen = bool(getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False))
                 link.open()
+                if bno is not None and self.fw_overrides.get("GYRO_ZUPT") == "true":
+                    # Preludio inmóvil de 3 s. Conserva el reloj, la fase de las
+                    # cámaras y la secuencia de ruido del banco durante la carrera.
+                    stationary_bno = copy.deepcopy(bno)
+                    dt = 0.01
+                    stationary_bno.read(veh.heading_deg, 0.0)
+                    deltas = []
+                    for sample in range(1, 301):
+                        rate = stationary_bno.read(veh.heading_deg, sample / 100)
+                        # El adapter SIL integra con el mismo dt entero del firmware.
+                        dt_ms = int(sample / 100 * 1000) - int((sample - 1) / 100 * 1000)
+                        deltas.append(rate * dt_ms / 1000 if abs(rate) >= 1.0 else 0.0)
+                    bias = fw.calibrate_stationary_yaw(deltas, dt)
+                    print(f"[ZUPT] stationary_s=3.00 bias_dps={bias:.4f}", flush=True)
                 fw.push_serial2("READY")
                 fw.setup()
 

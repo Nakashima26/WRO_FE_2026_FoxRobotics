@@ -51,6 +51,40 @@ def test_render_sign_bev_projection():
     assert err < 30.0
 
 
+def test_twin_pi_bev_floor_consistency(monkeypatch):
+    """Piso en el gemelo → píxel → cam_to_bev del npz; debe coincidir con mm→BEV."""
+    root = Path(__file__).resolve().parents[2]
+    npz, lens = root / "bev_calib.npz", root / "lens_calib.npz"
+    if not npz.exists() or not lens.exists():
+        pytest.skip("bev_calib.npz o lens_calib.npz ausentes")
+    monkeypatch.setenv("TWIN_LENS_CALIB", str(lens))
+    monkeypatch.setenv("TWIN_CAMERA_FROM_CALIB", str(npz))
+    twin = TwinParams()
+    cam, bev, _, _ = CameraModel.twin_camera_and_bev(twin)
+    errs: list[float] = []
+    wb = twin.vehicle.wheelbase_mm
+    behind = wb - cam.params.forward_from_rear_axle_mm
+    for fwd in range(100, 1001, 40):
+        for lat in range(-200, 201, 40):
+            delta = np.array(
+                [lat - cam.params.right_mm, fwd + behind, -cam.params.height_mm],
+                dtype=np.float64,
+            )
+            pt_cam = delta @ cam._robot_to_cam.T
+            if pt_cam[2] < 8.0:
+                continue
+            uv = cam._project(pt_cam.reshape(1, 3))[0]
+            hit = bev.cam_to_bev(float(uv[0]), float(uv[1]))
+            if hit is None:
+                continue
+            exp = __import__("pure_pursuit.bev", fromlist=["BEVTransformer"]).BEVTransformer._real_mm_to_bev_px(
+                np.array([[lat, fwd]], dtype=np.float32)
+            )[0]
+            errs.append(math.hypot(hit[0] - exp[0], hit[1] - exp[1]) * C.MM_PER_PX)
+    assert errs, "ningún punto de piso en rango"
+    assert max(errs) < 3.0, f"max err {max(errs):.2f} mm"
+
+
 def test_from_calib_npz_old_four_points():
     npz = Path(__file__).resolve().parents[2] / "bev_calib.npz"
     if not npz.exists():

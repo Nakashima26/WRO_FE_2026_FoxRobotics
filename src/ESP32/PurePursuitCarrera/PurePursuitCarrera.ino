@@ -279,6 +279,7 @@ volatile int uartErrTipo[8] = {0};                 // por tipo: [3] FIFO_OVF, [4
 int lineasV2 = 0, lineasRT = 0, lineasOtras = 0;
 int lineasMalas = 0;                                // lc= : líneas con checksum malo (descartadas)    // lv/lr/lo : líneas recibidas por tipo
 float rutaPaso    = 20.0f;   // mm entre puntos
+float rutaPasoB   = 20.0f;   // paso de la carga en curso (se copia en RTE con los puntos)
 int   rutaI       = -1;      // índice del punto más cercano (-1 = buscar en toda)
 bool  piRuta      = false;   // rt=1
 bool  piSteerPi   = false;   // ps=1: mientras sube la ruta, girar con obs de la Pi (ruta nueva) en vez de la ruta vieja
@@ -301,6 +302,12 @@ const unsigned long RUTA_SUB_HOLD_MS = 150;
 int rutaSubCap = -1;                       // tope vigente (-1 = ninguno)
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
+// 2026-11-23 (orillas155): la Pi corrige rtx/rty/rth a saltos de 45-116 mm y el volante daba un golpe (vuelta 3,
+// recta 3: +116 mm a lo largo -> giro adelantado hacia la isla, ToF der 7 cm). Solo el pure pursuit usa una copia
+// de la transformación que sigue a la de la Pi con constante RUTA_TF_SUAVE_S; un salto mayor a RUTA_TF_SALTO_MM
+// (ubicación del cajón al arrancar) se aplica entero. Estacionamiento, along y demás siguen con la exacta. 0 = apagado.
+const float RUTA_TF_SUAVE_S     = 0.0f;    // 0.25 probado en orillas156: no quitó la oscilación (los saltos vienen del localizador)
+const float RUTA_TF_SALTO_MM    = 250.0f;
 // 0 = como antes; >0 = en modo RUTA, si la Pi manda rv, el motor usa rv con tope RUTA_PWM_MAX en vez de min(rv, velocidadMotor) y MOTOR_MAX.
 const int RUTA_PWM_MAX = 255;
 bool  piPasado     = false;   // pasado=1: la Pi confirma que un obstáculo quedó
@@ -1124,7 +1131,7 @@ const float         PARK_ANG_MAX_DEG          = 7.0f;
 const float         PARK_KP_ANG               = 2.2f;
 const float         PARK_KD_RATE              = 0.30f;
 const int           PARK_SERVO_MAX            = 35;
-const int           PARK_PWM                  = 87;
+const int           PARK_PWM                  = 105;  // 87 -> 105 2026-11-21 (twin: -0.3 s, 0 fallas nuevas en 576)
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
@@ -1278,7 +1285,7 @@ const unsigned long PARK_WIGGLE_EXT_MS        = 0;      // reversa con volante h
 // mm del encoder, así no depende de la batería ni de la velocidad. Los *_MS de
 // arriba quedan para el carro sin encoder y como timeouts de seguridad.
 const bool          PARK_POR_ENCODER          = true;
-PARK_AJ float         PARK_POSTE2_MM            = 135.0f;  // 80 -> 135: el ToF ve el poste 55 mm antes que el sonar, el eje trasero para donde siempre (w0 ~285)  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
+PARK_AJ float         PARK_POSTE2_MM            = 110.0f;  // 135 -> 110 2026-11-21 con PARK_PWM 105  // 80 -> 135: el ToF ve el poste 55 mm antes que el sonar, el eje trasero para donde siempre (w0 ~285)  // avance tras el poste 2; 2026-10-04: 133 -> 40 (el coast de la fase 2 mete ~20 mm más); 2026-10-16: 40 -> 60 (motor físico)
 const float         PARK_POSTE2_MM_POR_CM     = 0.0f;   // mm de más por cm de llegada sobre PARK_POSTE2_REF_CM
 PARK_AJ float         PARK_RECTO_MAX_MM         = 110.0f; // tope de la fase 14; 2026-10-22: 100 -> 110. Con hueco 264 y U a 200, 100 deja la semilla 18 a 8 mm de la madera de enfrente; 120 choca en los dos postes; 110 termina 24/24
 const float         PARK_REV_EXT_HOLD_MM      = 0.0f;
@@ -1672,6 +1679,7 @@ PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
+PARK_AJ bool         PARK_UTURN_CONTINUA        = true;   // arco con solape y barrido predictivo
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 // Modo RUTA: si al terminar de alejarse quedan menos de esto (mm, eje trasero a la pared del fondo) no se endereza: la U arranca ya
 // (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
@@ -1745,6 +1753,7 @@ PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se dec
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
+PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
 PARK_AJ long         PARK_SINU_FORZAR_MM         = 450;   // sin estar en linea, el escaneo arranca a esto de la madera de adelante (pka)
 PARK_AJ long         PARK_SINU_B2_OFF_MM         = 80;    // eje trasero a esto antes de pka al empezar a ver la madera de adelante
@@ -1831,17 +1840,18 @@ PARK_AJ int          PARK_PL_ATASCO_MS           = 250;
 PARK_AJ float        PARK_PL_ATASCO_MM           = 4.0f;
 PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
 PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
+PARK_AJ int          PARK_PL_AVANCE_MS           = 900;     // tramo sin cambio de ángulo (BNO) ni encoder por esto -> se corta (2026-11-23)
 PARK_AJ int          PARK_PL_PAUSA_MS            = 220;     // parado con el volante girando antes de cada tramo nuevo
-PARK_AJ float        PARK_PL_Z1_MM               = 21.0f;   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
-PARK_AJ float        PARK_PL_Z2_MM               = 42.0f;
-PARK_AJ float        PARK_PL_Z3_MM               = 42.0f;
-PARK_AJ float        PARK_PL_Z4_MM               = 21.0f;
+PARK_AJ float        PARK_PL_Z1_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
+PARK_AJ float        PARK_PL_Z2_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
+PARK_AJ float        PARK_PL_Z3_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
+PARK_AJ float        PARK_PL_Z4_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
 PARK_AJ float        PARK_PL_TOK                 = 6.0f;    // theta final aceptable (grados)
-PARK_AJ float        PARK_PL_DF_MM               = 30.0f;   // zigzag: largo de cada tramo adelante
-PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
+PARK_AJ float        PARK_PL_DF_MM               = 150.0f;  // 30 -> 150 2026-11-23 (ver Z1)   // zigzag: largo de cada tramo adelante
+PARK_AJ float        PARK_PL_DR_MM               = 150.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
-PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
+PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
 PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
 const int            PARK_PL_LEGS                = 8;
@@ -2236,6 +2246,71 @@ int lazoVelocidad(int pwm) {
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
 int parkArranquePwm = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
+
+// ── Anti-atasco general por encoder (2026-11-23) ───────────────────────────
+// orillas169 (park, volante a tope): reversa pedida y el encoder quieto ~0.9 s
+// (pw 38 -> 125, 3 mm) hasta que la fricción estática cede y el carro sale de
+// tirón (70 mm en 0.36 s, 2.5x la velocidad pedida) porque el integrador del lazo
+// y el +PWM del plan siguen arriba. Igual en el arranque del cajón con la pila baja.
+// Para TODO estado: si se pide movimiento (PWM de mando arriba del arranque) y
+// |v| < ATASCO_V_MMS por más de ATASCO_T0_MS, se suma un empujón que sube a
+// ATASCO_RAMPA PWM/s (hasta ATASCO_MAX). En cuanto el encoder ve movimiento el
+// empujón se quita y el integrador se vacía (sin tirón). Si en ATASCO_RENDIR_MS
+// no se movió (contra una pared), se rinde hasta que cambie el sentido o se mueva.
+// ACK ax= (empujón actual). 0 en ATASCO_RAMPA = apagado.
+const float         ATASCO_V_MMS     = 25.0f;
+const unsigned long ATASCO_T0_MS     = 120;
+// Golpe: con las llantas giradas la rampa tarda 0.3-0.5 s en despegar (orillas176); de entrada se suma
+// ATASCO_GOLPE de un jalón y de ahí sigue la rampa.
+const int           ATASCO_GOLPE     = 120;
+const float         ATASCO_RAMPA     = 400.0f;   // PWM/s
+const int           ATASCO_MAX       = 180;
+const unsigned long ATASCO_RENDIR_MS = 2000;
+// Tras despegar (orillas176, zigzag con volante a tope): soltar el empujón de golpe y vaciar el integrador
+// dejaba el PWM en ~50-70, el carro avanzaba 1 cm y se volvía a pegar (stick-slip: 78->246->47->246...).
+// Ahora queda un piso = ATASCO_PISO_FRAC x el PWM con el que despegó, mientras siga el mismo sentido;
+// baja a ATASCO_PISO_BAJA PWM/s solo si va más rápido que ATASCO_PISO_V_MMS.
+const float         ATASCO_PISO_FRAC   = 0.7f;
+const float         ATASCO_PISO_BAJA   = 300.0f;  // PWM/s
+const float         ATASCO_PISO_V_MMS  = 150.0f;
+int atascoExtra = 0;
+int atascoPiso = 0;
+
+// Golpe y piso solo en la salida del cajón (INICIO): en el estacionamiento hacían maniobras bruscas
+// (2026-11-23); ahí queda la rampa sola y se suelta en cuanto se mueve (como en orillas176).
+int antiAtasco(int pedido, int salida) {
+  const bool salidaCajon = (estado == INICIO);
+  static unsigned long t0 = 0; static int dirPrev = 0; static bool rendido = false;
+  unsigned long now = millis();
+  int dir = motorDirActual;
+  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  static unsigned long tPiso = 0; static float pisoF = 0.0f;
+  if (ATASCO_RAMPA <= 0.0f || salida <= 0 || dir == 0 || (float)pedido <= p0 || dir != dirPrev) {
+    t0 = now; dirPrev = dir; rendido = false; atascoExtra = 0; pisoF = 0.0f; atascoPiso = 0;
+    return salida;
+  }
+  if (fabsf(encVelMmS) >= ATASCO_V_MMS) {
+    if (atascoExtra > 0 && salidaCajon) {   // acaba de despegar: piso con lo que costó (no vuelve a pegarse)
+      pisoF = max(pisoF, ATASCO_PISO_FRAC * (float)min(salida + atascoExtra, 255));
+      if (lazoI > 0.0f) lazoI = 0.0f;   // el piso hace el trabajo; sin integrador acumulado que dé tirón
+    } else if (atascoExtra > 0) {
+      lazoI = 0.0f;   // fuera de INICIO: se suelta todo al despegar (sin tirón)
+    }
+    if (!salidaCajon) pisoF = 0.0f;
+    float dtp = (tPiso == 0) ? 0.0f : (now - tPiso) / 1000.0f; tPiso = now;
+    if (fabsf(encVelMmS) > ATASCO_PISO_V_MMS) pisoF = max(0.0f, pisoF - ATASCO_PISO_BAJA * dtp);
+    t0 = now; rendido = false; atascoExtra = 0; atascoPiso = (int)pisoF;
+    return max(salida, atascoPiso);
+  }
+  tPiso = now;
+  salida = max(salida, (int)pisoF);
+  unsigned long t = now - t0;
+  if (rendido || t >= ATASCO_T0_MS + ATASCO_RENDIR_MS) { rendido = true; atascoExtra = 0; return salida; }
+  if (t < (salidaCajon ? ATASCO_T0_MS : 150UL)) { atascoExtra = 0; return salida; }
+  atascoExtra = min(salidaCajon ? ATASCO_MAX : 150, (salidaCajon ? ATASCO_GOLPE : 0) + (int)((t - ATASCO_T0_MS) * ATASCO_RAMPA / 1000.0f));
+  return min(salida + atascoExtra, 255);
+}
+
 void setMotorTope(int velocidad, int tope) {
   velocidad = constrain(velocidad, 0, tope);
   if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
@@ -2246,8 +2321,12 @@ void setMotorTope(int velocidad, int tope) {
     }
   }
 #if MOTOR_LAZO_VEL && FOX_ENCODER
-  velocidad = lazoVelocidad(velocidad);
-  if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+  {
+    int pedido = velocidad;
+    velocidad = lazoVelocidad(velocidad);
+    if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+    velocidad = antiAtasco(pedido, velocidad);
+  }
 #endif
 #ifdef FOX_BANCO_SIN_MOTOR
   velocidad = 0;   // banco: probar el UART sin mover el motor
@@ -2970,7 +3049,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
   SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
-  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM);
+  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
@@ -3182,6 +3261,7 @@ void iniciarEstacionamiento(bool retorno) {
 // abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
 float alongSalidaMm();
 extern float parkDetAlong, parkDetHPose, parkDetHSon, parkDetTh; float parkHPoseMm();
+int rutaServo(float ruedaDeg);
 float rutaErrCarrilDeg(); float rutaExtTapeteCm(); void rutaPoseTapete(float &x, float &y); int seccionTapete(float x, float y);
 // Final sin U: dispara el escaneo del cajon (ver PARK_SINU_*). Corre en SIGUIENDO/CRUCERO desde que el carro sale de la
 // esquina 12 (la cuenta de giros llega ~0.5 s tarde y el cajon puede estar ya a la entrada de la recta).
@@ -3197,6 +3277,42 @@ void parkRevCaeAU(const char *why) {
   anguloGyro = rutaErrCarrilDeg() + parkRevGyroOff;
   iniciarEstacionamiento(true);
   parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();
+}
+
+// Estima si aún cabe una alineación hacia la banda de escaneo. La ruta de la
+// Pi sigue al mando y el escaneo sólo empieza al comprobar la pose real.
+static bool parkCabeAlineacion(float along, float lateralCm, float rumboDeg) {
+  // Usa el menor agarre lateral medido para una maniobra con ambos sentidos.
+  const float velocidad = max(0.0f, encVelMmS);
+  const float radio = max(RUTA_BATALLA_MM / tanf(53.0f * DEG_TO_RAD),
+                          velocidad * velocidad / 2400.0f);
+  const float rumbo = (direccionIzquierda ? rumboDeg : -rumboDeg) * DEG_TO_RAD;
+  if (fabsf(rumbo) >= PI / 2.0f) return false;
+
+  // El retardo sólo aplica si el servo todavía debe iniciar la corrección.
+  const float retardo = rumboDeg * gyroRate < 0.0f ? 0.0f : velocidad * 0.10f;
+  const float disponible = rutaPka - PARK_SINU_B2_OFF_MM - PARK_SINU_CORRE_MM - along;
+  const float lateral0 = (lateralCm - PARK_PARED_CM) * 10.0f + retardo * sinf(rumbo);
+  const float banda = PARK_SINU_TOL_CM * 10.0f;
+
+  // Si basta un arco, sólo tiene que llegar al borde angular del escaneo.
+  const float toleranciaRad = PARK_SINU_ANG_DEG * DEG_TO_RAD;
+  const float rumboOk = min(fabsf(rumbo), toleranciaRad);
+  const float lateralOk = lateral0 + copysignf(radio * (cosf(rumboOk) - cosf(rumbo)), rumbo);
+  const float avanceOk = retardo * cosf(rumbo) + radio * (sinf(fabsf(rumbo)) - sinf(rumboOk));
+  if (fabsf(lateralOk) <= banda && avanceOk < disponible) return true;
+
+  // Si aún falta corrección lateral, primero endereza y luego cambia de línea.
+  const float yArco = copysignf(radio * (1.0f - cosf(rumbo)), rumbo);
+  const float lateral = lateral0 + yArco;
+  // Dos arcos opuestos, más recta si el desplazamiento requiere más de 45°.
+  const float delta = max(0.0f, fabsf(lateral) - banda);
+  const float angMax = PI / 4.0f;
+  const float deltaArcos = min(delta, 2.0f * radio * (1.0f - cosf(angMax)));
+  const float ang = acosf(constrain(1.0f - deltaArcos / (2.0f * radio), -1.0f, 1.0f));
+  const float avance = retardo * cosf(rumbo) + radio * fabsf(sinf(rumbo))
+                     + 2.0f * radio * sinf(ang) + (delta - deltaArcos) / tanf(angMax);
+  return avance < disponible;
 }
 
 void vigilarSinU() {
@@ -3228,11 +3344,14 @@ void vigilarSinU() {
   float along = alongSalidaMm();
   bool pre = (turnsCompleted == TURNS_PER_RACE - 1) && seccionTapete(x, y) == rutaSecSalida && along >= (float)PARK_SINU_PRE_MM;
   if (!(parkUturnPendiente || pre)) return;
+  const float extCm = rutaExtTapeteCm();
+  const float rumboDeg = rutaErrCarrilDeg();
   if (!isnan(rutaPka) && rutaPka < (float)PARK_SINU_PKA_MIN_MM && parkSinUDec == 0) {
     // Cajon al inicio de la recta: directo solo si la ruta ya lo trae pegado a su pared (la senal de la entrada se paso por afuera).
     if (along < (float)PARK_SINU_DEC_MM) return;
-    bool lin = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_DEC_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_DEC_ANG_DEG
+    bool lin = fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_DEC_TOL_CM && fabsf(rumboDeg) <= PARK_SINU_DEC_ANG_DEG
                && (rutaPka - PARK_SINU_B2_OFF_MM - along) >= (float)PARK_SINU_CORRE_MM;   // y queda recta suficiente para armar el sonar antes de la madera
+    if (!lin && PARK_SINU_GEOMETRIA && parkCabeAlineacion(along, extCm, rumboDeg)) return;
     parkSinUDec = lin ? 1 : 2;
     parkRevDir = !lin && PARK_REV_DIR;
     Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
@@ -3241,8 +3360,9 @@ void vigilarSinU() {
   float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
   if (along < alongIni || along < (float)PARK_SINU_MIN_MM) return;
   // Ya sobre la linea de escaneo (la ruta del final la lleva a ~PARK_PARED_CM de la pared): si no, espera hasta PARK_SINU_FORZAR_MM antes de la madera.
-  bool enLinea = fabsf(rutaExtTapeteCm() - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rutaErrCarrilDeg()) <= PARK_SINU_ANG_DEG;
+  bool enLinea = fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rumboDeg) <= PARK_SINU_ANG_DEG;
   if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
+  if (!enLinea && PARK_SINU_GEOMETRIA && !isnan(rutaPka) && parkCabeAlineacion(along, extCm, rumboDeg)) return;
   if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) { parkSinUDec = 2; Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return; }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
   if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
@@ -3603,6 +3723,68 @@ void leerBNO() {
 }
 #endif
 
+// Una sola estimación estacionaria en el cajón, antes de READY.
+const bool GYRO_ZUPT = true;
+#if FOX_ENCODER
+static float gyroBiasDps = 0;
+
+struct GyroZuptFit {
+  double sumT = 0, sumY = 0, sumTT = 0, sumTY = 0, sumYY = 0;
+  float duration = 0, yaw = 0, lastSample = 0;
+  // La primera observación fija el origen (t=0, yaw relativo=0).
+  int n = 1;
+
+  void sample(float delta, float dt) {
+    duration += dt;
+    yaw += delta;
+    // Espacia las observaciones para reducir la correlación entre paquetes RVC.
+    if (duration - lastSample < 0.099f) return;
+    double t = duration, y = yaw;
+    sumT += t;
+    sumY += y;
+    sumTT += t * t;
+    sumTY += t * y;
+    sumYY += y * y;
+    lastSample = duration;
+    ++n;
+  }
+
+  float estimate() const {
+    if (lastSample < 2.99f || n < 25) return 0;
+    double tt = sumTT - sumT * sumT / n;
+    double ty = sumTY - sumT * sumY / n;
+    double yy = sumYY - sumY * sumY / n;
+    double slope = ty / tt;
+    double residual = fmax(0.0, yy - slope * ty);
+    // Piso empírico para la deriva correlacionada del twin a 3 s.
+    double sigma = fmax(0.09, sqrt(residual / ((n - 2) * tt)));
+    return fabs(slope) > 3 * sigma && fabs(slope) <= 1.2 ? slope : 0;
+  }
+};
+
+#if defined(FOX_SIL)
+extern "C" float sil_gyro_zupt(const float *deltas, int n, float dt) {
+  if (!GYRO_ZUPT) return 0;
+  GyroZuptFit fit;
+  for (int i = 0; i < n; ++i) fit.sample(deltas[i], dt);
+  return gyroBiasDps = fit.estimate();
+}
+#elif FOX_BNO
+static GyroZuptFit gyroZuptFit;
+
+void muestrearGyroZupt(float delta, float dt) {
+  static int32_t lastCount = leerEncoder();
+  int32_t count = leerEncoder();
+  if (pwmActual != 0 || count != lastCount || dt > 0.15f) {
+    gyroZuptFit = GyroZuptFit{};
+  } else {
+    gyroZuptFit.sample(delta, dt);
+  }
+  lastCount = count;
+}
+#endif
+#endif
+
 void actualizarGyro() {
 #if FOX_BNO && !defined(FOX_SIL)
   // Consume lo acumulado por leerBNO() desde la última llamada (varios paquetes por loop).
@@ -3610,6 +3792,15 @@ void actualizarGyro() {
   float d = bnoDeltaAcc * BNO_YAW_SIGN;
   float dt = bnoDtAccMs / 1000.0f;
   bnoDeltaAcc = 0; bnoDtAccMs = 0;
+#if FOX_ENCODER
+  if (GYRO_ZUPT) {
+    if (!piReadyReceived) {
+      muestrearGyroZupt(d, dt);
+      return;
+    }
+    d -= gyroBiasDps * dt;
+  }
+#endif
   anguloGyro += d;
   anguloTotal += d;
   float gz = d / dt;
@@ -3621,6 +3812,9 @@ void actualizarGyro() {
 
   float gz = mpu.getGyroZ() / gyroScale;
   if (abs(gz) < 1.0) gz = 0;
+#if FOX_ENCODER && defined(FOX_SIL)
+  gz -= gyroBiasDps;
+#endif
   anguloGyro += gz * dt;
   anguloTotal += gz * dt;
   gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
@@ -3694,6 +3888,157 @@ float rutaExtTapeteCm() {
   return (1500.0f - perp) / 10.0f - 6.5f;
 }
 
+// Marco local de la esquina 13: s crece en el sentido original,
+// h mide desde la pared exterior hacia la isla. Ángulo positivo hacia la pared.
+static bool parkUPruebaArco(float rueda, float &tiempo) {
+  constexpr float dt = 0.02f;
+  constexpr float margen = 25.0f;
+  const float signo = parkParedEsIzquierda ? -1.0f : 1.0f;
+  float ang = signo * (anguloGyro - parkRumboGiro0) * DEG_TO_RAD;
+  float s = alongSalidaMm();
+  float h = parkHPoseMm();
+  float v = encVelMmS;
+  // La tasa IMU aproxima la curvatura efectiva antes de cambiar el mando.
+  float actual = atanf(signo * gyroRate * DEG_TO_RAD * RUTA_BATALLA_MM / v);
+  const float mando = rueda * DEG_TO_RAD;
+  bool cambio = false;
+  for (int i = 0; i < 100; ++i) {
+    for (float largo : {-21.8f, 154.2f}) {
+      for (float ancho : {-62.5f, 62.5f}) {
+        const float a = s + largo * cosf(ang) + ancho * sinf(ang);
+        const float b = h - largo * sinf(ang) + ancho * cosf(ang);
+        // Pared exterior y frontal, y límite con la recta siguiente.
+        if (b < margen || b > 1000.0f - margen || a > 1500.0f - margen
+            || a < -500.0f + margen) return false;
+        // Reserva las maderas y todo el carril posible de señales de la
+        // recta. La salida toma la banda exterior libre de señales.
+        if (fabsf(a - rutaPka + 145.0f) < 175.0f && b < 200.0f + margen) return false;
+        if (fabsf(a) <= 550.0f && b > 350.0f && b < 650.0f) return false;
+      }
+    }
+    if (!cambio && ang >= PI / 2.0f) {
+      if (s < 500.0f + 62.5f + margen) return false;
+      cambio = true;
+    }
+    if (ang >= 176.0f * DEG_TO_RAD) {
+      tiempo = i * dt + max(0.0f, s - rutaPka) / v;
+      return cambio && h >= 270.0f && h <= 360.0f && s > rutaPka + 150.0f;
+    }
+    const float objetivo = ang < PARK_UTURN_DEG * DEG_TO_RAD ? mando : 0.0f;
+    actual += (objetivo - actual) * (1.0f - expf(-dt / RUTA_LAG_S));
+    const float k = min(tanf(actual) / RUTA_BATALLA_MM, 2400.0f / (v * v));
+    const float dAng = v * dt * k;
+    s += v * dt * cosf(ang + dAng / 2.0f);
+    h -= v * dt * sinf(ang + dAng / 2.0f);
+    ang += dAng;
+  }
+  return false;
+}
+
+// Si queda poco fondo, simula también la caída de velocidad de la rampa.
+static bool parkUPruebaArcoLargo(float rueda, float &tiempo) {
+  constexpr float dt = 0.02f;
+  constexpr float margen = 25.0f;
+  const float signo = parkParedEsIzquierda ? -1.0f : 1.0f;
+  float ang = signo * (anguloGyro - parkRumboGiro0) * DEG_TO_RAD;
+  float s = alongSalidaMm();
+  float h = parkHPoseMm();
+  float v = encVelMmS;
+  // La tasa IMU aproxima la curvatura efectiva antes de cambiar el mando.
+  float actual = atanf(signo * gyroRate * DEG_TO_RAD * RUTA_BATALLA_MM / v);
+  const float mando = rueda * DEG_TO_RAD;
+  const int pwmMax = PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX;
+  const int pwmArco = PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM;
+  const float agarre = signo > 0.0f ? 2400.0f : 2750.0f;
+  const float alphaServo = 1.0f - expf(-dt / RUTA_LAG_S);
+  const float alphaMotor = 1.0f - expf(-dt / 0.28f);
+  bool cambio = false;
+  for (int i = 0; i < 100; ++i) {
+    const float ca = cosf(ang), sa = sinf(ang);
+    const float centroS = s + 66.2f * ca;
+    const float centroH = h - 66.2f * sa;
+    const float semiS = 88.0f * fabsf(ca) + 62.5f * fabsf(sa);
+    const float semiH = 88.0f * fabsf(sa) + 62.5f * fabsf(ca);
+    const float aMin = centroS - semiS, aMax = centroS + semiS;
+    const float bMin = centroH - semiH, bMax = centroH + semiH;
+    if (bMin < margen || bMax > 1000.0f - margen || aMax > 1500.0f - margen
+        || aMin < -500.0f + margen) return false;
+    if (aMax > rutaPka - 320.0f && aMin < rutaPka + 30.0f &&
+        bMin < 200.0f + margen) return false;
+    // Cada asiento posible ocupa 50 mm. En la recta del cajón las
+    // señales de h=400 mm se sortean en los asientos de h=600 mm.
+    for (float poste : {-500.0f, 0.0f, 500.0f}) {
+      if (aMax > poste - 50.0f && aMin < poste + 50.0f &&
+          bMax > 550.0f && bMin < 650.0f) return false;
+    }
+    if (!cambio && ang >= PI / 2.0f) {
+      if (aMin < 500.0f + margen) return false;
+      cambio = true;
+    }
+    if (ang >= 176.0f * DEG_TO_RAD) {
+      const float regreso = s - rutaPka;
+      tiempo = i * dt + max(0.0f, regreso) / v;
+      // Reserva margen tanto al entregar el arco como al llegar a la madera.
+      const float hMadera = h - regreso * 0.07f;
+      return cambio && h >= 285.0f && h <= 365.0f && regreso > 150.0f &&
+             hMadera >= 255.0f;
+    }
+    const float objetivo = ang < PARK_UTURN_DEG * DEG_TO_RAD ? mando : 0.0f;
+    actual += (objetivo - actual) * alphaServo;
+    const int pwm = min(pwmMax, rampaPWM((unsigned long)(i * dt * 1000.0f),
+                                        PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, pwmArco));
+    const float ruedaRel = actual / (RUEDA_TOPE_DEG * DEG_TO_RAD);
+    const float vObj = vMando(pwm, 1) * (1.0f - 0.12f * ruedaRel * ruedaRel);
+    v += (vObj - v) * alphaMotor;
+    const float k = constrain(tanf(actual) / RUTA_BATALLA_MM, -agarre / (v * v), agarre / (v * v));
+    const float dAng = v * dt * k;
+    s += v * dt * cosf(ang + dAng / 2.0f);
+    h -= v * dt * sinf(ang + dAng / 2.0f);
+    ang += dAng;
+  }
+  return false;
+}
+
+// Selecciona el arco más rápido desde la pose actual. Sin candidato válido,
+// el llamador conserva la preparación y vuelve a evaluar en el próximo ciclo.
+static bool parkUContinua(long ext) {
+  if (!PARK_UTURN_CONTINUA || !piRuta || !rutaTfOk || rutaSecSalida < 0
+      || !isfinite(rutaPka) || encVelMmS < 250.0f || (ext > 0 && ext < 20)) return false;
+  const float signo = parkParedEsIzquierda ? -1.0f : 1.0f;
+  const float along = alongSalidaMm();
+  // Tras pasar las dos maderas, reserva espacio para la nariz y la
+  // aproximación de estacionamiento antes de la línea de la otra esquina.
+  const float finEscaneo = rutaPka - PARK_CAJON_LARGO_MM - 154.2f - 100.0f;
+  const bool pocoFondo = parkFase == 27 && along > 890.0f
+                      && along - rutaPka > 780.0f && finEscaneo > -500.0f
+                      && signo * (anguloGyro - parkRumboGiro0) < -22.0f;
+  // La salida rodante y la salida con coast tienen estados de entrega distintos.
+  // Conserva la preparación original cuando el escaneo necesita asentamiento.
+  if (!PARK_UTURN_SIN_SETTLE || (direccionIzquierda && PARK_UTURN_CCW_SETTLE)) return false;
+  float mejorTiempo = INFINITY;
+  float mejorRueda = 0.0f;
+  for (float rueda = 20.0f; rueda <= (pocoFondo ? 47.0f : 38.0f); rueda += 1.0f) {
+    float tiempo;
+    bool cabe = pocoFondo ? parkUPruebaArcoLargo(rueda, tiempo) : parkUPruebaArco(rueda, tiempo);
+    // En el arco nominal, comprueba también la pose con la rampa real
+    // del motor. Una U más lenta puede cerrar más cerca de la madera.
+    float tiempoRampa;
+    if (cabe && !pocoFondo) cabe = parkUPruebaArcoLargo(rueda, tiempoRampa);
+    if (cabe && tiempo < mejorTiempo) {
+      mejorTiempo = tiempo;
+      mejorRueda = rueda;
+    }
+  }
+  if (mejorRueda == 0.0f) return false;
+  parkServoU = rutaServo(parkParedEsIzquierda ? mejorRueda : -mejorRueda);
+  parkFase = 24;
+  parkFaseMs = millis();
+  parkOdom0 = odomMm;
+  escribirServo(parkServoU);
+  Serial.print("PARK U continua rueda="); Serial.println(mejorRueda, 1);
+  return true;
+}
+
 // ── Geometria del cajon para el plan de entrada (fase 40) ───────────────────
 // Marco canonico: w = mm a lo largo de la marcha desde la cara interior de la madera de atras (hueco 264, madera 2 en
 // [264, 284]); h = mm desde la pared exterior (las maderas llegan a h = 200); theta = nariz hacia la isla (grados).
@@ -3727,6 +4072,80 @@ void parkPlanPose(float &w, float &h) {
   w -= PARK_PL_CONO * (parkDetHSon - 350.0f);
   h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
 }
+// Reancla la reversa con el centro de la segunda madera medido en el escaneo final.
+PARK_AJ bool PARK_PL_TOF_ANCLA = true;
+#if FOX_TOF
+static float parkPlHitMin, parkPlHitMax, parkPlSampleAlong;
+static unsigned long parkPlSampleMs;
+static int parkPlHits;
+static void parkPlMideMadera() {
+  if (parkFase == 0 && parkBaseN < PARK_BASE_N) {
+    parkPlHits = 0;
+    parkPlSampleMs = 0;
+    parkPlSampleAlong = NAN;
+  }
+  float th = parkThCarril();
+  if (!isfinite(th) || fabsf(th) > 15.0f || !isfinite(rutaPka)) return;
+  const int side = parkParedEsIzquierda ? 0 : 1;
+  const float along = alongSalidaMm() * (parkDirecto ? 1.0f : -1.0f);
+  const float range = tofMm[side];
+  if (range < 20.0f || range > 175.0f) return;
+#if !defined(FOX_SIL)
+  if (tofUltimoMs[side] == parkPlSampleMs) return;
+  parkPlSampleMs = tofUltimoMs[side];
+#endif
+  if (isfinite(parkPlSampleAlong) && fabsf(along - parkPlSampleAlong) < 3.0f) return;
+  const float yaw = th * DEG_TO_RAD;
+  const float hit = along + 110.6f * cosf(yaw) + (35.2f + range) * sinf(yaw);
+  const float prior = parkDirecto ? rutaPka - 10.0f : -rutaPka + 294.0f;
+  if (fabsf(hit - prior) > 105.0f) return;
+  if (!parkPlHits || hit > parkPlHitMax + 55.0f) {
+    parkPlHits = 0;
+    parkPlHitMin = parkPlHitMax = hit;
+  }
+  parkPlHitMin = min(parkPlHitMin, hit);
+  parkPlHitMax = max(parkPlHitMax, hit);
+  ++parkPlHits;
+  parkPlSampleAlong = along;
+}
+
+static void parkPlAnclaMadera() {
+  if (parkPlHits < 2 || parkPlHitMax - parkPlHitMin > 75.0f) return;
+  float w, h;
+  parkPlanPose(w, h);
+  const float along = alongSalidaMm() * (parkDirecto ? 1.0f : -1.0f);
+  const float measuredW = along - 0.5f * (parkPlHitMin + parkPlHitMax) + 274.0f;
+  const float delta = measuredW - w;
+  if (fabsf(delta) < 12.0f || fabsf(delta) > 95.0f) return;
+  parkDetAlong -= (parkDirecto ? 1.0f : -1.0f) * delta;
+  Serial.print("PARK ancla ToF lateral delta=");
+  Serial.println(delta, 1);
+}
+#endif
+
+// Termina el ajuste si la huella barrida hasta detenerse cabe en el cajon.
+PARK_AJ bool PARK_PL_CIERRE_HUELLA = true;
+PARK_AJ bool PARK_PL_ARCO_CALIBRADO = true;
+// Radio efectivo del contravolante en reversa, incluido el transitorio del servo.
+PARK_AJ float PARK_PL_RI_INT_MM = 104.0f;
+PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;
+PARK_AJ float PARK_PL_ARCO_W_MM = 48.0f;
+
+static bool parkPlHuellaDentro(float w, float h, float th, float avance) {
+  if (fabsf(th) > 12.0f) return false;
+  const float c = cosf(th * DEG_TO_RAD), s = sinf(th * DEG_TO_RAD);
+  // Envolvente del chasis. Deja margen para el error residual del ancla y el giro al soltar.
+  for (float a : {-34.0f, 155.0f}) {
+    for (float b : {-65.0f, 65.0f}) {
+      const float x = w + a * c - b * s, y = h + a * s + b * c;
+      if (min(x, x + avance * c) < 18.0f || max(x, x + avance * c) > 246.0f
+          || min(y, y + avance * s) < 15.0f || max(y, y + avance * s) > 185.0f)
+        return false;
+    }
+  }
+  return true;
+}
+
 static float parkPtSeg(float px, float py, float ax, float ay, float bx, float by) {
   float dx = bx - ax, dy = by - ay, t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
   t = constrain(t, 0.0f, 1.0f);
@@ -3757,10 +4176,10 @@ float parkPlanHolgura(float w, float h, float thDeg) {
 }
 
 // Angulo th1 del plan RECTA: arco EXT (radio RI) hasta th1, recta, arco INT de vuelta a 0; desde (w0,h0) llega a (wf,hf).
-float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float R) {
+float parkPlanT1Solve(float w0, float h0, float th0Deg, float wf, float hf, float rExt, float rInt) {
   float dW = w0 - wf, dH = h0 - hf, t0 = th0Deg * DEG_TO_RAD, th = 1.05f;
   for (int k = 0; k < 12; k++)
-    th = atan2f(dH - R * (cosf(t0) - cosf(th)) - R * (1.0f - cosf(th)), dW - R * (sinf(th) - sinf(t0)) - R * sinf(th));
+    th = atan2f(dH - rExt * (cosf(t0) - cosf(th)) - rInt * (1.0f - cosf(th)), dW - rExt * (sinf(th) - sinf(t0)) - rInt * sinf(th));
   return constrain(th * RAD_TO_DEG, 25.0f, 80.0f);
 }
 
@@ -3820,8 +4239,38 @@ bool rutaSteer(float &ruedaDeg) {
   if (!piRuta || rutaN < 10 || !rutaTfOk) return false;
   float x, y;
   rutaPoseTapete(x, y);
-  const float x0 = x, y0 = y;
   float h = (rutaTh - anguloTotal) * DEG_TO_RAD;
+  if (RUTA_TF_SUAVE_S > 0.0f) {
+    // Transformación suavizada (ver RUTA_TF_SUAVE_S): misma fórmula que rutaPoseTapete.
+    static bool tfIni = false;
+    static float sTx = 0.0f, sTy = 0.0f, sTh = 0.0f;
+    static unsigned long tfMs = 0;
+    unsigned long nowMs = millis();
+    float dth = rutaTh - sTh;
+    while (dth > 180.0f) dth -= 360.0f;
+    while (dth < -180.0f) dth += 360.0f;
+    float sx, sy;
+    {
+      float th = sTh * DEG_TO_RAD;
+      sx = sTx + poseXf * sinf(th) - poseYf * cosf(th);
+      sy = sTy + poseXf * cosf(th) + poseYf * sinf(th);
+    }
+    if (!tfIni || hypotf(x - sx, y - sy) > RUTA_TF_SALTO_MM) {
+      sTx = rutaTx; sTy = rutaTy; sTh = rutaTh; tfIni = true;
+    } else {
+      float dt = (nowMs - tfMs) / 1000.0f;
+      float a = (dt > 0.0f && dt < 0.5f) ? 1.0f - expf(-dt / RUTA_TF_SUAVE_S) : 1.0f;
+      sTx += (rutaTx - sTx) * a;
+      sTy += (rutaTy - sTy) * a;
+      sTh += dth * a;
+    }
+    tfMs = nowMs;
+    float th = sTh * DEG_TO_RAD;
+    x = sTx + poseXf * sinf(th) - poseYf * cosf(th);
+    y = sTy + poseXf * cosf(th) + poseYf * sinf(th);
+    h = (sTh - anguloTotal) * DEG_TO_RAD;
+  }
+  const float x0 = x, y0 = y;
   if (RUTA_LAG_S > 0.0f) {
     // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
     // carro estará cuando el comando haga efecto (velocidad y giro filtrados, arco a rumbo medio).
@@ -3883,8 +4332,8 @@ void parseRuta(const String &line) {
   if (line.startsWith("RTB,")) {
     int c1 = line.indexOf(',', 4);
     rutaCarga = constrain(line.substring(4, c1 < 0 ? line.length() : c1).toInt(), 0, RUTA_MAX);
-    if (c1 >= 0) rutaPaso = line.substring(c1 + 1).toFloat();
-    if (rutaPaso < 1.0f) rutaPaso = 20.0f;
+    if (c1 >= 0) rutaPasoB = line.substring(c1 + 1).toFloat();
+    if (rutaPasoB < 1.0f) rutaPasoB = 20.0f;
     rutaRecib = 0;
     return;
   }
@@ -3918,6 +4367,7 @@ void parseRuta(const String &line) {
       // Doble buffer: hasta aquí el ESP siguió la ruta anterior completa.
       memcpy(rutaX, rutaXb, sizeof(float) * n);
       memcpy(rutaY, rutaYb, sizeof(float) * n);
+      rutaPaso = rutaPasoB;
       rutaN = n;
       rutaI = -1;
     }
@@ -4142,6 +4592,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",ei=");   ackOut.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
     ackOut.print(",p2o=");  ackOut.print(parkPoste2Pose);
+    ackOut.print(",ax=");   ackOut.print(atascoExtra);   // empujón anti-atasco (PWM)
     ackOut.print(",fr=");   ackOut.print(lazoFrenando);   // 1 = lazo frenando activo
     ackOut.print(",pw=");   ackOut.print(pwmActual);      // PWM real al motor
     ackOut.print(",ue=");   ackOut.print(uartErrs);
@@ -4750,6 +5201,12 @@ void setup() {
   // loop() siempre arranca con piReadyReceived = true.
   Serial.println("Esperando READY desde Pi...");
   piReadyReceived = false;
+#if FOX_BNO && !defined(FOX_SIL)
+  if (GYRO_ZUPT) {
+    Serial1.setRxBufferSize(1024);
+    Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+  }
+#endif
 #if FOX_TOF && !defined(FOX_SIL)
   unsigned long preMs = 0;
 #endif
@@ -4795,6 +5252,12 @@ void setup() {
       }
     }
 #endif
+#if FOX_BNO && FOX_ENCODER && !defined(FOX_SIL)
+    if (GYRO_ZUPT) {
+      leerBNO();
+      actualizarGyro();
+    }
+#endif
     if (Serial2.available()) {
       String line = Serial2.readStringUntil('\n');
       line.trim();
@@ -4805,13 +5268,29 @@ void setup() {
         Serial.println("Recibido READY. Esperando primer V2...");
       }
     }
+#if FOX_BNO && FOX_ENCODER && !defined(FOX_SIL)
+    if (GYRO_ZUPT) {
+      if (piReadyReceived) {
+        if (bnoYawValid && millis() - bnoLastMs <= 150) {
+          gyroBiasDps = gyroZuptFit.estimate();
+        }
+        Serial.print("[ZUPT] bias_dps=");
+        Serial.println(gyroBiasDps, 3);
+      } else {
+        delay(10);
+        continue;
+      }
+    }
+#endif
     delay(50);
   }
   Serial.println("Sistema listo (PurePursuit)");
 #if FOX_BNO && !defined(FOX_SIL)
   // Se abre al final de setup: con el buffer grande no se pierden paquetes RVC mientras loop() se tarda.
-  Serial1.setRxBufferSize(1024);
-  Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+  if (!GYRO_ZUPT) {
+    Serial1.setRxBufferSize(1024);
+    Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+  }
 #endif
 }
 
@@ -6190,6 +6669,9 @@ void loop() {
       int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
       int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
+#if FOX_TOF
+      if (PARK_PL_TOF_ANCLA && (parkFase == 0 || parkFase == 1)) parkPlMideMadera();
+#endif
       if (piPark >= 1) parkRosaVisto = true;
 
       const int alejarPwm = direccionIzquierda && PARK_UTURN_CCW_ALEJAR_PWM > 0
@@ -6197,6 +6679,8 @@ void loop() {
                              : PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN;
       // ── Fase 26: ALEJARSE antes de la U (PARK_UTURN_ALEJAR_CM) — rumbo
       // abierto lejos de la pared del lado del giro hasta tener espacio ───────
+      if ((parkFase == 26 || parkFase == 27) &&
+          parkUContinua(parkParedEsIzquierda ? distR_raw : distL_raw)) break;
       if (parkFase == 26) {
         bool  uturnIzqP   = !parkParedEsIzquierda;
         float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
@@ -7257,6 +7741,9 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+#if FOX_TOF
+          if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
+#endif
           parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
@@ -7282,6 +7769,9 @@ void loop() {
         float th = -haciaPared * (anguloGyro - parkRumboRef);   // nariz hacia la isla (+)
         // El rumbo de la pared medido con los sonares trae hasta ~10 grados de error; el del carril (pose del tapete) no.
         if (PARK_PL_THLANE && !isnan(parkThCarril())) th = parkThCarril();
+        const bool arcoCalibrado = PARK_PL_ARCO_CALIBRADO && PARK_PL_RECTA && parkDirecto && !parkRevModo;
+        const float rInt = arcoCalibrado ? PARK_PL_RI_INT_MM : PARK_PL_RI;
+        const float hFinal = arcoCalibrado ? PARK_PL_ARCO_H_MM : PARK_PL_HEND;
         if (!parkPlanMov) {
           // Parado: elige sentido y volante del tramo que viene y deja que las ruedas lleguen.
           int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
@@ -7307,7 +7797,9 @@ void loop() {
                 wf = PARK_PL_WF_DIRECT_NEAR;
               if (parkDirecto && parkRevModo) wf += PARK_REV_DWF;
               if (parkDirecto && h0 < PARK_PL_H_BAJA_MM) wf += PARK_PL_WF_H_BAJA;   // entrada muy pegada a la pared (n4 s24 h0 268): el plan se queda sin altura para la recta y la cola roza el poste 2
-              float t = parkPlanT1Solve(w0, h0, th, wf, PARK_PL_HEND, PARK_PL_RI);
+              // Deja la nariz pasar por fuera de la punta de la segunda madera.
+              if (arcoCalibrado) wf = PARK_PL_ARCO_W_MM;
+              float t = parkPlanT1Solve(w0, h0, th, wf, hFinal, PARK_PL_RI, rInt);
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
@@ -7345,23 +7837,29 @@ void loop() {
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
         parkPlanPose(pw, ph);
+        if (PARK_PL_CIERRE_HUELLA && parkPlanI >= 2 - (arcoCalibrado ? 1 : 0)
+            && parkPlHuellaDentro(pw, ph, th, encVelMmS * 0.18f)) {
+          finalizarPark("PLAN huella dentro");
+          break;
+        }
         float clr = parkPlanHolgura(pw, ph, th);
         bool fin = false; const char *why = "";
         float mm = parkRecorridoMm();
         unsigned long tseg = millis() - parkFaseMs;
         int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
         bool cerca = clr <= PARK_PL_M_MM && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
+        bool cercaTof = false;
         parkPlanClrPrev = clr;
         // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
         if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
           float yaw = th * 0.0174533f;
           float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - PARK_TOF_COLA_CM - 6.3f * sinf(yaw));
-          if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
+          if (esqMm <= PARK_PL_MTOF_MM) { cerca = true; cercaTof = true; }
         }
         if (i == 0 && PARK_PL_RECTA) {
           if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
           if (parkPlanRectaOn) {
-            float thr = PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
+            float thr = hFinal + rInt * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f));
             fin = ph <= thr; why = "RECTA";
             // Con la nariz pegada al poste 2 (sonar ext <= 2 cm al terminar la recta: holgura real 2-6 mm, la pose dice ~20) el arco INT la metia en la madera (n3 s23, n2 s11; avanzar no abre: la holgura sigue en 5.5 mm). La cola tiene ~59 mm al poste 1: la recta sigue PARK_PL_RECTA_EXTRA_MM mas, alejando la nariz.
             if (fin && PARK_PL_RECTA_EXTRA_MM > 0.0f && th > 30.0f && extRaw >= 1 && extRaw <= PARK_PL_RECTA_EXT_CM) {
@@ -7388,7 +7886,23 @@ void loop() {
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * max(encVelMmS, 0.0f) * 0.1f) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
-        if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
+        // Zigzag (2026-11-23, orillas174): los tramos de 2-4 cm con pausa no enderezaban (35 -> 20 grados en
+        // 8 tramos, 5-8 cm libres sin usar). Ahora cada tramo sigue hasta theta ~0 (BNO) o hasta que el ToF
+        // de enfrente/atrás llegue al límite; la huella de la pose (~10 mm de error) ya no lo corta.
+        bool zz = (i == 6);
+        if (!fin && i >= 1 && cerca && (!zz || cercaTof)) { fin = true; why = "HOLGURA"; }
+        {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
+            // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
+            static float th0 = 0.0f, od0 = 0.0f; static unsigned long t0 = 0, sinAvance = 0; static int leg0 = -1;
+            if (leg0 != parkPlanI || tseg < 30UL) { leg0 = parkPlanI; th0 = th; od0 = odomMmF; t0 = millis(); sinAvance = 0; }
+            if (millis() - t0 >= 300UL) {
+              float dth = fabsf(th - th0), dod = fabsf(odomMmF - od0);
+              if (dth < 0.5f && dod < 4.0f) sinAvance += millis() - t0; else sinAvance = 0;
+              if (dod >= 15.0f && dth < 0.5f && parkPlanSrv != centroServo) Serial.println("PARK plan: encoder avanza pero el BNO no gira (patina?)");
+              th0 = th; od0 = odomMmF; t0 = millis();
+            }
+            if (!fin && sinAvance >= (unsigned long)PARK_PL_AVANCE_MS) { fin = true; why = "SIN AVANCE"; }
+        }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
           Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);

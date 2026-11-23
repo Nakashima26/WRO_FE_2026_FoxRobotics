@@ -7,8 +7,10 @@ yaw del ACK, encoder + IMU). Corrección: cada sensor de distancia del ACK
 predice un ray-casting sobre el mapa COMPLETO (paredes, isla, señales y maderas
 del cajón). Una medición solo se usa si el rayo esperado pega en pared o isla
 (superficie plana conocida) con buen ángulo; si lo más cercano es una señal o
-una madera, se descarta. Así una señal o el cajón nunca se confunden con la
-pared (lo que hacía digital_map._wall_fix).
+una madera, se descarta. En carrera, la guarda opt-in comprueba también el
+cono del ToF para descartar ecos de obstáculos conocidos fuera del eje.
+El visor de maniobras también
+usa caras de las maderas con el cajón fijado.
 
 Salida para el ESP: la transformación odometría -> tapete (tx, ty, th) con
 mundo = (tx, ty) + px·F + py·L, F = (sin th, cos th), L = (-cos th, sin th),
@@ -25,7 +27,7 @@ import re
 import numpy as np
 
 from . import config as C
-from .wro_field import INNER_HALF_MM, OUTER_HALF_MM, SEATS, SIGN_MM, _barrier_corners, section_to_world
+from .wro_field import INNER_HALF_MM, OUTER_HALF_MM, SEATS, SIGN_MM, _barrier_corners, section_to_world, w_axis
 
 # tipo de superficie
 _WALL, _ISLAND, _SIGN, _BARRIER = 0, 1, 2, 3
@@ -35,6 +37,7 @@ _US_HALF_CONE = 15.0
 _US_MAX_INC = 20.0
 _US_OFFS = np.arange(-_US_HALF_CONE, _US_HALF_CONE + 0.1, 3.0)   # rayos del cono (_expect), constantes
 _TOF_OFFS = np.array([0.0])
+_TOF_CONE_OFFS = np.radians(np.linspace(-13.5, 13.5, 19))
 _SENSORS = (
     ("dL", "us_left", 10.0, "us"),
     ("dR", "us_right", 10.0, "us"),
@@ -83,8 +86,8 @@ def build_segments(seats: dict, parking: str | None, park_w: float | None = None
     return a, b, k
 
 
-def raycast(origins: np.ndarray, dirs: np.ndarray, segs, max_mm: float = 4000.0):
-    """Distancia, tipo y |cos| de incidencia del primer impacto de cada rayo."""
+def raycast(origins: np.ndarray, dirs: np.ndarray, segs, max_mm: float = 4000.0, *, face=False):
+    """Distancia, tipo y |cos| del primer impacto; face devuelve índice y fracción del segmento."""
     a, b, kind = segs
     e = b - a                                            # (S,2)
     ox, oy = origins[:, 0:1], origins[:, 1:2]            # (R,1)
@@ -102,6 +105,8 @@ def raycast(origins: np.ndarray, dirs: np.ndarray, segs, max_mm: float = 4000.0)
     en = e[j] / np.linalg.norm(e[j], axis=1, keepdims=True)
     cos_inc = np.abs(dirs[:, 0] * en[:, 1] - dirs[:, 1] * en[:, 0])     # |dir · normal|
     hit = np.isfinite(d) & (d <= max_mm)
+    if face:
+        return np.where(hit, d, np.inf), j, u[np.arange(len(t)), j], cos_inc
     return np.where(hit, d, np.inf), np.where(hit, kind[j], -1), cos_inc
 
 
@@ -109,7 +114,9 @@ class Localizer:
     def __init__(self, seats: dict, parking: str | None, x: float, y: float, heading_deg: float,
                  park_w: float | None = None):
         self.park_w = park_w
+        self.park_axis = w_axis(parking) if parking is not None else None
         self.segs = build_segments(seats, parking, park_w)
+        self.occlusion_segs = self.segs
         self.x = np.array([x, y, math.radians(heading_deg)], float)
         # El rumbo del BNO085 es bueno (deriva ~0.5°/min): poca incertidumbre de
         # rumbo, así una sola medición rara no lo gira varios grados.
@@ -121,6 +128,9 @@ class Localizer:
         self.n_reanchor = 0
         self._rej = {}
         self._prev_z = {}
+        self.anchor_segs = None          # señales reales (DigitalMap.confirmed) como referencia del ToF lateral
+        self._anchor_key = None
+        self.n_sign = 0
 
     def set_map(self, seats: dict, unknown, parking: str | None, park_w: float | None = None) -> None:
         """Señales conocidas + asientos sin resolver (tapan el rayo igual)."""
@@ -129,7 +139,65 @@ class Localizer:
         allseats = dict(seats)
         for key in unknown or ():
             allseats.setdefault(key, "?")
+        self.park_axis = w_axis(parking) if parking is not None else None
         self.segs = build_segments(allseats, parking, self.park_w)
+        if C.LOC_RACE_TOF_OCCLUSION_MM is not None:
+            self.occlusion_segs = build_segments(seats, parking, self.park_w)
+
+    def set_anchors(self, seats: dict) -> None:
+        """Señales confirmadas por el mapa (sin fantasmas de fila) que el ToF lateral puede usar de referencia."""
+        key = tuple(sorted(seats))
+        if key == self._anchor_key:
+            return
+        self._anchor_key = key
+        if not seats:
+            self.anchor_segs = None
+            return
+        a, b, k = build_segments(seats, None)
+        m = k == _SIGN
+        self.anchor_segs = (a[m], b[m], k[m])
+
+    def _sign_cone(self, state, mount) -> float:
+        """Distancia a la cara de señal más cercana dentro del cono del ToF (el VL53 devuelve lo más cercano)."""
+        x, y, h = state
+        right, fwd, angle = mount
+        origin = (x + fwd * math.sin(h) + right * math.cos(h), y + fwd * math.cos(h) - right * math.sin(h))
+        half = float(getattr(C, "LOC_TOF_SIGN_HALF_DEG", 7.0))   # ROI 8 del firmware: cono ~14° total (twin/params.py)
+        ang = h + math.radians(angle) + np.radians(np.linspace(-half, half, 11))
+        dirs = np.column_stack((np.sin(ang), np.cos(ang)))
+        d, _k, _c = raycast(np.broadcast_to(origin, dirs.shape), dirs, self.anchor_segs)
+        return float(np.min(d))
+
+    def _sign_update(self, key, mount, z, zs, ack) -> None:
+        """Corrección EKF con el eco de una señal conocida (orillas162: 369 ecos cortos con señal en el cono,
+        residuo mediano 11 mm; donde la pose decía 267 mm al bloque el ToF lo tenía a 30)."""
+        H = np.zeros(3)
+        for j, eps in ((0, 2.0), (1, 2.0), (2, math.radians(0.5))):
+            s2 = self.x.copy()
+            s2[j] += eps
+            z2 = self._sign_cone(s2, mount)
+            if not math.isfinite(z2):
+                return
+            H[j] = (z2 - zs) / eps
+        sig = float(getattr(C, "LOC_TOF_SIGN_SIGMA_MM", 15.0)) + 0.02 * z
+        nu = z - zs
+        S = float(H @ self.P @ H + sig * sig)
+        if nu * nu / S > 9.0:
+            self.n_rej += 1
+            return
+        K = self.P @ H / S
+        dx = K * nu
+        self.x = self.x + dx
+        self.P = (np.eye(3) - np.outer(K, H)) @ self.P
+        self.n_used += 1
+        self.n_sign += 1
+        self.last[key] = (round(z), round(zs))
+        log_mm = getattr(C, "LOC_LOG_UPD_MM", None)
+        if log_mm is not None and math.hypot(dx[0], dx[1]) >= float(log_mm):
+            print(f"[LOCUPD] {key} z={z:.0f} esp={zs:.0f} nu={nu:+.0f} sup=bloque "
+                  f"dx={dx[0]:+.0f} dy={dx[1]:+.0f} dh={math.degrees(dx[2]):+.2f} "
+                  f"pose=({self.x[0]:.0f},{self.x[1]:.0f},{math.degrees(self.x[2]):.0f}) tc={_ack_num(ack, 'tc')}",
+                  flush=True)
 
     def shift(self, dx: float, dy: float) -> None:
         """Cambio de marco (arranque ciego resuelto): la pose se corre (dx, dy)."""
@@ -149,7 +217,16 @@ class Localizer:
         ty = self.x[1] - (px * fy + py * ly)
         return tx, ty, th
 
-    def pose(self):
+    def pose(self, ack: str | None = None):
+        """Pose actual, o proyección odométrica al ACK nuevo sin modificar el filtro."""
+        if ack and self.odom is not None:
+            px, py, yaw = (_ack_num(ack, key) for key in ("px", "py", "yaw"))
+            if px is not None and py is not None and yaw is not None:
+                tx, ty, th = self.transform()
+                r = math.radians(th)
+                sin_th, cos_th = math.sin(r), math.cos(r)
+                return (tx + px * sin_th - py * cos_th, ty + px * cos_th + py * sin_th,
+                        (th - yaw) % 360.0)
         return float(self.x[0]), float(self.x[1]), math.degrees(self.x[2]) % 360.0
 
     def _predict(self, px, py, yaw):
@@ -203,12 +280,95 @@ class Localizer:
         i = int(np.argmin(d))
         return float(d[i]), int(k[i]), float(c[i])
 
+    def _occlusion(self, mount, expected, reading):
+        """Error del eco respecto a la primera cara de obstáculo visible en cada rayo."""
+        x, y, h = self.x
+        right, fwd, angle = mount
+        origin = (x + fwd * math.sin(h) + right * math.cos(h),
+                  y + fwd * math.cos(h) - right * math.sin(h))
+        angles = h + math.radians(angle) + _TOF_CONE_OFFS
+        dirs = np.column_stack((np.sin(angles), np.cos(angles)))
+        distances, surfaces, _ = raycast(
+            np.broadcast_to(origin, dirs.shape), dirs, self.occlusion_segs, expected)
+        obstacle = (surfaces == _SIGN) | (surfaces == _BARRIER)
+        if not np.any(obstacle):
+            return math.inf
+        return float(np.min(np.abs(distances[obstacle] - reading)))
+
     def _shifted_segs(self, dx: float, dy: float):
         """Mapa visto desde un carro corrido (dx, dy): las maderas se corren con él."""
         a, b, k = self.segs
         m = (k == _BARRIER)[:, None]
         sv = np.array([dx, dy])
         return a + m * sv, b + m * sv, k
+
+    def update_maneuver(self, ack: str) -> None:
+        """ToF de maniobra para el visor: corrige posición y conserva rumbo IMU."""
+        px, py, yaw = (_ack_num(ack, key) for key in ("px", "py", "yaw"))
+        if px is None or py is None or yaw is None or self.odom == (px, py, yaw):
+            return
+        self._predict(px, py, yaw)
+        a, b, surface = self.segs
+        # La U de parking usa estado E y pnf 20..27 en el firmware actual.
+        phase = _ack_num(ack, "pnf")
+        turning = ",est=G," in ack or (phase is not None and 20 <= phase <= 27)
+        h = self.x[2]
+        fwd = np.array([math.sin(h), math.cos(h)])
+        right = np.array([fwd[1], -fwd[0]])
+        for key, name, _, kind in _SENSORS:
+            if kind != "tof":
+                continue
+            z = _ack_num(ack, key)
+            if z is None or z <= 0.0:
+                continue
+            if key == "tF":
+                z -= C.LOC_MANEUVER_FRONT_OFFSET_MM
+            limit = C.LOC_TOF_MAX_MM.get(key, 240.0)
+            if not 20.0 <= z <= limit:
+                continue
+            lateral, longitudinal, angle = C.SENSOR_MOUNTS[name]
+            origin = self.x[:2] + longitudinal * fwd + lateral * right
+            rad = h + math.radians(angle)
+            direction = np.array([math.sin(rad), math.cos(rad)])
+            (expected,), (j,), (u,), (cosi,) = raycast(
+                origin[None, :], direction[None, :], self.segs, face=True)
+            if (surface[j] not in (_WALL, _BARRIER) or cosi <= math.cos(math.radians(35.0))
+                    or not 20.0 <= expected <= limit):
+                continue
+            if surface[j] == _WALL and key in ("tL", "tR") and not turning and expected > 180.0:
+                continue  # durante el escaneo, la madera puede tapar parte del eco lejano
+            if surface[j] == _BARRIER and expected > 200.0:
+                continue
+            cone = rad + np.radians([-7.0, 7.0])
+            rim = np.column_stack((np.sin(cone), np.cos(cone)))
+            _, faces, _, _ = raycast(np.broadcast_to(origin, rim.shape), rim, self.segs, face=True)
+            if np.any(faces != j):
+                continue
+            edge = b[j] - a[j]
+            # Al borde, el cono del ToF puede mezclar la cara y el fondo.
+            length = np.linalg.norm(edge)
+            if min(u, 1.0 - u) * length < min(0.35 * length, max(12.0, 0.08 * expected)):
+                continue
+            normal = np.array([edge[1], -edge[0]])
+            if surface[j] == _BARRIER and key != "tF" and normal @ self.park_axis != 0.0:
+                # Las caras cuyo plano depende de w0 requieren el frontal calibrado.
+                continue
+            H = np.zeros(3)
+            H[:2] = -normal / (direction @ normal)
+            sigma = (C.LOC_MANEUVER_WOOD_SIGMA_MM if surface[j] == _BARRIER else 12.0) + 0.02 * z
+            innovation = z - expected
+            variance = float(H @ self.P @ H + sigma ** 2)
+            if abs(innovation) > C.LOC_MANEUVER_MAX_INNOV_MM or innovation ** 2 > 9.0 * variance:
+                self.n_rej += 1
+                continue
+            gain = self.P @ H / variance
+            gain[2] = 0.0
+            gain *= 0.25  # varios ACK pueden llevar ecos del mismo intervalo de muestreo
+            self.x += gain * innovation
+            residual = np.eye(3) - np.outer(gain, H)
+            self.P = residual @ self.P @ residual.T + sigma ** 2 * np.outer(gain, gain)
+            self.n_used += 1
+            self.last[key] = (round(z), round(expected))
 
     def update(self, ack: str | None, correct: bool = True, shifts=None) -> None:
         """Predicción con la odometría del ACK; con correct, corrección con sensores.
@@ -227,6 +387,9 @@ class Localizer:
         if not correct:
             return
         sin_us = getattr(C, "US_DESDE_TOF", False)
+        tol = C.LOC_RACE_TOF_OCCLUSION_MM
+        race_tc = _ack_num(ack, "tc") if tol is not None else None
+        race = shifts is None and race_tc is not None and -1 <= race_tc < 12
         pair_bad = False
         pair_tol = getattr(C, "LOC_L23_PAIR_TOL_MM", None)
         tc = _ack_num(ack, "tc") if pair_tol is not None else None
@@ -262,9 +425,27 @@ class Localizer:
             if kind == "tof" and (z < 20.0 or z > float(getattr(C, "LOC_TOF_MAX_MM", {}).get(key, 240.0))):
                 continue
             mount = C.SENSOR_MOUNTS[mname]
+            smax = getattr(C, "LOC_TOF_SIGN_MAX_MM", None)
+            if (smax is not None and kind == "tof" and key in ("tL", "tR") and self.anchor_segs is not None
+                    and not shifts and z <= float(smax)):
+                zs = self._sign_cone(self.x, mount)
+                if zs <= float(smax):
+                    # Pared/isla/madera sin señales: con la señal en el rayo central la "pared" era la señal misma
+                    # (zs == zw) y el eco se tiraba justo en las pasadas pegadas (orillas164 S/X2: z=29 esperado 105).
+                    a_, b_, k_ = self.segs
+                    m_ = k_ != _SIGN
+                    zw = self._expect(self.x, mount, kind, (a_[m_], b_[m_], k_[m_]))[0]
+                    # La señal queda delante de la pared en el cono y la lectura se parece más a ella que a la pared.
+                    if zs < zw - 60.0 and abs(z - zs) < abs(z - zw):
+                        self._sign_update(key, mount, z, zs, ack)
+                        continue
             zh, surf, cosi = self._expect(self.x, mount, kind)
             if surf not in (_WALL, _ISLAND) or not math.isfinite(zh):
                 continue
+            if (kind == "tof" and getattr(C, "LOC_TOF_EXPECT_GATE", False)
+                    and zh > float(getattr(C, "LOC_TOF_EXPECT_MAX_MM", {}).get(
+                        key, getattr(C, "LOC_TOF_MAX_MM", {}).get(key, 240.0)))):
+                continue   # la superficie queda más lejos que el rango útil: la lectura puede venir saturada
             if shifts:
                 stable = True
                 for dx, dy in shifts:
@@ -277,7 +458,7 @@ class Localizer:
                         break
                 if not stable:
                     continue
-            if kind == "tof" and cosi < math.cos(math.radians(35.0)):
+            if kind == "tof" and cosi < math.cos(math.radians(float(getattr(C, "LOC_TOF_MAX_INC_DEG", 35.0)))):
                 continue
             # Jacobiano numérico
             H = np.zeros(3)
@@ -293,9 +474,19 @@ class Localizer:
             if not ok:
                 continue
             sig = (8.0 + 0.01 * z) if kind == "us" else (6.0 + 0.01 * z)
+            far0 = getattr(C, "LOC_TOF_FAR_FROM_MM", None)
+            if kind == "tof" and far0 is not None and z > float(far0):
+                sig += float(getattr(C, "LOC_TOF_FAR_SIGMA_PER_MM", 0.0)) * (z - float(far0))
             R = sig * sig
             nu = z - zh
             S = float(H @ self.P @ H + R)
+            # El eco corto compatible con un obstáculo no informa sobre la pared ni
+            # debe alimentar su historial de reanclaje.
+            if (race and kind == "tof" and nu < -35.0
+                    and self._occlusion(mount, zh, z) <= tol):
+                self._rej.pop(key, None)
+                self.n_rej += 1
+                continue
             if nu * nu / S > 9.0:                  # 3 sigma
                 # Reanclaje: si el mismo sensor sigue diciendo lo mismo varias lecturas seguidas
                 # (cajón mal fijado: la pose va ~40 cm corrida y el gate tiraba justo la lectura
@@ -317,7 +508,15 @@ class Localizer:
                       f"pose=({self.x[0]:.0f},{self.x[1]:.0f})", flush=True)
             self._rej.pop(key, None)
             K = self.P @ H / S
-            self.x = self.x + K * nu
+            dx = K * nu
+            self.x = self.x + dx
             self.P = (np.eye(3) - np.outer(K, H)) @ self.P
             self.n_used += 1
             self.last[key] = (round(z), round(zh))
+            log_mm = getattr(C, "LOC_LOG_UPD_MM", None)
+            if log_mm is not None and math.hypot(dx[0], dx[1]) >= float(log_mm):
+                print(f"[LOCUPD] {key} z={z:.0f} esp={zh:.0f} nu={nu:+.0f} "
+                      f"sup={'pared' if surf == _WALL else 'isla'} cos={cosi:.2f} "
+                      f"dx={dx[0]:+.0f} dy={dx[1]:+.0f} dh={math.degrees(dx[2]):+.2f} "
+                      f"pose=({self.x[0]:.0f},{self.x[1]:.0f},{math.degrees(self.x[2]):.0f}) tc={_ack_num(ack, 'tc')}",
+                      flush=True)

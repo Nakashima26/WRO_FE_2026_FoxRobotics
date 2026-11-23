@@ -26,6 +26,7 @@ transformación del marco viejo hasta tener la ruta nueva completa.
 
 from __future__ import annotations
 
+from copy import copy
 import math
 import os
 
@@ -37,6 +38,7 @@ from . import ring_route as RR
 from .digital_map import feet_world
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
+from .park_refine import ParkRefine
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
                         SECTIONS_CW, SIGN_MM, blue_segments, orange_segments, section_to_world, world_to_section)
 
@@ -152,6 +154,8 @@ def _route_params():
         hard_clear_mm=float(getattr(C, "ROUTE_HARD_CLEAR_MM", 55.0)),
         soft_clear_mm=float(getattr(C, "ROUTE_SOFT_CLEAR_MM", 140.0)),
         w_clear=float(getattr(C, "ROUTE_W_CLEAR", 8.0)),
+        corner_exit_clear_mm=float(getattr(C, "ROUTE_CORNER_EXIT_CLEAR_MM", 0.0)),
+        corner_exit_inside_extra_mm=float(getattr(C, "ROUTE_CORNER_EXIT_INSIDE_EXTRA_MM", 0.0)),
         time_cost=bool(getattr(C, "ROUTE_TIME_COST", False)),
         # ROUTE_PLAN_VMIN_PWM: piso de velocidad que ve la DP (con BASE_PWM=255 el costo de tiempo no distingue curvas).
         v_min_mm_s=K * (float(getattr(C, "ROUTE_PLAN_VMIN_PWM", None) or getattr(C, "ROUTE_PROFILE_BASE_PWM", 155)) - pwm0),
@@ -266,7 +270,8 @@ def pix_line_delta(pix, pose, axis, direction, fwd_add: float = 0.0):
     c, dmed, dh, sp, tot = best
     if sp < min_span:
         return None
-    return dmed, f"n={c}/{tot} largo={sp:.0f} dh={dh:+.0f}"
+    bias = float(getattr(C, "ROUTE_FIX_PIX_DELTA_BIAS_MM", 0.0))
+    return dmed + bias, f"n={c}/{tot} largo={sp:.0f} dh={dh:+.0f}"
 
 
 class RouteMode:
@@ -310,10 +315,14 @@ class RouteMode:
         self.orange = None           # estado de la línea naranja (OrangeLineTracker) del frame
         self._pend_n = 0             # cuadros esperando evidencia del cajón con la media plana
         self._line_d: list = []      # δ por lectura de la línea naranja (ROUTE_FIX_LINE)
+        self._line_vote_src: list[str] = []  # fuente de cada voto en _line_d (recta, pix, linea, azul)
         self._pix_ok = None          # None = aún no se sabe si la cinta de esta recta sirve para pixeles
         self.fixed = not self.blind
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
         self.axis = (0.0, 0.0)
+        self.maneuver_loc = None     # pose del visor durante E/G
+        self._park_refine = None
+        self._park_refined_w = None
         self.park_w = None           # w0 del cajón en uso (supuesto o medido)
         _pf = getattr(C, "ROUTE_PRUEBA_CAJON_FILE", None)
         self._prueba_cajon = bool(_pf) and os.path.exists(str(_pf))
@@ -648,6 +657,19 @@ class RouteMode:
                 self._plan_frame is not None and self._step_frame - self._plan_frame <= replan_frames
             )
         self.rv = None
+        ack_est = _ack_est(ack)
+        if (C.LOC_MANEUVER_VIEW and armed and self.fixed and self.loc is not None
+                and self.loc.odom is not None and ack_est in ("E", "G")):
+            if self.maneuver_loc is None:
+                # El ESP usa la transformación de ruta también dentro de E.
+                self.maneuver_loc = copy(self.loc)
+                self.maneuver_loc.x = self.loc.x.copy()
+                self.maneuver_loc.P = self.loc.P.copy()
+                self.maneuver_loc.last = {}
+                self.maneuver_loc.n_used = self.maneuver_loc.n_rej = 0
+            self.maneuver_loc.update_maneuver(ack)
+        elif not armed or not C.LOC_MANEUVER_VIEW or ack_est is not None:
+            self.maneuver_loc = None
         if not (armed and getattr(C, "ROUTE_FOLLOW", False)):
             return None, "", None
         if est not in ("S", "C", "R"):
@@ -679,7 +701,9 @@ class RouteMode:
         # Parado en el cajón la pose del arranque es exacta: un ToF a 84 mm corría y +16 mm (gemelo s26).
         quieto = (getattr(C, "ROUTE_LOC_HOLD_AT_START", None) and not self.fixed
                   and _ack_num(ack or "", "px") == 0 and _ack_num(ack or "", "py") == 0)
-        self.loc.update(ack, correct=(est in ("S", "C", "R") and _ack_est(ack) in ("S", "C", "R") and not quieto),
+        if getattr(C, "LOC_TOF_SIGN_MAX_MM", None) is not None:
+            self.loc.set_anchors(dm.confirmed)   # solo lo que el mapa confirmó: los fantasmas de fila no anclan
+        self.loc.update(ack, correct=(est in ("S", "C", "R") and ack_est in ("S", "C", "R") and not quieto),
                         shifts=shifts)
         pose = self.loc.pose() if self.loc.odom is not None else (dm.pose_xy[0], dm.pose_xy[1], float(dm.heading))
         if self.loc.odom is not None:
@@ -697,7 +721,7 @@ class RouteMode:
             tol = getattr(C, "ROUTE_FIX_LINE_TOL_MM", None)
             if (delta is not None and tol is not None and getattr(C, "ROUTE_FIX_LINE", None)
                     and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
-                    and abs(float(delta) - float(np.median(self._line_d))) > float(tol)):
+                    and abs(float(delta) - self._line_median()) > float(tol)):
                 delta = None   # la masa converge a un pico que la línea contradice: seguir leyendo
             d_f = _ack_num(ack or "", "dF")
             if (delta is not None and len(self._line_d) < int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
@@ -708,11 +732,11 @@ class RouteMode:
             if (delta is None and d_f is not None and d_f <= 100.0 and len(self._line_d) >= 8
                     and float(np.max(self._line_d) - np.min(self._line_d)) <= 40.0
                     and self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1] < 0.5
-                and self._line_ok(float(np.median(self._line_d)))):
+                and self._line_ok(self._line_median())):
                 # Recta corta: dF ya < 100 y el sonar sigue plano, así que el tope 105
                 # se come el tramo (n3 s23). Si el pico ya pesa, se espera al sonar
                 # (n3 s24: la línea a n=8 iba 32 mm corrida).
-                delta = float(np.median(self._line_d))
+                delta = self._line_median()
             edge = getattr(C, "ROUTE_FIX_EDGE_MM", None)
             if (delta is not None and edge is not None and len(self._line_d) < int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
                     and (delta - (PARK_W_MIN - self.fix.w0_guess) < float(edge)
@@ -730,19 +754,19 @@ class RouteMode:
                 if (q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0))
                         and (span is None or max(last) - min(last) <= float(span))
                         and self._line_ok(float(np.median(last)))):
-                    delta = float(np.median(self._line_d[-int(n_dec):]))
+                    delta = self._line_median(last=int(n_dec))
             forced = False
             if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
                 # decidan, el histograma queda plano cerca de lo supuesto).
                 delta = self.fix.mean()
                 if (getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
-                        and not self._line_ok(float(np.median(self._line_d)))):
+                        and not self._line_ok(self._line_median())):
                     # La cinta contradice a los ToF: el pico de los ToF (corridas 100/101: cinta -565, ToF ~-150).
                     pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
                     delta = pk if pm >= 0.2 else delta
                 elif getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3)):
-                    delta = float(np.median(self._line_d))
+                    delta = self._line_median()
                     # 1-2 votos lejanos de la cinta van ~+60 mm corridos y el pico del sonar del otro lado
                     # (gemelo s9: cinta +649, pico +546 m=0.62, verdad +587; s22: +83 / -10, verdad +17).
                     blend = getattr(C, "ROUTE_FIX_FORCE_BLEND_MM", None)
@@ -751,6 +775,11 @@ class RouteMode:
                             and abs(pk - delta) <= float(blend)):
                         delta = 0.5 * (pk + delta)
                 forced = True
+                cap = getattr(C, "ROUTE_FIX_FORCE_MAX_NO_LINE_MM", None)
+                if (cap is not None and not self._line_d
+                        and abs(float(delta)) > float(cap)):
+                    delta = None
+                    forced = False
                 # Sin cinta y con el histograma plano la media es el centro del rango (n2 s36: -158, verdad -319):
                 # esperar evidencia un rato (el carro avanza lento, ver ROUTE_FIX_PENDING_CREEP_PWM).
                 pend = getattr(C, "ROUTE_FIX_PENDING_FRAMES", None)
@@ -763,8 +792,30 @@ class RouteMode:
                     self._pend_n += 1
                     delta = None
             if delta is not None:
+                if C.ROUTE_FIX_PILLAR_PAIR and len(self._line_d) >= 3:
+                    p_shift = 3 * SIGN_MM
+                    if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
+                        if self._recta_vote_span() >= float(getattr(C, "ROUTE_FIX_LINE_RECTA_DRIFT_MM", 40.0)):
+                            p_shift = SIGN_MM
+                    delta = self._pillar_pair_delta(dm, delta, p_shift)
                 pose = self._apply_fix(dm, ack, delta, forced)
                 conf, empty = self._resolved(dm)
+        if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
+            if self._park_refine is None:
+                self._park_refine = ParkRefine(dm.parking, dm.direction, self.park_w)
+            new_return = (_ack_est(ack) in ("S", "C", "R")
+                          and self._park_refine.update(tc, ack, pose, self.loc))
+            # Use third-pass returns while the ESP is still following the
+            # route at tc=11. The firmware may start parking during this turn.
+            if tc == 11 and (new_return or self._park_refined_w is None):
+                result = self._park_refine.estimate()
+                # The prior's p90 was about 43 mm. Only act on large disagreements.
+                if result is None or abs(result[0] - self.park_w) < 70:
+                    result = (self.park_w, 0)
+                if result[0] != self._park_refined_w:
+                    self._park_refined_w, passes = result
+                    print(f"[PARKREF] w0={self._park_refined_w:.0f} p0={self.park_w:.0f} "
+                          f"passes={passes} tc={tc:.0f}", flush=True)
         if lap1 and self.fixed:
             self._update_views(conf, empty, pose)
             conf, empty = self._resolved(dm)
@@ -1036,9 +1087,15 @@ class RouteMode:
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
-        prof = self._profile_pwm(self._sign_xy(conf, empty),
-                                 lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)), l23=tc is not None and 4 <= tc < 12,
-                                 l1=tc is not None and 1 <= tc < 4)   # en tc=0 no: s33 choca Green E/T1 en la salida
+        self._unk_pts = np.asarray([section_to_world(sec, *SEATS[seat]) for sec, seat in unknown], dtype=float).reshape(-1, 2)
+        prof = self._profile_pwm(
+            self._sign_xy(conf, empty),
+            lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)),
+            l23=tc is not None and 4 <= tc < 12,
+            l1=tc is not None and 1 <= tc < 4,
+            conf=conf,
+            parking=dm.parking,
+        )
         if prof is not None and tc == 4 and self._l23_entry_cap and getattr(C, "ROUTE_L23_ENTRY_PWM", None) is not None:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
@@ -1101,7 +1158,8 @@ class RouteMode:
             self.esp_route = self.route
         line = "\n".join(lines) if lines else None
         if self.fixed and self.park_w is not None:
-            self.pka = _stall_far_along(dm.parking, dm.direction, self.park_w)
+            park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
+            self.pka = _stall_far_along(dm.parking, dm.direction, park_w)
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
@@ -1196,7 +1254,7 @@ class RouteMode:
                if (sec, seat) in conf or (sec, seat) not in empty]
         return np.asarray(pts, dtype=float).reshape(-1, 2)
 
-    def _profile_pwm(self, signs=None, lap2=False, l23=False, l1=False) -> int | None:
+    def _profile_pwm(self, signs=None, lap2=False, l23=False, l1=False, conf=None, parking=None) -> int | None:
         """PWM máximo según la curvatura por delante (perfil de velocidad).
 
         En cada muestra adelante: v_curva = sqrt(A_LAT/|κ|) acotada a [piso, max]
@@ -1299,13 +1357,61 @@ class RouteMode:
                     tight_on = True
                 v_c = np.where(dd < sign_mm, np.minimum(v_c, v_sign), v_c)
             corner_sign = getattr(C, "ROUTE_L1_CORNER_SIGN", None)
-            if corner_sign and not l23 and self.fixed and float(getattr(self, "_tc_max", 0) or 0) < 4:
+            if l23:
+                corner_sign = getattr(C, "ROUTE_L23_CORNER_SIGN", None)
+            elif not self.fixed or float(getattr(self, "_tc_max", 0) or 0) >= 4:
+                corner_sign = None
+            if corner_sign:
                 # El piso normal del perfil permite ~700 mm/s incluso al salir
                 # de la esquina hacia una señal cercana. Se limita solo esa
                 # curva; el mismo sobre de frenado anticipa y suelta el freno.
                 vg = K * (float(corner_sign["pwm"]) - pwm0)
-                near_curve = ((dd < float(corner_sign.get("mm", 350.0)))
+                dd_c = dd
+                if l23 and corner_sign.get("inside_exit_only"):
+                    # Re-paso por el interior al salir de curva: seleccionar por
+                    # lado reglamentario y posición longitudinal del asiento.
+                    pts = []
+                    exit_end = 1000.0 + float(corner_sign.get("exit_mm", 500.0))
+                    for (sec, seat), color in (conf or {}).items():
+                        if (color == "Red") != (r.direction == "CW"):
+                            continue
+                        xy = section_to_world(sec, *SEATS[seat])
+                        along, _ = RR._sec(sec, r.direction).frame(*xy)
+                        if 1000.0 <= along <= exit_end:
+                            pts.append(xy)
+                    if pts:
+                        sx, sy = np.asarray(pts).T
+                        dd_c = np.hypot(pxy[:, None, 0] - sx, pxy[:, None, 1] - sy).min(axis=1)
+                    else:
+                        dd_c = np.full_like(dd, np.inf)
+                elif corner_sign.get("unk_only"):
+                    # solo asientos aún sin resolver (la ruta puede cambiar de lado): los confirmados ya los traza la DP
+                    u = getattr(self, "_unk_pts", None)
+                    dd_c = np.full_like(dd, 1e9) if u is None or not len(u) else np.hypot(pxy[:, None, 0] - u[None, :, 0], pxy[:, None, 1] - u[None, :, 1]).min(axis=1)
+                reach = float(corner_sign.get("mm", 350.0))
+                if not l23 and corner_sign.get("selective") and parking:
+                    # Preserve the original reach around the stall and around
+                    # confirmed outer-row signs immediately after a corner.
+                    risk = [section_to_world(parking, 0.0, self.park_w)]
+                    for sec, seat in conf or ():
+                        if seat.startswith("X"):
+                            xy = section_to_world(sec, *SEATS[seat])
+                            along, _ = RR._sec(sec, r.direction).frame(*xy)
+                            if 1000.0 <= along <= 1500.0:
+                                risk.append(xy)
+                    sx, sy = np.asarray(risk).T
+                    risk_mm = float(corner_sign.get("risk_mm", 550.0))
+                    close = np.any(np.hypot(pxy[:, None, 0] - sx,
+                                            pxy[:, None, 1] - sy) < risk_mm, axis=1)
+                    if "other_pwm" in corner_sign:
+                        other_v = K * (float(corner_sign["other_pwm"]) - pwm0)
+                        vg = np.where(close, vg, other_v)
+                    reach = np.where(close, reach, float(corner_sign.get("other_mm", 240.0)))
+                near_curve = ((dd_c < reach)
                               & (kmax > 1.0 / float(corner_sign.get("radius_mm", 400.0))))
+                if l23 and "a_lat_mm_s2" in corner_sign:
+                    # Escalar el tope con la demanda lateral de la curva.
+                    vg = np.maximum(vg, np.sqrt(float(corner_sign["a_lat_mm_s2"]) / np.maximum(kmax, 1e-12)))
                 v_c = np.where(near_curve, np.minimum(v_c, vg), v_c)
                 if np.any(near_curve):
                     corner_floor = int(corner_sign["pwm"])
@@ -1367,6 +1473,63 @@ class RouteMode:
         front = w + sgn * RR._FRONT_MM
         return front >= 1900.0 if sgn > 0 else front <= 1100.0
 
+    def _line_median(self, last: int | None = None) -> float:
+        d = self._line_d[-last:] if last else self._line_d
+        srcs = self._line_vote_src[-len(d):] if last else self._line_vote_src
+        if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
+            pix = [d[i] for i, s in enumerate(srcs) if s == "pix"]
+            if pix:
+                return float(np.median(pix))
+        return float(np.median(d))
+
+    def _recta_vote_span(self) -> float:
+        srcs = self._line_vote_src
+        rv = [self._line_d[i] for i, s in enumerate(srcs) if s == "recta"]
+        return float(max(rv) - min(rv)) if len(rv) >= 2 else 0.0
+
+    def _pix_blind_heading_ok(self, pose, lim=None) -> bool:
+        """Mediana pix en arranque ciego solo con el carro ya en la recta del cajón (no en maniobra INICIO)."""
+        if self.fixed or not getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False):
+            return True
+        if lim is None:
+            lim = getattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG", None)
+        if lim is None:
+            return True
+        # Eje del cajón en mundo: rumbo paralelo a axis = atan2(ax, ay).
+        ax, ay = self.axis
+        h_ax = math.degrees(math.atan2(ax, ay))
+        err = abs((pose[2] - h_ax + 180.0) % 360.0 - 180.0)
+        err = min(err, abs((pose[2] - h_ax - 180.0 + 180.0) % 360.0 - 180.0))
+        return err <= float(lim)
+
+    def _pix_inicio_vote_ok(self, d: float) -> bool:
+        """Con ToF ya informativo en el cajón, no añadir pix_line (parkc3 s3/s5); s34 sigue con masa baja."""
+        if self.fix is None:
+            return True
+        ni = int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3))
+        if getattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", False) and self.fix.n_inform > 0:
+            return False
+        if self.fix.n_inform >= ni and not self._line_ok(d):
+            return False
+        return True
+
+    def _line_vote_append(self, d: float, src: str) -> bool:
+        d = float(d)
+        if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
+            pix = [self._line_d[i] for i, s in enumerate(self._line_vote_src) if s == "pix"]
+            if src == "recta" and pix:
+                med = float(np.median(pix))
+                mad = float(np.median(np.abs(np.array(pix) - med))) or 15.0
+                k = float(getattr(C, "ROUTE_FIX_LINE_VOTE_K_MAD", 2.5))
+                if abs(d - med) > k * max(mad, 12.0):
+                    print(f"[FIXVOTE] recta d={d:+.0f} rechazada vs pix med={med:+.0f}", flush=True)
+                    return False
+            if src == "recta" and self._recta_vote_span() >= float(getattr(C, "ROUTE_FIX_LINE_RECTA_DRIFT_MM", 40.0)):
+                return False
+        self._line_d.append(d)
+        self._line_vote_src.append(src)
+        return True
+
     def _line_vote(self, dm, pose):
         """δ del cajón según la línea naranja. Con `_pix` (pixeles de cinta del frame,
         corner_lines._center_pix): cada pixel llevado al mundo con la pose supuesta da
@@ -1399,6 +1562,26 @@ class RouteMode:
             # SOSTENIDA de frames anteriores y con la pose avanzando arrastraba el
             # voto ~10 mm/frame (gemelo s19: de +327 a +74).
             return
+        if (getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and not self.fixed
+                and o.get("src") == "col"):
+            ny = o.get("near_y")
+            band = int(o.get("band") or 0)
+            max_band = int(getattr(C, "ROUTE_FIX_PIX_INICIO_MAX_BAND", 750))
+            if (ny is not None and float(ny) >= float(getattr(C, "ROUTE_FIX_PIX_INICIO_MIN_Y", 150.0))
+                    and band <= max_band):
+                pall = o.get("_pix_all")
+                if pall is None or len(np.asarray(pall)) == 0:
+                    pall = o.get("_pix")
+                if pall is not None and len(pall) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+                    res = pix_line_delta(np.asarray(pall, float), pose, np.array(self.axis), dm.direction,
+                                         self._fwd_add(dm))
+                    if res is not None and self._pix_inicio_vote_ok(res[0]):
+                        self._pix_line_vote(dm, pose, np.asarray(pall, float))
+                        return
+                    weak = (getattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", False)
+                            and self.fix is not None and self.fix.n_inform > 0)
+                    if not weak:
+                        return
         vx, vy, x0, y0 = o["line"]
         if abs(vx) < 1e-6:
             return
@@ -1429,8 +1612,8 @@ class RouteMode:
             if lo <= d <= hi and (best is None or dist < best[1]):
                 best = (float(d), dist)
         if best is not None:
-            self._line_d.append(best[0])
-            print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+            if self._line_vote_append(best[0], "recta"):
+                print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
     def _blue_vote(self, dm, pose) -> None:
         """δ del cajón con la cinta AZUL (la que cruza el carril en CCW, |n·a| 0.87; la naranja ahí va a
@@ -1482,7 +1665,7 @@ class RouteMode:
                 best = (d, dist)
         if best is None:
             return
-        self._line_d.append(best[0])
+        self._line_vote_append(best[0], "azul")
         print(f"[FIXVOTE] azul d={best[0]:+.0f} n={len(fwd)} c=({c[0]:.0f},{c[1]:.0f}) "
               f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
@@ -1513,7 +1696,9 @@ class RouteMode:
         if res is None:
             return
         d, info = res
-        self._line_d.append(d)
+        if getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and not self.fixed and not self._pix_inicio_vote_ok(d):
+            return
+        self._line_vote_append(d, "linea")
         print(f"[FIXVOTE] linea d={d:+.0f} {info} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
     def _line_ok(self, d: float) -> bool:
@@ -1583,13 +1768,65 @@ class RouteMode:
             return True
         if abs(math.sin(h) * a[1] - math.cos(h) * a[0]) > math.sin(math.radians(float(getattr(C, "ROUTE_FIX_PIX_MAX_ANG_DEG", 15.0)))):
             return True
+        na = abs(float(n @ a))
         d = (ns - P @ n) / (n @ a)
         d = d[(d >= lo) & (d <= hi)]
-        if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
-            self._line_d.append(float(np.median(d)))
-            print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
-                  f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+        if len(d) < int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+            return True
+        d_pix = float(np.median(d))
+        ok_h = self._pix_blind_heading_ok(pose)
+        if not ok_h:
+            lim_al = getattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_ALIGNED_DEG", None)
+            cap_d = float(getattr(C, "ROUTE_FIX_PIX_BLIND_ALIGNED_MAX_D_MM", 150.0))
+            if (lim_al is not None and na >= float(getattr(C, "ROUTE_FIX_PIX_MIN_NA", 0.7))
+                    and abs(d_pix) <= cap_d):
+                ok_h = self._pix_blind_heading_ok(pose, lim=lim_al)
+        if not ok_h:
+            return True
+        self._line_vote_append(d_pix, "pix")
+        print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
+              f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
+
+    def _pillar_pair_delta(self, dm, delta: float, min_shift: float | None = None) -> float:
+        """Contrasta el ajuste de la cinta con un par inequívoco de asientos."""
+        ax, ay = self.axis
+        step = 1 if dm.direction == "CW" else -1
+        next_sec = SECTIONS_CW[(SECTIONS_CW.index(dm.parking) + step) % len(SECTIONS_CW)]
+        seats = {
+            (sec, seat): section_to_world(sec, h, w)
+            for sec in (dm.parking, next_sec)
+            for seat, (h, w) in SEATS.items()
+            if sec != dm.parking or seat not in PARKING_FORBIDDEN_SEATS
+        }
+        votes: dict[tuple[str, str], list[float]] = {}
+        for feet, pose, heading, *_ in dm._deferred or ():
+            frame_votes: dict[tuple[str, str], list[float]] = {}
+            for x, y, _, _, _ in feet_world(feet, pose, heading):
+                for key, (sx, sy) in seats.items():
+                    dx, dy = sx - x, sy - y
+                    shift = dx * ax + dy * ay
+                    if (abs(dx * ay - dy * ax) <= SIGN_MM
+                            and PARK_W_MIN <= self.fix.w0_guess + shift <= PARK_W_MAX):
+                        frame_votes.setdefault(key, []).append(shift)
+            for key, values in frame_votes.items():
+                # Dos pies en competencia no informan de este asiento.
+                if len(values) == 1:
+                    votes.setdefault(key, []).extend(values)
+
+        shifts = {sec: [] for sec in (dm.parking, next_sec)}
+        for (sec, _), values in votes.items():
+            if len(values) >= 5:
+                shifts[sec].append(float(np.median(values)))
+        pairs = [(a + b) / 2 for a in shifts[dm.parking] for b in shifts[next_sec]
+                 if abs(a - b) <= SIGN_MM]
+        # La cinta conserva la prioridad para discrepancias pequeñas o pares ambiguos.
+        if min_shift is None:
+            min_shift = 3 * SIGN_MM
+        if len(pairs) == 1 and abs(pairs[0] - delta) >= min_shift:
+            print(f"[ROUTE] avance por par de pilares: {delta:+.0f} -> {pairs[0]:+.0f} mm", flush=True)
+            return pairs[0]
+        return delta
 
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -181,6 +182,10 @@ class ToF:
         if sensor_id in p.short_map_ids:
             xs, ys = p.short_map_by_id.get(sensor_id, (p.short_map_true_mm, p.short_map_read_mm))
             mean_d = mean_d + ys[0] - xs[0] if mean_d < xs[0] else float(np.interp(mean_d, xs, ys))
+        # Sesgo lateral reproducible del banco de referencias.
+        short_bias = os.environ.get("TWIN_TOF_SHORT_K")
+        if short_bias and sensor_id in (0, 1):
+            mean_d *= 1.0 - float(short_bias) * max(0.0, mean_d - 450.0) / 1000.0
         sigma = p.noise_sigma_mm
         near = mean_d < self._sensor_value(p.near_ok_mm_by_id, 0.0, sensor_id)
         if sensor_id in p.long_map_ids:
@@ -253,6 +258,7 @@ class Bno085Heading:
         self.rng = rng
         self._scale = 1.0 + float(rng.normal(0.0, params.scale_error_sigma))
         self._walk = 0.0
+        self._yaw_drift_dps = float(os.environ.get("TWIN_YAW_DRIFT_DPS", "0"))
         self._gm = 0.0
         self._yaw_true: float | None = None   # CCW, sin envolver
         self._head_prev: float | None = None
@@ -273,6 +279,7 @@ class Bno085Heading:
             dt = 0.0 if self._sample is None else t - self._sample_t
             if dt > 0.0:
                 self._walk += float(self.rng.normal(0.0, p.drift_walk_deg_per_sqrt_s * math.sqrt(dt)))
+                self._walk += self._yaw_drift_dps * dt
                 a = math.exp(-dt / p.noise_tau_s)
                 self._gm = a * self._gm + float(self.rng.normal(0.0, p.noise_deg * math.sqrt(1.0 - a * a)))
             self._sample = self._yaw_true * self._scale + self._walk + self._gm

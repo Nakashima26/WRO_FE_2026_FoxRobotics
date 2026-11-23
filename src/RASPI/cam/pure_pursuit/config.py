@@ -144,7 +144,39 @@ US_DESDE_TOF = True
 # 484): ve el piso con el ROI de 16. Con 500 esas lecturas entraban y corrían la pose 10-25 cm hacia la
 # derecha (roces en la sección 2). Izquierdo: 55 cm lee 526. Gemelo campo 36 con esa curva: 500/500
 # termina 2/7, 480/450 termina 7/7.
-LOC_TOF_MAX_MM = {"tL": 480.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
+# Distancia máxima entre el eco y un obstáculo conocido dentro del cono ToF.
+# None conserva la asociación por el rayo central.
+LOC_RACE_TOF_OCCLUSION_MM = None
+# Diagnóstico (2026-11-23, orillas156: saltos laterales de ~9 cm en la recta 3): imprime [LOCUPD] cada corrección
+# del EKF que mueve la pose >= estos mm (sensor, lectura, esperado, superficie). None = sin log.
+LOC_LOG_UPD_MM = 15.0
+# 2026-11-23 (orillas162): el ToF lateral ve las señales al pasar (20-120 mm donde la pared queda a 400-600) y en
+# varias pasadas no cuadraba con la pose. Con esto, una señal confirmada por el mapa dentro del cono del ToF
+# (a <= LOC_TOF_SIGN_MAX_MM) es referencia del EKF. None = apagado (el eco se descarta como antes).
+LOC_TOF_SIGN_MAX_MM = 300.0
+# 2026-11-23 (orillas165, verde W/T2 en la vuelta 3): en la esquina 7->8 el izquierdo leyó la isla 120 mm corto con
+# 32° de incidencia y el EKF saltó la pose 100 mm (igual en orillas162: -123/103 mm). Con el cono ancho del VL53 la
+# lectura oblicua sale corta: real - rayo central = -1/-4/-20/-71 mm a 0-20/20-30/30-40/40-60°. Antes 35° fijo.
+LOC_TOF_MAX_INC_DEG = 30.0   # twin (ToF sin sesgo oblicuo): 35° 44/48, 30° 43/48, 25° 42/48. orillas166 (30°) limpia; orillas167 (27°) chocó S/X2R en vuelta 1 (pose 14 cm corrida tras la primera curva)
+LOC_TOF_SIGN_HALF_DEG = 7.0    # medio cono del ToF (ROI 8); 13.5 era el de ROI 16. Ecos de bloque 162+164: ±7° -> mediana -0 mm, ±13.5° -> +4
+LOC_TOF_SIGN_SIGMA_MM = 15.0   # + 2% de la lectura; la señal mide 50 mm y el cono 27°
+LOC_TOF_MAX_MM = {"tL": 650.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
+# orillas159 (tL 650): con la pared a >700 el izquierdo se satura y lee 600-645 (esperado 768/793/733 -> 645/622/607),
+# salto falso de 121 mm. orillas160 (tL 600 y esperado <= 600): sin esos saltos pero la recta 3 (pared a 573-690)
+# perdió el izquierdo y el golpe volvió (-88/-90). LOC_TOF_EXPECT_GATE: se descarta si lo esperado pasa de
+# LOC_TOF_EXPECT_MAX_MM[key] (si no está, LOC_TOF_MAX_MM[key]).
+LOC_TOF_EXPECT_GATE = True
+LOC_TOF_EXPECT_MAX_MM = {"tL": 700.0}
+# 2026-11-23 tL 480 -> 650: banco recta 3, real 620 mm lee 560-646 (media ~600, ±40). Con 480 el izquierdo no veía la
+# pared exterior en rectas con señales a la derecha (N/T1-T4 verdes tapan el derecho) y la deriva llegaba entera a la
+# recta 3 (orillas157: tR -84/-112 mm, golpe de volante). Más allá de LOC_TOF_FAR_FROM_MM la sigma crece por mm.
+LOC_TOF_FAR_FROM_MM = 480.0
+LOC_TOF_FAR_SIGMA_PER_MM = 0.15   # a 600 mm: 12 + 18 = 30 mm de sigma
+# Corrección de pose para el visor durante maniobras, con el cajón ya fijado.
+LOC_MANEUVER_VIEW = False
+LOC_MANEUVER_MAX_INNOV_MM = 80.0
+LOC_MANEUVER_WOOD_SIGMA_MM = 44.0  # incertidumbre de asociar el cono con la madera
+LOC_MANEUVER_FRONT_OFFSET_MM = 32.0  # frontal Long en el rango cercano (calib. 2026-10-19)
 # Ruido de proceso lineal del localizador (mm² por mm recorrido); None = el de antes. Ver localizer._predict.
 LOC_Q_XY_PER_MM = 2.0   # gemelo (s19/s7/s23, encoder 1.00 y 1.04): 2 -> 12+12+3 y 12+12+2 vueltas-esquina; sin esto con 1.04: 1+1+1
 # Procedencia, para el twin (describe()) y para quien mida.
@@ -1385,6 +1417,26 @@ ROUTE_FIX_LINE_DECIDE_N = 5
 ROUTE_FIX_LINE_DECIDE_IQR_MM = 60.0
 ROUTE_FIX_LINE_DECIDE_SPAN_MM = None   # rango máx de esos votos (None = sin chequeo)
 ROUTE_FIX_LINE_FRESH = None   # True: el voto por recta solo con la cinta vista en este frame (no la sostenida)
+# Arranque ciego en est=INICIO: la cinta viva sigue en el BEV pero corner_lines no extraía pix (in_turn_cooldown).
+ROUTE_FIX_PIX_AT_INICIO = False
+LINE_PIX_INICIO_HALF_COLS = 200   # banda lateral más ancha en INICIO (cinta vista por columna lejana)
+ROUTE_FIX_PIX_INICIO_MIN_Y = 150.0   # px BEV: no votar pix_line en INICIO si la cinta queda pegada al robot
+ROUTE_FIX_PIX_INICIO_MAX_BAND = 750  # masas enormes de naranja en el BEV (p. ej. fila entera) no son cinta de esquina
+# True: pix_line en INICIO solo si ToF aún no informa (s34); con sonar ya informativo (s3/s5) no pisa el pico.
+ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK = False
+ROUTE_FIX_PIX_INICIO_TOF_MASS_MAX = 0.2   # con masa ≥ esto y lecturas, ToF cuenta como decidido
+ROUTE_FIX_PIX_DELTA_BIAS_MM = 0.0   # suma al δ de votos pix_line (sesgo BEV calibrada, ver bev_calib PnP)
+# Con ROUTE_FIX_PIX_AT_INICIO: mediana pix solo si el rumbo está alineado a la recta del cajón (maniobras ~40-60° no).
+ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG = 28.0
+# Cinta casi paralela (|n·a| alto) y |δ| pequeño: umbral de rumbo más alto (salida W/S ~41°; maniobras ~226° no).
+ROUTE_FIX_PIX_BLIND_MAX_HEADING_ALIGNED_DEG = None
+ROUTE_FIX_PIX_BLIND_ALIGNED_MAX_D_MM = 150.0
+# Sin votos de cinta: no forzar por ToF si el δ supera esto (gemelo s20/s32).
+ROUTE_FIX_FORCE_MAX_NO_LINE_MM = None
+# Rechaza votos recta que discrepan de pix o de una serie recta con drift; prefiere pix al decidir.
+ROUTE_FIX_LINE_VOTE_REJECT = False
+ROUTE_FIX_LINE_VOTE_K_MAD = 2.5
+ROUTE_FIX_LINE_RECTA_DRIFT_MM = 40.0
 ROUTE_FIX_FORCE_BLEND_MM = None   # forzado con 1-2 votos de cinta: promedia con el pico del sonar (masa ≥0.2) si están a ≤ esto
 ROUTE_FIX_FWD_ADD_MM = 0.0   # número o {"CW":mm,"CCW":mm}: mm que se suman al avance (BEV->mundo) de los votos de cinta de StartFix; corrige el sesgo +37 mm de la cinta (gemelo N20)
 ROUTE_LOC_HOLD_AT_START = None   # True: sin corrección del localizador mientras la odometría sigue en 0 (parado en el cajón)
@@ -1462,6 +1514,11 @@ ROUTE_PROFILE_PWM0 = 25.0
 # (sqrt(A_LAT/κ) < base) pueden bajar hasta aquí, también cerca de señales.
 ROUTE_PROFILE_MIN_PWM = None
 ROUTE_L23_MIN_PWM = 190    # piso del perfil en vueltas 2-3 (tc 4..11). Con el lazo sin tope en 2-3 (255 = no frenar) chocaban señales; 170 frena cerca de señales/isla. None = ROUTE_PROFILE_MIN_PWM
+# Tope en curvas de vueltas 2-3: {pwm, mm, radius_mm}.
+# inside_exit_only limita a señales confirmadas con paso por la isla, en los primeros exit_mm de recta.
+ROUTE_L23_CORNER_SIGN = None
+ROUTE_CORNER_EXIT_CLEAR_MM = 70.0  # orillas170 (semilla 4) con 40 rozo E/T2R y S/T3G en v2 saliendo de esquina; twin: 0 47/48 min15mm, 40 44/48 +0.4s min27mm, 70 44/48 +0.7s; deriva de pose tras esquina ~8-14cm. reserva blanda ante señales en los primeros 500 mm de recta
+ROUTE_CORNER_EXIT_INSIDE_EXTRA_MM = 0.0  # reserva adicional si se pasa del lado de la isla
 ROUTE_L1_SOFT_CLEAR_MM = None  # margen blando de la ruta en vuelta 1 desde tc>=1 (con asientos sin ver). None = ROUTE_SOFT_CLEAR_MM
 ROUTE_L1_MIN_PWM = None    # piso del perfil en vuelta 1 (1<=tc<4). None = ROUTE_PROFILE_MIN_PWM
 ROUTE_L1_UPLOAD_PWM = None # tope en vuelta 1 (1<=tc<4) mientras sube la ruta al ESP. None = ROUTE_UPLOAD_PWM
@@ -1495,6 +1552,8 @@ ROUTE_PROFILE_BRAKE_FLOOR_PWM = 60
 ROUTE_FIX_STEP_MM = None
 # Arranque forzado: δ del cajón = mediana de lo que dice la línea naranja (recta del BEV en la columna central) si hay ≥ ROUTE_FIX_LINE_MIN lecturas; None = solo sonar
 ROUTE_FIX_LINE = None
+# Contrasta el avance de la cinta con un par de pilares de rectas distintas.
+ROUTE_FIX_PILLAR_PAIR = False
 # 3 -> 1 (2026-11-11, orillas47): con 2 votos cayó a la media del sonar, +339 con la verdad en +170 (41/42 con
 # 3-4 votos: +170 y estacionó), y el ESP tomó el estacionamiento ya al lado de la madera. Gemelo (8 semillas,
 # [PRUEBA]): los votos de la línea quedan a ~+40 de la verdad y entre sí a ±15; la media del sonar a 100-300.
@@ -1508,6 +1567,7 @@ ROUTE_FIX_LINE_TOF_LR = None
 ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
 # Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
 ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
+ROUTE_PARK_REFINE = False  # Solo Pi: refina pka con las dos maderas vistas por el ToF exterior.
 # Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
 ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es la del MISMO frame que la pose; el "lag 14" medido salía de que en el _bev.bin el frame del voto m es el 6+m+16, no 6+m (centroide del carro reproducido a 0.5 mm con +16). Con 0: 129 -> -5 mm
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
@@ -1797,4 +1857,5 @@ ROUTE_FINAL_W = 20.0
 LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas que no suman el ancho (tc3..11)
 
 # N20: freno selectivo en curva de vuelta 1 junto a una señal. Opt-in.
-ROUTE_L1_CORNER_SIGN = None
+# selective: conservar el freno cerca del cajon o de la fila X al salir de curva; fuera rigen other_mm y other_pwm.
+ROUTE_L1_CORNER_SIGN = None   # {pwm, mm, radius_mm, unk_only}: tope en curvas cerradas cerca de señales (unk_only: solo asientos sin resolver)

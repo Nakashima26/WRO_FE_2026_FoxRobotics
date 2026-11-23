@@ -24,6 +24,9 @@ import numpy as np
 
 from . import config as C
 
+# route_mode / runtime: True solo mientras el arranque ciego no fijó el cajón.
+_BLIND_PIX_EXTRACT = False
+
 
 def _line_mask(bev_hsv: np.ndarray, ranges) -> np.ndarray:
     masks = [cv2.inRange(bev_hsv, lo, hi) for lo, hi in ranges]
@@ -471,6 +474,8 @@ def _center_pix(mask, cap: int = 400) -> np.ndarray | None:
     if mask is None:
         return None
     half = int(getattr(C, "LINE_PIX_HALF_COLS", 80))
+    if _BLIND_PIX_EXTRACT:
+        half = max(half, int(getattr(C, "LINE_PIX_INICIO_HALF_COLS", 200)))
     x0 = max(0, int(C.ROBOT_BEV_X) - half)
     x1 = min(mask.shape[1], int(C.ROBOT_BEV_X) + half + 1)
     ahead = float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
@@ -625,7 +630,10 @@ class OrangeLineTracker:
         self._prov = raw.get("curve") if raw["seen"] else None
         if raw["seen"] and not in_turn_cooldown:
             self._raw_pix = _center_pix(raw.get("_mask"))
-        if not in_turn_cooldown and getattr(C, "ROUTE_FIX_PIX_LINE", False):
+            if self._raw_pix is None and _BLIND_PIX_EXTRACT:
+                self._raw_pix = _center_pix(raw.get("_mask_all"))
+        if not in_turn_cooldown and (
+                getattr(C, "ROUTE_FIX_PIX_LINE", False) or _BLIND_PIX_EXTRACT):
             # Voto por línea (route_mode._pix_vote): todos los pixeles naranjas de la franja central,
             # se haya aceptado o no la cinta en este frame. La geometría decide cuáles son cinta.
             self._raw_pix_all = _center_pix(raw.get("_mask_all"), cap=1200)

@@ -15,6 +15,7 @@ def _rm(orange):
     rm = RouteMode.__new__(RouteMode)
     rm.orange = orange
     rm._line_d = []
+    rm._line_vote_src = []
     rm._pre_poses = []
     rm.axis = W.w_axis("N")
     return rm
@@ -37,6 +38,42 @@ def test_line_vote_recovers_delta(monkeypatch):
     rm._line_vote(_Dm(), pose)
     assert len(rm._line_d) == 1
     assert abs(rm._line_d[0] - delta) <= 1.0
+
+
+def test_line_vote_rejects_recta_against_pix(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", True, raising=False)
+    rm = _rm({"seen": True, "line": (1.0, 0.0, 0.0, 100.0)})
+    rm._line_vote_src = []
+    rm._line_d = []
+    rm._line_vote_append(-100.0, "pix")
+    rm._line_vote_append(200.0, "recta")
+    assert rm._line_d == [-100.0]
+
+
+def test_pix_blind_heading_blocks_maneuver(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_PIX_AT_INICIO", True, raising=False)
+    monkeypatch.setattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG", 28.0, raising=False)
+    rm = _rm({"seen": True, "line": (1.0, 0.0, 0.0, 100.0)})
+    rm.fixed = False
+    rm.axis = W.w_axis("E")
+    assert rm._pix_blind_heading_ok((0.0, 0.0, 180.0)) is True
+    assert rm._pix_blind_heading_ok((0.0, 0.0, 226.0)) is False
+
+
+def test_pix_inicio_skips_when_tof_informative(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", True, raising=False)
+    rm = _rm({"seen": True, "src": "col", "near_y": 200.0, "band": 300,
+              "line": (1.0, 0.0, 0.0, 100.0), "_pix_all": np.zeros((30, 2))})
+    rm.fixed = False
+    class _Fix:
+        n_inform = 5
+        def estimate(self, _):
+            return -100.0, 0.8
+        logp = np.array([0.0])
+        deltas = np.array([-100.0])
+    rm.fix = _Fix()
+    rm._line_ok = lambda d: True
+    assert rm._pix_inicio_vote_ok(-600.0) is False
 
 
 def test_line_vote_ignores_unseen_or_dead_reckoned():
