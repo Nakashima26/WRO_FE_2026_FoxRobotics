@@ -1576,6 +1576,7 @@ ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
 ROUTE_FIX_BLUE = True
 # Cajón = pose ubicada por la cinta + esto (la odometría de la salida se pasa siempre igual; la pose sí se corre con el δ completo).
+ROUTE_FIX_POSE_MARGIN_MM = None   # el δ de la pose puede salir esto del rango del cajón (None = recortado igual que el cajón)
 ROUTE_FIX_PARK_ADJ_MM = {"CW": 0.0, "CCW": -86.0}   # 2026-11-21: CCW 126/128/131 medido +83/+88/+86; CW 121/130 −2/−29
 ROUTE_FIX_BLUE_HSV = ((95, 70, 60), (115, 255, 200))
 ROUTE_FIX_BLUE_MIN_AREA = 150

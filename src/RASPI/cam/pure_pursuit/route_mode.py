@@ -1870,13 +1870,20 @@ class RouteMode:
     def _apply_fix(self, dm, ack, delta: float, forced: bool):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""
         # w0 fuera de [PARK_W_MIN, PARK_W_MAX] no existe en el reglamento (corrida 99: 1820 con máx 1696).
-        delta = float(min(max(float(delta), PARK_W_MIN - self.fix.w0_guess), PARK_W_MAX - self.fix.w0_guess))
+        lo, hi = PARK_W_MIN - self.fix.w0_guess, PARK_W_MAX - self.fix.w0_guess
+        delta_raw = float(delta)
+        delta = float(min(max(delta_raw, lo), hi))   # δ del cajón (dónde está la madera)
+        # δ de la pose: lo que midió la cinta es dónde está el CARRO, no el cajón. Recortarlo al rango del cajón
+        # tiraba el error de la odometría de la salida (CCW con el cajón supuesto en el máximo: δ=+0 siempre con la
+        # cinta votando +38..+102; la isla corregía 137-175 mm en la esquina 1 en las 6 runs del 2026-11-23).
+        pm = getattr(C, "ROUTE_FIX_POSE_MARGIN_MM", None)
+        delta_pose = delta if pm is None else float(min(max(delta_raw, lo - float(pm)), hi + float(pm)))
         ax, ay = self.axis
-        dx, dy = delta * ax, delta * ay
+        dx, dy = delta_pose * ax, delta_pose * ay
         mass = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1]
-        self.shift = float(delta)
+        self.shift = float(delta_pose)
         self.fixed = True
-        self.fix.fixed = float(delta)
+        self.fix.fixed = float(delta_pose)
         self.loc.shift(dx, dy)
         # El δ corre la POSE (lo que ve la cinta = dónde está el carro), pero la odometría de la salida
         # del cajón se pasa siempre lo mismo: en CCW ~+86 mm (131/126/128 medidos 86/83/88). Ese error
@@ -1896,7 +1903,7 @@ class RouteMode:
         how = f"FORZADO masa {mass:.2f}" if forced else f"masa {mass:.2f}"
         if getattr(C, "ROUTE_FIX_LINE", None):
             how += f" línea n={len(self._line_d)}"
-        print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, ajuste {adj:+.0f}, {how}) tras "
+        print(f"[ROUTE] arranque: cajón en w0={self.park_w:.0f} (δ={delta:+.0f} mm, crudo {delta_raw:+.0f}, pose {delta_pose:+.0f}, ajuste {adj:+.0f}, {how}) tras "
               f"{self.fix.n_frames} lecturas ({self.fix.n_inform} informativas); "
               f"{n} frames de cámara votados", flush=True)
         if self._prueba_cajon:
