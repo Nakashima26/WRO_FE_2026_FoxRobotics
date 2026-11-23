@@ -7797,7 +7797,9 @@ void loop() {
         if (parkCentrarDir == 0) {
           motorCoast();
           if (millis() - parkFaseMs < (unsigned long)PARK_PL_PAUSA_MS) break;   // que pare y el volante llegue al centro
-          float dF = distF_filtrada, dB = distB_filtrada, err = dF - dB - PARK_PL_CENTRAR_OFF_CM;   // >0: sobra adelante
+          // ToF de enfrente si lee (el sonar frontal da ~3 cm menos que el ToF: corrida 1281 cerraba con tF 93 / tB 46 mm)
+          float dF = (tofMm[3] > 0 && tofMm[3] < 300) ? tofMm[3] / 10.0f : distF_filtrada;
+          float dB = distB_filtrada, err = dF - dB - PARK_PL_CENTRAR_OFF_CM;   // >0: sobra adelante
           Serial.print("PARK centrar dF="); Serial.print(dF, 1); Serial.print(" dB="); Serial.print(dB, 1);
           if (dF <= 0.0f || dF > 20.0f || dB <= 0.0f || dB > 20.0f || fabsf(err) <= PARK_PL_CENTRAR_TOL_CM) {
             Serial.println(" -> ya");
