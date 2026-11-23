@@ -3837,6 +3837,74 @@ void parkPlanPose(float &w, float &h) {
   w -= PARK_PL_CONO * (parkDetHSon - 350.0f);
   h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
 }
+// Reancla la reversa con el centro de la segunda madera medido en el escaneo final.
+PARK_AJ bool PARK_PL_TOF_ANCLA = false;
+#if FOX_TOF
+static float parkPlHitMin, parkPlHitMax, parkPlSampleAlong;
+static unsigned long parkPlSampleMs;
+static int parkPlHits;
+static void parkPlMideMadera() {
+  if (parkFase == 0 && parkBaseN < PARK_BASE_N) {
+    parkPlHits = 0;
+    parkPlSampleMs = 0;
+    parkPlSampleAlong = NAN;
+  }
+  float th = parkThCarril();
+  if (!isfinite(th) || fabsf(th) > 15.0f || !isfinite(rutaPka)) return;
+  const int side = parkParedEsIzquierda ? 0 : 1;
+  const float along = alongSalidaMm() * (parkDirecto ? 1.0f : -1.0f);
+  const float range = tofMm[side];
+  if (range < 20.0f || range > 175.0f) return;
+#if !defined(FOX_SIL)
+  if (tofUltimoMs[side] == parkPlSampleMs) return;
+  parkPlSampleMs = tofUltimoMs[side];
+#endif
+  if (isfinite(parkPlSampleAlong) && fabsf(along - parkPlSampleAlong) < 3.0f) return;
+  const float yaw = th * DEG_TO_RAD;
+  const float hit = along + 110.6f * cosf(yaw) + (35.2f + range) * sinf(yaw);
+  const float prior = parkDirecto ? rutaPka - 10.0f : -rutaPka + 294.0f;
+  if (fabsf(hit - prior) > 105.0f) return;
+  if (!parkPlHits || hit > parkPlHitMax + 55.0f) {
+    parkPlHits = 0;
+    parkPlHitMin = parkPlHitMax = hit;
+  }
+  parkPlHitMin = min(parkPlHitMin, hit);
+  parkPlHitMax = max(parkPlHitMax, hit);
+  ++parkPlHits;
+  parkPlSampleAlong = along;
+}
+
+static void parkPlAnclaMadera() {
+  if (parkPlHits < 2 || parkPlHitMax - parkPlHitMin > 75.0f) return;
+  float w, h;
+  parkPlanPose(w, h);
+  const float along = alongSalidaMm() * (parkDirecto ? 1.0f : -1.0f);
+  const float measuredW = along - 0.5f * (parkPlHitMin + parkPlHitMax) + 274.0f;
+  const float delta = measuredW - w;
+  if (fabsf(delta) < 12.0f || fabsf(delta) > 95.0f) return;
+  parkDetAlong -= (parkDirecto ? 1.0f : -1.0f) * delta;
+  Serial.print("PARK ancla ToF lateral delta=");
+  Serial.println(delta, 1);
+}
+#endif
+
+// Termina el ajuste si la huella barrida hasta detenerse cabe en el cajon.
+PARK_AJ bool PARK_PL_CIERRE_HUELLA = false;
+static bool parkPlHuellaDentro(float w, float h, float th, float avance) {
+  if (fabsf(th) > 12.0f) return false;
+  const float c = cosf(th * DEG_TO_RAD), s = sinf(th * DEG_TO_RAD);
+  // Envolvente del chasis. Deja margen para el error residual del ancla y el giro al soltar.
+  for (float a : {-34.0f, 155.0f}) {
+    for (float b : {-65.0f, 65.0f}) {
+      const float x = w + a * c - b * s, y = h + a * s + b * c;
+      if (min(x, x + avance * c) < 18.0f || max(x, x + avance * c) > 246.0f
+          || min(y, y + avance * s) < 15.0f || max(y, y + avance * s) > 185.0f)
+        return false;
+    }
+  }
+  return true;
+}
+
 static float parkPtSeg(float px, float py, float ax, float ay, float bx, float by) {
   float dx = bx - ax, dy = by - ay, t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
   t = constrain(t, 0.0f, 1.0f);
@@ -6329,6 +6397,9 @@ void loop() {
       int   servoHaciaPared = parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG;      // tope hacia la pared exterior
       int   servoDesdePared = parkParedEsIzquierda ? SERVO_MIN_DEG : SERVO_MAX_DEG;      // contravuelta hacia el interior
       parkExtRaw = extRaw;
+#if FOX_TOF
+      if (PARK_PL_TOF_ANCLA && (parkFase == 0 || parkFase == 1)) parkPlMideMadera();
+#endif
       if (piPark >= 1) parkRosaVisto = true;
 
       const int alejarPwm = direccionIzquierda && PARK_UTURN_CCW_ALEJAR_PWM > 0
@@ -7388,6 +7459,9 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+#if FOX_TOF
+          if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
+#endif
           parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
@@ -7476,6 +7550,11 @@ void loop() {
         if (th > parkPlanThMax) parkPlanThMax = th;
         float pw, ph;
         parkPlanPose(pw, ph);
+        if (PARK_PL_CIERRE_HUELLA && parkPlanI >= 2
+            && parkPlHuellaDentro(pw, ph, th, encVelMmS * 0.18f)) {
+          finalizarPark("PLAN huella dentro");
+          break;
+        }
         float clr = parkPlanHolgura(pw, ph, th);
         bool fin = false; const char *why = "";
         float mm = parkRecorridoMm();
