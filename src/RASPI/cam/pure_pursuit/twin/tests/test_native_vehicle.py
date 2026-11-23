@@ -139,3 +139,34 @@ def test_sil_native_advance_exact(variant, drain_period):
     finally:
         for fw in firmwares:
             fw.close()
+
+
+@pytest.mark.parametrize("vehicle_cls", [Vehicle, NativeVehicle])
+def test_race_motor_breakaway_and_speed_cap(monkeypatch, vehicle_cls):
+    monkeypatch.setenv("TWIN_MOTOR_REAL", "1")
+    monkeypatch.setenv("TWIN_VBAT", "12.5")
+    params = TwinParams()
+
+    def run(vehicle, pwm, servo, direction=1, steps=2000):
+        for _ in range(steps):
+            vehicle._integrate_substep(.001, servo, pwm, direction)
+
+    center = params.steering.servo_center_deg
+    lock = params.steering.servo_min_deg
+    vehicle = vehicle_cls(params, 0, 0, 0)
+    run(vehicle, 78, lock)
+    assert (vehicle.v, vehicle.v_wheel, vehicle.x, vehicle.y) == (0, 0, 0, 0)
+    run(vehicle, 150, lock)
+    assert vehicle.v > 200
+    run(vehicle, 78, lock)
+    assert vehicle.v > 200
+
+    straight = vehicle_cls(params, 0, 0, 0)
+    run(straight, 255, center, steps=4000)
+    assert straight.v == pytest.approx(1080, abs=1)
+
+    reverse = vehicle_cls(params, 0, 0, 0)
+    run(reverse, 78, lock, direction=-1)
+    assert reverse.v_wheel == 0
+    run(reverse, 150, lock, direction=-1)
+    assert reverse.v < -200

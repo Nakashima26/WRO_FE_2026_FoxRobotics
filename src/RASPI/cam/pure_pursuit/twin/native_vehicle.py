@@ -15,6 +15,7 @@ class NativeVehicle(Vehicle):
         vals += [len(st.table_right),len(st.table_left)]
         vals += [x for pair in st.table_right for x in pair]
         vals += [x for pair in st.table_left for x in pair]
+        vals += [m.max_speed_fwd_mm_s, m.breakaway_pwm, m.breakaway_turn_pwm]
         self._p=(ct.c_double*len(vals))(*(0 if x is None else x for x in vals))
         self._fn=get_kernel('fox_twin_vehicle',[ct.c_void_p,ct.c_void_p],None)
         if self._fn is None: raise RuntimeError('native vehicle unavailable')

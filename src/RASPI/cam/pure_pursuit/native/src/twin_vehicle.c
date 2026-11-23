@@ -8,7 +8,8 @@
  * 23..29: coast/drive tau, reverse/forward acceleration, reverse slip enabled,
  *         reverse spin tau, reverse steering scale
  * 30..34: wheelbase, lateral acceleration L/R, right/left table lengths
- * 35..: interleaved servo units / wheel degrees, right table then left table.
+ * 35..: interleaved servo units / wheel degrees, right table then left table,
+ *       followed by forward speed cap, base breakaway PWM, and turn increment.
  */
 static double (*volatile py_sin)(double)=sin;
 static double (*volatile py_cos)(double)=cos;
@@ -18,6 +19,7 @@ static double table(double u, const double *t, int n) {
 }
 FOX_API void fox_twin_vehicle(double *s,const double *p){
  int rn=(int)p[33],ln=(int)p[34]; const double *rt=p+35,*lt=rt+2*rn;
+ const double *motor_load=lt+2*ln;
  double dt=s[10],cmd=s[11],pwm=s[12];int dir=(int)s[13];
  /* s: x y heading v servo effective wheel_v sliding lag last_wheel */
  volatile double square_exponent = 2.0;
@@ -39,7 +41,11 @@ FOX_API void fox_twin_vehicle(double *s,const double *p){
  }else{
   double vt=0;
   if(dir!=0){double v=(dir<0&&p[17])?p[18]*(pwm-p[19]):p[20]*(pwm-p[11]);
-   if(p[21]>1e-6)v*=1.0-p[22]*pow(fabs(wheel)/p[21],square_exponent);
+   double wheel_fraction_sq=p[21]>1e-6?pow(fabs(wheel)/p[21],square_exponent):0.0;
+   if(dir>0 && motor_load[0]>0.0)v=fmin(v,motor_load[0]);
+   v*=1.0-p[22]*wheel_fraction_sq;
+   double breakaway=motor_load[1]+motor_load[2]*wheel_fraction_sq;
+   if(fabs(s[3])<5.0 && pwm<breakaway)v=0.0;
    double ss=fmax(0,v);vt=dir>0?ss:-ss;}
   double tau=dir==0?p[23]:p[24],dv=(vt-s[3])*(dt/tau);
   double amax=(dir<0&&p[25])?p[25]:p[26];int spinning=0;

@@ -164,7 +164,15 @@ class Vehicle:
                 if w_max is None:
                     w_max = self._w_max = max_wheel_deg(st)   # constante: params no cambian en la corrida
                 if w_max > 1e-6:
-                    v *= 1.0 - mot.scrub_coeff * (abs(wheel) / w_max) ** 2
+                    wheel_fraction_sq = (abs(wheel) / w_max) ** 2
+                else:
+                    wheel_fraction_sq = 0.0
+                if direction > 0 and mot.max_speed_fwd_mm_s is not None:
+                    v = min(v, mot.max_speed_fwd_mm_s)
+                v *= 1.0 - mot.scrub_coeff * wheel_fraction_sq
+                breakaway = mot.breakaway_pwm + mot.breakaway_turn_pwm * wheel_fraction_sq
+                if abs(self.v) < 5.0 and drive_pwm < breakaway:
+                    v = 0.0
                 v_ss = max(0.0, v)
                 v_target = v_ss if direction > 0 else -v_ss
 
