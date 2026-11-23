@@ -32,6 +32,8 @@ This README documents **the car that competes at the WRO 2026 International Fina
 | <img src="docs/img/real_vs_twin.gif" width="100%" alt="Real car (left) and digital twin (right) running the same field"> |
 | <sub>Left: the real car's debug view (camera, bird's-eye view, map with the planned route). Right: the twin on the same field ([§3.9](#39-digital-twin--software-in-the-loop-simulator)).</sub> |
 
+Surprise rule (2026 extra task), real track: <https://youtu.be/haEbG5QQj1Y>.
+
 v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG-6s) · [Obstacle Challenge](https://youtu.be/VI6V6hTf_HE). Each driving video is at least 30 s long. Index: [`video/video.md`](video/video.md).
 
 ## The car in one minute
@@ -858,8 +860,10 @@ Only the pillar's **foot** goes through the floor homography; the height is meas
 
 </details>
 
-**Open before declaring the attempt.**
-1. **Calibrate with real photos** of a normal pillar at several distances on the car (no real table yet), then check with real 50 mm and 150 mm pillars.
+**Real track (2026-11-23).** The surprise attempt ran on our real track with the code exactly as described above, no changes, and it worked: [video](https://youtu.be/haEbG5QQj1Y).
+
+**Still open.**
+1. Repeat the real test with both heights (50 and 150 mm) and more fields to get a real success rate.
 2. **Three regressions in the twin:** on two fields the car hits the parking walls only when surprise mode is on, and on one field (150 mm) it hits a normal pillar after 10 corners. In all three the special pillar itself was classified correctly; the cause is in the route or the parking, not in the classifier.
 3. Decide per round, with these results, whether the 15 points are worth the risk to the main score.
 
@@ -1062,7 +1066,7 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 - **Consistency of the full round.** Clean 3-lap rounds with a correct map exist (runs 41, 48), but not every run yet completes all 3 laps with every pillar mapped correctly; the open mapping case is the one above. On 2026-11-21 lap 1 steered visibly less smooth than laps 2–3 (about twice as many steering reversals per metre); cause not yet confirmed. The validation matrix above will be filled once this is consistent.
 - **Color depends on the camera exposure.** After the 2026-11-19 remount (automatic exposure) the red pillars appeared at hue 5–7 instead of 170–179 and the old red band missed them; the ratio-based classifier that fixes it is validated offline and still has to be tested on the car (§6).
 - **Front ToF** is reliable only to ~80 cm on the black wall; it is never used for the lot fix.
-- **Surprise pillar (§3.7.8)** is validated only in the twin: it still needs a calibration table from real photos and three twin regressions (parking and one pillar) fixed before we declare the attempt.
+- **Surprise pillar (§3.7.8)** worked on the real track (2026-11-23, [video](https://youtu.be/haEbG5QQj1Y)) but with few real attempts so far; three twin regressions (parking and one pillar) are still open.
 - **Twin parking** is the least realistic part of the simulator; parking constants are confirmed on the car.
 
 
@@ -1496,7 +1500,7 @@ What is still open, in the order we will work on it, and how we will know it is 
 | 4 | **Validation matrices and the release** | Formal evidence for the final code | Fill the open (3 CW + 3 CCW) and obstacle (OBS-01…06) matrices with the final firmware, then tag `v2.0-internacional` | Matrices filled and tagged |
 | 5 | **Ultrasonic cross-check of the ToF** | The ToF's weak spot (far black wall) is where sound works ([§2.4](#24-sensors--selection-placement-and-calibration)) | Static test on black and white walls, then let the EKF drop a ToF reading that disagrees | Measured disagreement threshold and a twin bench with no new failures |
 | 6 | **Open round in route mode** | `RondaAbierta.ino` drives every corner at a speed safe for an unseen corner ([§3.6](#36-open-challenge-esp32-only)) | Lap 1 maps the inner walls with the ToF and the encoder; laps 2–3 follow a planned route | Beats 29.6 s reliably on our track |
-| 7 | **Surprise pillar (2026 extra task)** | Validated only in the twin ([§3.7.8](#378-2026-extra-task--the-surprise-pillar)) | Calibration table from real photos of a normal pillar; fix the three twin regressions | The twin regressions pass and real 50 / 150 mm pillars are classified correctly |
+| 7 | **Surprise pillar (2026 extra task)** | Worked on the real track 2026-11-23 ([§3.7.8](#378-2026-extra-task--the-surprise-pillar)), few real attempts | More real attempts with both heights; fix the three twin regressions | The twin regressions pass and a measured real success rate with 50 / 150 mm pillars |
 | 8 | **PCB RevC** | A rotated board killed a Pi 5; a large output capacitor stopped the Pi from booting ([§4.5](#45-risks-failure-modes-and-mitigations)) | Keyed stacking headers, PTC fuse and 5 V TVS diode on the Pi rail, input capacitor ≥ 25 V, latching JST-ZH connectors for the BNO085 and the servo (Dupont today) | Board ordered and the power-up checklist passes |
 
 ---

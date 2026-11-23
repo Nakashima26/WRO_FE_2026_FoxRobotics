@@ -1,6 +1,6 @@
 """Portadas 1920x1080 para los videos v2 (logo, render isométrico, bandera, tipo de prueba).
 
-python video/portadas/portada.py   -> portada_open.png, portada_obstacle.png
+python video/portadas/portada.py   -> portada_open.png, portada_obstacle.png, portada_surprise.png
 """
 from pathlib import Path
 
@@ -124,6 +124,7 @@ def portada(titulo, subs, salida):
 if __name__ == "__main__":
     portada(["OPEN", "CHALLENGE"], ["3 laps", "fully autonomous"], "portada_open.png")
     portada(["OBSTACLE", "CHALLENGE"], ["3 laps with traffic signs", "parallel parking"], "portada_obstacle.png")
+    portada(["SURPRISE", "RULE"], ["2026 extra task", "special-height pillar"], "portada_surprise.png")
 
 
 def banner(salida=REPO / "docs/img/banner.png"):

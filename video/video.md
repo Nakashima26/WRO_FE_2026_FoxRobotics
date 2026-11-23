@@ -14,6 +14,12 @@
 
 [https://youtu.be/Qk4TaZrQ-Js](https://youtu.be/Qk4TaZrQ-Js)
 
+### Surprise Rule — 2026 extra task (special-height pillar)
+
+[![Surprise Rule v2](https://img.youtube.com/vi/haEbG5QQj1Y/maxresdefault.jpg)](https://youtu.be/haEbG5QQj1Y)
+
+[https://youtu.be/haEbG5QQj1Y](https://youtu.be/haEbG5QQj1Y)
+
 ---
 
 ## v1 — Mexico National Final (archived)
