@@ -773,6 +773,11 @@ class RouteMode:
                             and abs(pk - delta) <= float(blend)):
                         delta = 0.5 * (pk + delta)
                 forced = True
+                cap = getattr(C, "ROUTE_FIX_FORCE_MAX_NO_LINE_MM", None)
+                if (cap is not None and not self._line_d
+                        and abs(float(delta)) > float(cap)):
+                    delta = None
+                    forced = False
                 # Sin cinta y con el histograma plano la media es el centro del rango (n2 s36: -158, verdad -319):
                 # esperar evidencia un rato (el carro avanza lento, ver ROUTE_FIX_PENDING_CREEP_PWM).
                 pend = getattr(C, "ROUTE_FIX_PENDING_FRAMES", None)
@@ -1480,11 +1485,12 @@ class RouteMode:
         rv = [self._line_d[i] for i, s in enumerate(srcs) if s == "recta"]
         return float(max(rv) - min(rv)) if len(rv) >= 2 else 0.0
 
-    def _pix_blind_heading_ok(self, pose) -> bool:
+    def _pix_blind_heading_ok(self, pose, lim=None) -> bool:
         """Mediana pix en arranque ciego solo con el carro ya en la recta del cajón (no en maniobra INICIO)."""
         if self.fixed or not getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False):
             return True
-        lim = getattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG", None)
+        if lim is None:
+            lim = getattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG", None)
         if lim is None:
             return True
         # Eje del cajón en mundo: rumbo paralelo a axis = atan2(ax, ay).
@@ -1760,15 +1766,24 @@ class RouteMode:
             return True
         if abs(math.sin(h) * a[1] - math.cos(h) * a[0]) > math.sin(math.radians(float(getattr(C, "ROUTE_FIX_PIX_MAX_ANG_DEG", 15.0)))):
             return True
-        if not self._pix_blind_heading_ok(pose):
-            return True
+        na = abs(float(n @ a))
         d = (ns - P @ n) / (n @ a)
         d = d[(d >= lo) & (d <= hi)]
-        if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
-            d_pix = float(np.median(d))
-            self._line_vote_append(d_pix, "pix")
-            print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
-                  f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+        if len(d) < int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+            return True
+        d_pix = float(np.median(d))
+        ok_h = self._pix_blind_heading_ok(pose)
+        if not ok_h:
+            lim_al = getattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_ALIGNED_DEG", None)
+            cap_d = float(getattr(C, "ROUTE_FIX_PIX_BLIND_ALIGNED_MAX_D_MM", 150.0))
+            if (lim_al is not None and na >= float(getattr(C, "ROUTE_FIX_PIX_MIN_NA", 0.7))
+                    and abs(d_pix) <= cap_d):
+                ok_h = self._pix_blind_heading_ok(pose, lim=lim_al)
+        if not ok_h:
+            return True
+        self._line_vote_append(d_pix, "pix")
+        print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
+              f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
 
     def _pillar_pair_delta(self, dm, delta: float, min_shift: float | None = None) -> float:

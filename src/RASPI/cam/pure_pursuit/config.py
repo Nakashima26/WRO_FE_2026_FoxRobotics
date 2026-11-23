@@ -1401,6 +1401,11 @@ ROUTE_FIX_PIX_INICIO_TOF_MASS_MAX = 0.2   # con masa ≥ esto y lecturas, ToF cu
 ROUTE_FIX_PIX_DELTA_BIAS_MM = 0.0   # suma al δ de votos pix_line (sesgo BEV calibrada, ver bev_calib PnP)
 # Con ROUTE_FIX_PIX_AT_INICIO: mediana pix solo si el rumbo está alineado a la recta del cajón (maniobras ~40-60° no).
 ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG = 28.0
+# Cinta casi paralela (|n·a| alto) y |δ| pequeño: umbral de rumbo más alto (salida W/S ~41°; maniobras ~226° no).
+ROUTE_FIX_PIX_BLIND_MAX_HEADING_ALIGNED_DEG = None
+ROUTE_FIX_PIX_BLIND_ALIGNED_MAX_D_MM = 150.0
+# Sin votos de cinta: no forzar por ToF si el δ supera esto (gemelo s20/s32).
+ROUTE_FIX_FORCE_MAX_NO_LINE_MM = None
 # Rechaza votos recta que discrepan de pix o de una serie recta con drift; prefiere pix al decidir.
 ROUTE_FIX_LINE_VOTE_REJECT = False
 ROUTE_FIX_LINE_VOTE_K_MAD = 2.5
