@@ -534,9 +534,7 @@ class Sim:
         tof = ToF(self.params.tof, rng)
         w_max = max_wheel_deg(self.params.steering)
 
-        # Montaje de la foto, no el PnP del .npz (ese daba ~25° con un lente inventado).
-        cam = CameraModel(self.params.camera, self.params)
-        bev, bev_err = cam.build_bev()
+        cam, bev, bev_err, calib_report = CameraModel.twin_camera_and_bev(self.params)
         self.camera_report = {
             "tilt_deg": cam.params.tilt_deg,
             "hfov_deg": cam.params.hfov_deg,
@@ -544,12 +542,15 @@ class Sim:
             "forward_from_rear_axle_mm": cam.params.forward_from_rear_axle_mm,
             "bev_fit_err_px": bev_err,
         }
+        if calib_report is not None:
+            self.camera_report["from_calib"] = True
         print(
             f"[CAM] tilt={cam.params.tilt_deg:.1f}° "
             f"hfov={cam.params.hfov_deg:.1f}° "
             f"h={cam.params.height_mm:.0f}mm "
             f"adelante={cam.params.forward_from_rear_axle_mm:.0f}mm "
             f"bev_err={bev_err:.2f}px "
+            f"bev={'npz' if calib_report else 'sintética'} "
             f"lente={'equidistante' if cam.params.equidistant else 'pinhole'} "
             f"bev={C.BEV_W}x{C.BEV_H} robot_y={C.ROBOT_BEV_Y} "
             f"vel x{self.speed_scale:.2f}"

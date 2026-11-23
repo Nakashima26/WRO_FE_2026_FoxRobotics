@@ -577,6 +577,30 @@ class CameraModel:
         )
         return cls(params=cam_params, vehicle=twin), report
 
+    @classmethod
+    def twin_camera_and_bev(
+        cls, twin: TwinParams
+    ) -> tuple[CameraModel, BEVTransformer, float, dict[str, Any] | None]:
+        """Cámara y BEV del sim: por defecto pose de config + H sintética; con
+        TWIN_CAMERA_FROM_CALIB (ruta o 1=bev_calib.npz) usa el mismo PnP y H
+        que el Pi (requiere TWIN_LENS_CALIB si la homografía es con lente)."""
+        raw = os.environ.get("TWIN_CAMERA_FROM_CALIB", "")
+        if not raw:
+            cam = cls(twin.camera, twin)
+            bev, err = cam.build_bev()
+            return cam, bev, err, None
+        bev_path = Path(raw) if raw not in ("1", "true", "yes") else C.CALIB_FILE
+        cam, report = cls.from_calib_npz(
+            bev_path,
+            twin=twin,
+            lens_path=os.environ.get("TWIN_LENS_CALIB"),
+        )
+        bev = BEVTransformer(calib_path=bev_path)
+        err = float(bev.last_reproj_err_px or 0.0)
+        if bev.H is not None:
+            cam._attach_wide_warp(bev, bev.H)
+        return cam, bev, err, report
+
     # ── geometría de escena (igual que chassis_twin) ────────────────────────
 
     def _wall_quads(self):
