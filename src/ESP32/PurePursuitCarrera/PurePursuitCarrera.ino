@@ -1673,6 +1673,7 @@ PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
+PARK_AJ bool         PARK_UTURN_CONTINUA        = false;  // arco con solape y barrido predictivo
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 // Modo RUTA: si al terminar de alejarse quedan menos de esto (mm, eje trasero a la pared del fondo) no se endereza: la U arranca ya
 // (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
@@ -3184,6 +3185,7 @@ void iniciarEstacionamiento(bool retorno) {
 // abajo (SIGUIENDO) — compartimes el contador lo movería dos veces por frame.
 float alongSalidaMm();
 extern float parkDetAlong, parkDetHPose, parkDetHSon, parkDetTh; float parkHPoseMm();
+int rutaServo(float ruedaDeg);
 float rutaErrCarrilDeg(); float rutaExtTapeteCm(); void rutaPoseTapete(float &x, float &y); int seccionTapete(float x, float y);
 // Final sin U: dispara el escaneo del cajon (ver PARK_SINU_*). Corre en SIGUIENDO/CRUCERO desde que el carro sale de la
 // esquina 12 (la cuenta de giros llega ~0.5 s tarde y el cajon puede estar ya a la entrada de la recta).
@@ -3808,6 +3810,157 @@ float rutaExtTapeteCm() {
   rutaPoseTapete(x, y);
   float perp = (rutaSecSalida == 2) ? -y : (rutaSecSalida == 1) ? x : (rutaSecSalida == 0) ? y : -x;
   return (1500.0f - perp) / 10.0f - 6.5f;
+}
+
+// Marco local de la esquina 13: s crece en el sentido original,
+// h mide desde la pared exterior hacia la isla. Ángulo positivo hacia la pared.
+static bool parkUPruebaArco(float rueda, float &tiempo) {
+  constexpr float dt = 0.02f;
+  constexpr float margen = 25.0f;
+  const float signo = parkParedEsIzquierda ? -1.0f : 1.0f;
+  float ang = signo * (anguloGyro - parkRumboGiro0) * DEG_TO_RAD;
+  float s = alongSalidaMm();
+  float h = parkHPoseMm();
+  float v = encVelMmS;
+  // La tasa IMU aproxima la curvatura efectiva antes de cambiar el mando.
+  float actual = atanf(signo * gyroRate * DEG_TO_RAD * RUTA_BATALLA_MM / v);
+  const float mando = rueda * DEG_TO_RAD;
+  bool cambio = false;
+  for (int i = 0; i < 100; ++i) {
+    for (float largo : {-21.8f, 154.2f}) {
+      for (float ancho : {-62.5f, 62.5f}) {
+        const float a = s + largo * cosf(ang) + ancho * sinf(ang);
+        const float b = h - largo * sinf(ang) + ancho * cosf(ang);
+        // Pared exterior y frontal, y límite con la recta siguiente.
+        if (b < margen || b > 1000.0f - margen || a > 1500.0f - margen
+            || a < -500.0f + margen) return false;
+        // Reserva las maderas y todo el carril posible de señales de la
+        // recta. La salida toma la banda exterior libre de señales.
+        if (fabsf(a - rutaPka + 145.0f) < 175.0f && b < 200.0f + margen) return false;
+        if (fabsf(a) <= 550.0f && b > 350.0f && b < 650.0f) return false;
+      }
+    }
+    if (!cambio && ang >= PI / 2.0f) {
+      if (s < 500.0f + 62.5f + margen) return false;
+      cambio = true;
+    }
+    if (ang >= 176.0f * DEG_TO_RAD) {
+      tiempo = i * dt + max(0.0f, s - rutaPka) / v;
+      return cambio && h >= 270.0f && h <= 360.0f && s > rutaPka + 150.0f;
+    }
+    const float objetivo = ang < PARK_UTURN_DEG * DEG_TO_RAD ? mando : 0.0f;
+    actual += (objetivo - actual) * (1.0f - expf(-dt / RUTA_LAG_S));
+    const float k = min(tanf(actual) / RUTA_BATALLA_MM, 2400.0f / (v * v));
+    const float dAng = v * dt * k;
+    s += v * dt * cosf(ang + dAng / 2.0f);
+    h -= v * dt * sinf(ang + dAng / 2.0f);
+    ang += dAng;
+  }
+  return false;
+}
+
+// Si queda poco fondo, simula también la caída de velocidad de la rampa.
+static bool parkUPruebaArcoLargo(float rueda, float &tiempo) {
+  constexpr float dt = 0.02f;
+  constexpr float margen = 25.0f;
+  const float signo = parkParedEsIzquierda ? -1.0f : 1.0f;
+  float ang = signo * (anguloGyro - parkRumboGiro0) * DEG_TO_RAD;
+  float s = alongSalidaMm();
+  float h = parkHPoseMm();
+  float v = encVelMmS;
+  // La tasa IMU aproxima la curvatura efectiva antes de cambiar el mando.
+  float actual = atanf(signo * gyroRate * DEG_TO_RAD * RUTA_BATALLA_MM / v);
+  const float mando = rueda * DEG_TO_RAD;
+  const int pwmMax = PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX;
+  const int pwmArco = PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM;
+  const float agarre = signo > 0.0f ? 2400.0f : 2750.0f;
+  const float alphaServo = 1.0f - expf(-dt / RUTA_LAG_S);
+  const float alphaMotor = 1.0f - expf(-dt / 0.28f);
+  bool cambio = false;
+  for (int i = 0; i < 100; ++i) {
+    const float ca = cosf(ang), sa = sinf(ang);
+    const float centroS = s + 66.2f * ca;
+    const float centroH = h - 66.2f * sa;
+    const float semiS = 88.0f * fabsf(ca) + 62.5f * fabsf(sa);
+    const float semiH = 88.0f * fabsf(sa) + 62.5f * fabsf(ca);
+    const float aMin = centroS - semiS, aMax = centroS + semiS;
+    const float bMin = centroH - semiH, bMax = centroH + semiH;
+    if (bMin < margen || bMax > 1000.0f - margen || aMax > 1500.0f - margen
+        || aMin < -500.0f + margen) return false;
+    if (aMax > rutaPka - 320.0f && aMin < rutaPka + 30.0f &&
+        bMin < 200.0f + margen) return false;
+    // Cada asiento posible ocupa 50 mm. En la recta del cajón las
+    // señales de h=400 mm se sortean en los asientos de h=600 mm.
+    for (float poste : {-500.0f, 0.0f, 500.0f}) {
+      if (aMax > poste - 50.0f && aMin < poste + 50.0f &&
+          bMax > 550.0f && bMin < 650.0f) return false;
+    }
+    if (!cambio && ang >= PI / 2.0f) {
+      if (aMin < 500.0f + margen) return false;
+      cambio = true;
+    }
+    if (ang >= 176.0f * DEG_TO_RAD) {
+      const float regreso = s - rutaPka;
+      tiempo = i * dt + max(0.0f, regreso) / v;
+      // Reserva margen tanto al entregar el arco como al llegar a la madera.
+      const float hMadera = h - regreso * 0.07f;
+      return cambio && h >= 285.0f && h <= 365.0f && regreso > 150.0f &&
+             hMadera >= 255.0f;
+    }
+    const float objetivo = ang < PARK_UTURN_DEG * DEG_TO_RAD ? mando : 0.0f;
+    actual += (objetivo - actual) * alphaServo;
+    const int pwm = min(pwmMax, rampaPWM((unsigned long)(i * dt * 1000.0f),
+                                        PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, pwmArco));
+    const float ruedaRel = actual / (RUEDA_TOPE_DEG * DEG_TO_RAD);
+    const float vObj = vMando(pwm, 1) * (1.0f - 0.12f * ruedaRel * ruedaRel);
+    v += (vObj - v) * alphaMotor;
+    const float k = constrain(tanf(actual) / RUTA_BATALLA_MM, -agarre / (v * v), agarre / (v * v));
+    const float dAng = v * dt * k;
+    s += v * dt * cosf(ang + dAng / 2.0f);
+    h -= v * dt * sinf(ang + dAng / 2.0f);
+    ang += dAng;
+  }
+  return false;
+}
+
+// Selecciona el arco más rápido desde la pose actual. Sin candidato válido,
+// el llamador conserva la preparación y vuelve a evaluar en el próximo ciclo.
+static bool parkUContinua(long ext) {
+  if (!PARK_UTURN_CONTINUA || !piRuta || !rutaTfOk || rutaSecSalida < 0
+      || !isfinite(rutaPka) || encVelMmS < 250.0f || (ext > 0 && ext < 20)) return false;
+  const float signo = parkParedEsIzquierda ? -1.0f : 1.0f;
+  const float along = alongSalidaMm();
+  // Tras pasar las dos maderas, reserva espacio para la nariz y la
+  // aproximación de estacionamiento antes de la línea de la otra esquina.
+  const float finEscaneo = rutaPka - PARK_CAJON_LARGO_MM - 154.2f - 100.0f;
+  const bool pocoFondo = parkFase == 27 && along > 890.0f
+                      && along - rutaPka > 780.0f && finEscaneo > -500.0f
+                      && signo * (anguloGyro - parkRumboGiro0) < -22.0f;
+  // La salida rodante y la salida con coast tienen estados de entrega distintos.
+  // Conserva la preparación original cuando el escaneo necesita asentamiento.
+  if (!PARK_UTURN_SIN_SETTLE || (direccionIzquierda && PARK_UTURN_CCW_SETTLE)) return false;
+  float mejorTiempo = INFINITY;
+  float mejorRueda = 0.0f;
+  for (float rueda = 20.0f; rueda <= (pocoFondo ? 47.0f : 38.0f); rueda += 1.0f) {
+    float tiempo;
+    bool cabe = pocoFondo ? parkUPruebaArcoLargo(rueda, tiempo) : parkUPruebaArco(rueda, tiempo);
+    // En el arco nominal, comprueba también la pose con la rampa real
+    // del motor. Una U más lenta puede cerrar más cerca de la madera.
+    float tiempoRampa;
+    if (cabe && !pocoFondo) cabe = parkUPruebaArcoLargo(rueda, tiempoRampa);
+    if (cabe && tiempo < mejorTiempo) {
+      mejorTiempo = tiempo;
+      mejorRueda = rueda;
+    }
+  }
+  if (mejorRueda == 0.0f) return false;
+  parkServoU = rutaServo(parkParedEsIzquierda ? mejorRueda : -mejorRueda);
+  parkFase = 24;
+  parkFaseMs = millis();
+  parkOdom0 = odomMm;
+  escribirServo(parkServoU);
+  Serial.print("PARK U continua rueda="); Serial.println(mejorRueda, 1);
+  return true;
 }
 
 // ── Geometria del cajon para el plan de entrada (fase 40) ───────────────────
@@ -6419,6 +6572,8 @@ void loop() {
                              : PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN;
       // ── Fase 26: ALEJARSE antes de la U (PARK_UTURN_ALEJAR_CM) — rumbo
       // abierto lejos de la pared del lado del giro hasta tener espacio ───────
+      if ((parkFase == 26 || parkFase == 27) &&
+          parkUContinua(parkParedEsIzquierda ? distR_raw : distL_raw)) break;
       if (parkFase == 26) {
         bool  uturnIzqP   = !parkParedEsIzquierda;
         float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
