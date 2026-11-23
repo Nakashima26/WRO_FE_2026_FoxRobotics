@@ -2936,6 +2936,18 @@ bool parkAtoroDetecta(unsigned long faseMs) {
 
 // Red de seguridad trasera de las reversas del paralelo (ver PARK_ATRAS_MIN_CM).
 // Sin FOX_TOF, distB_filtrada se queda en -1 y esto siempre da false (inerte).
+// Reversa del zigzag/centrado (2026-11-23, carro 4209/4402: tB crudo 15-17 mm, toca la madera de atrás):
+// el corte usaba distB_filtrada (EMA, atrasado) contra 2 cm sin ver la inclinación. Ahora: holgura de la
+// esquina de la cola con el ToF crudo, theta (tope PARK_PL_TOF_TH_MAX) y lo que avanza en la latencia.
+const bool  PARK_PL_ATRAS_ESQ   = true;
+const float PARK_PL_ATRAS_LAG_S = 0.15f;
+float parkColaEsqMm(float th) {
+  float dB = (tofMm[2] > 0 && tofMm[2] < 300) ? tofMm[2] / 10.0f : distB_filtrada;
+  if (dB <= 0.0f) return 1e9f;
+  float a = min(fabsf(th), PARK_PL_TOF_TH_MAX) * 0.0174533f;
+  return 10.0f * (dB * cosf(a) - PARK_TOF_COLA_CM - 6.3f * sinf(a)) - fabsf(encVelMmS) * PARK_PL_ATRAS_LAG_S;
+}
+
 bool parkAtrasPegado() {
   return distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_MIN_CM;
 }
@@ -7802,7 +7814,7 @@ void loop() {
         float v = fabsf(encVelMmS);
         bool fin = parkRecorridoMm() >= parkCentrarMm - v * 0.10f;   // ~0.1 s de coast
         if (parkCentrarDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * v * 0.1f) fin = true;
-        if (parkCentrarDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) fin = true;
+        if (parkCentrarDir < 0 && ((distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) || (PARK_PL_ATRAS_ESQ && parkColaEsqMm(0.0f) <= PARK_PL_MTOF_MM))) fin = true;
         if (millis() - parkFaseMs >= (unsigned long)PARK_PL_CENTRAR_MS) fin = true;
         if (fin) {
           Serial.print("PARK centrar fin mm="); Serial.print(parkRecorridoMm(), 0); Serial.print(" dF="); Serial.print(distF_filtrada, 1);
@@ -7966,7 +7978,7 @@ void loop() {
           if (mm >= dmax) { fin = true; why = "DIST"; }
           else if (th * parkPlanSgn <= PARK_PL_TOK * 0.5f && fabsf(th) <= PARK_PL_TOK) { fin = true; why = "TH"; }
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * max(encVelMmS, 0.0f) * 0.1f) { fin = true; why = "FRENTE"; }
-          else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
+          else if (parkPlanDir < 0 && ((distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) || (PARK_PL_ATRAS_ESQ && parkColaEsqMm(th) <= PARK_PL_MTOF_MM))) { fin = true; why = "ATRAS"; }
         }
         // Zigzag (2026-11-23, orillas174): los tramos de 2-4 cm con pausa no enderezaban (35 -> 20 grados en
         // 8 tramos, 5-8 cm libres sin usar). Ahora cada tramo sigue hasta theta ~0 (BNO) o hasta que el ToF
