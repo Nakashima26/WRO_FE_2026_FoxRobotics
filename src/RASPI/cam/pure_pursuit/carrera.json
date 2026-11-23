@@ -125,6 +125,7 @@
  "ROUTE_WARM_PLAN": true,
  "ROUTE_W_CLEAR": 16,
  "ROUTE_PARK_REFINE": true,
+ "ROUTE_FIX_PILLAR_PAIR": true,
  "_fuente": "carrera_bench.json",
  "_preset": "ruta_perfil"
 }
