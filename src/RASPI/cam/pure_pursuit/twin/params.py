@@ -145,8 +145,12 @@ class MotorParams:
     brake_wheel_tau_s: float = 0.06
     # p8_curva: PWM 160 a servo 15 (casi tope) −11%, a servo 40 −2%.
     scrub_coeff: float = 0.12
-    # Perfil opcional de carrera. El umbral crece con el cuadrado del ángulo normalizado.
-    max_speed_fwd_mm_s: float | None = None
+    # Perfil opcional de avance, con una corrección suave en PWM alto.
+    high_pwm_knee: float = 205.0
+    high_pwm_gain_mm_s_per_pwm2: float = 0.0
+    forward_accel_tau_s: float | None = None
+    forward_accel_limit_mm_s2: float | None = None
+    # El umbral de despegue crece con el cuadrado del ángulo normalizado.
     breakaway_pwm: float = 0.0
     breakaway_turn_pwm: float = 0.0
     # Tope de aceleración por agarre; None = sin tope. 0.8·0.55·g (no medido; las llantas patinan ~1 cm al arrancar).
@@ -177,14 +181,18 @@ class MotorParams:
         _prov("motor.a_lat_left/right_mm_s2", "medido", "calib 2026-10-21 p8_curva_rapida: 2360-2860 mm/s² según servo")
         _prov("motor.a_max_mm_s2", "supuesto", "mu*fracción en eje trasero*g")
         if os.environ.get("TWIN_MOTOR_REAL") == "1":
-            # Perfil de carga observado en los journals de carrera del 2026-11-23.
-            # Referido a 12.5 V, la condición nominal del banco.
+            # Curva efectiva bajo carga: pendiente media de los ACK y recuperación
+            # progresiva del extremo medido con el N30 en recta a fondo.
             self.k_mm_s_per_pwm = 5.0 * 12.0 / 12.5
             self.pwm0 = 17.0 * 12.5 / 12.0
-            self.max_speed_fwd_mm_s = 1080.0 * 12.0 / 12.5
+            # A 12.5 V: 5*(255-17) + 0.154*(255-205)**2 = 1575 mm/s.
+            self.high_pwm_gain_mm_s_per_pwm2 = 0.154 * 12.0 / 12.5
+            # Respuesta efectiva en pista. Solo cambia la aceleración de avance.
+            self.forward_accel_tau_s = 0.40
+            self.forward_accel_limit_mm_s2 = 2600.0
             self.breakaway_pwm = 85.0 * 12.5 / 12.0
             self.breakaway_turn_pwm = 45.0 * 12.5 / 12.0
-            _prov("motor.carrera", "supuesto", "ACK/od 2026-11-23: perfil cargado y despegue por volante")
+            _prov("motor.carrera", "supuesto", "N30 en tapete + transitorios ACK/od 2026-11-23")
         # TWIN_VBAT: voltaje de la pila. k/pwm0 se midieron a ~12.0 V; el PWM rinde ∝ V y el PWM de
         # arranque (fricción fija) sube ∝ 1/V. Comprobado con orillas36 (2026-11-11, pila baja):
         # real 130 -> 264, 255 -> 722 mm/s; con TWIN_VBAT=11.1 el modelo da 281 / 719.
@@ -192,12 +200,11 @@ class MotorParams:
         if vb:
             f = float(vb) / 12.0
             self.k_mm_s_per_pwm *= f
+            self.high_pwm_gain_mm_s_per_pwm2 *= f
             self.k_rev_mm_s_per_pwm *= f
             self.pwm0 /= f
             self.breakaway_pwm /= f
             self.breakaway_turn_pwm /= f
-            if self.max_speed_fwd_mm_s is not None:
-                self.max_speed_fwd_mm_s *= f
             if self.pwm0_rev is not None:
                 self.pwm0_rev /= f
             _prov("motor.v_batt", "medido", f"TWIN_VBAT={vb} V: k x{f:.3f}, pwm0 /{f:.3f}")
@@ -491,8 +498,9 @@ def steady_speed_mm_s(
     if pwm <= motor.pwm0:
         return 0.0
     v = motor.k_mm_s_per_pwm * (pwm - motor.pwm0)
-    if motor.max_speed_fwd_mm_s is not None:
-        v = min(v, motor.max_speed_fwd_mm_s)
+    if motor.high_pwm_gain_mm_s_per_pwm2 and pwm > motor.high_pwm_knee:
+        excess = pwm - motor.high_pwm_knee
+        v += motor.high_pwm_gain_mm_s_per_pwm2 * excess * excess
     w_max = max_wheel_deg(steering)
     if w_max > 1e-6:
         v *= 1.0 - motor.scrub_coeff * (abs(wheel_deg) / w_max) ** 2

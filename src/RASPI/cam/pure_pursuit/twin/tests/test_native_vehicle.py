@@ -2,7 +2,7 @@
 import dataclasses
 import random
 import pytest
-from pure_pursuit.twin.params import TwinParams
+from pure_pursuit.twin.params import TwinParams, steady_speed_mm_s
 from pure_pursuit.twin.vehicle import Vehicle
 from pure_pursuit.twin.native_vehicle import NativeVehicle, _FIELDS
 
@@ -142,7 +142,7 @@ def test_sil_native_advance_exact(variant, drain_period):
 
 
 @pytest.mark.parametrize("vehicle_cls", [Vehicle, NativeVehicle])
-def test_race_motor_breakaway_and_speed_cap(monkeypatch, vehicle_cls):
+def test_race_motor_breakaway_and_full_pwm_speed(monkeypatch, vehicle_cls):
     monkeypatch.setenv("TWIN_MOTOR_REAL", "1")
     monkeypatch.setenv("TWIN_VBAT", "12.5")
     params = TwinParams()
@@ -162,8 +162,24 @@ def test_race_motor_breakaway_and_speed_cap(monkeypatch, vehicle_cls):
     assert vehicle.v > 200
 
     straight = vehicle_cls(params, 0, 0, 0)
+    run(straight, 180, center, steps=4000)
+    assert straight.v == pytest.approx(815, abs=1)
+
+    straight = vehicle_cls(params, 0, 0, 0)
+    run(straight, 255, center, steps=100)
+    assert straight.v == pytest.approx(260, abs=1)
     run(straight, 255, center, steps=4000)
-    assert straight.v == pytest.approx(1080, abs=1)
+    assert straight.v == pytest.approx(1575, abs=2)
+    assert steady_speed_mm_s(255, 0, params.motor, params.steering) == pytest.approx(1575)
+
+    rolling = vehicle_cls(params, 0, 0, 0, v=1000)
+    run(rolling, 255, center, steps=100)
+    assert rolling.v == pytest.approx(1127, abs=2)
+
+    monkeypatch.setenv("TWIN_VBAT", "11.5")
+    low_battery = vehicle_cls(TwinParams(), 0, 0, 0)
+    run(low_battery, 255, center, steps=4000)
+    assert low_battery.v == pytest.approx(1442, abs=2)
 
     reverse = vehicle_cls(params, 0, 0, 0)
     run(reverse, 78, lock, direction=-1)

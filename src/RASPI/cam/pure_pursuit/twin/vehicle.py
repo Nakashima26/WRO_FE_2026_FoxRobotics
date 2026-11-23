@@ -160,6 +160,9 @@ class Vehicle:
                     v = mot.k_rev_mm_s_per_pwm * (drive_pwm - mot.pwm0_rev)
                 else:
                     v = mot.k_mm_s_per_pwm * (drive_pwm - mot.pwm0)
+                if direction > 0 and mot.high_pwm_gain_mm_s_per_pwm2 and drive_pwm > mot.high_pwm_knee:
+                    excess = drive_pwm - mot.high_pwm_knee
+                    v += mot.high_pwm_gain_mm_s_per_pwm2 * excess * excess
                 w_max = self._w_max
                 if w_max is None:
                     w_max = self._w_max = max_wheel_deg(st)   # constante: params no cambian en la corrida
@@ -167,8 +170,6 @@ class Vehicle:
                     wheel_fraction_sq = (abs(wheel) / w_max) ** 2
                 else:
                     wheel_fraction_sq = 0.0
-                if direction > 0 and mot.max_speed_fwd_mm_s is not None:
-                    v = min(v, mot.max_speed_fwd_mm_s)
                 v *= 1.0 - mot.scrub_coeff * wheel_fraction_sq
                 breakaway = mot.breakaway_pwm + mot.breakaway_turn_pwm * wheel_fraction_sq
                 if abs(self.v) < 5.0 and drive_pwm < breakaway:
@@ -177,8 +178,11 @@ class Vehicle:
                 v_target = v_ss if direction > 0 else -v_ss
 
             tau = mot.tau_coast_s if direction == 0 else mot.tau_drive_s
-            dv = (v_target - self.v) * (dt / tau)
             amax = mot.a_max_rev_mm_s2 if direction < 0 and mot.a_max_rev_mm_s2 else mot.a_max_mm_s2
+            if direction > 0 and v_target > max(0.0, self.v) and mot.forward_accel_tau_s:
+                tau = mot.forward_accel_tau_s
+                amax = mot.forward_accel_limit_mm_s2
+            dv = (v_target - self.v) * (dt / tau)
             spinning = False
             if direction != 0 and amax:
                 lim = amax * dt
