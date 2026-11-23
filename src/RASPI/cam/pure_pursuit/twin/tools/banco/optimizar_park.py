@@ -101,7 +101,7 @@ def fuera_mm(sd):
 def ok_t(rec, sd):
     """(ok, tiempo total s); ok = parada normal, sin colisiones y fuera de la pieza <= 5 mm."""
     ok = (rec is not None and rec.get("stop_reason") in ("race_finished", "terminado")
-          and not rec.get("collisions") and fuera_mm(sd) <= 5.0)
+          and not rec.get("collisions") and not rec.get("ignored_contacts") and fuera_mm(sd) <= 5.0)
     return (ok, float(rec["total_time_s"]) if ok else None)
 
 
