@@ -3638,6 +3638,68 @@ void leerBNO() {
 }
 #endif
 
+// Una sola estimación estacionaria en el cajón, antes de READY.
+const bool GYRO_ZUPT = false;
+#if FOX_ENCODER
+static float gyroBiasDps = 0;
+
+struct GyroZuptFit {
+  double sumT = 0, sumY = 0, sumTT = 0, sumTY = 0, sumYY = 0;
+  float duration = 0, yaw = 0, lastSample = 0;
+  // La primera observación fija el origen (t=0, yaw relativo=0).
+  int n = 1;
+
+  void sample(float delta, float dt) {
+    duration += dt;
+    yaw += delta;
+    // Espacia las observaciones para reducir la correlación entre paquetes RVC.
+    if (duration - lastSample < 0.099f) return;
+    double t = duration, y = yaw;
+    sumT += t;
+    sumY += y;
+    sumTT += t * t;
+    sumTY += t * y;
+    sumYY += y * y;
+    lastSample = duration;
+    ++n;
+  }
+
+  float estimate() const {
+    if (lastSample < 2.99f || n < 25) return 0;
+    double tt = sumTT - sumT * sumT / n;
+    double ty = sumTY - sumT * sumY / n;
+    double yy = sumYY - sumY * sumY / n;
+    double slope = ty / tt;
+    double residual = fmax(0.0, yy - slope * ty);
+    // Piso empírico para la deriva correlacionada del twin a 3 s.
+    double sigma = fmax(0.09, sqrt(residual / ((n - 2) * tt)));
+    return fabs(slope) > 3 * sigma && fabs(slope) <= 1.2 ? slope : 0;
+  }
+};
+
+#if defined(FOX_SIL)
+extern "C" float sil_gyro_zupt(const float *deltas, int n, float dt) {
+  if (!GYRO_ZUPT) return 0;
+  GyroZuptFit fit;
+  for (int i = 0; i < n; ++i) fit.sample(deltas[i], dt);
+  return gyroBiasDps = fit.estimate();
+}
+#elif FOX_BNO
+static GyroZuptFit gyroZuptFit;
+
+void muestrearGyroZupt(float delta, float dt) {
+  static int32_t lastCount = leerEncoder();
+  int32_t count = leerEncoder();
+  if (pwmActual != 0 || count != lastCount || dt > 0.15f) {
+    gyroZuptFit = GyroZuptFit{};
+  } else {
+    gyroZuptFit.sample(delta, dt);
+  }
+  lastCount = count;
+}
+#endif
+#endif
+
 void actualizarGyro() {
 #if FOX_BNO && !defined(FOX_SIL)
   // Consume lo acumulado por leerBNO() desde la última llamada (varios paquetes por loop).
@@ -3645,6 +3707,15 @@ void actualizarGyro() {
   float d = bnoDeltaAcc * BNO_YAW_SIGN;
   float dt = bnoDtAccMs / 1000.0f;
   bnoDeltaAcc = 0; bnoDtAccMs = 0;
+#if FOX_ENCODER
+  if (GYRO_ZUPT) {
+    if (!piReadyReceived) {
+      muestrearGyroZupt(d, dt);
+      return;
+    }
+    d -= gyroBiasDps * dt;
+  }
+#endif
   anguloGyro += d;
   anguloTotal += d;
   float gz = d / dt;
@@ -3656,6 +3727,9 @@ void actualizarGyro() {
 
   float gz = mpu.getGyroZ() / gyroScale;
   if (abs(gz) < 1.0) gz = 0;
+#if FOX_ENCODER && defined(FOX_SIL)
+  gz -= gyroBiasDps;
+#endif
   anguloGyro += gz * dt;
   anguloTotal += gz * dt;
   gyroRate = 0.7f * gyroRate + 0.3f * gz;   // EMA ligera: quita ruido, conserva el latigazo
@@ -4785,6 +4859,12 @@ void setup() {
   // loop() siempre arranca con piReadyReceived = true.
   Serial.println("Esperando READY desde Pi...");
   piReadyReceived = false;
+#if FOX_BNO && !defined(FOX_SIL)
+  if (GYRO_ZUPT) {
+    Serial1.setRxBufferSize(1024);
+    Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+  }
+#endif
 #if FOX_TOF && !defined(FOX_SIL)
   unsigned long preMs = 0;
 #endif
@@ -4830,6 +4910,12 @@ void setup() {
       }
     }
 #endif
+#if FOX_BNO && FOX_ENCODER && !defined(FOX_SIL)
+    if (GYRO_ZUPT) {
+      leerBNO();
+      actualizarGyro();
+    }
+#endif
     if (Serial2.available()) {
       String line = Serial2.readStringUntil('\n');
       line.trim();
@@ -4840,13 +4926,29 @@ void setup() {
         Serial.println("Recibido READY. Esperando primer V2...");
       }
     }
+#if FOX_BNO && FOX_ENCODER && !defined(FOX_SIL)
+    if (GYRO_ZUPT) {
+      if (piReadyReceived) {
+        if (bnoYawValid && millis() - bnoLastMs <= 150) {
+          gyroBiasDps = gyroZuptFit.estimate();
+        }
+        Serial.print("[ZUPT] bias_dps=");
+        Serial.println(gyroBiasDps, 3);
+      } else {
+        delay(10);
+        continue;
+      }
+    }
+#endif
     delay(50);
   }
   Serial.println("Sistema listo (PurePursuit)");
 #if FOX_BNO && !defined(FOX_SIL)
   // Se abre al final de setup: con el buffer grande no se pierden paquetes RVC mientras loop() se tarda.
-  Serial1.setRxBufferSize(1024);
-  Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+  if (!GYRO_ZUPT) {
+    Serial1.setRxBufferSize(1024);
+    Serial1.begin(115200, SERIAL_8N1, BNO_RX_PIN, -1);
+  }
 #endif
 }
 

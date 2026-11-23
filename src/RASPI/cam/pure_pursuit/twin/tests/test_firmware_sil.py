@@ -34,6 +34,20 @@ def test_setup_ready():
     fw.close()
 
 
+def test_gyro_zupt_requires_long_window_and_significant_slope():
+    fw = FirmwareSIL(overrides={"GYRO_ZUPT": "true"}, defines={"FOX_ENCODER": "1"})
+    try:
+        assert fw.calibrate_stationary_yaw([0.005] * 290, 0.01) == 0
+        assert fw.calibrate_stationary_yaw([0.0025] * 300, 0.01) == 0
+        assert fw.calibrate_stationary_yaw([0.005] * 300, 0.01) == pytest.approx(0.5, abs=1e-5)
+        # La misma pendiente con observaciones ruidosas debe quedar bajo 3σ.
+        yaw = [0.0] + [0.05 * k + (-1) ** k * 1.5 for k in range(1, 31)]
+        deltas = [(b - a) / 10 for a, b in zip(yaw, yaw[1:]) for _ in range(10)]
+        assert fw.calibrate_stationary_yaw(deltas, 0.01) == 0
+    finally:
+        fw.close()
+
+
 def test_v2_ack_and_tpr_override():
     fw = FirmwareSIL(overrides={"TURNS_PER_RACE": "12"})
     fw.push_serial2("READY")

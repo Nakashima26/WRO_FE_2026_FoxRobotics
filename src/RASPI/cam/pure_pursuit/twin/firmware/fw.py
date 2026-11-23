@@ -222,6 +222,12 @@ class FirmwareSIL:
         self._tof_cb = _tof
         self._lib.sil_set_callbacks(_advance, _sonar, _gyro, _encoder, _tof)
 
+    def calibrate_stationary_yaw(self, deltas: list[float], dt: float) -> float:
+        calibrate = self._lib.sil_gyro_zupt
+        calibrate.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.c_int, ctypes.c_float]
+        calibrate.restype = ctypes.c_float
+        return float(calibrate((ctypes.c_float * len(deltas))(*deltas), len(deltas), dt))
+
     def setup(self) -> None:
         rc = self._lib.sil_setup()
         if self._native_sync:

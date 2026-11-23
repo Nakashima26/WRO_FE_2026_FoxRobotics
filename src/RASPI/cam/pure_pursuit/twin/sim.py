@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import copy
 import math
 import os
 import time
@@ -774,6 +775,20 @@ class Sim:
                 freeze_at_tc = int(getattr(C, "DIGITAL_MAP_FREEZE_AT_TC", 0) or 0)
                 map_frozen = bool(getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False))
                 link.open()
+                if bno is not None and self.fw_overrides.get("GYRO_ZUPT") == "true":
+                    # Preludio inmóvil de 3 s. Conserva el reloj, la fase de las
+                    # cámaras y la secuencia de ruido del banco durante la carrera.
+                    stationary_bno = copy.deepcopy(bno)
+                    dt = 0.01
+                    stationary_bno.read(veh.heading_deg, 0.0)
+                    deltas = []
+                    for sample in range(1, 301):
+                        rate = stationary_bno.read(veh.heading_deg, sample / 100)
+                        # El adapter SIL integra con el mismo dt entero del firmware.
+                        dt_ms = int(sample / 100 * 1000) - int((sample - 1) / 100 * 1000)
+                        deltas.append(rate * dt_ms / 1000 if abs(rate) >= 1.0 else 0.0)
+                    bias = fw.calibrate_stationary_yaw(deltas, dt)
+                    print(f"[ZUPT] stationary_s=3.00 bias_dps={bias:.4f}", flush=True)
                 fw.push_serial2("READY")
                 fw.setup()
 
