@@ -144,6 +144,9 @@ US_DESDE_TOF = True
 # 484): ve el piso con el ROI de 16. Con 500 esas lecturas entraban y corrían la pose 10-25 cm hacia la
 # derecha (roces en la sección 2). Izquierdo: 55 cm lee 526. Gemelo campo 36 con esa curva: 500/500
 # termina 2/7, 480/450 termina 7/7.
+# Distancia máxima entre el eco y un obstáculo conocido dentro del cono ToF.
+# None conserva la asociación por el rayo central.
+LOC_RACE_TOF_OCCLUSION_MM = None
 LOC_TOF_MAX_MM = {"tL": 480.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
 # Corrección de pose para el visor durante maniobras, con el cajón ya fijado.
 LOC_MANEUVER_VIEW = False

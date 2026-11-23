@@ -7,8 +7,9 @@ yaw del ACK, encoder + IMU). Corrección: cada sensor de distancia del ACK
 predice un ray-casting sobre el mapa COMPLETO (paredes, isla, señales y maderas
 del cajón). Una medición solo se usa si el rayo esperado pega en pared o isla
 (superficie plana conocida) con buen ángulo; si lo más cercano es una señal o
-una madera, se descarta. Así una señal o el cajón nunca se confunden con la
-pared (lo que hacía digital_map._wall_fix). El visor de maniobras también
+una madera, se descarta. En carrera, la guarda opt-in comprueba también el
+cono del ToF para descartar ecos de obstáculos conocidos fuera del eje.
+El visor de maniobras también
 usa caras de las maderas con el cajón fijado.
 
 Salida para el ESP: la transformación odometría -> tapete (tx, ty, th) con
@@ -36,6 +37,7 @@ _US_HALF_CONE = 15.0
 _US_MAX_INC = 20.0
 _US_OFFS = np.arange(-_US_HALF_CONE, _US_HALF_CONE + 0.1, 3.0)   # rayos del cono (_expect), constantes
 _TOF_OFFS = np.array([0.0])
+_TOF_CONE_OFFS = np.radians(np.linspace(-13.5, 13.5, 19))
 _SENSORS = (
     ("dL", "us_left", 10.0, "us"),
     ("dR", "us_right", 10.0, "us"),
@@ -114,6 +116,7 @@ class Localizer:
         self.park_w = park_w
         self.park_axis = w_axis(parking) if parking is not None else None
         self.segs = build_segments(seats, parking, park_w)
+        self.occlusion_segs = self.segs
         self.x = np.array([x, y, math.radians(heading_deg)], float)
         # El rumbo del BNO085 es bueno (deriva ~0.5°/min): poca incertidumbre de
         # rumbo, así una sola medición rara no lo gira varios grados.
@@ -135,6 +138,8 @@ class Localizer:
             allseats.setdefault(key, "?")
         self.park_axis = w_axis(parking) if parking is not None else None
         self.segs = build_segments(allseats, parking, self.park_w)
+        if C.LOC_RACE_TOF_OCCLUSION_MM is not None:
+            self.occlusion_segs = build_segments(seats, parking, self.park_w)
 
     def shift(self, dx: float, dy: float) -> None:
         """Cambio de marco (arranque ciego resuelto): la pose se corre (dx, dy)."""
@@ -216,6 +221,21 @@ class Localizer:
             d = np.where(inc_ok, d, np.inf)
         i = int(np.argmin(d))
         return float(d[i]), int(k[i]), float(c[i])
+
+    def _occlusion(self, mount, expected, reading):
+        """Error del eco respecto a la primera cara de obstáculo visible en cada rayo."""
+        x, y, h = self.x
+        right, fwd, angle = mount
+        origin = (x + fwd * math.sin(h) + right * math.cos(h),
+                  y + fwd * math.cos(h) - right * math.sin(h))
+        angles = h + math.radians(angle) + _TOF_CONE_OFFS
+        dirs = np.column_stack((np.sin(angles), np.cos(angles)))
+        distances, surfaces, _ = raycast(
+            np.broadcast_to(origin, dirs.shape), dirs, self.occlusion_segs, expected)
+        obstacle = (surfaces == _SIGN) | (surfaces == _BARRIER)
+        if not np.any(obstacle):
+            return math.inf
+        return float(np.min(np.abs(distances[obstacle] - reading)))
 
     def _shifted_segs(self, dx: float, dy: float):
         """Mapa visto desde un carro corrido (dx, dy): las maderas se corren con él."""
@@ -309,6 +329,9 @@ class Localizer:
         if not correct:
             return
         sin_us = getattr(C, "US_DESDE_TOF", False)
+        tol = C.LOC_RACE_TOF_OCCLUSION_MM
+        race_tc = _ack_num(ack, "tc") if tol is not None else None
+        race = shifts is None and race_tc is not None and -1 <= race_tc < 12
         pair_bad = False
         pair_tol = getattr(C, "LOC_L23_PAIR_TOL_MM", None)
         tc = _ack_num(ack, "tc") if pair_tol is not None else None
@@ -378,6 +401,13 @@ class Localizer:
             R = sig * sig
             nu = z - zh
             S = float(H @ self.P @ H + R)
+            # El eco corto compatible con un obstáculo no informa sobre la pared ni
+            # debe alimentar su historial de reanclaje.
+            if (race and kind == "tof" and nu < -35.0
+                    and self._occlusion(mount, zh, z) <= tol):
+                self._rej.pop(key, None)
+                self.n_rej += 1
+                continue
             if nu * nu / S > 9.0:                  # 3 sigma
                 # Reanclaje: si el mismo sensor sigue diciendo lo mismo varias lecturas seguidas
                 # (cajón mal fijado: la pose va ~40 cm corrida y el gate tiraba justo la lectura
