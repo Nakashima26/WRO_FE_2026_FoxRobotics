@@ -1480,6 +1480,20 @@ class RouteMode:
         rv = [self._line_d[i] for i, s in enumerate(srcs) if s == "recta"]
         return float(max(rv) - min(rv)) if len(rv) >= 2 else 0.0
 
+    def _pix_blind_heading_ok(self, pose) -> bool:
+        """Mediana pix en arranque ciego solo con el carro ya en la recta del cajón (no en maniobra INICIO)."""
+        if self.fixed or not getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False):
+            return True
+        lim = getattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG", None)
+        if lim is None:
+            return True
+        # Eje del cajón en mundo: rumbo paralelo a axis = atan2(ax, ay).
+        ax, ay = self.axis
+        h_ax = math.degrees(math.atan2(ax, ay))
+        err = abs((pose[2] - h_ax + 180.0) % 360.0 - 180.0)
+        err = min(err, abs((pose[2] - h_ax - 180.0 + 180.0) % 360.0 - 180.0))
+        return err <= float(lim)
+
     def _pix_inicio_vote_ok(self, d: float) -> bool:
         """Con ToF ya informativo en el cajón, no añadir pix_line (parkc3 s3/s5); s34 sigue con masa baja."""
         if self.fix is None:
@@ -1746,10 +1760,12 @@ class RouteMode:
             return True
         if abs(math.sin(h) * a[1] - math.cos(h) * a[0]) > math.sin(math.radians(float(getattr(C, "ROUTE_FIX_PIX_MAX_ANG_DEG", 15.0)))):
             return True
+        if not self._pix_blind_heading_ok(pose):
+            return True
         d = (ns - P @ n) / (n @ a)
         d = d[(d >= lo) & (d <= hi)]
         if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
-            d_pix = float(np.median(d)) + float(getattr(C, "ROUTE_FIX_PIX_DELTA_BIAS_MM", 0.0))
+            d_pix = float(np.median(d))
             self._line_vote_append(d_pix, "pix")
             print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
                   f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)

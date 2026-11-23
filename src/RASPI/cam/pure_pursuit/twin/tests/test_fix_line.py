@@ -50,6 +50,16 @@ def test_line_vote_rejects_recta_against_pix(monkeypatch):
     assert rm._line_d == [-100.0]
 
 
+def test_pix_blind_heading_blocks_maneuver(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_PIX_AT_INICIO", True, raising=False)
+    monkeypatch.setattr(C, "ROUTE_FIX_PIX_BLIND_MAX_HEADING_DEG", 28.0, raising=False)
+    rm = _rm({"seen": True, "line": (1.0, 0.0, 0.0, 100.0)})
+    rm.fixed = False
+    rm.axis = W.w_axis("E")
+    assert rm._pix_blind_heading_ok((0.0, 0.0, 180.0)) is True
+    assert rm._pix_blind_heading_ok((0.0, 0.0, 226.0)) is False
+
+
 def test_pix_inicio_skips_when_tof_informative(monkeypatch):
     monkeypatch.setattr(C, "ROUTE_FIX_PIX_INICIO_IF_TOF_WEAK", True, raising=False)
     rm = _rm({"seen": True, "src": "col", "near_y": 200.0, "band": 300,
