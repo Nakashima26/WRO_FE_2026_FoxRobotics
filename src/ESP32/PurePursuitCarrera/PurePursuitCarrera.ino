@@ -1673,7 +1673,7 @@ PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
 // estaba lejos al disparar (carro metido al interior y girado hacia la esquina: enderezar lo mete en la esquina, s18).
-PARK_AJ bool         PARK_UTURN_CONTINUA        = false;  // arco con solape y barrido predictivo
+PARK_AJ bool         PARK_UTURN_CONTINUA        = true;   // arco con solape y barrido predictivo
 PARK_AJ long         PARK_UTURN_ENDEREZA        = 1;
 // Modo RUTA: si al terminar de alejarse quedan menos de esto (mm, eje trasero a la pared del fondo) no se endereza: la U arranca ya
 // (enderezar come ~250 mm de recta y el arco de la U se pasa de la pared del fondo). 0 = apagado.
