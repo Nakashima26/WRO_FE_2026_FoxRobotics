@@ -1390,6 +1390,15 @@ ROUTE_FIX_LINE_DECIDE_N = 5
 ROUTE_FIX_LINE_DECIDE_IQR_MM = 60.0
 ROUTE_FIX_LINE_DECIDE_SPAN_MM = None   # rango máx de esos votos (None = sin chequeo)
 ROUTE_FIX_LINE_FRESH = None   # True: el voto por recta solo con la cinta vista en este frame (no la sostenida)
+# Arranque ciego en est=INICIO: la cinta viva sigue en el BEV pero corner_lines no extraía pix (in_turn_cooldown).
+ROUTE_FIX_PIX_AT_INICIO = False
+LINE_PIX_INICIO_HALF_COLS = 200   # banda lateral más ancha en INICIO (cinta vista por columna lejana)
+ROUTE_FIX_PIX_INICIO_MIN_Y = 150.0   # px BEV: no votar pix_line en INICIO si la cinta queda pegada al robot
+ROUTE_FIX_PIX_INICIO_MAX_BAND = 750  # masas enormes de naranja en el BEV (p. ej. fila entera) no son cinta de esquina
+# Rechaza votos recta que discrepan de pix o de una serie recta con drift; prefiere pix al decidir.
+ROUTE_FIX_LINE_VOTE_REJECT = False
+ROUTE_FIX_LINE_VOTE_K_MAD = 2.5
+ROUTE_FIX_LINE_RECTA_DRIFT_MM = 40.0
 ROUTE_FIX_FORCE_BLEND_MM = None   # forzado con 1-2 votos de cinta: promedia con el pico del sonar (masa ≥0.2) si están a ≤ esto
 ROUTE_FIX_FWD_ADD_MM = 0.0   # número o {"CW":mm,"CCW":mm}: mm que se suman al avance (BEV->mundo) de los votos de cinta de StartFix; corrige el sesgo +37 mm de la cinta (gemelo N20)
 ROUTE_LOC_HOLD_AT_START = None   # True: sin corrección del localizador mientras la odometría sigue en 0 (parado en el cajón)

@@ -1770,12 +1770,18 @@ class PPRuntime:
                 # provisional soltó la esquiva ya en SIGUIENDO. Las lecturas
                 # REALES de la línea siguen clasificando igual.
                 # Modo ruta con el cajón ubicado y las 4 rectas en el mapa: la naranja ya no la usa nadie.
+                _rm = getattr(self, "_rmode", None)
+                _blind_pix = bool(getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and (
+                    (_rm is None and getattr(C, "ROUTE_START_BLIND", False))
+                    or (_rm is not None and not _rm.fixed)))
+                from . import corner_lines as _cl
+                _cl._BLIND_PIX_EXTRACT = _blind_pix
                 line_info = {"Orange": {"seen": False, "near_y": None, "line": None}} if _sin_nar else {
                     "Orange": self.line_tracker.update(
                     bev_frame if _hay_naranja else None,
                     bev_hsv=bev_hsv if _hay_naranja else None, ds_px=_dr_ds_px,
                     in_turn_cooldown=(self._turn_recovery_frames > 0
-                                      or self._esp_inicio))}
+                                      or (self._esp_inicio and not _blind_pix)))}
 
                 # ── Cooldown post-giro: justo al salir de un giro,
                 # OrangeLineTracker se reseteó y apenas está re-

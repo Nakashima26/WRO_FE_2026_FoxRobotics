@@ -314,6 +314,7 @@ class RouteMode:
         self.orange = None           # estado de la línea naranja (OrangeLineTracker) del frame
         self._pend_n = 0             # cuadros esperando evidencia del cajón con la media plana
         self._line_d: list = []      # δ por lectura de la línea naranja (ROUTE_FIX_LINE)
+        self._line_vote_src: list[str] = []  # fuente de cada voto en _line_d (recta, pix, linea, azul)
         self._pix_ok = None          # None = aún no se sabe si la cinta de esta recta sirve para pixeles
         self.fixed = not self.blind
         self.shift = 0.0             # δ aplicado: verdad = supuesto + δ·w de la recta del cajón
@@ -717,7 +718,7 @@ class RouteMode:
             tol = getattr(C, "ROUTE_FIX_LINE_TOL_MM", None)
             if (delta is not None and tol is not None and getattr(C, "ROUTE_FIX_LINE", None)
                     and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
-                    and abs(float(delta) - float(np.median(self._line_d))) > float(tol)):
+                    and abs(float(delta) - self._line_median()) > float(tol)):
                 delta = None   # la masa converge a un pico que la línea contradice: seguir leyendo
             d_f = _ack_num(ack or "", "dF")
             if (delta is not None and len(self._line_d) < int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
@@ -728,11 +729,11 @@ class RouteMode:
             if (delta is None and d_f is not None and d_f <= 100.0 and len(self._line_d) >= 8
                     and float(np.max(self._line_d) - np.min(self._line_d)) <= 40.0
                     and self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))[1] < 0.5
-                and self._line_ok(float(np.median(self._line_d)))):
+                and self._line_ok(self._line_median())):
                 # Recta corta: dF ya < 100 y el sonar sigue plano, así que el tope 105
                 # se come el tramo (n3 s23). Si el pico ya pesa, se espera al sonar
                 # (n3 s24: la línea a n=8 iba 32 mm corrida).
-                delta = float(np.median(self._line_d))
+                delta = self._line_median()
             edge = getattr(C, "ROUTE_FIX_EDGE_MM", None)
             if (delta is not None and edge is not None and len(self._line_d) < int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
                     and (delta - (PARK_W_MIN - self.fix.w0_guess) < float(edge)
@@ -750,19 +751,19 @@ class RouteMode:
                 if (q3 - q1 <= float(getattr(C, "ROUTE_FIX_LINE_DECIDE_IQR_MM", 60.0))
                         and (span is None or max(last) - min(last) <= float(span))
                         and self._line_ok(float(np.median(last)))):
-                    delta = float(np.median(self._line_d[-int(n_dec):]))
+                    delta = self._line_median(last=int(n_dec))
             forced = False
             if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
                 # decidan, el histograma queda plano cerca de lo supuesto).
                 delta = self.fix.mean()
                 if (getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3))
-                        and not self._line_ok(float(np.median(self._line_d)))):
+                        and not self._line_ok(self._line_median())):
                     # La cinta contradice a los ToF: el pico de los ToF (corridas 100/101: cinta -565, ToF ~-150).
                     pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
                     delta = pk if pm >= 0.2 else delta
                 elif getattr(C, "ROUTE_FIX_LINE", None) and len(self._line_d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN", 3)):
-                    delta = float(np.median(self._line_d))
+                    delta = self._line_median()
                     # 1-2 votos lejanos de la cinta van ~+60 mm corridos y el pico del sonar del otro lado
                     # (gemelo s9: cinta +649, pico +546 m=0.62, verdad +587; s22: +83 / -10, verdad +17).
                     blend = getattr(C, "ROUTE_FIX_FORCE_BLEND_MM", None)
@@ -784,7 +785,11 @@ class RouteMode:
                     delta = None
             if delta is not None:
                 if C.ROUTE_FIX_PILLAR_PAIR and len(self._line_d) >= 3:
-                    delta = self._pillar_pair_delta(dm, delta)
+                    p_shift = 3 * SIGN_MM
+                    if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
+                        if self._recta_vote_span() >= float(getattr(C, "ROUTE_FIX_LINE_RECTA_DRIFT_MM", 40.0)):
+                            p_shift = SIGN_MM
+                    delta = self._pillar_pair_delta(dm, delta, p_shift)
                 pose = self._apply_fix(dm, ack, delta, forced)
                 conf, empty = self._resolved(dm)
         if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
@@ -1460,6 +1465,37 @@ class RouteMode:
         front = w + sgn * RR._FRONT_MM
         return front >= 1900.0 if sgn > 0 else front <= 1100.0
 
+    def _line_median(self, last: int | None = None) -> float:
+        d = self._line_d[-last:] if last else self._line_d
+        srcs = self._line_vote_src[-len(d):] if last else self._line_vote_src
+        if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
+            pix = [d[i] for i, s in enumerate(srcs) if s == "pix"]
+            if pix:
+                return float(np.median(pix))
+        return float(np.median(d))
+
+    def _recta_vote_span(self) -> float:
+        srcs = self._line_vote_src
+        rv = [self._line_d[i] for i, s in enumerate(srcs) if s == "recta"]
+        return float(max(rv) - min(rv)) if len(rv) >= 2 else 0.0
+
+    def _line_vote_append(self, d: float, src: str) -> bool:
+        d = float(d)
+        if getattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", False):
+            pix = [self._line_d[i] for i, s in enumerate(self._line_vote_src) if s == "pix"]
+            if src == "recta" and pix:
+                med = float(np.median(pix))
+                mad = float(np.median(np.abs(np.array(pix) - med))) or 15.0
+                k = float(getattr(C, "ROUTE_FIX_LINE_VOTE_K_MAD", 2.5))
+                if abs(d - med) > k * max(mad, 12.0):
+                    print(f"[FIXVOTE] recta d={d:+.0f} rechazada vs pix med={med:+.0f}", flush=True)
+                    return False
+            if src == "recta" and self._recta_vote_span() >= float(getattr(C, "ROUTE_FIX_LINE_RECTA_DRIFT_MM", 40.0)):
+                return False
+        self._line_d.append(d)
+        self._line_vote_src.append(src)
+        return True
+
     def _line_vote(self, dm, pose):
         """δ del cajón según la línea naranja. Con `_pix` (pixeles de cinta del frame,
         corner_lines._center_pix): cada pixel llevado al mundo con la pose supuesta da
@@ -1492,6 +1528,19 @@ class RouteMode:
             # SOSTENIDA de frames anteriores y con la pose avanzando arrastraba el
             # voto ~10 mm/frame (gemelo s19: de +327 a +74).
             return
+        if (getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and not self.fixed
+                and o.get("src") == "col"):
+            ny = o.get("near_y")
+            band = int(o.get("band") or 0)
+            max_band = int(getattr(C, "ROUTE_FIX_PIX_INICIO_MAX_BAND", 750))
+            if (ny is not None and float(ny) >= float(getattr(C, "ROUTE_FIX_PIX_INICIO_MIN_Y", 150.0))
+                    and band <= max_band):
+                pall = o.get("_pix_all")
+                if pall is None or len(np.asarray(pall)) == 0:
+                    pall = o.get("_pix")
+                if pall is not None and len(pall) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
+                    self._pix_line_vote(dm, pose, np.asarray(pall, float))
+                    return
         vx, vy, x0, y0 = o["line"]
         if abs(vx) < 1e-6:
             return
@@ -1522,8 +1571,8 @@ class RouteMode:
             if lo <= d <= hi and (best is None or dist < best[1]):
                 best = (float(d), dist)
         if best is not None:
-            self._line_d.append(best[0])
-            print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
+            if self._line_vote_append(best[0], "recta"):
+                print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
     def _blue_vote(self, dm, pose) -> None:
         """δ del cajón con la cinta AZUL (la que cruza el carril en CCW, |n·a| 0.87; la naranja ahí va a
@@ -1575,7 +1624,7 @@ class RouteMode:
                 best = (d, dist)
         if best is None:
             return
-        self._line_d.append(best[0])
+        self._line_vote_append(best[0], "azul")
         print(f"[FIXVOTE] azul d={best[0]:+.0f} n={len(fwd)} c=({c[0]:.0f},{c[1]:.0f}) "
               f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
@@ -1606,7 +1655,11 @@ class RouteMode:
         if res is None:
             return
         d, info = res
-        self._line_d.append(d)
+        if (getattr(C, "ROUTE_FIX_PIX_AT_INICIO", False) and not self.fixed and self.fix is not None
+                and self.fix.n_inform >= int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3))
+                and not self._line_ok(d)):
+            return
+        self._line_vote_append(d, "linea")
         print(f"[FIXVOTE] linea d={d:+.0f} {info} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
 
     def _line_ok(self, d: float) -> bool:
@@ -1679,12 +1732,12 @@ class RouteMode:
         d = (ns - P @ n) / (n @ a)
         d = d[(d >= lo) & (d <= hi)]
         if len(d) >= int(getattr(C, "ROUTE_FIX_LINE_MIN_PIX", 25)):
-            self._line_d.append(float(np.median(d)))
+            self._line_vote_append(float(np.median(d)), "pix")
             print(f"[FIXVOTE] pix d={self._line_d[-1]:+.0f} n={len(d)} iqr={np.percentile(d, 75) - np.percentile(d, 25):.0f} "
                   f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
 
-    def _pillar_pair_delta(self, dm, delta: float) -> float:
+    def _pillar_pair_delta(self, dm, delta: float, min_shift: float | None = None) -> float:
         """Contrasta el ajuste de la cinta con un par inequívoco de asientos."""
         ax, ay = self.axis
         step = 1 if dm.direction == "CW" else -1
@@ -1717,7 +1770,9 @@ class RouteMode:
         pairs = [(a + b) / 2 for a in shifts[dm.parking] for b in shifts[next_sec]
                  if abs(a - b) <= SIGN_MM]
         # La cinta conserva la prioridad para discrepancias pequeñas o pares ambiguos.
-        if len(pairs) == 1 and abs(pairs[0] - delta) >= 3 * SIGN_MM:
+        if min_shift is None:
+            min_shift = 3 * SIGN_MM
+        if len(pairs) == 1 and abs(pairs[0] - delta) >= min_shift:
             print(f"[ROUTE] avance por par de pilares: {delta:+.0f} -> {pairs[0]:+.0f} mm", flush=True)
             return pairs[0]
         return delta

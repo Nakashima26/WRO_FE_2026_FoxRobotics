@@ -15,6 +15,7 @@ def _rm(orange):
     rm = RouteMode.__new__(RouteMode)
     rm.orange = orange
     rm._line_d = []
+    rm._line_vote_src = []
     rm._pre_poses = []
     rm.axis = W.w_axis("N")
     return rm
@@ -37,6 +38,16 @@ def test_line_vote_recovers_delta(monkeypatch):
     rm._line_vote(_Dm(), pose)
     assert len(rm._line_d) == 1
     assert abs(rm._line_d[0] - delta) <= 1.0
+
+
+def test_line_vote_rejects_recta_against_pix(monkeypatch):
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_VOTE_REJECT", True, raising=False)
+    rm = _rm({"seen": True, "line": (1.0, 0.0, 0.0, 100.0)})
+    rm._line_vote_src = []
+    rm._line_d = []
+    rm._line_vote_append(-100.0, "pix")
+    rm._line_vote_append(200.0, "recta")
+    assert rm._line_d == [-100.0]
 
 
 def test_line_vote_ignores_unseen_or_dead_reckoned():
