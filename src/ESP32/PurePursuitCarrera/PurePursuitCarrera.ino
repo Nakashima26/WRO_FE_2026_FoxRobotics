@@ -3896,7 +3896,7 @@ static void parkPlAnclaMadera() {
 
 // Termina el ajuste si la huella barrida hasta detenerse cabe en el cajon.
 PARK_AJ bool PARK_PL_CIERRE_HUELLA = true;
-PARK_AJ bool PARK_PL_ARCO_CALIBRADO = false;
+PARK_AJ bool PARK_PL_ARCO_CALIBRADO = true;
 // Radio efectivo del contravolante en reversa, incluido el transitorio del servo.
 PARK_AJ float PARK_PL_RI_INT_MM = 104.0f;
 PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;

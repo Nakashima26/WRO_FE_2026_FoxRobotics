@@ -118,6 +118,7 @@
     "GYRO_ZUPT": "true",
     "PARK_PL_TOF_ANCLA": "true",
     "PARK_PL_CIERRE_HUELLA": "true",
+    "PARK_PL_ARCO_CALIBRADO": "true",
     "PARK_PUNTA_KP_ANG_SEGUIR": "1.3f",
     "PARK_PUNTA_KPOS": "1.4f",
     "INICIO_PWM": "140",
