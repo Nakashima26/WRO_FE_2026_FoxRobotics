@@ -1534,6 +1534,8 @@ const unsigned long PARK_ATORO_GRACIA_MS      = 350;    // sin vigilar al entrar
 bool          parkBuscando          = false;
 unsigned long parkBuscandoEntryMs   = 0;
 int           parkFase              = -1;
+const char   *parkFinMotivo         = "";     // ACK pfm=: por qué cerró ESTACIONANDO
+const char   *parkPlanWhy           = "";     // ACK pwy=: cómo terminó el último tramo del PLAN (pli=)
 unsigned long parkFaseMs            = 0;
 bool          parkParedEsIzquierda  = false;
 // Ciclo adelante/atrás (fases 9/11 <-> 12/13) del paralelo: ver PARK_CICLOS_MAX.
@@ -2940,6 +2942,7 @@ void finalizarPark(const char *motivo) {
   motorCoast();
   escribirServo(centroServo);
   parkFase     = 7;
+  parkFinMotivo = motivo;
   raceFinished = true;
   Serial.println("==================================================");
   Serial.print  ("  ESTACIONAMIENTO PARALELO (10 pts) TERMINADO: ");
@@ -4609,6 +4612,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     // pkp = pka de la Pi, pkd/pkh/pks = ancla (along, h por pose, h por sonar),
     // pk1 = odomMm en el poste 1 (-1 = sin poste 1).
     ackOut.print(",pkf=");  ackOut.print(parkFase);
+    ackOut.print(",pli=");  ackOut.print(parkPlanI); ackOut.print(",pwy="); ackOut.print(parkPlanWhy); ackOut.print(",pfm="); ackOut.print(parkFinMotivo);
     ackOut.print(",pal=");  ackOut.print(alongSalidaMm(), 0);
     ackOut.print(",pkp=");  if (isnan(rutaPka)) ackOut.print('x'); else ackOut.print(rutaPka, 0);
     ackOut.print(",pkd=");  ackOut.print(parkDetAlong, 0);
@@ -7062,7 +7066,8 @@ void loop() {
         float offsetPoste2 = parkDirecto ? PARK_D_B2_OFF_MM : PARK_U_B2_OFF_MM;
         float errorPoste2 = validaPoste2 ? alongSalidaMm() - (rutaPka - offsetPoste2) : 0.0f;
         // Con el poste 1 ya visto, la separacion medida desde el (odometria) manda sobre la pose absoluta de la Pi (pka puede venir 90 mm corrido).
-        bool p1Reciente = parkDirecto && PARK_D_P1_ODOM_MM > 0 && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM - 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM + PARK_D_P1_ODOM_MM;   // el poste 2 no puede estar a menos de ~240 mm del 1
+        bool p1Reciente = PARK_D_P1_ODOM_MM > 0 && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM - 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM + PARK_D_P1_ODOM_MM;   // el poste 2 no puede estar a menos de ~240 mm del 1
+        // p1Reciente también tras la U (run 181: el poste 2 cayó 108 mm después de pka y abortó 2 mm antes de verlo).
         bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
         if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
           // La ruta puede rodear una señal por dentro y saltarse el cajón antes de volver a la pared.
@@ -7919,6 +7924,7 @@ void loop() {
         }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
+          parkPlanWhy = why;
           Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);
           Serial.print(") th="); Serial.print(th, 1); Serial.print(" max="); Serial.print(parkPlanThMax, 1);
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);

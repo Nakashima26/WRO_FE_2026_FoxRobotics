@@ -888,6 +888,23 @@ class RouteMode:
                 if back:
                     plan_seats = {**plan_seats, **back}
                     plan_unknown = [k for k in plan_unknown if k not in back]
+        if getattr(C, "ROUTE_COLUMN_CONFLICT", False):
+            # Por regla nunca hay dos señales en la misma columna (T2/T4, T1/T3, X1/X2). Un provisional o fantasma
+            # que contradice a la confirmada de su columna toma el color de la confirmada (run 182: S/T2 Green
+            # provisional + S/T4 Red confirmado -> plan infactible con isla=37 y el carro chocó con la isla).
+            twin_of = {"T1": "T3", "T3": "T1", "T2": "T4", "T4": "T2", "X1": "X2", "X2": "X1"}
+            fixd = {}
+            for (sec, seat), col in plan_seats.items():
+                if (sec, seat) in conf or seat not in twin_of:
+                    continue
+                cc = conf.get((sec, twin_of[seat]))
+                if cc is not None and cc != col:
+                    fixd[(sec, seat)] = cc
+            if fixd:
+                if fixd != getattr(self, "_col_fix_prev", None):
+                    print("[ROUTE] columna contradice a la confirmada: " + " ".join(f"{s}/{o}->{c}" for (s, o), c in sorted(fixd.items())), flush=True)
+                plan_seats = {**plan_seats, **fixd}
+            self._col_fix_prev = fixd
         self._ghost_fb = None
         gtc = getattr(C, "ROUTE_CONF_GHOST_TC", None)
         if gtc is not None and float(getattr(self, "_tc_max", 0) or 0) < float(gtc) and getattr(dm, "row_candidates", None):

@@ -1456,6 +1456,7 @@ ROUTE_PROV_RULES = False
 ROUTE_HALF_SEEN = True
 ROUTE_CONF_GHOST_TC = 4   # vuelta 1 (tc < esto): la señal confirmada también esquiva la otra fila de su columna si la mediana lateral cae a <= ROUTE_CONF_GHOST_TOL_MM; None = apagado
 ROUTE_CONF_GHOST_TOL_MM = 150.0
+ROUTE_COLUMN_CONFLICT = False   # provisional/fantasma que contradice el color de la confirmada de su columna toma ese color (run 182)
 ROUTE_GHOST_HOLD_TC = 4   # desde qué esquina rige ROUTE_GHOST_HOLD_MM (vuelta 1 los fantasmas sí deben entrar cerca)
 ROUTE_GHOST_HOLD_MM = None   # fantasma de fila a menos de esto (mm) del carro: no entra ni sale del plan (run 180: N/X1R parpadeando a media recta); None = apagado
 ROUTE_COL_GHOST_TC = None   # tc < esto: detecciones que ninguna señal conocida explica (>250 mm de todas) dejan como obstáculo los asientos de su fila a <= ROUTE_COL_GHOST_TOL_MM (orillas110/111: E/X1 tomado como E/T1); None = apagado
