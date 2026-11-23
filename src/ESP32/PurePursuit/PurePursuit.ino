@@ -1834,17 +1834,18 @@ PARK_AJ int          PARK_PL_ATASCO_MS           = 250;
 PARK_AJ float        PARK_PL_ATASCO_MM           = 4.0f;
 PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
 PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
+PARK_AJ int          PARK_PL_AVANCE_MS           = 900;     // tramo sin cambio de ángulo (BNO) ni encoder por esto -> se corta (2026-11-23)
 PARK_AJ int          PARK_PL_PAUSA_MS            = 120;     // parado con el volante girando antes de cada tramo nuevo
-PARK_AJ float        PARK_PL_Z1_MM               = 21.0f;   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
-PARK_AJ float        PARK_PL_Z2_MM               = 42.0f;
-PARK_AJ float        PARK_PL_Z3_MM               = 42.0f;
-PARK_AJ float        PARK_PL_Z4_MM               = 21.0f;
+PARK_AJ float        PARK_PL_Z1_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
+PARK_AJ float        PARK_PL_Z2_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
+PARK_AJ float        PARK_PL_Z3_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
+PARK_AJ float        PARK_PL_Z4_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
 PARK_AJ float        PARK_PL_TOK                 = 6.0f;    // theta final aceptable (grados)
-PARK_AJ float        PARK_PL_DF_MM               = 30.0f;   // zigzag: largo de cada tramo adelante
-PARK_AJ float        PARK_PL_DR_MM               = 30.0f;   // y atras
+PARK_AJ float        PARK_PL_DF_MM               = 150.0f;  // 30 -> 150 2026-11-23 (ver Z1)   // zigzag: largo de cada tramo adelante
+PARK_AJ float        PARK_PL_DR_MM               = 150.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
-PARK_AJ int          PARK_PL_FRENTE_CM           = 4;       // sonar frontal: corta el avance del zigzag
+PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
 PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
 const int            PARK_PL_LEGS                = 8;
@@ -2239,6 +2240,71 @@ int lazoVelocidad(int pwm) {
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
 int parkArranquePwm = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
+
+// ── Anti-atasco general por encoder (2026-11-23) ───────────────────────────
+// orillas169 (park, volante a tope): reversa pedida y el encoder quieto ~0.9 s
+// (pw 38 -> 125, 3 mm) hasta que la fricción estática cede y el carro sale de
+// tirón (70 mm en 0.36 s, 2.5x la velocidad pedida) porque el integrador del lazo
+// y el +PWM del plan siguen arriba. Igual en el arranque del cajón con la pila baja.
+// Para TODO estado: si se pide movimiento (PWM de mando arriba del arranque) y
+// |v| < ATASCO_V_MMS por más de ATASCO_T0_MS, se suma un empujón que sube a
+// ATASCO_RAMPA PWM/s (hasta ATASCO_MAX). En cuanto el encoder ve movimiento el
+// empujón se quita y el integrador se vacía (sin tirón). Si en ATASCO_RENDIR_MS
+// no se movió (contra una pared), se rinde hasta que cambie el sentido o se mueva.
+// ACK ax= (empujón actual). 0 en ATASCO_RAMPA = apagado.
+const float         ATASCO_V_MMS     = 25.0f;
+const unsigned long ATASCO_T0_MS     = 120;
+// Golpe: con las llantas giradas la rampa tarda 0.3-0.5 s en despegar (orillas176); de entrada se suma
+// ATASCO_GOLPE de un jalón y de ahí sigue la rampa.
+const int           ATASCO_GOLPE     = 120;
+const float         ATASCO_RAMPA     = 400.0f;   // PWM/s
+const int           ATASCO_MAX       = 180;
+const unsigned long ATASCO_RENDIR_MS = 2000;
+// Tras despegar (orillas176, zigzag con volante a tope): soltar el empujón de golpe y vaciar el integrador
+// dejaba el PWM en ~50-70, el carro avanzaba 1 cm y se volvía a pegar (stick-slip: 78->246->47->246...).
+// Ahora queda un piso = ATASCO_PISO_FRAC x el PWM con el que despegó, mientras siga el mismo sentido;
+// baja a ATASCO_PISO_BAJA PWM/s solo si va más rápido que ATASCO_PISO_V_MMS.
+const float         ATASCO_PISO_FRAC   = 0.7f;
+const float         ATASCO_PISO_BAJA   = 300.0f;  // PWM/s
+const float         ATASCO_PISO_V_MMS  = 150.0f;
+int atascoExtra = 0;
+int atascoPiso = 0;
+
+// Golpe y piso solo en la salida del cajón (INICIO): en el estacionamiento hacían maniobras bruscas
+// (2026-11-23); ahí queda la rampa sola y se suelta en cuanto se mueve (como en orillas176).
+int antiAtasco(int pedido, int salida) {
+  const bool salidaCajon = (estado == INICIO);
+  static unsigned long t0 = 0; static int dirPrev = 0; static bool rendido = false;
+  unsigned long now = millis();
+  int dir = motorDirActual;
+  float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
+  static unsigned long tPiso = 0; static float pisoF = 0.0f;
+  if (ATASCO_RAMPA <= 0.0f || salida <= 0 || dir == 0 || (float)pedido <= p0 || dir != dirPrev) {
+    t0 = now; dirPrev = dir; rendido = false; atascoExtra = 0; pisoF = 0.0f; atascoPiso = 0;
+    return salida;
+  }
+  if (fabsf(encVelMmS) >= ATASCO_V_MMS) {
+    if (atascoExtra > 0 && salidaCajon) {   // acaba de despegar: piso con lo que costó (no vuelve a pegarse)
+      pisoF = max(pisoF, ATASCO_PISO_FRAC * (float)min(salida + atascoExtra, 255));
+      if (lazoI > 0.0f) lazoI = 0.0f;   // el piso hace el trabajo; sin integrador acumulado que dé tirón
+    } else if (atascoExtra > 0) {
+      lazoI = 0.0f;   // fuera de INICIO: se suelta todo al despegar (sin tirón)
+    }
+    if (!salidaCajon) pisoF = 0.0f;
+    float dtp = (tPiso == 0) ? 0.0f : (now - tPiso) / 1000.0f; tPiso = now;
+    if (fabsf(encVelMmS) > ATASCO_PISO_V_MMS) pisoF = max(0.0f, pisoF - ATASCO_PISO_BAJA * dtp);
+    t0 = now; rendido = false; atascoExtra = 0; atascoPiso = (int)pisoF;
+    return max(salida, atascoPiso);
+  }
+  tPiso = now;
+  salida = max(salida, (int)pisoF);
+  unsigned long t = now - t0;
+  if (rendido || t >= ATASCO_T0_MS + ATASCO_RENDIR_MS) { rendido = true; atascoExtra = 0; return salida; }
+  if (t < (salidaCajon ? ATASCO_T0_MS : 150UL)) { atascoExtra = 0; return salida; }
+  atascoExtra = min(salidaCajon ? ATASCO_MAX : 150, (salidaCajon ? ATASCO_GOLPE : 0) + (int)((t - ATASCO_T0_MS) * ATASCO_RAMPA / 1000.0f));
+  return min(salida + atascoExtra, 255);
+}
+
 void setMotorTope(int velocidad, int tope) {
   velocidad = constrain(velocidad, 0, tope);
   if (motorDirActual == -1 && MOTOR_REV_RAMPA_MS > 0 && velocidad > MOTOR_REV_RAMPA_MIN) {
@@ -2249,8 +2315,12 @@ void setMotorTope(int velocidad, int tope) {
     }
   }
 #if MOTOR_LAZO_VEL && FOX_ENCODER
-  velocidad = lazoVelocidad(velocidad);
-  if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+  {
+    int pedido = velocidad;
+    velocidad = lazoVelocidad(velocidad);
+    if (parkArranquePwm > 0 && velocidad > 0 && fabsf(encVelMmS) < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+    velocidad = antiAtasco(pedido, velocidad);
+  }
 #endif
 #ifdef FOX_BANCO_SIN_MOTOR
   velocidad = 0;   // banco: probar el UART sin mover el motor
@@ -4516,6 +4586,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     ackOut.print(",ei=");   ackOut.print(leerEncoder());   // cuentas crudas del PCNT (adelante +)
 #endif
     ackOut.print(",p2o=");  ackOut.print(parkPoste2Pose);
+    ackOut.print(",ax=");   ackOut.print(atascoExtra);   // empujón anti-atasco (PWM)
     ackOut.print(",fr=");   ackOut.print(lazoFrenando);   // 1 = lazo frenando activo
     ackOut.print(",pw=");   ackOut.print(pwmActual);      // PWM real al motor
     ackOut.print(",ue=");   ackOut.print(uartErrs);
@@ -7763,12 +7834,13 @@ void loop() {
         unsigned long tseg = millis() - parkFaseMs;
         int i = parkPlanI; if (PARK_PL_ZZ && i >= 2 && i <= 5) i = 6;
         bool cerca = clr <= PARK_PL_M_MM && parkPlanClrPrev < 1e8f && clr < parkPlanClrPrev - 0.15f;   // solo si se sigue acercando
+        bool cercaTof = false;
         parkPlanClrPrev = clr;
         // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
         if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
           float yaw = th * 0.0174533f;
           float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - PARK_TOF_COLA_CM - 6.3f * sinf(yaw));
-          if (esqMm <= PARK_PL_MTOF_MM) cerca = true;
+          if (esqMm <= PARK_PL_MTOF_MM) { cerca = true; cercaTof = true; }
         }
         if (i == 0 && PARK_PL_RECTA) {
           if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
@@ -7800,7 +7872,23 @@ void loop() {
           else if (parkPlanDir > 0 && distF_filtrada > 0 && distF_filtrada <= PARK_PL_FRENTE_CM + PARK_PL_FRENTE_LAG_S * max(encVelMmS, 0.0f) * 0.1f) { fin = true; why = "FRENTE"; }
           else if (parkPlanDir < 0 && distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) { fin = true; why = "ATRAS"; }
         }
-        if (!fin && i >= 1 && cerca) { fin = true; why = "HOLGURA"; }
+        // Zigzag (2026-11-23, orillas174): los tramos de 2-4 cm con pausa no enderezaban (35 -> 20 grados en
+        // 8 tramos, 5-8 cm libres sin usar). Ahora cada tramo sigue hasta theta ~0 (BNO) o hasta que el ToF
+        // de enfrente/atrás llegue al límite; la huella de la pose (~10 mm de error) ya no lo corta.
+        bool zz = (i == 6);
+        if (!fin && i >= 1 && cerca && (!zz || cercaTof)) { fin = true; why = "HOLGURA"; }
+        {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
+            // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
+            static float th0 = 0.0f, od0 = 0.0f; static unsigned long t0 = 0, sinAvance = 0; static int leg0 = -1;
+            if (leg0 != parkPlanI || tseg < 30UL) { leg0 = parkPlanI; th0 = th; od0 = odomMmF; t0 = millis(); sinAvance = 0; }
+            if (millis() - t0 >= 300UL) {
+              float dth = fabsf(th - th0), dod = fabsf(odomMmF - od0);
+              if (dth < 0.5f && dod < 4.0f) sinAvance += millis() - t0; else sinAvance = 0;
+              if (dod >= 15.0f && dth < 0.5f && parkPlanSrv != centroServo) Serial.println("PARK plan: encoder avanza pero el BNO no gira (patina?)");
+              th0 = th; od0 = odomMmF; t0 = millis();
+            }
+            if (!fin && sinAvance >= (unsigned long)PARK_PL_AVANCE_MS) { fin = true; why = "SIN AVANCE"; }
+        }
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
           Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);
