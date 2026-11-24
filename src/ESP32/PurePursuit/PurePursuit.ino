@@ -1751,6 +1751,12 @@ PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se dec
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 PARK_AJ float        PARK_SINU_ABORT_ANG        = 15.0f;  // DIRECTO fase0: |gyro| sobre esto → U (s20 derivaba a −22° antes de ventana vencida)
+PARK_AJ long         PARK_UTURN_ABORT_PWM       = 0;     // >0: PWM U solo si DIRECTO chueco→U; 0 = PARK_UTURN_PWM
+bool                 parkUturnFromAbort         = false;
+int parkUturnPwmEfectivo() {
+  if (parkUturnFromAbort && PARK_UTURN_ABORT_PWM > 0) return (int)PARK_UTURN_ABORT_PWM;
+  return PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM;
+}
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
@@ -3139,7 +3145,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_ABORT_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_U_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -3189,6 +3195,7 @@ void iniciarEstacionando() {
 #if defined(FOX_SIL)
   silPreParkSeed();
 #endif
+  parkUturnFromAbort = false;
   estado       = ESTACIONANDO;
   parkBuscando = false;
   parkParedEsIzquierda = paredCajonEsIzq(false);
@@ -4107,7 +4114,7 @@ static bool parkUPruebaArcoLargo(float rueda, float &tiempo) {
   float actual = atanf(signo * gyroRate * DEG_TO_RAD * RUTA_BATALLA_MM / v);
   const float mando = rueda * DEG_TO_RAD;
   const int pwmMax = PARK_UTURN_TOPE > 0 ? (int)PARK_UTURN_TOPE : MOTOR_MAX;
-  const int pwmArco = PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM;
+  const int pwmArco = parkUturnPwmEfectivo();
   const float agarre = signo > 0.0f ? 2400.0f : 2750.0f;
   const float alphaServo = 1.0f - expf(-dt / RUTA_LAG_S);
   const float alphaMotor = 1.0f - expf(-dt / 0.28f);
@@ -6893,7 +6900,7 @@ void loop() {
       if (parkFase == 24) {
         unsigned long t = millis() - parkFaseMs;
         int vel = rampaPWM(t, PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN,
-                           PARK_UTURN_PWM > 0 ? (int)PARK_UTURN_PWM : PARK_RETORNO_PWM);
+                           parkUturnPwmEfectivo());
         bool  uturnIzqP   = !parkParedEsIzquierda;
         float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
         long  extAhoraP   = uturnIzqP ? distL_raw : distR_raw;
@@ -7232,6 +7239,7 @@ void loop() {
               && millis() - parkEntryMs > 150UL) {
             parkSinUDec = 2;
             parkDirecto = false;
+            parkUturnFromAbort = true;
             parkUturnPendiente = true;
             parkUturnOdom0 = odomMm;
             parkUturnDisparoOdom = -1;
