@@ -97,6 +97,12 @@ def main() -> None:
                 cause = str(c)
             collisions[cause] = collisions.get(cause, 0) + 1
         violations += len(r.get("pass_side_violations") or [])
+        # Contacto con la pared exterior en --solo-cajon: va a ignored_contacts y no a collisions; contarlo igual.
+        for c in r.get("ignored_contacts") or []:
+            cause = c.get("cause", "?") if isinstance(c, dict) else str(c)
+            collisions[cause + " (ignorado)"] = collisions.get(cause + " (ignorado)", 0) + 1
+        if float(r.get("min_clearance_wall_mm", 0.0)) < 0.0:
+            collisions["margen pared < 0"] = collisions.get("margen pared < 0", 0) + 1
 
     def _median(xs: list[float]) -> float:
         if not xs:

@@ -98,10 +98,17 @@ def fuera_mm(sd):
     return max(max(box[0]-cx, cx-box[1], box[2]-cy, cy-box[3], 0) for cx, cy in cs)
 
 
+def wall_ok(rec):
+    """Margen de pared >= 0 (un corner fuera del tapete = contacto con la pared exterior, aunque
+    --solo-cajon lo mande a ignored_contacts). Sin el campo (registros viejos) no cuenta como falla."""
+    return float(rec.get("min_clearance_wall_mm", 0.0)) >= 0.0
+
+
 def ok_t(rec, sd):
     """(ok, tiempo total s); ok = parada normal, sin colisiones y fuera de la pieza <= 5 mm."""
     ok = (rec is not None and rec.get("stop_reason") in ("race_finished", "terminado")
-          and not rec.get("collisions") and not rec.get("ignored_contacts") and fuera_mm(sd) <= 5.0)
+          and not rec.get("collisions") and not rec.get("ignored_contacts") and fuera_mm(sd) <= 5.0
+          and wall_ok(rec))
     return (ok, float(rec["total_time_s"]) if ok else None)
 
 

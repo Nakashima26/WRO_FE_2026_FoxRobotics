@@ -22,7 +22,8 @@ def one(path):
         m = json.loads(js)
     except Exception:
         return dict(ok=False, why="noSTOP")
-    bad = stop != "race_finished" or bool(m.get("collisions")) or bool(m.get("sign_contacts"))
+    bad = (stop != "race_finished" or bool(m.get("collisions")) or bool(m.get("sign_contacts"))
+           or bool(m.get("ignored_contacts")) or float(m.get("min_clearance_wall_mm", 0.0)) < 0.0)
     # Choque ya con las 3 vueltas hechas (TERMINANDO del bench): en la carrera ahí sigue la U, no cuenta.
     if stop == "collision" and len(m.get("lap_times_s") or []) >= 3:
         bad = False

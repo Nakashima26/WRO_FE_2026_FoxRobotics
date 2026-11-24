@@ -11,7 +11,8 @@ for n in range(1, 6):
         pw = float(re.search(r"parkw=(\d+)", open(f).read()).group(1))
         m = re.search(r"arranque: cajón en w0=(-?\d+) \(δ=[^,]*, (masa [0-9.]+|FORZADO)\) tras (\d+)", open(sd + "/pi.log", errors="ignore").read())
         st = [l for l in open(sd + ".out", errors="ignore") if l.startswith("STOP ")]
-        ok = bool(st) and st[-1].startswith("STOP race_finished") and '"collisions": []' in st[-1] and '"sign_contacts": []' in st[-1]
+        ok = bool(st) and st[-1].startswith("STOP race_finished") and '"collisions": []' in st[-1] and '"sign_contacts": []' in st[-1] \
+            and '"ignored_contacts": []' in st[-1] and not re.search(r'"min_clearance_wall_mm": -', st[-1])
         if m:
             rows.append((abs(float(m.group(1)) - pw), seed, n, m.group(2), int(m.group(3)), ok))
 rows.sort(reverse=True)
