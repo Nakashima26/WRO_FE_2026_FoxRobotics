@@ -1752,7 +1752,7 @@ bool                 parkRevDir                  = false;  // el cajon al inicio
 int                  parkSinUDec                 = 0;     // para pka < PKA_MIN: 0 sin decidir, 1 directo, 2 con U
 PARK_AJ float        PARK_SINU_DEC_TOL_CM        = 12.0f;
 PARK_AJ long         PARK_SINU_CORRE_MM          = 200;
-PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
+PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 12.0f;
 PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
@@ -3462,43 +3462,46 @@ void vigilarSinU() {
 // PARK_GEOM_EXT: con la U ya decidida, toma el mando sobre la linea de escaneo pasado el cajon. true = tomo el mando.
 bool vigilarGeomExt(float along, long distF) {
   if ((!PARK_GEOM_EXT && !PARK_GEOM_ROJO) || isnan(rutaPka) || parkGeomModo) return false;
+  // s35 sticky temprano: ROJO; cerca de pka (along>=pka-80) vuelve sticky verde (s36@138).
+  const bool stickyEarly = parkGeomVeniaLejos && rutaPge && along < rutaPka - 80.0f;
+  const bool pgeEff = rutaPge && !stickyEarly;
   // ROJO: pka<<0 alarga max (U@~500); pka alto baja pasa (si no, U dispara antes de pka+150).
   float geomMax = PARK_GEOM_MAX_MM, geomPasa = PARK_GEOM_PASA_MM;
-  if (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) {
+  if (PARK_GEOM_ROJO && parkGeomVeniaLejos && !pgeEff) {
     geomMax = max(geomMax, 520.0f - rutaPka);
-    // s37 (pka~110): U gira antes de pka+150 → abrir desde latch.
-    // pka<<0 (s22) o pka alto (s4): early take empeora / colisiona — r5 pasa.
-    if (rutaPka > 50.0f && rutaPka < 250.0f)
+    if (rutaPge)
+      geomPasa = min(geomPasa, -200.0f);  // sticky: no −450 (s36)
+    else if (rutaPka > 50.0f && rutaPka < 250.0f)
       geomPasa = min(geomPasa, -450.0f);
     else
       geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
   }
   // verde s16: pge early; tomar ~200 mm antes de pka (aún cerca; -450 chocaba magenta).
-  if (rutaPge) geomPasa = min(geomPasa, -200.0f);
+  if (pgeEff) geomPasa = min(geomPasa, -200.0f);
   // s32: no_llega cerca sin pge — misma ventana early (veniaLejos no aplica).
-  if (PARK_GEOM_ROJO && !rutaPge && !parkGeomVeniaLejos) geomPasa = min(geomPasa, -350.0f);
+  if (PARK_GEOM_ROJO && !pgeEff && !parkGeomVeniaLejos) geomPasa = min(geomPasa, -350.0f);
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
   // ROJO: gate en anguloGyro (mismo que U por pose); err carril ≠ gyro dejaba s39@−11.5.
   // angLim 23 solo banda s37 (pka 50..250) + lejos; else 15 (s22 early crook +1–2s).
-  const bool rojoLatch = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos;
+  const bool rojoLatch = PARK_GEOM_ROJO && !pgeEff && parkGeomVeniaLejos;
   const float eGate = rojoLatch ? fabsf(anguloGyro) : fabsf(err);
   const bool s37banda = rutaPka > 50.0f && rutaPka < 250.0f;
   // s32 cerca: err~16 > ANG 10; 18 abre sin el angLim35 que caía.
   const float angLim = rojoLatch ? ((s37banda && lejos) ? 23.0f : 15.0f)
-                       : ((PARK_GEOM_ROJO && !rutaPge && !lejos) ? 18.0f : PARK_GEOM_ANG_DEG);
+                       : ((PARK_GEOM_ROJO && !pgeEff && !lejos) ? 18.0f : PARK_GEOM_ANG_DEG);
   if (eGate > angLim) return false;
   // Banda libre en ventana (sin pka+250). f45 solo si along<420.
   // distF>50 bloqueaba n2/s39 (toma @530 con frente ya cerca; gyro ya ≤15).
-  const bool rojoFar = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
+  const bool rojoFar = PARK_GEOM_ROJO && !pgeEff && parkGeomVeniaLejos
                     && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
                     && distF > 25;
   // s32: no_llega cerca (ext en TOL) sin pge/veniaLejos — GEOM en vez de U.
-  const bool rojoCerca = PARK_GEOM_ROJO && !rutaPge && !parkGeomVeniaLejos
+  const bool rojoCerca = PARK_GEOM_ROJO && !pgeEff && !parkGeomVeniaLejos
                          && fabsf(ext - PARK_PARED_CM) <= PARK_GEOM_TOL_CM && distF > 25;
   const bool rojo = rojoFar || rojoCerca;
-  if (!rojo && (!PARK_GEOM_EXT || !rutaPge || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
+  if (!rojo && (!PARK_GEOM_EXT || !pgeEff || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
   const bool acercar = rojoFar && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   parkDirecto = true;
@@ -3515,6 +3518,9 @@ bool vigilarGeomExt(float along, long distF) {
   Serial.print(" ext="); Serial.print(ext, 1); Serial.print(" err="); Serial.print(err, 1); Serial.print(" v="); Serial.println(encVelMmS, 0);
   return true;
 }
+
+
+
 
 void vigilarUturn(long distL, long distR, long distF) {
   if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO || sinUActivo()) return;
