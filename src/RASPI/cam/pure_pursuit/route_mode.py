@@ -1030,6 +1030,18 @@ class RouteMode:
             if True:
               hug = (float(getattr(C, "ROUTE_FINAL_D_MM", 640.0)), pk - 304.0 - float(getattr(C, "ROUTE_FINAL_LEAD_MM", 1300.0)),
                    pk, float(getattr(C, "ROUTE_FINAL_W", 20.0)))
+            far_mm = float(getattr(C, "ROUTE_FINAL_DROP_FAR", 0) or 0)   # ventana (mm) pasando pk; 0 = apagado
+            if far_mm > 0:
+                # El carro se estaciona antes de pk: las señales de la recta del cajón más allá no se rebasan por su lado,
+                # y planear su lado obligaba a esquivar en el propio cajón (real orillas245: verde W/T2, CCW).
+                from . import wro_field as _wf
+                hd = math.radians(_wf._heading(dm.parking, dm.direction))
+                def _al(seat):
+                    x, y = _wf.section_to_world(dm.parking, *_wf.SEATS[seat])
+                    return x * math.sin(hd) + y * math.cos(hd)
+                # Sigue siendo obstáculo: se planea por el lado de la pared (rojo=derecha en CCW, verde=izquierda en CW).
+                lado = "Red" if dm.direction == "CCW" else "Green"
+                plan_seats = {k: (lado if k[0] == dm.parking and pk <= _al(k[1]) < pk + far_mm else v) for k, v in plan_seats.items()}
         key = (dm.direction, dm.parking, self.park_w, self.shift,
                tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key, hug)
         if key != self.key and key != self._job_key:

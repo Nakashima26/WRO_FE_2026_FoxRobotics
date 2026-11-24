@@ -1896,6 +1896,7 @@ ROUTE_FINAL_LEAD_MM = 1300.0
 ROUTE_FINAL_PWM = None   # tope de rv desde tc >= ROUTE_FINAL_TC (recta del cajón al final); None = sin tope
 ROUTE_LAP2_PROFILE_TC_MAX = 8   # perfil de pursuit (curvatura vista desde el lookahead) para 4 <= tc < esto; 8 = solo la vuelta 2
 ROUTE_FINAL_W = 20.0
+ROUTE_FINAL_DROP_FAR = 0   # mm: en el final (hug) las señales de la recta del cajón entre pk y pk+esto se planean por el lado de la pared; 0 = apagado
 
 LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas que no suman el ancho (tc3..11)
 
