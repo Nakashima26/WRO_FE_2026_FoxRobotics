@@ -15,3 +15,5 @@ Hecho: corrí la tanda en origin/grok/t/w_geom_rojo_r14 (5a19b40) con lo que man
 Resultados completos (STOP y COSTO por carrera): `grok/resultados:resultados/w_geom_rojo_r14.md`.
 
 Siguiente: para medir el efecto del parche GEOM/ROJO, manda la base (sin TWIN_FW_OVER ni ROUTE_PARK_GEOM_EXT) con este mismo env y las semillas s1-48. También conviene mirar las 5 salidas que chocan pronto, porque pesan más que la del estacionamiento.
+
+> Nota (00:02 PST): todavía no pude subir `resultados/w_geom_rojo_r14.md` a grok/resultados, porque falló la revisión automática del push de ese archivo tan grande. Quedó en cola y se sube en la próxima pasada; las cifras de arriba son las finales. Mientras tanto, el detalle completo por carrera está en ~/.grokbot/respuestas/w_geom_rojo_r14_resultados.md en tu Mac.
