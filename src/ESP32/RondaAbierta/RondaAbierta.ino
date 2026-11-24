@@ -292,6 +292,11 @@ float distL_filtrada = SIN_PARED_CM, distR_filtrada = SIN_PARED_CM, distF_filtra
 
 // Carrera
 int  turnsCompleted     = 0;
+// Mapeo Open (vuelta 1): pasillos 60|100 cm entre laterales válidos (< umbralPared).
+const float MAP_SPAN_CM = 7.0f;   // ~ancho entre caras laterales de los VL53
+float mapSumLR = 0.0f;
+int   mapSamples = 0;
+int   mapPasilloCm[4] = {0, 0, 0, 0};
 bool direccionIzquierda = true;
 bool primerGiro         = false;
 int  contadorEsquina    = 0;
@@ -651,6 +656,35 @@ void pidRumbo() {
 
 // Una línea por recta: si "hold" sale bajo, el PID de pared casi no actuó.
 // "int sin dato" alto = el ToF interior no ve la pared.
+void mapReiniciar() {
+  mapSumLR = 0.0f;
+  mapSamples = 0;
+  for (int i = 0; i < 4; i++) mapPasilloCm[i] = 0;
+}
+
+void mapMuestra(long distL, long distR) {
+  if (distL <= 0 || distR <= 0 || distL >= umbralPared || distR >= umbralPared) return;
+  mapSumLR += (float)(distL + distR);
+  mapSamples++;
+}
+
+void mapCongelarSeccion(int secIndex) {
+  if (secIndex < 0 || secIndex >= 4) return;
+  float corridor = (mapSamples > 0) ? (mapSumLR / (float)mapSamples) + MAP_SPAN_CM : 0.0f;
+  int pasillo = (corridor < 80.0f) ? 60 : 100;
+  mapPasilloCm[secIndex] = pasillo;
+  Log.printf("MAP sec=%d pasillo=%d cm\n", secIndex + 1, pasillo);
+  mapSumLR = 0.0f;
+  mapSamples = 0;
+}
+
+void mapListoSiCompleto() {
+  if (mapPasilloCm[0] == 0 || mapPasilloCm[1] == 0 || mapPasilloCm[2] == 0 || mapPasilloCm[3] == 0)
+    return;
+  Log.printf("MAP listo: %d/%d/%d/%d\n",
+             mapPasilloCm[0], mapPasilloCm[1], mapPasilloCm[2], mapPasilloCm[3]);
+}
+
 void imprimirResumenRecta() {
   if (resTicks == 0) return;
   // "int en hold" = distancia promedio a la interior mientras la seguía: debe
@@ -677,6 +711,7 @@ void arrancarCarrera() {
   anguloGyro     = 0;
   anguloObjetivo = 0;
   wallPrevValido = false; desvio = 0; trimRumbo = 0;
+  mapReiniciar();
   integralGyro = 0;
   timeStart    = millis();
   lastTurnTime = millis();
@@ -687,6 +722,7 @@ void arrancarCarrera() {
 }
 
 void siguiendo(long distL, long distR, long distF) {
+  mapMuestra(distL, distR);
   velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
   if (distF > 0 && distF < FRONT_SLOWDOWN_CM)
     velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
@@ -751,6 +787,10 @@ void girando() {
     turnsCompleted++;
     anguloObjetivo = rumboRecta(turnsCompleted);
     Log.printf("Giro completado %d/%d\n", turnsCompleted, TURNS_PER_RACE);
+    if (turnsCompleted <= 4)
+      mapCongelarSeccion(turnsCompleted - 1);
+    if (turnsCompleted == 4)
+      mapListoSiCompleto();
     if (turnsCompleted >= TURNS_PER_RACE) {
       estado = TERMINANDO;
       terminandoEntryMs = millis();

@@ -1,20 +1,24 @@
 """
-Mapeo de paredes interiores — Open Challenge (WRO Future Engineers).
+Mapeo de paredes interiores — Open Challenge (WRO Future Engineers 2026).
+
+Regla FE Open: cada pasillo entre pared interior y exterior es **solo 600 mm o
+1000 mm** (±100 mm en la Final Internacional). No hay anchos continuos; las
+medidas ToF se **ajustan (snap)** al par legal más cercano.
 
 Geometría
 ---------
 - Paredes exteriores fijas en ±OUTER_HALF_MM (1500 mm desde el centro del tapete).
-- La isla interior es un rectángulo centrado; en cada ronda solo cambian los
-  anchos de los cuatro pasillos (las cuatro caras se pueden medir de forma
-  independiente, pero rectángulo centrado ⇒ lados opuestos comparten ancho).
+- Isla interior centrada; **cada una de las cuatro caras** puede ser 600 o 1000 mm
+  de forma **independiente** (no se asume que N=S ni E=W).
 - En una recta con rumbo estable y |error de rumbo| pequeño:
     corridor ≈ d_inner + d_outer + SENSOR_LAT_SPAN_MM
   (distancia entre montajes laterales de los ToF), o bien
     inner_half_along_lat = OUTER_HALF − corridor
   para esa sección.
-- Tras cada esquina completada se congela la sección recién recorrida.
-- Con **3 esquinas** quedan 3 pasillos medidos; el cuarto se infiere por
-  consistencia opuesta (E↔W comparten |x|, S↔N comparten |y| en campo centrado).
+- Tras cada esquina completada se congela la sección recién recorrida (pasillo
+  con snap a 600/1000).
+- Con **3 esquinas** hay 3 pasillos medidos ⇒ ``ready``; la cuarta cara queda sin
+  medir hasta la 4.ª esquina (no se copia el ancho del lado opuesto).
 - Tras la 4.ª esquina se refinan las cuatro caras con las muestras de la vuelta.
 
 Coordenadas: frame campo como ``track_map.FieldPose`` (origen centro, +x este,
@@ -64,6 +68,36 @@ INNER_COORD_EMA_ALPHA = 0.12
 SENSOR_LAT_SPAN_MM = abs(
     C.SENSOR_MOUNTS["tof_right"][0] - C.SENSOR_MOUNTS["tof_left"][0]
 ) if hasattr(C, "SENSOR_MOUNTS") else 120.0
+
+# WRO 2026 Open Challenge: únicos anchos de pasillo permitidos (mm).
+OPEN_CORRIDOR_MM = (600.0, 1000.0)
+OPEN_CORRIDOR_IF_TOL_MM = 100.0
+_IF_CORRIDOR_CANDIDATES_MM = (500.0, 600.0, 700.0, 900.0, 1000.0, 1100.0)
+_OPEN_SNAP_MID_MM = 800.0
+
+
+def snap_corridor_mm(raw: float) -> float:
+    """
+    Ajusta una medida cruda al pasillo legal 600 o 1000 mm.
+
+    Primero acerca a un candidato IF (500…1100); si está dentro de
+    ``OPEN_CORRIDOR_IF_TOL_MM``, pliega por umbral 800 mm. Si no, umbral directo.
+    """
+    best = min(_IF_CORRIDOR_CANDIDATES_MM, key=lambda c: abs(raw - c))
+    if abs(raw - best) <= OPEN_CORRIDOR_IF_TOL_MM:
+        raw = best
+    return OPEN_CORRIDOR_MM[0] if raw < _OPEN_SNAP_MID_MM else OPEN_CORRIDOR_MM[1]
+
+
+def open_layout_from_seed(seed: int) -> dict[SectionId, float]:
+    """Cuatro pasillos 600|1000 independientes (espíritu lanzamiento de moneda)."""
+    import random
+
+    rng = random.Random(seed)
+    order: tuple[SectionId, ...] = ("S", "E", "N", "W")
+    return {
+        s: OPEN_CORRIDOR_MM[0] if rng.getrandbits(1) else OPEN_CORRIDOR_MM[1] for s in order
+    }
 
 
 def _mounts() -> dict[str, SensorMount]:
@@ -206,9 +240,15 @@ class OpenWallMap:
 
     @property
     def ready(self) -> bool:
-        """True cuando hay 3 caras medidas y la 4.ª inferida (3 esquinas completas)."""
+        """True con 3 esquinas: tres pasillos medidos y ajustados (sin copiar el 4.º)."""
         n_frozen = sum(1 for st in self._sections.values() if st.frozen and not st.inferred)
-        return n_frozen >= 3 and bool(self._inferred_faces)
+        return n_frozen >= 3
+
+    def _snap_section(self, st: _SectionState) -> None:
+        if st.corridor_mm is None:
+            return
+        st.corridor_mm = snap_corridor_mm(st.corridor_mm)
+        st.inner_coord_mm = self._coord_from_corridor(st.section, st.corridor_mm)
 
     def _expected_heading(self) -> float:
         return _section_heading(self._geom, self._current)
@@ -288,6 +328,7 @@ class OpenWallMap:
                     st.corridor_mm = 2 * statistics.median(st.d_inner) + SENSOR_LAT_SPAN_MM
             if st.inner_coord_mm is None and st.corridor_mm is not None:
                 st.inner_coord_mm = self._coord_from_corridor(self._current, st.corridor_mm)
+            self._snap_section(st)
             st.frozen = True
 
         # avanzar sección según orden de marcha
@@ -295,7 +336,6 @@ class OpenWallMap:
         if idx + 1 < len(self._order):
             self._current = self._order[idx + 1]
         self._last_odom_mm = None
-        self._try_infer_fourth()
         if turn_index >= 4:
             self._refine_inferred()
 
@@ -309,47 +349,12 @@ class OpenWallMap:
             return oh - corridor_mm
         return -oh + corridor_mm
 
-    def _try_infer_fourth(self) -> None:
-        measured = [s for s in self._order if self._sections[s].frozen and not self._sections[s].inferred]
-        if len(measured) < 3:
-            return
-        missing = [s for s in self._order if not self._sections[s].frozen]
-        if len(missing) != 1:
-            return
-        face = missing[0]
-        st = self._sections[face]
-        opp = {"S": "N", "N": "S", "E": "W", "W": "E"}[face]
-        ref = self._sections[opp]
-        if ref.corridor_mm is None and ref.inner_coord_mm is None:
-            return
-        if face in ("E", "W"):
-            peer = self._sections["E" if face == "W" else "W"]
-            if peer.corridor_mm is not None:
-                st.corridor_mm = peer.corridor_mm
-                st.inner_coord_mm = -peer.inner_coord_mm if peer.inner_coord_mm else None
-            elif ref.inner_coord_mm is not None:
-                st.inner_coord_mm = -ref.inner_coord_mm
-                st.corridor_mm = ref.corridor_mm
-        else:
-            peer = self._sections["N" if face == "S" else "S"]
-            if peer.corridor_mm is not None:
-                st.corridor_mm = peer.corridor_mm
-                st.inner_coord_mm = -peer.inner_coord_mm if peer.inner_coord_mm else None
-            elif ref.inner_coord_mm is not None:
-                st.inner_coord_mm = -ref.inner_coord_mm
-                st.corridor_mm = ref.corridor_mm
-        if st.inner_coord_mm is None and st.corridor_mm is not None:
-            st.inner_coord_mm = self._coord_from_corridor(face, st.corridor_mm)
-        st.frozen = True
-        st.inferred = True
-        self._inferred_faces.add(face)
-
     def _refine_inferred(self) -> None:
         for st in self._sections.values():
             if st.d_inner and st.d_outer:
                 c = statistics.median(st.d_inner) + statistics.median(st.d_outer) + SENSOR_LAT_SPAN_MM
                 st.corridor_mm = c
-                st.inner_coord_mm = self._coord_from_corridor(st.section, c)
+                self._snap_section(st)
 
     def inner_half_mm(self) -> tuple[float, float]:
         """Semiejes interiores (half_x, half_y) en frame centro."""
@@ -367,24 +372,37 @@ class OpenWallMap:
         return hx, hy
 
     def inner_box_mm(self) -> tuple[float, float, float, float]:
-        """(x0,y0,x1,y1) estilo analiza_vuelta en tapete 0…3000."""
+        """(x0,y0,x1,y1) estilo analiza_vuelta en tapete 0…3000 (solo caras medidas)."""
         vals: dict[str, float] = {}
         for sec, st in self._sections.items():
-            if st.inner_coord_mm is not None:
+            if st.frozen and st.inner_coord_mm is not None and not st.inferred:
                 vals[sec] = st.inner_coord_mm
-        # paredes: combinar medido + opuesto
-        x_w = vals.get("W", -vals.get("E", -500.0) if "E" in vals else -500.0)
-        x_e = vals.get("E", -x_w)
-        y_s = vals.get("S", -vals.get("N", -500.0) if "N" in vals else -500.0)
-        y_n = vals.get("N", -y_s)
-        if "E" in vals and "W" not in vals:
-            x_w = -vals["E"]
-        if "W" in vals and "E" not in vals:
-            x_e = -vals["W"]
-        if "S" in vals and "N" not in vals:
-            y_n = -vals["S"]
-        if "N" in vals and "S" not in vals:
-            y_s = -vals["N"]
+        if len(vals) < 2:
+            hx, hy = self.inner_half_mm()
+            cx0, cy0 = -hx, -hy
+            cx1, cy1 = hx, hy
+            return (
+                MAT_CENTER_MM + cx0,
+                MAT_CENTER_MM + cy0,
+                MAT_CENTER_MM + cx1,
+                MAT_CENTER_MM + cy1,
+            )
+        if "W" in vals and "E" in vals:
+            x_w, x_e = vals["W"], vals["E"]
+        elif "W" in vals:
+            x_w, x_e = vals["W"], vals["W"] + 1.0
+        elif "E" in vals:
+            x_w, x_e = vals["E"] - 1.0, vals["E"]
+        else:
+            x_w, x_e = -500.0, 500.0
+        if "S" in vals and "N" in vals:
+            y_s, y_n = vals["S"], vals["N"]
+        elif "S" in vals:
+            y_s, y_n = vals["S"], vals["S"] + 1.0
+        elif "N" in vals:
+            y_s, y_n = vals["N"] - 1.0, vals["N"]
+        else:
+            y_s, y_n = -500.0, 500.0
         x0 = MAT_CENTER_MM + min(x_w, x_e)
         x1 = MAT_CENTER_MM + max(x_w, x_e)
         y0 = MAT_CENTER_MM + min(y_s, y_n)
@@ -394,6 +412,11 @@ class OpenWallMap:
     def geometry(self) -> dict[str, Any]:
         hx, hy = self.inner_half_mm()
         x0, y0, x1, y1 = self.inner_box_mm()
+        narrow_mask: dict[SectionId, bool] = {}
+        for s, st in self._sections.items():
+            if st.corridor_mm is not None:
+                snapped = snap_corridor_mm(st.corridor_mm)
+                narrow_mask[s] = snapped == OPEN_CORRIDOR_MM[0]
         return {
             "drive_dir": self.drive_dir,
             "outer_half_mm": self.outer_half_mm,
@@ -402,9 +425,17 @@ class OpenWallMap:
             "ready": self.ready,
             "frozen": self.frozen,
             "turn_index": self._turn_index,
+            "narrow_mask": narrow_mask,
             "sections": {
                 s: {
                     "corridor_mm": st.corridor_mm,
+                    "kind": (
+                        "600"
+                        if st.corridor_mm is not None and snap_corridor_mm(st.corridor_mm) == OPEN_CORRIDOR_MM[0]
+                        else "1000"
+                        if st.corridor_mm is not None
+                        else None
+                    ),
                     "inner_coord_mm": st.inner_coord_mm,
                     "along_mm": st.along_mm,
                     "frozen": st.frozen,

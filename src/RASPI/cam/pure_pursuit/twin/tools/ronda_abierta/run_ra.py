@@ -5,17 +5,20 @@ Desde src/RASPI/cam (PYTHONPATH=.):
   python -m pure_pursuit.twin.tools.ronda_abierta.run_ra <semilla> [salida.csv] [--ino RUTA]
 Sin --ino usa `git show origin/parking:src/ESP32/RondaAbierta/RondaAbierta.ino`.
 RA_VIEJO=1: versión de la corrida real 133246 (29.9 s): sin trim de rumbo y con el frontal sin calibrar.
-TWIN_MOTOR=fisico: motor de hoja de datos en vez del medido."""
+TWIN_MOTOR=fisico: motor de hoja de datos en vez del medido.
+OPEN_MAP=1: alimenta ``OpenWallMap`` con ToF del gemelo y muestra ``geometry()`` al terminar.
+  El mundo del gemelo sigue con ``INNER_HALF_MM`` fijo (≈1000 mm); TODO: paredes 600/1000 por ``open_layout_from_seed``."""
 import ctypes, os, re, subprocess, sys, tempfile
 from pathlib import Path
 import numpy as np
-from pure_pursuit.wro_field import randomize
+from pure_pursuit.wro_field import MAT_MM, randomize
 from pure_pursuit.twin.firmware import build as B
 from pure_pursuit.twin.firmware.fw import FirmwareSIL
 from pure_pursuit.twin.params import TwinParams, physical_motor
 from pure_pursuit.twin.sensors import ToF, Bno085Heading, Pose
 from pure_pursuit.twin.vehicle import Vehicle
 from pure_pursuit.twin.world import World, collision
+from pure_pursuit.open_map import OpenWallMap, open_layout_from_seed
 
 HERE = Path(__file__).resolve().parent
 OUT = Path(tempfile.gettempdir()) / "fox_ronda_abierta"
@@ -85,6 +88,12 @@ def main():
     t_s = lambda: fw._lib.sil_now_us() / 1e6
     hit, rows, last = [None], [], [-1.0]
     L, W, R = p.vehicle.length_mm, p.vehicle.width_mm, p.vehicle.rear_overhang_mm
+    open_map = None
+    odom_mm = [0.0]
+    mat_c = MAT_MM / 2.0
+    if os.environ.get("OPEN_MAP"):
+        _ = open_layout_from_seed(seed)  # referencia / futuro layout del tapete
+        open_map = OpenWallMap(drive_dir="L")
 
     def advance(us):
         rem = us / 1e6
@@ -95,6 +104,20 @@ def main():
         if t - last[0] >= 0.02:
             last[0] = t
             rows.append((t, veh.x, veh.y, veh.heading_deg, abs(veh.v), fw.motor_pwm(), fw.servo_angle()))
+            if open_map is not None:
+                pose = Pose(veh.x, veh.y, veh.heading_deg)
+                odom_mm[0] += abs(veh.v) * 0.02
+                def _mm(i):
+                    d = tof.read_mm(i, world, pose, t)
+                    return float(d) if d and d > 0 else None
+                open_map.update_straight(
+                    t * 1000.0,
+                    (veh.x - mat_c, veh.y - mat_c, veh.heading_deg),
+                    _mm(0),
+                    _mm(1),
+                    _mm(3),
+                    odom_mm[0],
+                )
             if hit[0] is None:
                 h = collision(world, veh.x, veh.y, veh.heading_deg, L, W, R)
                 if h:
@@ -112,12 +135,18 @@ def main():
     log = ""
     while t_s() < 90 and hit[0] is None:
         fw.loop()
-        log += fw.pop_debug() or ""
+        chunk = fw.pop_debug() or ""
+        log += chunk
+        if open_map is not None and chunk:
+            for m in re.finditer(r"Giro completado (\d+)/", chunk):
+                open_map.on_corner_complete(int(m.group(1)))
         if "TERMINADO" in log or "NO ARRANCA" in log:
             break
     lib_path.unlink(missing_ok=True)
     m = re.search(r"TERMINADO: (\d+) giros en ([\d.]+) s", log)
     print(f"seed={seed} dir={f.direction} res={'%s giros %s s' % m.groups() if m else 'NO'} choque={hit[0]}")
+    if open_map is not None:
+        print("OPEN_MAP geometry:", open_map.geometry())
     if len(args) > 1:
         out = Path(args[1])
         out.write_text("t,x,y,h,v,pwm,servo\n" + "\n".join(",".join(f"{c:.3f}" for c in r) for r in rows))
