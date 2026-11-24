@@ -663,10 +663,12 @@ class PPRuntime:
         self._map_signmap = SignMap(self._map_geometry)
         self._map_frame = TrackFrame(self._map_geometry)
         if self._inicio_estacionamiento:
-            # Dentro del cajón, pegado a la pared exterior de la recta de salida.
-            w_c = float(getattr(C, "PARK_LOT_CENTER_W_MM", 1177.0))
-            start = FieldPose(1500.0 - w_c, -(self._map_geometry.outer_half - 100.0),
-                              0.0 if drive_dir == "L" else 180.0)
+            # Cajón en dm.parking (no hardcode S): misma ancla que DigitalMap.
+            from .wro_field import _heading, stall_start_xy
+            dm = self.digital
+            direction = dm.direction or ("CCW" if drive_dir == "L" else "CW")
+            sx, sy = stall_start_xy(dm.parking, direction, dm.park_w)
+            start = FieldPose(float(sx), float(sy), _heading(dm.parking, direction))
         else:
             start = self._map_geometry.start_field_pose()
         # La dirección puede llegar segundos después de armar: la pose arranca
