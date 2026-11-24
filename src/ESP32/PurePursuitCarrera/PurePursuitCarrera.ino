@@ -3473,6 +3473,8 @@ bool vigilarGeomExt(float along, long distF) {
     else
       geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
   }
+  // verde s16: pge early; tomar ~200 mm antes de pka (aún cerca; -450 chocaba magenta).
+  if (rutaPge) geomPasa = min(geomPasa, -200.0f);
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
@@ -4590,7 +4592,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
-    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); rutaPge = campoPi(line, ",pge=", v) && campoInt(v) != 0; }
+    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0; }  // sticky: pka sin pge no apaga (s16)
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();

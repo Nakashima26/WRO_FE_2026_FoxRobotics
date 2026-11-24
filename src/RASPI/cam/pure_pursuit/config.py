@@ -1574,6 +1574,7 @@ ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
 ROUTE_PARK_REFINE = False  # Solo Pi: refina pka con las dos maderas vistas por el ToF exterior.
 ROUTE_PARK_GEOM_EXT = 0  # Pi+ESP opt-in (g_geom): manda pge=1 para que el ESP, si iba a hacer la U, se pegue a la pared exterior pasado el cajon y lo busque en reversa con el sonar. 0 apagado, 1 solo con senal de entrada verde.
 ROUTE_PARK_GEOM_TC = 12  # pge solo desde esta cuenta de esquinas (no cambia la linea al ESP en las vueltas 1-3)
+ROUTE_PARK_GEOM_PGE_BEFORE_MM = 600  # pge desde along>=pka-esto (0 = solo tras pka; s16 early)
 # Voto de la línea: la imagen es más vieja que la pose del ACK; se usa la pose de N frames atrás (gemelo: N=5 quita el sesgo ∝ velocidad del δ).
 ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es la del MISMO frame que la pose; el "lag 14" medido salía de que en el _bev.bin el frame del voto m es el 6+m+16, no 6+m (centroide del carro reproducido a 0.5 mm con +16). Con 0: 129 -> -5 mm
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
