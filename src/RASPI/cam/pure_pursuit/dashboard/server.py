@@ -400,6 +400,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"pre": [[round(t, 2), d] for t, d in TELE.pre_hist if t > since]})
             if p == "/api/runs":
                 return self._json(runs.list_runs(VIDEOS))
+            if p == "/api/runs/ghosts":
+                return self._json(runs.ghost_list(VIDEOS))
+            if p.startswith("/api/runs/") and p.endswith("/ghost"):
+                try:
+                    return self._json(runs.ghost(VIDEOS, p[len("/api/runs/"):-len("/ghost")]))
+                except Exception as e:
+                    return self._json({"error": str(e)}, 404)
             if p.startswith("/api/runs/") and p.endswith("/timeline"):
                 name = p[len("/api/runs/"):-len("/timeline")]
                 try:

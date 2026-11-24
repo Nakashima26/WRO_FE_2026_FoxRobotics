@@ -46,6 +46,86 @@ def list_runs(videos: Path, n: int = 40) -> list[dict]:
     return out
 
 
+# ── Fantasma: tiempos por esquina y trayectoria ligera de cada corrida ─────────
+# Tiempo 0 = primer estado armado (botón). split[n] = cuándo el ESP contó la esquina n (tc).
+_GHOST_CACHE: dict[str, tuple[float, dict]] = {}
+_GHOST_LOCK = threading.Lock()
+
+
+def ghost(videos: Path, name: str) -> dict:
+    """{name, splits[1..tpr] (s desde el botón, None si no llegó), tpr, done, dur, path[[t,x,y,h,tc]]}."""
+    video = videos / Path(name).name
+    tp = tele_path(video)
+    if not tp.exists():
+        raise FileNotFoundError(name)
+    mt = tp.stat().st_mtime
+    with _GHOST_LOCK:
+        c = _GHOST_CACHE.get(str(tp))
+        if c and c[0] == mt:
+            return c[1]
+    a0, prev, tpr, src = None, None, 12, "runtime"
+    rdir, signs = None, None
+    splits: dict[int, float] = {}
+    path, t_last = [], None
+    with open(tp, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("hdr"):
+                src = r.get("src", "runtime")
+                continue
+            s = r.get("s") or {}
+            t = s.get("t")
+            if t is None:
+                continue
+            if a0 is None:
+                if not s.get("armed"):
+                    continue
+                a0 = t
+            rel = round(t - a0, 2)
+            t_last = rel
+            a = s.get("ack") or {}
+            tc = a.get("tc", s.get("tc"))
+            tpr = int(a.get("tpr") or s.get("tpr") or tpr)
+            rdir = a.get("dir") or rdir
+            conf = (s.get("map") or {}).get("confirmed")
+            if conf:
+                signs = sorted("/".join(map(str, c[:3])) for c in conf)
+            if isinstance(tc, (int, float)):
+                tc = int(tc)
+                if prev is not None and tc > prev and tc not in splits:
+                    splits[tc] = rel
+                prev = tc
+            pose = (s.get("loc") or {}).get("pose")
+            if pose and len(pose) >= 3:
+                if not path or rel - path[-1][0] >= 0.08:
+                    path.append([rel, round(pose[0]), round(pose[1]), round(pose[2], 1), prev])
+    out = {"name": video.name, "src": src, "tpr": tpr, "dur": t_last, "dir": rdir, "signs": signs or [],
+           "splits": [splits.get(n) for n in range(1, tpr + 1)], "path": path}
+    out["done"] = out["splits"][-1] is not None if out["splits"] else False
+    with _GHOST_LOCK:
+        _GHOST_CACHE[str(tp)] = (mt, out)
+    return out
+
+
+def ghost_list(videos: Path, n: int = 40) -> list[dict]:
+    """Tiempos por esquina de las corridas con telemetría (para elegir el fantasma; sin la trayectoria)."""
+    out = []
+    for f in list_runs(videos, n):
+        if not f.get("tele"):
+            continue
+        try:
+            g = ghost(videos, f["name"])
+        except Exception:
+            continue
+        out.append({"name": f["name"], "t": f["t"], "src": g["src"], "tpr": g["tpr"], "done": g["done"],
+                    "splits": g["splits"], "has_pose": bool(g["path"]), "dir": g["dir"],
+                    "signs": g["signs"]})
+    return out
+
+
 # ── Lectura ──────────────────────────────────────────────────────────────────
 def load(videos: Path, name: str) -> dict:
     video = videos / Path(name).name

@@ -47,7 +47,7 @@ flowchart LR
 | State | `RuntimeNuevo._tele_state()` in [`runtime_nuevo.py`](../src/RASPI/cam/pure_pursuit/runtime_nuevo.py) | Builds the state: last ACK/PRE, localizer pose and covariance, planned route, confirmed pillars, parking box, timing, camera color gains. |
 | Run log | [`pure_pursuit/run_log.py`](../src/RASPI/cam/pure_pursuit/run_log.py) | While the video records, writes every state plus the important log lines to `orillasN_tele.jsonl`. |
 | Server | [`dashboard/server.py`](../src/RASPI/cam/pure_pursuit/dashboard/server.py) | HTTP + Server-Sent Events, service control, calibration files, runs. |
-| Runs | [`dashboard/runs.py`](../src/RASPI/cam/pure_pursuit/dashboard/runs.py) | Lists runs, loads a timeline, rebuilds old runs from the journal, serves video frames. |
+| Runs | [`dashboard/runs.py`](../src/RASPI/cam/pure_pursuit/dashboard/runs.py) | Lists runs, loads a timeline, rebuilds old runs from the journal, serves video frames, ghost splits and paths. |
 | Page | [`dashboard/static/`](../src/RASPI/cam/pure_pursuit/dashboard/static/) | `index.html`, `app.js`, `style.css`. |
 | PC helper | [`scripts/fox_pc.py`](../scripts/fox_pc.py) | Serves the page from the laptop's repo, proxies data to the Pi, flashes the ESP32 with arduino-cli. |
 
@@ -117,6 +117,18 @@ The lateral ToF read short at long range, and the error changes with the wall pa
 - **Summary**: duration, firmware and direction, corners, final ESP state, odometer distance, minimum reading and % of time without a reading per ToF, UART errors during the run, parking messages, errors.
 - **🔗 copiar enlace** copies a link to the current moment (`http://<pi>:8080/?run=orillas242.avi&t=30.0&tab=runs`) using the Pi's Tailscale address, so it works for a teammate even when you opened the page through `fox_pc.py` on `localhost`. Opening the link loads that run at that second.
 - ⬇ downloads the `.avi`.
+
+#### 👻 Ghost
+
+<p align="center"><a href="img/dashboard_ghost.png"><img src="img/dashboard_ghost.png" width="100%" alt="Replay of run 242 with run 241 as a translucent ghost car, the delta in the bottom bar and the per-corner split table"></a></p>
+
+*Run `orillas242` 13 s after the button, racing the ghost of `orillas241` (same direction and same signs). The ghost is the translucent car with its dashed path. It is 0.35 s ahead at corner 4, and 242 wins that back on lap 2.*
+
+The **👻** selector in the bottom bar overlays another recorded run on the replay map, like the ghost in a racing game. Both runs are aligned at the start button (first armed state).
+- **la mejor** (default) picks the fastest finished run with the same direction, and among those only runs with the same confirmed signs when there are any. You can also pick any run from the list. Each entry is marked *mismo mapa* or *otro sentido*.
+- The bottom bar shows the delta at the last corner both runs counted: green when this run is ahead, red when it is behind.
+- The **Fantasma** card has one row per corner (the ESP's `tc`): time from the button for this run and for the ghost, the **Δ tramo** for that corner-to-corner segment, and the running **Δ total**. This is the quickest way to see where a run loses time.
+- It costs the Pi nothing: the Pi sends the ghost's splits and pose path (~10 poses per second, a few KB) once, cached by file time. The browser does all the drawing.
 
 ### ESP
 
@@ -189,6 +201,8 @@ All on the Pi, port 8080. `fox_pc.py` adds the `/local/*` routes on the laptop a
 | GET / POST | `/api/surprise` | Surprise rule in `carrera.json` |
 | POST | `/api/service` · `/api/radio` | start/stop/restart `wro-runtime` · radios on/off |
 | GET | `/api/runs` | Recorded runs and whether they have telemetry |
+| GET | `/api/runs/ghosts` | Per-corner split times, direction and confirmed signs of every run with telemetry (ghost picker) |
+| GET | `/api/runs/<name>/ghost` | One run's splits plus a light pose path `[t, x, y, heading, tc]` from the start button |
 | GET | `/api/runs/<name>/timeline` | Full run: header, states, events, summary, video info |
 | GET | `/api/runs/<name>/frame?i=` | One video frame as JPEG |
 | GET | `/api/runs/<name>/acks?f=&t0=&t1=&paso=&cambio=` | Full-rate ESP ACKs from the journal as TSV (t relative to [INICIO]); `cambio=pkf,pns` emits a row only when those fields change |

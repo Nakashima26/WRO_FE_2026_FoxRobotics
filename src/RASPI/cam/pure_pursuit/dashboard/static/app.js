@@ -221,6 +221,7 @@ function drawMap(cv = $("#map")) {
     g.strokeStyle = "#7d4cff99"; g.lineWidth = 2; g.beginPath();
     trail.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
   }
+  drawGhost(g, X, Y, k);
   const pose = t.loc ? t.loc.pose : null;
   $("#map-sub").textContent = pose ? `x ${fmt(pose[0])} y ${fmt(pose[1])} rumbo ${fmt(pose[2], 1)}°` :
     (t.map && t.map.direction ? `sentido ${t.map.direction}, cajón ${t.map.parking}` : "sin pose (el carro se ubica al salir del cajón)");
@@ -901,7 +902,7 @@ async function repOpen(name) {
   if (!st.length) { $("#rep-title").textContent = ""; return toast(`${name}: sin estados`, true); }
   Object.assign(REP, {
     on: true, name, d, st, ev: d.events || [], i: 0, applied: -1, playing: false, timer: null,
-    t0: st[0].t, t1: st[st.length - 1].t, tcur: st[0].t, frameIdx: -1, frameBusy: false, evShown: -1,
+    t0: st[0].t, t1: st[st.length - 1].t, tcur: st[0].t, frameIdx: -1, frameBusy: false, evShown: -1, a0: undefined, splits: null,
   });
   // tiempo del video: el .avi arranca con el header (o el 1er estado) y termina con el último estado
   REP.v0 = (d.hdr && d.hdr.t) || REP.t0;
@@ -915,6 +916,10 @@ async function repOpen(name) {
   repEvents(true);
   loadRepList();
   repGo(0);
+  await ghostLoadList();
+  const keep = GHOST.choice, v = $("#rep-ghost").value;
+  await ghostSet(v);
+  if (!v) GHOST.choice = keep;   // la elección se recuerda aunque esta corrida no tenga con quién compararse
 }
 
 function repReset() {
@@ -1006,6 +1011,7 @@ function repUI() {
   $("#rep-now").textContent = `est ${a.est ?? "—"} · esquina ${fmt(a.tc)}/${fmt(a.tpr)} · pwm ${fmt(a.pw)} · servo ${fmt(a.srv)}`;
   repFrame();
   repEvents(false);
+  ghostUI();
 }
 // Cuadro del .avi que va con el tiempo actual (uno a la vez: el siguiente se pide al llegar el anterior).
 function repFrame() {
@@ -1130,6 +1136,124 @@ $("#rep-chart").onclick = (ev) => {
   const L = 46, R = cv.width - 10;
   repSeekT(REP.t0 + (px - L) / (R - L) * (REP.t1 - REP.t0));
 };
+
+// ── Fantasma: otra corrida encimada en el replay ────────────────────────────
+// Todo corre en el navegador: la Pi solo manda una vez los tiempos por esquina y la pose (~10/s) de
+// la otra corrida (/api/runs/<name>/ghost). Las dos se alinean al botón (primer estado armado).
+const GHOST = { choice: "@best", name: "", g: null, list: [], best: "", key: "" };
+const runShort = (n) => n.replace(".avi", "").replace("orillas", "#");
+const lastSplit = (r) => r.splits[r.splits.length - 1];
+function repA0() {
+  if (REP.a0 === undefined) { const s = REP.st.find((x) => x.armed); REP.a0 = s ? s.t : REP.t0; }
+  return REP.a0;
+}
+function repSplits() {
+  if (REP.splits) return REP.splits;
+  const a0 = repA0(), sp = {};
+  let prev = null, tpr = 12;
+  for (const s of REP.st) {
+    if (s.t < a0) continue;
+    const a = s.ack || {}, tc = a.tc ?? s.tc;
+    tpr = a.tpr || s.tpr || tpr;
+    if (typeof tc === "number") { if (prev !== null && tc > prev && !(tc in sp)) sp[tc] = s.t - a0; prev = tc; }
+  }
+  REP.splits = Array.from({ length: tpr }, (_, k) => sp[k + 1] ?? null);
+  return REP.splits;
+}
+// Sentido y señales confirmadas de la corrida actual (para que "la mejor" sea del mismo mapa).
+function repMapKey() {
+  let dir = null, signs = [];
+  for (const s of REP.st) {
+    const a = s.ack || {};
+    if (a.dir) dir = a.dir;
+    const c = s.map && s.map.confirmed;
+    if (c && c.length) signs = c.map((x) => x.slice(0, 3).join("/")).sort();
+  }
+  return { dir, signs: signs.join(" ") };
+}
+async function ghostLoadList() {
+  try { GHOST.list = await api("/api/runs/ghosts"); } catch (e) { GHOST.list = []; }
+  const mk = repMapKey();
+  const others = GHOST.list.filter((r) => r.name !== REP.name && r.has_pose);
+  for (const r of others) { r.sameDir = !mk.dir || !r.dir || r.dir === mk.dir; r.sameMap = r.sameDir && !!mk.signs && r.signs.join(" ") === mk.signs; }
+  // la mejor: terminada, mismo sentido; si alguna tiene las mismas señales, solo entre esas
+  const pool = others.filter((r) => r.done && r.sameDir), same = pool.filter((r) => r.sameMap);
+  const best = (same.length ? same : pool).sort((a, b) => lastSplit(a) - lastSplit(b))[0];
+  GHOST.best = best ? best.name : "";
+  const sel = $("#rep-ghost");
+  sel.innerHTML = '<option value="">👻 sin fantasma</option>' +
+    (best ? `<option value="@best">👻 la mejor (${runShort(best.name)}, ${fmt(lastSplit(best), 1)} s${best.sameMap ? ", mismo mapa" : ""})</option>` : "") +
+    others.map((r) => `<option value="${r.name}">👻 ${runShort(r.name)} · ${r.t} · ${r.done ? fmt(lastSplit(r), 1) + " s" :
+      `${r.splits.filter((x) => x !== null).length}/${r.tpr} esq.`}${r.sameMap ? " · mismo mapa" : r.sameDir ? "" : " · otro sentido"}</option>`).join("");
+  sel.value = [...sel.options].some((o) => o.value === GHOST.choice) ? GHOST.choice : "";
+}
+async function ghostSet(v) {
+  GHOST.choice = v;
+  const name = v === "@best" ? GHOST.best : v;
+  GHOST.name = name; GHOST.g = null; GHOST.key = "";
+  if (name) {
+    try { GHOST.g = await api(`/api/runs/${encodeURIComponent(name)}/ghost`); }
+    catch (e) { toast(`fantasma ${name}: ${e.message}`, true); }
+  }
+  if (REP.on) { drawState(); ghostUI(); }
+}
+$("#rep-ghost").onchange = (e) => ghostSet(e.target.value);
+// Pose del fantasma a t segundos del botón (interpolada; antes/después de su corrida se queda quieto).
+function ghostPose(t) {
+  const p = GHOST.g && GHOST.g.path;
+  if (!p || !p.length) return null;
+  if (t <= p[0][0]) return p[0];
+  if (t >= p[p.length - 1][0]) return p[p.length - 1];
+  let lo = 0, hi = p.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (p[m][0] <= t) lo = m; else hi = m; }
+  const a = p[lo], b = p[hi], u = (t - a[0]) / Math.max(1e-3, b[0] - a[0]);
+  let dh = b[3] - a[3]; dh -= 360 * Math.round(dh / 360);
+  return [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1]), a[2] + u * (b[2] - a[2]), a[3] + u * dh, a[4]];
+}
+function drawGhost(g, X, Y, k) {
+  if (!REP.on || !GHOST.g || !GHOST.g.path.length) return;
+  const p = GHOST.g.path;
+  g.save();
+  g.strokeStyle = "#00000066"; g.lineWidth = 1.5; g.setLineDash([6, 5]); g.beginPath();
+  p.forEach((q, i) => i ? g.lineTo(X(q[1]), Y(q[2])) : g.moveTo(X(q[1]), Y(q[2]))); g.stroke(); g.setLineDash([]);
+  const q = ghostPose(REP.tcur - repA0());
+  if (q) {
+    g.globalAlpha = 0.45; drawCar(g, X, Y, k, [q[1], q[2], q[3]]); g.globalAlpha = 1;
+    g.fillStyle = "#111"; g.font = "bold 14px system-ui"; g.fillText("👻 " + runShort(GHOST.name), X(q[1]) + 14, Y(q[2]) - 14);
+  }
+  g.restore();
+}
+// Δ contra el fantasma en la última esquina que ya contaron los dos, y la tabla por esquina.
+function ghostUI() {
+  const box = $("#rep-ghost-d"), tbl = $("#rep-splits");
+  if (!REP.on) return;
+  const me = repSplits(), gh = GHOST.g ? GHOST.g.splits : null;
+  const a = (REP.st[REP.i] || {}), n = (a.ack || {}).tc ?? a.tc ?? 0;
+  let d = null;
+  if (gh) for (let k = Math.min(n, me.length); k >= 1; k--) if (me[k - 1] !== null && gh[k - 1] != null) { d = me[k - 1] - gh[k - 1]; break; }
+  box.className = "mono ghost-d" + (d === null ? "" : d > 0.05 ? " behind" : d < -0.05 ? " ahead" : "");
+  box.textContent = !GHOST.g ? "" : d === null ? "👻 —" : `👻 ${d > 0 ? "+" : ""}${d.toFixed(2)} s`;
+  box.title = d === null ? "" : d > 0 ? "más lento que el fantasma (en la última esquina)" : "más rápido que el fantasma";
+  const key = `${REP.name}|${GHOST.name}|${n}|${!!GHOST.g}`;
+  if (key === GHOST.key) return;
+  GHOST.key = key;
+  const gm = GHOST.list.find((r) => r.name === GHOST.name) || {};
+  $("#ghost-sub").textContent = GHOST.g ? `contra ${runShort(GHOST.name)} · ${gm.sameMap ? "mismo mapa" : gm.sameDir === false ? "otro sentido" : "otro mapa"} · tiempos desde el botón` :
+    "elige una corrida en la barra del replay (👻)";
+  const cls = (x) => x === null ? "" : x > 0.05 ? "behind" : x < -0.05 ? "ahead" : "";
+  const sg = (x) => x === null ? "—" : `${x > 0 ? "+" : ""}${x.toFixed(2)}`;
+  const rows = ["<tr><th>esquina</th><th>esta</th><th>👻</th><th>Δ tramo</th><th>Δ total</th></tr>"];
+  for (let k = 0; k < me.length; k++) {
+    const m = me[k], q = gh ? gh[k] ?? null : null;
+    const mp = k ? me[k - 1] : 0, qp = gh ? (k ? gh[k - 1] ?? null : 0) : null;
+    const tot = m !== null && q !== null ? m - q : null;
+    const tr = m !== null && q !== null && mp !== null && qp !== null ? (m - mp) - (q - qp) : null;
+    rows.push(`<tr class="${k + 1 === n ? "cur" : ""}"><td>${k + 1}${k + 1 === me.length ? " (vuelta 3)" : k === 3 || k === 7 ? ` (vuelta ${(k + 1) / 4})` : ""}</td>` +
+      `<td>${m === null ? "—" : m.toFixed(2)}</td><td>${q === null ? "—" : q.toFixed(2)}</td>` +
+      `<td class="${cls(tr)}">${sg(tr)}</td><td class="${cls(tot)}">${sg(tot)}</td></tr>`);
+  }
+  tbl.innerHTML = rows.join("");
+}
 
 // Enlace directo a un momento de una corrida: ?run=orillas242.avi&t=17&tab=live (t en s desde el arranque).
 (async () => {

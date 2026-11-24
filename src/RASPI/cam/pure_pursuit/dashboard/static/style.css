@@ -108,3 +108,13 @@ table.tbl tr.sel td { background: #4c9aff22; }
 #repbar input[type=range] { flex: 1; min-width: 200px; }
 .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
 body.replay main { padding-bottom: 70px; }
+
+/* fantasma */
+.ghost-d { padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.ghost-d.ahead { color: var(--ok); background: #2fbf7122; }
+.ghost-d.behind { color: var(--bad); background: #e5484d22; }
+table.splits td, table.splits th { text-align: right; font-variant-numeric: tabular-nums; padding: 2px 6px; }
+table.splits td:first-child, table.splits th:first-child { text-align: left; }
+table.splits tr.cur td { background: #4c9aff22; }
+table.splits .ahead { color: var(--ok); } table.splits .behind { color: var(--bad); }
+#rep-ghost { max-width: 220px; }
