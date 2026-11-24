@@ -3469,23 +3469,31 @@ bool vigilarGeomExt(float along, long distF) {
   }
   // verde s16: pge early; tomar ~200 mm antes de pka (aún cerca; -450 chocaba magenta).
   if (rutaPge) geomPasa = min(geomPasa, -200.0f);
+  // s32: no_llega cerca sin pge — misma ventana early (veniaLejos no aplica).
+  if (PARK_GEOM_ROJO && !rutaPge && !parkGeomVeniaLejos) geomPasa = min(geomPasa, -350.0f);
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
   // ROJO: gate en anguloGyro (mismo que U por pose); err carril ≠ gyro dejaba s39@−11.5.
   // angLim 23 solo banda s37 (pka 50..250) + lejos; else 15 (s22 early crook +1–2s).
-  const float eGate = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) ? fabsf(anguloGyro) : fabsf(err);
+  const bool rojoLatch = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos;
+  const float eGate = rojoLatch ? fabsf(anguloGyro) : fabsf(err);
   const bool s37banda = rutaPka > 50.0f && rutaPka < 250.0f;
-  const float angLim = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge)
-                       ? ((s37banda && lejos) ? 23.0f : 15.0f) : PARK_GEOM_ANG_DEG;
+  // s32 cerca: err~16 > ANG 10; 18 abre sin el angLim35 que caía.
+  const float angLim = rojoLatch ? ((s37banda && lejos) ? 23.0f : 15.0f)
+                       : ((PARK_GEOM_ROJO && !rutaPge && !lejos) ? 18.0f : PARK_GEOM_ANG_DEG);
   if (eGate > angLim) return false;
   // Banda libre en ventana (sin pka+250). f45 solo si along<420.
   // distF>50 bloqueaba n2/s39 (toma @530 con frente ya cerca; gyro ya ≤15).
-  const bool rojo = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
+  const bool rojoFar = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
                     && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
                     && distF > 25;
+  // s32: no_llega cerca (ext en TOL) sin pge/veniaLejos — GEOM en vez de U.
+  const bool rojoCerca = PARK_GEOM_ROJO && !rutaPge && !parkGeomVeniaLejos
+                         && fabsf(ext - PARK_PARED_CM) <= PARK_GEOM_TOL_CM && distF > 25;
+  const bool rojo = rojoFar || rojoCerca;
   if (!rojo && (!PARK_GEOM_EXT || !rutaPge || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
-  const bool acercar = rojo && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
+  const bool acercar = rojoFar && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
@@ -7205,14 +7213,32 @@ void loop() {
               && parkScanSubFase == 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
               && (rutaExtTapeteCm() > PARK_PARED_CM + PARK_SINU_TOL_CM
                   || (lecturaValida && parkBase > PARK_PARED_CM + PARK_LEJOS_CM))) {
-            parkSinUDec = 2;
-            parkDirecto = false;
-            parkUturnPendiente = true;
-            parkUturnOdom0 = odomMm;
-            parkUturnDisparoOdom = -1;
-            contadorEsquina13 = 0;
-            estado = SIGUIENDO;
-            Serial.println("PARK: ventana vencida lejos de la pared -> U");
+            // s20: escaneo DIRECTO se alejó tras pka; GEOM+f45 si pge (U sobra).
+            if (rutaPge && PARK_GEOM_EXT) {
+              const float alongG = alongSalidaMm(), extG = rutaExtTapeteCm(), errG = rutaErrCarrilDeg();
+              parkSinUDec = 2; parkDirecto = true; parkUturnPendiente = false; parkUturnDisparoOdom = -1;
+              turnsCompleted = TURNS_PER_RACE;
+              iniciarEstacionando();
+              parkRevGyroOff = anguloGyro - errG; anguloGyro = errG; parkRumboRef = 0.0f;
+              parkDetAlong = rutaPka - 64.0f;
+              parkDetHPose = parkHPoseMm(); parkDetHSon = parkDetHPose; parkDetTh = 0.0f;
+              parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevEnMadera = false;
+              parkRevModo = true; parkGeomModo = true;
+              // s20: ext ya ~TOL; f45 seguía hasta along~300 y el plan chocaba magenta.
+              const bool lejosG = extG > PARK_PARED_CM + PARK_GEOM_TOL_CM;
+              parkFase = lejosG ? 45 : 44; parkFaseMs = millis(); parkOdom0 = odomMm;
+              Serial.print("PARK: ventana vencida lejos -> GEOM along="); Serial.print(alongG, 0);
+              Serial.print(" ext="); Serial.print(extG, 1); Serial.print(" f="); Serial.println(parkFase);
+            } else {
+              parkSinUDec = 2;
+              parkDirecto = false;
+              parkUturnPendiente = true;
+              parkUturnOdom0 = odomMm;
+              parkUturnDisparoOdom = -1;
+              contadorEsquina13 = 0;
+              estado = SIGUIENDO;
+              Serial.println("PARK: ventana vencida lejos de la pared -> U");
+            }
           } else {
             finalizarPark("POSTE 2 fuera de ventana");
           }
