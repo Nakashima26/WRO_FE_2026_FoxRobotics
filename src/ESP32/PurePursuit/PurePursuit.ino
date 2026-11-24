@@ -1858,6 +1858,15 @@ PARK_AJ float        PARK_PL_CENTRAR_OFF_CM      = 0.0f;   // dF - dB objetivo
 PARK_AJ float        PARK_PL_CENTRAR_TH_MAX      = 12.0f;  // mas chueco, el tramo recto se mete de lado: no centra
 PARK_AJ int          PARK_PL_CENTRAR_MS          = 2000;
 PARK_AJ int          PARK_PL_ARRANQUE_PWM        = 78;       // PWM de salida minimo mientras el carro esta parado (<25 mm/s) en un tramo del plan: el lazo de velocidad integraba ~1 s (pw 36->72) hasta vencer la friccion estatica y luego daba tirón (orillas79); 0 = apagado
+// Despegue aprendido (2026-11-23, g_w_park): cada tramo del plan arrancaba en PARK_PL_ARRANQUE_PWM y el anti-atasco tardaba
+// ~0.3 s en subir hasta el PWM con el que el carro despega (gemelo motor real 11.5 V: ~147 con el volante a tope, ~107 recto).
+// Se guarda FRAC x el PWM con el que despego el tramo anterior (volante a tope / recto, nunca baja) y el siguiente tramo en
+// reversa arranca ahi, solo hasta que se mueve (no es piso de movimiento). Banco cen_seeds 96: 95/96 igual que main, -0.33 s.
+// Probado y descartado: tambien en los tramos de adelante (cortos, pegados a la madera de enfrente: 2 choques con el cajon),
+// tope 140 (la reversa INT corta antes por holgura y queda afuera), y rampa propia desde el aprendido (13 choques).
+PARK_AJ float        PARK_PL_DESPEGUE_FRAC       = 0.85f;   // 0 = apagado (como antes)
+PARK_AJ int          PARK_PL_DESPEGUE_MAX        = 125;
+PARK_AJ bool         PARK_PL_DESPEGUE_FWD        = false;   // true = tambien los tramos hacia adelante
 // Piso en movimiento (2026-11-23, 4532): fuera del arranque el lazo bajaba la salida a 36-55 (por debajo de lo que
 // sostiene la friccion cinetica), el carro se volvia a pegar y el anti-atasco lo despegaba: tramos a 25-40 mm/s,
 // fase 40 en 10 s. Medido en las corridas reales (11.5 V): volante a tope 80-99 PWM -> ~75 mm/s sin pegarse,
@@ -2262,6 +2271,7 @@ int lazoVelocidad(int pwm) {
 // setMotor con tope propio: la RUTA usa RUTA_PWM_MAX en vez de MOTOR_MAX. La
 // rampa de reversa es la misma. setMotor(v) == setMotorTope(v, MOTOR_MAX).
 int parkArranquePwm = 0, parkPisoMov = 0;   // != 0 solo dentro de un tramo del plan de estacionamiento (PARK_PL_ARRANQUE_PWM)
+bool parkDespInicio = false; int parkDespPico = 0; int parkDespAprendido[2] = {0, 0};   // despegue aprendido (PARK_PL_DESPEGUE_*): [recto, a tope]
 
 // ── Anti-atasco general por encoder (2026-11-23) ───────────────────────────
 // orillas169 (park, volante a tope): reversa pedida y el encoder quieto ~0.9 s
@@ -2343,10 +2353,18 @@ void setMotorTope(int velocidad, int tope) {
     if (parkArranquePwm > 0 && velocidad > 0) {
       float v = fabsf(encVelMmS);
       // el piso de movimiento solo mientras no llegue a la velocidad que el plan ya pide: no acelera de mas
-      if (v < 25.0f) velocidad = max(velocidad, parkArranquePwm);
+      const int slotD = (parkPisoMov >= (PARK_PL_PISO_RECTO + PARK_PL_PISO_LOCK + 1) / 2) ? 1 : 0;
+      if (parkDespInicio && v >= 25.0f) {   // despego: aprende con lo que costo
+        if (PARK_PL_DESPEGUE_FRAC > 0.0f && parkDespPico > 0)
+          parkDespAprendido[slotD] = min(max(parkDespAprendido[slotD], (int)lroundf(PARK_PL_DESPEGUE_FRAC * parkDespPico)), PARK_PL_DESPEGUE_MAX);
+        parkDespInicio = false;
+      }
+      const bool despOn = parkDespInicio && PARK_PL_DESPEGUE_FRAC > 0.0f && (PARK_PL_DESPEGUE_FWD || motorDirActual < 0);
+      if (v < 25.0f) velocidad = max(velocidad, despOn ? max(parkArranquePwm, parkDespAprendido[slotD]) : parkArranquePwm);
       else if (v < min(0.9f * vMando((float)pedido, motorDirActual), PARK_PL_PISO_VMAX)) velocidad = max(velocidad, parkPisoMov);
     }
     velocidad = antiAtasco(pedido, velocidad);
+    if (parkArranquePwm > 0 && parkDespInicio) parkDespPico = max(parkDespPico, velocidad);
   }
 #endif
 #ifdef FOX_BANCO_SIN_MOTOR
@@ -7812,6 +7830,7 @@ void loop() {
             finalizarPark(parkCentrarMotivo); break;
           }
           parkCentrarDir = err > 0.0f ? 1 : -1; parkCentrarMm = fabsf(err) * 5.0f;   // la mitad, en mm
+          parkDespInicio = true; parkDespPico = 0;
           Serial.print(parkCentrarDir > 0 ? " -> ADELANTE " : " -> REVERSA "); Serial.println(parkCentrarMm, 0);
           parkFaseMs = millis(); parkOdom0 = odomMm;
         }
@@ -7900,6 +7919,7 @@ void loop() {
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
               Serial.print(" th1="); Serial.println(t, 1);
             }
+            parkDespInicio = true; parkDespPico = 0;
             parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
             if (parkPlanDir > 0) motorAdelante(); else motorReversa();
             Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
