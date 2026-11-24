@@ -1672,6 +1672,7 @@ PARK_AJ long         PARK_UTURN_EXT_OBJ_CM      = 28;     // se pega aquí antes
 // Antes de la U: si la pared del lado del giro está a menos de esto (cm, ext corregido por el ángulo), el carro se aleja
 // a PARK_UTURN_ALEJAR_ANG grados (tope PARK_UTURN_ALEJAR_MAX_MM) y se endereza (fases 26/27). 0 = U directa (como antes).
 PARK_AJ long         PARK_UTURN_ALEJAR_CM       = 0;
+PARK_AJ bool         PARK_UTURN_PREPARACION_CORTA = false;
 PARK_AJ long         PARK_UTURN_ALEJAR_ANG      = 35;
 PARK_AJ long         PARK_UTURN_ALEJAR_MAX_MM   = 500;
 // Fase 27 (enderezar antes de la U): 1 = siempre (como antes); 0 = nunca (26 -> 24); 2 = se salta si ya
@@ -3090,7 +3091,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_FINAL_TOL_DEG); SIL_AJ(PARK_REV_CENTER_HI_CM); SIL_AJ(PARK_PR_FINAL_DF_CM);
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
-  SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
+  SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_PREPARACION_CORTA); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
   SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
@@ -4042,6 +4043,11 @@ static bool parkUPruebaArcoLargo(float rueda, float &tiempo) {
   return false;
 }
 
+// Límite de la aproximación tras escanear las dos maderas, incluida la nariz.
+static float parkUFinEscaneoMm() {
+  return rutaPka - PARK_CAJON_LARGO_MM - 154.2f - 100.0f;
+}
+
 // Selecciona el arco más rápido desde la pose actual. Sin candidato válido,
 // el llamador conserva la preparación y vuelve a evaluar en el próximo ciclo.
 static bool parkUContinua(long ext) {
@@ -4051,7 +4057,7 @@ static bool parkUContinua(long ext) {
   const float along = alongSalidaMm();
   // Tras pasar las dos maderas, reserva espacio para la nariz y la
   // aproximación de estacionamiento antes de la línea de la otra esquina.
-  const float finEscaneo = rutaPka - PARK_CAJON_LARGO_MM - 154.2f - 100.0f;
+  const float finEscaneo = parkUFinEscaneoMm();
   const bool pocoFondo = parkFase == 27 && along > 890.0f
                       && along - rutaPka > 780.0f && finEscaneo > -500.0f
                       && signo * (anguloGyro - parkRumboGiro0) < -22.0f;
@@ -6718,7 +6724,14 @@ void loop() {
 #endif
       if (piPark >= 1) parkRosaVisto = true;
 
-      const int alejarPwm = direccionIzquierda && PARK_UTURN_CCW_ALEJAR_PWM > 0
+      // Cajón temprano con margen de escaneo de vuelta y opción de arco continuo.
+      const bool preparaCorto = PARK_UTURN_PREPARACION_CORTA && (parkFase == 26 || parkFase == 27)
+                             && PARK_UTURN_CONTINUA && PARK_UTURN_SIN_SETTLE
+                             && !direccionIzquierda && piRuta && rutaTfOk && rutaSecSalida >= 0
+                             && rutaPka < PARK_SINU_PKA_MIN_MM && parkUFinEscaneoMm() > -500.0f
+                             && PARK_UTURN_ALEJAR_CM >= 45 && PARK_UTURN_ALEJAR_PWM > 0;
+      const int alejarPwm = preparaCorto ? (int)PARK_UTURN_ALEJAR_PWM + 7
+                           : direccionIzquierda && PARK_UTURN_CCW_ALEJAR_PWM > 0
                              ? (int)PARK_UTURN_CCW_ALEJAR_PWM
                              : PARK_UTURN_ALEJAR_PWM > 0 ? (int)PARK_UTURN_ALEJAR_PWM : PARK_RETORNO_PWM_MIN;
       // ── Fase 26: ALEJARSE antes de la U (PARK_UTURN_ALEJAR_CM) — rumbo
@@ -6732,7 +6745,7 @@ void loop() {
         float dif     = fabs(anguloGyro - parkRumboGiro0);
         float lateral = (piRuta && rutaTfOk && rutaSecSalida >= 0) ? rutaExtTapeteCm()
                       : (extAhoraP > 2 && extAhoraP < 150) ? extAhoraP * cos(dif * 3.14159265f / 180.0f) : 999.0f;
-        bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM;
+        bool  lejos   = lateral >= (float)PARK_UTURN_ALEJAR_CM - (preparaCorto ? 2.0f : 0.0f);
         bool  tope    = parkRecorridoMm() >= (float)PARK_UTURN_ALEJAR_MAX_MM;
         bool  restCorto = PARK_UTURN_ENDEREZA_REST_MM > 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
                           && (1500.0f - alongSalidaMm()) < (float)PARK_UTURN_ENDEREZA_REST_MM;
