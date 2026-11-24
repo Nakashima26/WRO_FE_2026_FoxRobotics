@@ -493,7 +493,7 @@ class PPRuntime:
     def _tele_cmd(self, cmd: dict, armed: bool, frame) -> None:
         """Comando del dashboard. Al ESP solo desarmado (calibración de ToF antes del botón)."""
         line = cmd.get("esp")
-        if isinstance(line, str) and line and not armed:
+        if isinstance(line, str) and line:   # el ESP solo lo acepta antes de rodar o ya TERMINADO
             line = line.strip()[:200]
             if line.startswith(("CALQ", "CALT")):
                 self.serial_link.send_line(line)
@@ -537,7 +537,7 @@ class PPRuntime:
             if cal:
                 st["esp_rx"] = cal
         pre = getattr(self, "_tele_pre", None)
-        if pre is not None and now - pre[0] < 3.0 and not armed:
+        if pre is not None and now - pre[0] < 3.0:   # antes del botón o ya TERMINADO
             st["pre"] = parse_pre(pre[1])
         cc = getattr(self, "color_corr", None)
         if cc is not None:

@@ -62,8 +62,8 @@ function push(name, v) {
 // Lecturas ToF vigentes: armado = ACK, desarmado = PRE (antes del botón).
 function tofNow() {
   const t = S.tele || {}, a = t.ack || {}, p = t.pre || {};
-  if (t.ack) return { L: a.tL, R: a.tR, B: a.tB, F: a.tF, src: "ACK" };
   if (t.pre) return { L: p.L, R: p.R, B: p.B, F: p.F, raw: p.rl, h: p.h, src: "PRE" };
+  if (t.ack) return { L: a.tL, R: a.tR, B: a.tB, F: a.tF, src: "ACK" };
   return null;
 }
 
@@ -290,8 +290,8 @@ function drawChecklist() {
   const add = (st, txt, d = "") => items.push(`<li class="${st}"><b>${st === "ok" ? "✓" : st === "bad" ? "✗" : "!"}</b>${txt}<span class="d">${d}</span></li>`);
   add(sy.service === "active" ? "ok" : "bad", "Servicio wro-runtime", sy.service || "?");
   add(t._age !== null && t._age < 1.5 ? "ok" : "bad", "Telemetría del runtime", t._age === null ? "nunca" : `hace ${fmt(t._age, 1)} s`);
-  const esp = t.armed ? !!t.ack : !!t.pre;
-  add(esp ? "ok" : "bad", "ESP32 respondiendo", t.armed ? (t.ack ? "ACK" : "sin ACK") : (t.pre ? "PRE" : "sin PRE (¿ESP apagado o ya armado?)"));
+  const esp = !!t.ack || !!t.pre;
+  add(esp ? "ok" : "bad", "ESP32 respondiendo", t.pre ? "PRE (quieto)" : t.ack ? "ACK (carrera)" : "nada (¿ESP apagado o firmware viejo?)");
   const tof = tofNow();
   if (tof) {
     const bad = ["L", "R", "F", "B"].filter((k) => !(tof[k] > 0));
@@ -402,7 +402,7 @@ async function preWindow(sec) {
 function drawTofLive() {
   const p = (S.tele || {}).pre;
   const box = $("#tof-live");
-  if (!p) { box.innerHTML = `<div class="sensor bad" style="grid-column: span 4"><div class="n">Sin lecturas PRE</div><div class="v small">El servicio tiene que estar corriendo y el carro SIN arrancar. Si ya se picó el botón, reinicia el servicio.</div></div>`; return; }
+  if (!p) { box.innerHTML = `<div class="sensor bad" style="grid-column: span 4"><div class="n">Sin lecturas PRE</div><div class="v small">El servicio tiene que estar corriendo y el carro sin arrancar o ya TERMINADO. Si no llega nada: firmware viejo o ESP apagado.</div></div>`; return; }
   const raw = p.rl || [];
   box.innerHTML = [["L", 0], ["R", 1], ["B", 2], ["F", 3]].map(([k, i]) =>
     `<div class="sensor ${raw[i] > 0 ? "" : "bad"}"><div class="n">${k} crudo · corregido</div><div class="v">${raw[i] ?? "—"} <small>· ${p[k] ?? "—"} mm</small></div></div>`).join("");
@@ -472,7 +472,7 @@ function espRx(line) {
   if (line.startsWith("CALT error")) toast("ESP rechazó la tabla: " + line, true);
 }
 async function sendEsp(line) {
-  if (S.tele.armed) return toast("El carro está armado: el ESP solo acepta antes del botón. Reinicia el servicio.", true);
+  if (!S.tele.pre) return toast("El ESP no está mandando PRE: solo acepta antes del botón o ya TERMINADO.", true);
   try { await api("/api/esp", { line }); toast("enviado: " + line.slice(0, 40)); } catch (e) { toast(e.message, true); }
 }
 $("#btn-calq").onclick = () => sendEsp("CALQ");

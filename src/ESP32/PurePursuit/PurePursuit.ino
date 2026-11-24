@@ -4628,8 +4628,37 @@ static AckBuf ackOut;
 #define ackOut Serial2   // el shim del SIL no tiene Print; los bytes son los mismos
 #endif
 
+#if FOX_TOF && !defined(FOX_SIL)
+// ToF crudos y corregidos al Pi (dashboard / journal). Antes del botón y también ya TERMINADO.
+void enviarPRE() {
+  Serial2.print("PRE L="); Serial2.print(tofMm[0]);
+  Serial2.print(" R=");    Serial2.print(tofMm[1]);
+  Serial2.print(" B=");    Serial2.print(tofMm[2]);
+  Serial2.print(" F=");    Serial2.print(tofMm[3]);
+  Serial2.print(" h=");
+  for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofEstado[i]); }
+  Serial2.print(" i=");
+  for (int i = 0; i < TOF_N; i++) Serial2.print(tofInitBoot[i] ? '1' : '0');
+  Serial2.print(" r=");
+  for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofReinicios[i]); }
+  Serial2.print(" rst="); Serial2.print((int)esp_reset_reason());
+  Serial2.print(" rl=");   // crudas (sin la tabla de calibración)
+  for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofRaw[i]); }
+#if FOX_ENCODER
+  Serial2.print(" enc="); Serial2.print(leerEncoder());   // banco: escala del encoder empujando a mano
+#endif
+  Serial2.println();
+}
+#endif
+
 void parsePiMessage(String &line) {   // por referencia: el único llamador (readPiSerial) ya no usa la línea después
   line.trim();
+
+  // Calibración de ToF desde el dashboard: también tras TERMINADO (sin reiniciar el ESP), nunca rodando.
+  if (line.startsWith("CAL")) {
+    if (raceFinished || !marchaIniciada) tofCalComando(line);
+    return;
+  }
 
   if (line.startsWith("RT")) {
     parseRuta(line);
@@ -5458,23 +5487,7 @@ void setup() {
     leerToF();
     if (millis() - preMs >= 250) {   // 500 -> 250 (2026-11-24): el dashboard calibra con estas lecturas
       preMs = millis();
-      Serial2.print("PRE L="); Serial2.print(tofMm[0]);
-      Serial2.print(" R=");    Serial2.print(tofMm[1]);
-      Serial2.print(" B=");    Serial2.print(tofMm[2]);
-      Serial2.print(" F=");    Serial2.print(tofMm[3]);
-      Serial2.print(" h=");
-      for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofEstado[i]); }
-      Serial2.print(" i=");
-      for (int i = 0; i < TOF_N; i++) Serial2.print(tofInitBoot[i] ? '1' : '0');
-      Serial2.print(" r=");
-      for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofReinicios[i]); }
-      Serial2.print(" rst="); Serial2.print((int)esp_reset_reason());
-      Serial2.print(" rl=");   // crudas (sin la tabla de calibración)
-      for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofRaw[i]); }
-#if FOX_ENCODER
-      Serial2.print(" enc="); Serial2.print(leerEncoder());   // banco: escala del encoder empujando a mano
-#endif
-      Serial2.println();
+      enviarPRE();
     }
 #endif
 #if FOX_ENCODER && !defined(FOX_SIL)
@@ -5598,6 +5611,9 @@ void loop() {
 
   if (raceFinished) {
     setMotor(0);
+#if FOX_TOF && !defined(FOX_SIL)
+    { static unsigned long preFinMs = 0; if (millis() - preFinMs >= 250) { preFinMs = millis(); enviarPRE(); } }
+#endif
     // Modo RUTA: rodando hasta parar sigue la ruta; con el servo al centro a la salida de la curva iba recto a la isla.
     // En el cajón no: la ruta deja el volante cruzado y el coast de la fase 13 mete la esquina trasera (n7 s9, n10 s14).
     float ruedaDeg;
