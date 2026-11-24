@@ -205,8 +205,9 @@ def _park_geom_flag(dm, tc, pose=None, pka=None) -> int:
         return 0
     from .wro_field import _heading
     h = math.radians(_heading(dm.parking, dm.direction))
-    if pose[0] * math.sin(h) + pose[1] * math.cos(h) < pka:
-        return 0   # y con el carro ya pasado el cajón (la vuelta 3 ya cerró en la línea de salida); el ESP lo usa desde pka + PARK_GEOM_PASA_MM
+    # s16: pge solo tras pka llegaba ya lejos; adelantar PGE_BEFORE_MM (ESP early pasa).
+    if pose[0] * math.sin(h) + pose[1] * math.cos(h) < float(pka) - float(getattr(C, "ROUTE_PARK_GEOM_PGE_BEFORE_MM", 600) or 0):
+        return 0
     order = ("T2", "X1", "T1") if dm.direction == "CW" else ("T1", "X1", "T2")
     conf = getattr(dm, "confirmed", {}) or {}
     for seat in order:
