@@ -1141,7 +1141,25 @@ class RouteMode:
             self.rv = cap if self.rv is None else min(self.rv, cap)
         # Perfil por curvatura: solo baja el tope (los de arriba siguen ganando).
         # Solo la vuelta 2: la 3 queda con el κ local para llegar al cajón como la base.
-        self._unk_pts = np.asarray([section_to_world(sec, *SEATS[seat]) for sec, seat in unknown], dtype=float).reshape(-1, 2)
+        corner_sign = getattr(C, "ROUTE_L1_CORNER_SIGN", None)
+        can_release = (corner_sign and corner_sign.get("planned_clearance_resolved") and self.fixed
+                       and 1 <= (tcf or 0) < 4 and self.esp_route is self.route
+                       and self.route.report.get("feasible") and not self.upload and self._rte_n is None
+                       and not plan_unknown and self.key == key)
+        corner_points = []
+        for sec, seat in unknown:
+            xy = section_to_world(sec, *SEATS[seat])
+            seat_key = (sec, seat)
+            if can_release and seat_key in prov and self._conf_prev.get(seat_key) == prov[seat_key]:
+                # El plan activo ya respeta el color provisional. Conservar el
+                # freno si el error de seguimiento puede consumir su holgura.
+                r = self.route
+                gap = RR._rect_dist_pose(*xy, r.x, r.y, np.radians(r.heading_deg)).min()
+                reserve = float(C.ROUTE_CORNER_EXIT_CLEAR_MM) + abs(self.follower.cte)
+                if gap > SIGN_MM / math.sqrt(2.0) + reserve:
+                    continue
+            corner_points.append(xy)
+        self._unk_pts = np.asarray(corner_points, dtype=float).reshape(-1, 2)
         prof = self._profile_pwm(
             self._sign_xy(conf, empty),
             lap2=tc is not None and 4 <= tc < int(getattr(C, "ROUTE_LAP2_PROFILE_TC_MAX", 8)),
