@@ -1695,6 +1695,7 @@ PARK_AJ long         PARK_UTURN_PWM             = 160;
 // Modo RUTA: escaneo del paralelo a este PWM mientras el carro va a más de PARK_SCAN_RAPIDO_MM (along) de la
 // madera del cajón que manda la Pi (pka=); luego PARK_PUNTA_PWM. 0 = escaneo todo a PARK_PUNTA_PWM (como antes).
 PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 200;
+PARK_AJ long         PARK_SCAN_U_PWM            = 230;   // tras U 180° (!parkDirecto); 0 = PARK_SCAN_RAPIDO_PWM. No sube escaneo GEOM/directo.
 PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 400;
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
@@ -3138,7 +3139,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
   SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
-  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
+  SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_U_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
   anguloTotal    = (float)sil_param("pp_yaw_total", 0.0);
@@ -7490,7 +7491,8 @@ void loop() {
           // En ESTACIONANDO la Pi no manda rt=1: la transformación y pka quedan las últimas.
           // El PWM no cae en seco: tau de tracción ~0.17 s. 2 tau bastan para llegar
           // a la velocidad lenta; el piso PARK_SCAN_RAPIDO_MM sigue de tope.
-          float vRap = ((float)PARK_SCAN_RAPIDO_PWM - 42.1f) * 4.02f;
+          const int pwmScanRap = (!parkDirecto && PARK_SCAN_U_PWM > 0) ? (int)PARK_SCAN_U_PWM : (int)PARK_SCAN_RAPIDO_PWM;
+          float vRap = ((float)pwmScanRap - 42.1f) * 4.02f;
           float vLen = ((float)PARK_PUNTA_PWM - 42.1f) * 4.02f;
           float dFreno = (float)PARK_SCAN_RAPIDO_MM;
           if (vRap > vLen + 50.0f) {
@@ -7505,7 +7507,7 @@ void loop() {
           // Sin U: cerca de la madera de adelante, lento, para que el instante en que el sonar la ve fije bien la posicion (error ~ v * 50 ms).
           if (parkDirecto && !isnan(rutaPka) && !rapido && alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM - (float)PARK_SINU_LENTO_MM)
             pwmEsc = PARK_SINU_PWM_B2;
-          setMotorTope(rapido ? (int)PARK_SCAN_RAPIDO_PWM : pwmEsc, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
+          setMotorTope(rapido ? pwmScanRap : pwmEsc, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
 
         if (logEsteLoop) {
