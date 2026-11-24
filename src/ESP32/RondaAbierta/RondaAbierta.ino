@@ -118,10 +118,11 @@ const int VEL_GIRO_INICIO   = 210;   // GIRANDO, |ángulo| < 45
 const int VEL_GIRO_MEDIO    = 200;   // GIRANDO, |ángulo| < 70
 const int VEL_GIRO_FINAL    = 220;   // GIRANDO, resto
 // Vueltas 2–3 con MAP (pasillo 60|100 cm por sección, tras esquina 4).
+// frontSlow: distF < X → frena; X MÁS BAJO = frena MÁS TARDE (más cerca de la pared).
 const int MAP_ANCHO_PWM         = 255;
-const int MAP_ANGOSTO_PWM       = 255;   // no más lento que la recta actual
-const int MAP_ANCHO_SLOW_CM     = 100;   // frena más tarde en 100 cm
-const int MAP_ANGOSTO_SLOW_CM   = 90;    // = FRONT_SLOWDOWN_CM en 60 cm
+const int MAP_ANGOSTO_PWM       = 255;   // nunca más lento que sin mapa
+const int MAP_ANCHO_SLOW_CM     = 70;    // 100 era al revés: frenaba ANTES que sin mapa
+const int MAP_ANGOSTO_SLOW_CM   = 90;    // = FRONT_SLOWDOWN_CM
 const int MAP_ANCHO_GIRO_INI    = 220;
 const int MAP_ANCHO_GIRO_MED    = 215;
 const int MAP_ANCHO_GIRO_FIN    = 230;
@@ -689,11 +690,12 @@ void mapRectaLimites(int &pwmRecta, int &frontSlowCm) {
   int pasillo = mapPasilloCm[sec];
   if (pasillo == 100) {
     pwmRecta = MAP_ANCHO_PWM;
-    frontSlowCm = MAP_ANCHO_SLOW_CM;
+    frontSlowCm = MAP_ANCHO_SLOW_CM;   // < FRONT_SLOWDOWN → frena más tarde
   } else if (pasillo == 60) {
     pwmRecta = MAP_ANGOSTO_PWM;
     frontSlowCm = MAP_ANGOSTO_SLOW_CM;
   }
+  // pasillo==0 (sin muestras): defaults = sin mapa
 }
 
 void mapGiroVelocidad(float delta, int &pwm) {
@@ -732,10 +734,19 @@ void mapMuestra(long distL, long distR) {
 
 void mapCongelarSeccion(int secIndex) {
   if (secIndex < 0 || secIndex >= 4) return;
-  float corridor = (mapSamples > 0) ? (mapSumLR / (float)mapSamples) + MAP_SPAN_CM : 0.0f;
+  // Sin muestras válidas no inventar 60 (corridor=0 < 80): deja 0 = desconocido.
+  if (mapSamples <= 0) {
+    mapPasilloCm[secIndex] = 0;
+    Log.printf("MAP sec=%d pasillo=? (sin muestras)\n", secIndex + 1);
+    mapSumLR = 0.0f;
+    mapSamples = 0;
+    return;
+  }
+  float corridor = (mapSumLR / (float)mapSamples) + MAP_SPAN_CM;
   int pasillo = (corridor < 80.0f) ? 60 : 100;
   mapPasilloCm[secIndex] = pasillo;
-  Log.printf("MAP sec=%d pasillo=%d cm\n", secIndex + 1, pasillo);
+  Log.printf("MAP sec=%d pasillo=%d cm (corr=%.0f n=%d)\n",
+             secIndex + 1, pasillo, corridor, mapSamples);
   mapSumLR = 0.0f;
   mapSamples = 0;
 }
@@ -786,14 +797,21 @@ void arrancarCarrera() {
 
 void siguiendo(long distL, long distR, long distF) {
   mapMuestra(distL, distR);
-  mapLogRectaSiNuevo();
-  int pwmRecta, frontSlowCm;
-  mapRectaLimites(pwmRecta, frontSlowCm);
-  velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : pwmRecta;
-  if (distF > 0 && distF < frontSlowCm)
-    velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
-  if (turnsCompleted == 0 && distF > 0 && distF < FRONT_SLOWDOWN2_CM)
-    velocidadMotor = min(velocidadMotor, VEL_APROX2);
+  // Vuelta 1 (y sin mapa listo): misma lógica que antes del MAP — no tocar.
+  if (!mapUsarVelocidad()) {
+    velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
+    if (distF > 0 && distF < FRONT_SLOWDOWN_CM)
+      velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
+    if (turnsCompleted == 0 && distF > 0 && distF < FRONT_SLOWDOWN2_CM)
+      velocidadMotor = min(velocidadMotor, VEL_APROX2);
+  } else {
+    mapLogRectaSiNuevo();
+    int pwmRecta, frontSlowCm;
+    mapRectaLimites(pwmRecta, frontSlowCm);
+    velocidadMotor = pwmRecta;
+    if (distF > 0 && distF < frontSlowCm)
+      velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
+  }
 
   actualizarDesvio(distL_filtrada, distR_filtrada);
   setMotor(velocidadMotor);
