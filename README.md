@@ -22,10 +22,10 @@ This README documents **the car that competes at the WRO 2026 International Fina
 
 ## Videos
 
-| Obstacle Challenge — v2 (3 laps + parking) | Open Challenge — v2 (3 laps) | Surprise Rule — 2026 extra task |
+| Open Challenge — v2 (3 laps) | Obstacle Challenge — v2 (3 laps + parking) | Surprise Rule — 2026 extra task |
 |:---:|:---:|:---:|
-| [![Obstacle Challenge v2](https://img.youtube.com/vi/Qk4TaZrQ-Js/maxresdefault.jpg)](https://youtu.be/Qk4TaZrQ-Js) | [![Open Challenge v2](https://img.youtube.com/vi/NgGNFpsWpc8/maxresdefault.jpg)](https://youtu.be/NgGNFpsWpc8) | [![Surprise Rule v2](https://img.youtube.com/vi/haEbG5QQj1Y/maxresdefault.jpg)](https://youtu.be/haEbG5QQj1Y) |
-| <https://youtu.be/Qk4TaZrQ-Js> | <https://youtu.be/NgGNFpsWpc8> | <https://youtu.be/haEbG5QQj1Y> |
+| [![Open Challenge v2](https://img.youtube.com/vi/NgGNFpsWpc8/maxresdefault.jpg)](https://youtu.be/NgGNFpsWpc8) | [![Obstacle Challenge v2](https://img.youtube.com/vi/Qk4TaZrQ-Js/maxresdefault.jpg)](https://youtu.be/Qk4TaZrQ-Js) | [![Surprise Rule v2](https://img.youtube.com/vi/haEbG5QQj1Y/maxresdefault.jpg)](https://youtu.be/haEbG5QQj1Y) |
+| <https://youtu.be/NgGNFpsWpc8> | <https://youtu.be/Qk4TaZrQ-Js> | <https://youtu.be/haEbG5QQj1Y> |
 
 | Real car vs digital twin on the same field |
 |:---:|
