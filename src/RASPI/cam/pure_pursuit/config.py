@@ -1537,11 +1537,18 @@ ROUTE_PROFILE_SIGN_NEAR_MM = None
 # Paso muy justo a una señal (ruta a centro < NEAR_MM): rampa de MIN_PWM a TIGHT_PWM en TIGHT_MM (centro a centro). None = apagado
 ROUTE_PROFILE_SIGN_TIGHT_MM = None
 ROUTE_PROFILE_SIGN_TIGHT_PWM = 110
-# Perfil: frenar también cerca de las 4 esquinas de la isla (±INNER_HALF_MM, ±INNER_HALF_MM).
-# None = apagado. Rampa de v_min (dist <= ISLAND_NEAR_MM) a la base (dist >= ISLAND_MM),
-# igual que con las señales. Distancia medida desde la muestra de la ruta a la esquina.
-ROUTE_PROFILE_ISLAND_MM = None
-ROUTE_PROFILE_ISLAND_NEAR_MM = 200.0
+# Perfil: frenar cerca de la isla (±INNER_HALF_MM). None = apagado.
+# Rampa de v_min (dist <= ISLAND_NEAR_MM) a la base (dist >= ISLAND_MM).
+# Distancia = holgura a la caja (caras), no solo a las 4 esquinas: orillas219 rozó la
+# cara norte en recta (dL→9 cm) y el freno por esquina no actuaba.
+ROUTE_PROFILE_ISLAND_MM = 350.0
+ROUTE_PROFILE_ISLAND_NEAR_MM = 150.0
+# ToF del lado interior (CCW→dL, CW→dR): tope de PWM si la isla está cerca.
+# orillas219 vuelta 3 tc=9: PWM 255 con dL=15 cm → roce a 9 cm (pose ya fuera del tapete).
+# None = apagado. Rampa: <= NEAR_CM → ISLAND_TOF_PWM; en CM → sin este tope.
+ROUTE_ISLAND_TOF_CM = 20.0
+ROUTE_ISLAND_TOF_NEAR_CM = 10.0
+ROUTE_ISLAND_TOF_PWM = 120
 # Perfil: compensación del retraso del motor al frenar (feedforward). None = apagado.
 # Si la velocidad permitida la fija una frenada por delante (no la curva donde está
 # el carro), se pide v_permitida - BRAKE_FF_S * A_BRAKE (el motor sigue la rampa con
