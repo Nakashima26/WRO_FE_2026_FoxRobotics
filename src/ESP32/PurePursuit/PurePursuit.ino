@@ -7113,9 +7113,12 @@ void loop() {
         if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
           // La ruta puede rodear una señal por dentro y saltarse el cajón antes de volver a la pared.
           // Seguir la ruta hasta el disparo normal de la U si el escaneo directo nunca se alineó.
-          if (PARK_MEDIA_VUELTA && PARK_SINU_FORZAR_U && parkDirecto && !parkSinULinea
+          // Haber entregado el volante al seguidor de pared no prueba que el
+          // carro siga en la banda de escaneo al terminar de pasar el cajón.
+          if (PARK_MEDIA_VUELTA && PARK_SINU_FORZAR_U && parkDirecto
               && parkScanSubFase == 0 && piRuta && rutaTfOk && rutaSecSalida >= 0
-              && rutaExtTapeteCm() > PARK_PARED_CM + PARK_SINU_TOL_CM) {
+              && (rutaExtTapeteCm() > PARK_PARED_CM + PARK_SINU_TOL_CM
+                  || (lecturaValida && parkBase > PARK_PARED_CM + PARK_LEJOS_CM))) {
             parkSinUDec = 2;
             parkDirecto = false;
             parkUturnPendiente = true;
@@ -7153,6 +7156,11 @@ void loop() {
         }
         // ── Subfase 0: Buscando Poste 1 ──
         if (parkScanSubFase == 0) {
+          // Un retorno invalido solo sustituye al poste 1 cerca de la
+          // posicion esperada del sensor. Fuera de ahi puede ser solo la pared.
+          const float p1Previsto = rutaPka - PARK_D_B2_OFF_MM - PARK_POSTE2_SEP_MM;
+          const bool ecoPoste1 = !posteSintetico || !parkDirecto || !validaPoste2
+                             || fabsf(alongSalidaMm() - p1Previsto) <= 0.5f * ventanaPoste2;
           if (bajada && !armada && parkCaidaCnt == PARK_CAIDA_N) {
             parkIgnAlong = alongSalidaMm(); parkIgnOk = true;
             Serial.print("PARK: bajada IGNORADA (no armada: base=");
@@ -7163,12 +7171,12 @@ void loop() {
           }
           // El poste mide 2 cm: a la salida de la U (PWM 200) cabe entero antes
           // de PARK_ARMADO_MS. Si se tira, el poste 2 queda como poste 1.
-          if (bajada && poseOk && posteConfirmado && tEn < PARK_ARMADO_MS) {
+          if (bajada && poseOk && posteConfirmado && ecoPoste1 && tEn < PARK_ARMADO_MS) {
             parkBajadaPre = true;
             parkBajadaPreMs = millis();
           }
 
-          if (bajada && armada && posteConfirmado) {
+          if (bajada && armada && posteConfirmado && ecoPoste1) {
             parkCaidaLectura = extRaw;
             parkPoste1Ms     = millis();   // arranca el velocímetro (ver PARK_VEL_COMP)
             parkOdomPoste1   = odomMm;
