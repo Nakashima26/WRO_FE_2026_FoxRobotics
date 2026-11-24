@@ -3444,7 +3444,7 @@ void vigilarSinU() {
   if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) {
     parkSinUDec = 2;
     // Sync park_legado: cajón mid-recta no pasa por "cajón al inicio"; latch si venía lejos.
-    if (PARK_GEOM_ROJO && extCm > PARK_PARED_CM + 22.0f) parkGeomVeniaLejos = true;
+    if (PARK_GEOM_ROJO && extCm >= PARK_PARED_CM + 18.0f) parkGeomVeniaLejos = true;  // 22/>41 dejaba s39 (ext≈41)
     Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return;
   }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
@@ -3470,7 +3470,7 @@ bool vigilarGeomExt(float along, long distF) {
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   if (fabsf(err) > PARK_GEOM_ANG_DEG) return false;
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
-  // Banda: sin along>=pka+250 (con pka~300 pedía ≥548 y el U@500 ganaba). f45 solo si aún hay recta.
+  // Banda libre en ventana (sin pka+250). f45 solo si along<420.
   const bool rojo = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
                     && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
                     && distF > 50;
