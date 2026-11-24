@@ -1578,6 +1578,7 @@ ROUTE_PARK_GEOM_TC = 12  # pge solo desde esta cuenta de esquinas (no cambia la 
 ROUTE_FIX_LINE_LAG_FRAMES = 0   # 2026-11-21 (orillas129): la imagen del voto es la del MISMO frame que la pose; el "lag 14" medido salía de que en el _bev.bin el frame del voto m es el 6+m+16, no 6+m (centroide del carro reproducido a 0.5 mm con +16). Con 0: 129 -> -5 mm
 # Voto del cajón con la cinta azul (route_mode._blue_vote). En CCW es la que cruza el carril.
 ROUTE_FIX_BLUE = True
+ROUTE_FIX_BLUE_WAIT = False  # CCW: al final supuesto de la recta espera ROUTE_FIX_FORCE_WAIT_MM a la azul aunque no se vea la naranja
 # Cajón = pose ubicada por la cinta + esto (la odometría de la salida se pasa siempre igual; la pose sí se corre con el δ completo).
 ROUTE_FIX_POSE_MARGIN_MM = None   # el δ de la pose puede salir esto del rango del cajón (None = recortado igual que el cajón)
 # Cinta azul vista DESPUÉS de fijar el arranque (aún tc=0): la mediana de N votos seguidos corrige la pose
