@@ -1642,8 +1642,10 @@ ROUTE_L0_CTE_MM = 40.0
 ROUTE_L23_LEFT_K_TC_MAX = 12  # el factor propio solo rige con tc < esto
 ROUTE_L23_LEFT_K_FACTOR = None  # vueltas 2-3: factor de κ a la izquierda propio (None = ROUTE_PROFILE_LEFT_K_FACTOR)
 # El planificador minimiza tiempo con el modelo del perfil, no largo + curvatura. False: sin cambio.
-ROUTE_TIME_COST = False
-ROUTE_PLAN_VMIN_PWM = None  # piso de velocidad del costo de tiempo de la DP (None = ROUTE_PROFILE_BASE_PWM)
+# ACCEPT VMIN230: TIME_COST+PLAN_VMIN=230 (cen96 96/96 vs tip 93/96). BRAKE trapecio sigue OFF/no en tip.
+ROUTE_TIME_COST = True
+ROUTE_PLAN_VMIN_PWM = 230  # piso de velocidad del costo de tiempo de la DP (None = ROUTE_PROFILE_BASE_PWM)
+
 # Carro real: planear en un hilo aparte (la DP tarda ~1-2 s en la Pi 5).
 # El twin lo deja en False para que cada corrida sea reproducible.
 ROUTE_PLAN_ASYNC = False
