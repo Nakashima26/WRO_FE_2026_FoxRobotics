@@ -98,16 +98,29 @@ def _square_edges(half: float, material: MaterialName, object_index: int) -> lis
     return _poly_edges(poly, material, object_index)
 
 
+_DEFAULT_INNER_BOUNDS = (-INNER_HALF_MM, -INNER_HALF_MM, INNER_HALF_MM, INNER_HALF_MM)
+
+
 class World:
     """Geometría 2D del tapete para sensores y choques."""
 
-    def __init__(self, field: Field) -> None:
+    def __init__(self, field: Field, *, inner_box_mat: tuple[float, float, float, float] | None = None) -> None:
         self.field = field
+        self._inner_bounds = _DEFAULT_INNER_BOUNDS
+        if inner_box_mat is not None:
+            x0, y0, x1, y1 = inner_box_mat
+            size = 2 * OUTER_HALF_MM
+            if not (0 < x0 < x1 < size and 0 < y0 < y1 < size):
+                raise ValueError("inner_box_mat must be a rectangle strictly inside the mat")
+            self._inner_bounds = tuple(v - OUTER_HALF_MM for v in inner_box_mat)
+        x0, y0, x1, y1 = self._inner_bounds
+        inner = ((x1, y0), (x1, y1), (x0, y1), (x0, y0))
+        self._inner_polygon = inner if inner_box_mat is not None else None
         self.segments: list[Segment] = []
         idx = 0
         self.segments.extend(_square_edges(OUTER_HALF_MM, "wall", idx))
         idx += 1
-        self.segments.extend(_square_edges(INNER_HALF_MM, "wall", idx))
+        self.segments.extend(_poly_edges(inner, "wall", idx))
         idx += 1
         for bi, box in enumerate(field.barriers):
             self.segments.extend(_poly_edges(box, "magenta", 100 + bi))
@@ -250,8 +263,9 @@ def _segments_cross(a, b, c, d) -> bool:
     )
 
 
-def _point_in_island(x: float, y: float) -> bool:
-    return abs(x) < INNER_HALF_MM and abs(y) < INNER_HALF_MM
+def _point_in_island(x: float, y: float, bounds=_DEFAULT_INNER_BOUNDS) -> bool:
+    x0, y0, x1, y1 = bounds
+    return x0 < x < x1 and y0 < y < y1
 
 
 def _point_outside_field(x: float, y: float) -> bool:
@@ -324,7 +338,7 @@ def _collision_geometry(world):
         if cached is not None and cached[0] == key:
             return cached[1]
     walls = []
-    for poly in (track.outer, track.inner):
+    for poly in (track.outer, getattr(world, "_inner_polygon", None) or track.inner):
         wall = [(float(p[0]), float(p[1])) for p in poly]
         rect = len(wall) == 4 and len({p[0] for p in wall}) == 2 and len({p[1] for p in wall}) == 2
         walls.append((wall, _bbox(wall), list(zip(wall, wall[1:] + wall[:1])), rect))
@@ -354,10 +368,11 @@ def collision(
     """Primera causa de contacto, saltando las de `ignore` (p. ej. "pared exterior")."""
     corners = body_corners(x, y, heading_deg, length_mm, width_mm, rear_overhang_mm)
     corner_list = [tuple(c) for c in corners]
+    inner_bounds = getattr(world, "_inner_bounds", _DEFAULT_INNER_BOUNDS)
     for cx, cy in corner_list:
         if _point_outside_field(cx, cy) and "pared exterior" not in ignore:
             return "pared exterior"
-        if _point_in_island(cx, cy):
+        if _point_in_island(cx, cy, inner_bounds):
             return "isla"
     edges = list(zip(corner_list, corner_list[1:] + corner_list[:1]))
     car_box = _bbox(corner_list)

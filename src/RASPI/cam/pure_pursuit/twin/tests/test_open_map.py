@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from pure_pursuit.open_map import (
@@ -11,15 +12,20 @@ from pure_pursuit.open_map import (
     ESP_MAP_ANGOSTO_SLOW_CM,
     OPEN_CORRIDOR_MM,
     OpenWallMap,
+    esp_consistent_corridors_cm,
     esp_map_recta_pwm,
     expected_tof_mm,
     field_inner_box_from_corridors,
+    open_layout_from_seed,
     snap_corridor_mm,
 )
-from pure_pursuit.track_map import TrackGeometry
-from pure_pursuit.wro_field import OUTER_HALF_MM
+from pure_pursuit.track_map import TrackGeometry, field_heading_to_twin
+from pure_pursuit.twin.params import ToFParams
+from pure_pursuit.twin.sensors import Pose, ToF
+from pure_pursuit.twin.world import World, collision
+from pure_pursuit.wro_field import OUTER_HALF_MM, randomize
 
-# Patrón legal: N/S estrechos, E/W anchos (lados opuestos pueden diferir en Open).
+# Patrón legal: N/S estrechos, E/W anchos.
 CORRIDORS_L = {"S": 600.0, "E": 1000.0, "N": 600.0, "W": 1000.0}
 TRUTH_BOX = field_inner_box_from_corridors(CORRIDORS_L)
 TOL_MM = 55.0
@@ -153,7 +159,7 @@ def test_four_corners_refine_inner_box_left():
 
 
 def test_four_corners_drive_right():
-    corridors = {"S": 600.0, "W": 1000.0, "N": 1000.0, "E": 600.0}
+    corridors = {"S": 1000.0, "W": 600.0, "N": 1000.0, "E": 600.0}
     truth = field_inner_box_from_corridors(corridors)
     wm = OpenWallMap(drive_dir="R")
     _run_lap1(wm, truth, "R")
@@ -180,3 +186,50 @@ def test_reset_and_geometry_summary():
     assert g["drive_dir"] == "R"
     assert "sections" in g and g["sections"]["S"]["along_mm"] > 0
     assert "narrow_mask" in g
+
+
+def test_real_log_is_reconciled_like_esp():
+    raw = (1290, 620, 780, 1270)
+    assert tuple(snap_corridor_mm(v) for v in raw) == (1000, 600, 600, 1000)
+    assert esp_consistent_corridors_cm(raw) == (100, 100, 100, 100)
+    assert esp_consistent_corridors_cm((800, 600, 1000, 1000)) == (100, 60, 100, 60)
+    assert ESP_MAP_ANCHO_SLOW_CM == 70
+
+
+@pytest.mark.parametrize("drive,start", [("L", "E"), ("R", "W")])
+def test_world_tof_recovers_seeded_rectangular_layout(drive, start):
+    truth = open_layout_from_seed(3)
+    assert truth["S"] == truth["N"] == 600
+    assert truth["E"] == truth["W"] == 1000
+    box = field_inner_box_from_corridors(truth)
+    field = randomize(3)
+    field.signs, field.barriers = [], []
+    world = World(field, inner_box_mat=box)
+    tof = ToF(ToFParams(half_fov_deg=0, noise_sigma_mm=0, noise_rel=0,
+                        black_wall_max_mm=3000, short_map_ids=(),
+                        status_ok_prob_by_id=(1, 1, 1, 1)), np.random.default_rng(3))
+    wm = OpenWallMap(drive_dir=drive, start_section=start)
+    for turn in range(1, 5):
+        section = wm.current_section
+        x, y, h = _section_line(section, box, drive)
+        pose = Pose(x, y, field_heading_to_twin(h))
+        t = float(turn)
+        left = tof.read_mm(0, world, pose, t)
+        right = tof.read_mm(1, world, pose, t)
+        assert left + right + 70.4 == pytest.approx(truth[section], abs=2)
+        wm.update_straight(t * 1000, (x, y, h), left, right, None, turn * 1000)
+        wm.on_corner_complete(turn)
+    assert wm.frozen
+    assert {sec: entry["corridor_mm"] for sec, entry in wm.geometry()["sections"].items()} == truth
+    assert wm.inner_box_mm() == box
+
+    assert collision(world, 0, -700, 90, 120, 80, 20) == "isla"
+    assert collision(World(field), 0, -700, 90, 120, 80, 20) is None
+    assert collision(world, 700, 0, 0, 120, 80, 20) is None
+
+
+def test_missing_corridors_keep_map_incomplete():
+    wm = OpenWallMap(start_section="W")
+    for turn in range(1, 5):
+        wm.on_corner_complete(turn)
+    assert not wm.ready and not wm.frozen
