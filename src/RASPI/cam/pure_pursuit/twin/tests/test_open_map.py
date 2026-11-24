@@ -7,8 +7,11 @@ import math
 import pytest
 
 from pure_pursuit.open_map import (
+    ESP_MAP_ANCHO_SLOW_CM,
+    ESP_MAP_ANGOSTO_SLOW_CM,
     OPEN_CORRIDOR_MM,
     OpenWallMap,
+    esp_map_recta_pwm,
     expected_tof_mm,
     field_inner_box_from_corridors,
     snap_corridor_mm,
@@ -93,6 +96,14 @@ def _run_lap1(wm: OpenWallMap, inner_box: tuple[float, float, float, float], dri
         _feed_straight(wm, sec, inner_box)
         wm.on_corner_complete(k + 1)
     wm.on_corner_complete(4)
+
+
+def test_esp_map_recta_pwm_lap2_wide_vs_narrow():
+    m = (60, 100, 60, 100)
+    assert esp_map_recta_pwm(m, 4) == (255, ESP_MAP_ANGOSTO_SLOW_CM)
+    assert esp_map_recta_pwm(m, 5) == (255, ESP_MAP_ANCHO_SLOW_CM)
+    assert esp_map_recta_pwm(m, 3) == (255, ESP_MAP_ANGOSTO_SLOW_CM)
+    assert esp_map_recta_pwm((0, 0, 0, 0), 6) == (255, ESP_MAP_ANGOSTO_SLOW_CM)
 
 
 @pytest.mark.parametrize("noisy,expect", [(580.0, 600.0), (620.0, 600.0), (950.0, 1000.0), (1050.0, 1000.0)])

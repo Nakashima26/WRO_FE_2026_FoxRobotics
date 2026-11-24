@@ -76,6 +76,40 @@ _IF_CORRIDOR_CANDIDATES_MM = (500.0, 600.0, 700.0, 900.0, 1000.0, 1100.0)
 _OPEN_SNAP_MID_MM = 800.0
 
 
+# Paridad con ``RondaAbierta.ino`` (MAP_ANCHO_*, MAP_ANGOSTO_*) tras esquina 4.
+ESP_MAP_ANCHO_PWM = 255
+ESP_MAP_ANGOSTO_PWM = 255
+ESP_MAP_ANCHO_SLOW_CM = 100
+ESP_MAP_ANGOSTO_SLOW_CM = 90
+
+
+def esp_corridor_cm_from_mm(corridor_mm: float) -> int:
+    """60 o 100 cm, mismo umbral que ``mapCongelarSeccion`` (80 cm)."""
+    return 60 if snap_corridor_mm(corridor_mm) == OPEN_CORRIDOR_MM[0] else 100
+
+
+def esp_map_recta_pwm(
+    map_pasillo_cm: tuple[int, int, int, int] | list[int],
+    turns_completed: int,
+    *,
+    turns_per_race: int = 12,
+) -> tuple[int, int]:
+    """
+  PWM recto y umbral frontal (cm) para ``turnsCompleted`` en RondaAbierta.
+
+  Vuelta 1 (turns < 4) o MAP incompleto → (255, 90). Vueltas 2–3 usan
+  ``map_pasillo_cm[turns_completed % 4]``.
+    """
+    if turns_completed < 4 or turns_completed >= turns_per_race:
+        return ESP_MAP_ANGOSTO_PWM, ESP_MAP_ANGOSTO_SLOW_CM
+    if any(p <= 0 for p in map_pasillo_cm):
+        return ESP_MAP_ANGOSTO_PWM, ESP_MAP_ANGOSTO_SLOW_CM
+    sec = turns_completed % 4
+    if map_pasillo_cm[sec] == 100:
+        return ESP_MAP_ANCHO_PWM, ESP_MAP_ANCHO_SLOW_CM
+    return ESP_MAP_ANGOSTO_PWM, ESP_MAP_ANGOSTO_SLOW_CM
+
+
 def snap_corridor_mm(raw: float) -> float:
     """
     Ajusta una medida cruda al pasillo legal 600 o 1000 mm.

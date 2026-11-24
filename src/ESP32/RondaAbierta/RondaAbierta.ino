@@ -117,6 +117,14 @@ const int VEL_APROX2        = 90;    // giro 1: pared de enfrente < FRONT_SLOWDO
 const int VEL_GIRO_INICIO   = 210;   // GIRANDO, |ángulo| < 45
 const int VEL_GIRO_MEDIO    = 200;   // GIRANDO, |ángulo| < 70
 const int VEL_GIRO_FINAL    = 220;   // GIRANDO, resto
+// Vueltas 2–3 con MAP (pasillo 60|100 cm por sección, tras esquina 4).
+const int MAP_ANCHO_PWM         = 255;
+const int MAP_ANGOSTO_PWM       = 255;   // no más lento que la recta actual
+const int MAP_ANCHO_SLOW_CM     = 100;   // frena más tarde en 100 cm
+const int MAP_ANGOSTO_SLOW_CM   = 90;    // = FRONT_SLOWDOWN_CM en 60 cm
+const int MAP_ANCHO_GIRO_INI    = 220;
+const int MAP_ANCHO_GIRO_MED    = 215;
+const int MAP_ANCHO_GIRO_FIN    = 230;
 
 // ── PID paredes ───────────────────────────────────────────────────────────────
 // En CASCADA: la pared no mueve el servo directo, corre el rumbo objetivo como
@@ -297,6 +305,7 @@ const float MAP_SPAN_CM = 7.0f;   // ~ancho entre caras laterales de los VL53
 float mapSumLR = 0.0f;
 int   mapSamples = 0;
 int   mapPasilloCm[4] = {0, 0, 0, 0};
+bool  mapListo          = false;
 bool direccionIzquierda = true;
 bool primerGiro         = false;
 int  contadorEsquina    = 0;
@@ -659,7 +668,60 @@ void pidRumbo() {
 void mapReiniciar() {
   mapSumLR = 0.0f;
   mapSamples = 0;
+  mapListo = false;
   for (int i = 0; i < 4; i++) mapPasilloCm[i] = 0;
+}
+
+// Índice de sección de la recta actual (0..3) según vueltas completadas.
+int mapSecRecta() {
+  return turnsCompleted % 4;
+}
+
+bool mapUsarVelocidad() {
+  return mapListo && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE;
+}
+
+void mapRectaLimites(int &pwmRecta, int &frontSlowCm) {
+  pwmRecta = MOTOR_MAX;
+  frontSlowCm = FRONT_SLOWDOWN_CM;
+  if (!mapUsarVelocidad()) return;
+  int sec = mapSecRecta();
+  int pasillo = mapPasilloCm[sec];
+  if (pasillo == 100) {
+    pwmRecta = MAP_ANCHO_PWM;
+    frontSlowCm = MAP_ANCHO_SLOW_CM;
+  } else if (pasillo == 60) {
+    pwmRecta = MAP_ANGOSTO_PWM;
+    frontSlowCm = MAP_ANGOSTO_SLOW_CM;
+  }
+}
+
+void mapGiroVelocidad(float delta, int &pwm) {
+  if (turnsCompleted == 0) {
+    pwm = VEL_INICIAL;
+    return;
+  }
+  if (!mapUsarVelocidad() || mapPasilloCm[mapSecRecta()] != 100) {
+    if (delta < 45)      pwm = VEL_GIRO_INICIO;
+    else if (delta < 70) pwm = VEL_GIRO_MEDIO;
+    else                 pwm = VEL_GIRO_FINAL;
+    return;
+  }
+  if (delta < 45)      pwm = MAP_ANCHO_GIRO_INI;
+  else if (delta < 70) pwm = MAP_ANCHO_GIRO_MED;
+  else                 pwm = MAP_ANCHO_GIRO_FIN;
+}
+
+void mapLogRectaSiNuevo() {
+  static int ultimoLog = -1;
+  if (!mapUsarVelocidad() || turnsCompleted == ultimoLog) return;
+  ultimoLog = turnsCompleted;
+  int sec = mapSecRecta();
+  int pasillo = mapPasilloCm[sec];
+  int pwmRecta, frontSlowCm;
+  mapRectaLimites(pwmRecta, frontSlowCm);
+  Log.printf("MAP usa %s PWM=%d slow=%d cm (sec %d)\n",
+             pasillo == 100 ? "ancho" : "angosto", pwmRecta, frontSlowCm, sec + 1);
 }
 
 void mapMuestra(long distL, long distR) {
@@ -681,6 +743,7 @@ void mapCongelarSeccion(int secIndex) {
 void mapListoSiCompleto() {
   if (mapPasilloCm[0] == 0 || mapPasilloCm[1] == 0 || mapPasilloCm[2] == 0 || mapPasilloCm[3] == 0)
     return;
+  mapListo = true;
   Log.printf("MAP listo: %d/%d/%d/%d\n",
              mapPasilloCm[0], mapPasilloCm[1], mapPasilloCm[2], mapPasilloCm[3]);
 }
@@ -723,8 +786,11 @@ void arrancarCarrera() {
 
 void siguiendo(long distL, long distR, long distF) {
   mapMuestra(distL, distR);
-  velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
-  if (distF > 0 && distF < FRONT_SLOWDOWN_CM)
+  mapLogRectaSiNuevo();
+  int pwmRecta, frontSlowCm;
+  mapRectaLimites(pwmRecta, frontSlowCm);
+  velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : pwmRecta;
+  if (distF > 0 && distF < frontSlowCm)
     velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
   if (turnsCompleted == 0 && distF > 0 && distF < FRONT_SLOWDOWN2_CM)
     velocidadMotor = min(velocidadMotor, VEL_APROX2);
@@ -761,10 +827,7 @@ void girando() {
   float signo = direccionIzquierda ? 1.0f : -1.0f;
   float delta = signo * (anguloGyro - rumboRecta(turnsCompleted));
 
-  if (turnsCompleted == 0)  velocidadMotor = VEL_INICIAL;
-  else if (delta < 45)      velocidadMotor = VEL_GIRO_INICIO;
-  else if (delta < 70)      velocidadMotor = VEL_GIRO_MEDIO;
-  else                      velocidadMotor = VEL_GIRO_FINAL;
+  mapGiroVelocidad(delta, velocidadMotor);
 
   setMotor(velocidadMotor);
 
