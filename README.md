@@ -22,17 +22,15 @@ This README documents **the car that competes at the WRO 2026 International Fina
 
 ## Videos
 
-| Obstacle Challenge — v2 (3 laps + parking) | Open Challenge — v2 (3 laps) |
-|:---:|:---:|
-| [![Obstacle Challenge v2](https://img.youtube.com/vi/Qk4TaZrQ-Js/maxresdefault.jpg)](https://youtu.be/Qk4TaZrQ-Js) | [![Open Challenge v2](https://img.youtube.com/vi/NgGNFpsWpc8/maxresdefault.jpg)](https://youtu.be/NgGNFpsWpc8) |
-| <https://youtu.be/Qk4TaZrQ-Js> | <https://youtu.be/NgGNFpsWpc8> |
+| Obstacle Challenge — v2 (3 laps + parking) | Open Challenge — v2 (3 laps) | Surprise Rule — 2026 extra task |
+|:---:|:---:|:---:|
+| [![Obstacle Challenge v2](https://img.youtube.com/vi/Qk4TaZrQ-Js/maxresdefault.jpg)](https://youtu.be/Qk4TaZrQ-Js) | [![Open Challenge v2](https://img.youtube.com/vi/NgGNFpsWpc8/maxresdefault.jpg)](https://youtu.be/NgGNFpsWpc8) | [![Surprise Rule v2](https://img.youtube.com/vi/haEbG5QQj1Y/maxresdefault.jpg)](https://youtu.be/haEbG5QQj1Y) |
+| <https://youtu.be/Qk4TaZrQ-Js> | <https://youtu.be/NgGNFpsWpc8> | <https://youtu.be/haEbG5QQj1Y> |
 
 | Real car vs digital twin on the same field |
 |:---:|
 | <img src="docs/img/real_vs_twin.gif" width="100%" alt="Real car (left) and digital twin (right) running the same field"> |
 | <sub>Left: the real car's debug view (camera, bird's-eye view, map with the planned route). Right: the twin on the same field ([§3.9](#39-digital-twin--software-in-the-loop-simulator)).</sub> |
-
-Surprise rule (2026 extra task), real track: <https://youtu.be/haEbG5QQj1Y>.
 
 v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG-6s) · [Obstacle Challenge](https://youtu.be/VI6V6hTf_HE). Each driving video is at least 30 s long. Index: [`video/video.md`](video/video.md).
 
