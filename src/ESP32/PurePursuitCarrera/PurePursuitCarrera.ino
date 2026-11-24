@@ -1842,6 +1842,7 @@ PARK_AJ long         PARK_GEOM_BUSCA_MS          = 6000;
 PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
 PARK_AJ int          PARK_GEOM_ROJO              = 0;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
+PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
 PARK_AJ int          PARK_GEOM_ROJO_PWM          = 155;     // avance durante el acercamiento
 bool                 parkGeomVeniaLejos          = false;
 bool                 parkGeomModo                = false;
@@ -7370,7 +7371,7 @@ void loop() {
               && (rutaExtTapeteCm() > PARK_PARED_CM + PARK_SINU_TOL_CM
                   || (lecturaValida && parkBase > PARK_PARED_CM + PARK_LEJOS_CM))) {
             // s20: escaneo DIRECTO se alejó tras pka; GEOM+f45 si pge (U sobra).
-            if (rutaPge && PARK_GEOM_EXT) {
+            if ((rutaPge && PARK_GEOM_EXT) || PARK_GEOM_RESCATE) {
               const float alongG = alongSalidaMm(), extG = rutaExtTapeteCm(), errG = rutaErrCarrilDeg();
               parkSinUDec = 2; parkDirecto = true; parkUturnPendiente = false; parkUturnDisparoOdom = -1;
               turnsCompleted = TURNS_PER_RACE;
