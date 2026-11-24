@@ -1757,6 +1757,7 @@ PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se dec
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 PARK_AJ float        PARK_SINU_ABORT_ANG        = 15.0f;  // DIRECTO fase0: |gyro| sobre esto → U (s20 derivaba a −22° antes de ventana vencida)
+PARK_AJ int          PARK_SINU_RECOVER          = 1;       // 1: tras no_llega, si vuelve en linea antes de U → DIRECTO (s32)
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
@@ -3145,7 +3146,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_SINU_RECOVER); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_U_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -3433,7 +3434,19 @@ void vigilarSinU() {
     Serial.print(" h="); Serial.println(parkDetHSon, 0);
     return;
   }
-  if (!sinUActivo() && parkSinUDec == 2) return;
+  // Tras no_llega (dec=2): si vuelve en linea antes de la U, recuperar DIRECTO (s32 endereza @~450).
+  if (parkSinUDec == 2) {
+    if (!PARK_SINU_RECOVER || !parkUturnPendiente || !piRuta || !rutaTfOk || rutaSecSalida < 0 || isnan(rutaPka))
+      return;
+    float alongR = alongSalidaMm();
+    float extR = rutaExtTapeteCm(), errR = rutaErrCarrilDeg();
+    bool enLineaR = fabsf(extR - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(errR) <= PARK_SINU_ANG_DEG;
+    if (!enLineaR || fabsf(anguloGyro) > PARK_SINU_ANG_DEG || alongR < rutaPka + PARK_GEOM_PASA_MM)
+      return;
+    parkSinUDec = 1;
+    Serial.print("PARK: recupera DIRECTO tras no_llega along="); Serial.print(alongR, 0);
+    Serial.print(" ext="); Serial.print(extR, 1); Serial.print(" err="); Serial.println(errR, 1);
+  }
   if (PARK_MODO == PARK_NINGUNO || !PARK_SIN_U) return;
   if (!(piRuta && rutaTfOk && rutaSecSalida >= 0 && PARK_UTURN_RUTA_ALONG_MM > 0)) return;
   float x, y;
@@ -3492,6 +3505,8 @@ bool vigilarGeomExt(float along, long distF) {
     else
       geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
   }
+  // verde s16: pge early; tomar ~200 mm antes de pka (aún cerca; -450 chocaba magenta).
+  if (rutaPge) geomPasa = min(geomPasa, -200.0f);
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
@@ -4609,7 +4624,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
-    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); rutaPge = campoPi(line, ",pge=", v) && campoInt(v) != 0; }
+    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0; }  // sticky: pka sin pge no apaga (s16)
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
