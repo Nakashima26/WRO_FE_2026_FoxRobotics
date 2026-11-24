@@ -1199,6 +1199,18 @@ class RouteMode:
             prof = min(prof, int(C.ROUTE_L23_ENTRY_PWM))   # primer tramo de la vuelta 2 (tc=4): el carro aún llega desviado de la vuelta 1
         if prof is not None:
             self.rv = prof if self.rv is None else min(self.rv, prof)
+        # ToF interior (isla): el perfil mira la ruta, no el cte. orillas219 iba a PWM 255
+        # con dL=15 cm y rozó a 9 cm. Capar por el lateral del lado de la isla.
+        tof_cm = getattr(C, "ROUTE_ISLAND_TOF_CM", None)
+        if tof_cm is not None and ack and dm.direction in ("CCW", "CW"):
+            d_int = _ack_num(ack, "dL" if dm.direction == "CCW" else "dR")
+            if d_int is not None and 0.0 < d_int < float(tof_cm):
+                near = float(getattr(C, "ROUTE_ISLAND_TOF_NEAR_CM", 10.0))
+                lo = int(getattr(C, "ROUTE_ISLAND_TOF_PWM", 120))
+                span = max(float(tof_cm) - near, 1.0)
+                t = min(max((float(d_int) - near) / span, 0.0), 1.0)
+                cap = int(round(lo + t * (255 - lo)))
+                self.rv = cap if self.rv is None else min(int(self.rv), cap)
         fpw = getattr(C, "ROUTE_FINAL_PWM", None)
         if fpw is not None and tc is not None and tc >= int(getattr(C, "ROUTE_FINAL_TC", 11)) and self.fixed:
             self.rv = int(fpw) if self.rv is None else min(self.rv, int(fpw))   # última recta hacia el cajón: tope propio (con el perfil pursuit hasta tc 12 llegaba rápido y chocaba el cajón)
@@ -1547,12 +1559,12 @@ class RouteMode:
                 v_o = v_om + (v_base - v_om) * np.clip((dd_o - on) / max(osm - on, 1.0), 0.0, 1.0)
                 v_c = np.where(dd_o < osm, np.minimum(v_c, v_o), v_c)
         if getattr(C, "ROUTE_PROFILE_ISLAND_MM", None) is not None:
-            # Cerca de las esquinas de la isla: misma rampa que las señales (v_min -> base).
+            # Holgura a la caja de la isla (caras). Antes solo 4 esquinas: en recta pegado
+            # a una cara (orillas219) no frenaba.
             h = float(INNER_HALF_MM)
-            cxy = np.array([[h, h], [h, -h], [-h, h], [-h, -h]])
             pxy = np.stack((r.x[j], r.y[j]), axis=1)                       # (m, 2)
-            di = np.hypot(pxy[:, None, 0] - cxy[None, :, 0],
-                          pxy[:, None, 1] - cxy[None, :, 1]).min(axis=1)    # (m,)
+            di = np.hypot(np.maximum(np.abs(pxy[:, 0]) - h, 0.0),
+                          np.maximum(np.abs(pxy[:, 1]) - h, 0.0))
             isl_mm = float(C.ROUTE_PROFILE_ISLAND_MM)
             isl_near = float(getattr(C, "ROUTE_PROFILE_ISLAND_NEAR_MM", 200.0))
             f = np.clip((di - isl_near) / max(isl_mm - isl_near, 1.0), 0.0, 1.0)
