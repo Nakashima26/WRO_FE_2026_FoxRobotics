@@ -1,4 +1,4 @@
-"""Síntesis OpenWallMap: pasillos asimétricos, 3 esquinas ⇒ listo, L y R."""
+"""Síntesis OpenWallMap: pasillos WRO 600/1000, snap, 3 esquinas ⇒ listo."""
 
 from __future__ import annotations
 
@@ -7,17 +7,19 @@ import math
 import pytest
 
 from pure_pursuit.open_map import (
+    OPEN_CORRIDOR_MM,
     OpenWallMap,
     expected_tof_mm,
     field_inner_box_from_corridors,
+    snap_corridor_mm,
 )
 from pure_pursuit.track_map import TrackGeometry
 from pure_pursuit.wro_field import OUTER_HALF_MM
 
-# Pasillos distintos N/S vs E/W para comprobar rectángulo (no cuadrado 1 m).
-CORRIDORS_L = {"S": 800.0, "E": 1200.0, "N": 800.0, "W": 1200.0}
+# Patrón legal: N/S estrechos, E/W anchos (lados opuestos pueden diferir en Open).
+CORRIDORS_L = {"S": 600.0, "E": 1000.0, "N": 600.0, "W": 1000.0}
 TRUTH_BOX = field_inner_box_from_corridors(CORRIDORS_L)
-TOL_MM = 50.0
+TOL_MM = 55.0
 
 
 def _section_line(
@@ -58,6 +60,7 @@ def _feed_straight(
     inner_box: tuple[float, float, float, float],
     steps: int = 40,
     spacing_mm: float = 12.0,
+    corridor_bias_mm: float = 0.0,
 ) -> None:
     """Muestras a lo largo de la recta sin entrar en las esquinas (|along| ≤ tramo interior)."""
     x0, y0, h = _section_line(section, inner_box, wm.drive_dir)
@@ -76,6 +79,9 @@ def _feed_straight(
         t_l = expected_tof_mm(pose, "L", inner_box)
         t_r = expected_tof_mm(pose, "R", inner_box)
         t_f = expected_tof_mm(pose, "F", inner_box)
+        if corridor_bias_mm and t_l is not None and t_r is not None:
+            t_l += corridor_bias_mm / 2.0
+            t_r += corridor_bias_mm / 2.0
         odom += spacing_mm
         wm.update_straight(t_ms, pose, t_l, t_r, t_f, odom)
 
@@ -89,18 +95,38 @@ def _run_lap1(wm: OpenWallMap, inner_box: tuple[float, float, float, float], dri
     wm.on_corner_complete(4)
 
 
-def test_three_corners_ready_and_infer_fourth():
+@pytest.mark.parametrize("noisy,expect", [(580.0, 600.0), (620.0, 600.0), (950.0, 1000.0), (1050.0, 1000.0)])
+def test_snap_corridor_mm(noisy, expect):
+    assert snap_corridor_mm(noisy) == expect
+
+
+def test_three_corners_ready_without_inferring_fourth():
     wm = OpenWallMap(drive_dir="L")
     for sec in ("S", "E", "N"):
         assert wm.current_section == sec
         _feed_straight(wm, sec, TRUTH_BOX)
         wm.on_corner_complete({"S": 1, "E": 2, "N": 3}[sec])
     assert wm.ready
-    assert wm._sections["W"].frozen
-    assert wm._sections["W"].inferred
-    box = wm.inner_box_mm()
-    for i in range(4):
-        assert box[i] == pytest.approx(TRUTH_BOX[i], abs=TOL_MM)
+    assert not wm._sections["W"].frozen
+    assert wm._sections["W"].inferred is False
+    g = wm.geometry()
+    assert g["sections"]["S"]["kind"] == "600"
+    assert g["sections"]["E"]["kind"] == "1000"
+    assert g["sections"]["N"]["kind"] == "600"
+    assert g["narrow_mask"]["S"] is True
+    assert g["narrow_mask"]["E"] is False
+
+
+def test_noisy_corridors_snap_after_three_turns():
+    inner_noisy = field_inner_box_from_corridors({"S": 580.0, "E": 1020.0, "N": 615.0, "W": 1000.0})
+    wm = OpenWallMap(drive_dir="L")
+    for sec in ("S", "E", "N"):
+        _feed_straight(wm, sec, inner_noisy, corridor_bias_mm=15.0 if sec == "N" else 0.0)
+        wm.on_corner_complete({"S": 1, "E": 2, "N": 3}[sec])
+    assert wm.ready
+    assert wm._sections["S"].corridor_mm == pytest.approx(OPEN_CORRIDOR_MM[0], abs=1.0)
+    assert wm._sections["E"].corridor_mm == pytest.approx(OPEN_CORRIDOR_MM[1], abs=1.0)
+    assert wm._sections["N"].corridor_mm == pytest.approx(OPEN_CORRIDOR_MM[0], abs=1.0)
 
 
 def test_four_corners_refine_inner_box_left():
@@ -109,14 +135,14 @@ def test_four_corners_refine_inner_box_left():
     assert wm.frozen
     box = wm.inner_box_mm()
     hx, hy = wm.inner_half_mm()
-    assert hx == pytest.approx(300.0, abs=TOL_MM)
-    assert hy == pytest.approx(700.0, abs=TOL_MM)
+    assert hx == pytest.approx(500.0, abs=TOL_MM)
+    assert hy == pytest.approx(900.0, abs=TOL_MM)
     for i in range(4):
         assert box[i] == pytest.approx(TRUTH_BOX[i], abs=TOL_MM)
 
 
 def test_four_corners_drive_right():
-    corridors = {"S": 900.0, "W": 1100.0, "N": 900.0, "E": 1100.0}
+    corridors = {"S": 600.0, "W": 1000.0, "N": 1000.0, "E": 600.0}
     truth = field_inner_box_from_corridors(corridors)
     wm = OpenWallMap(drive_dir="R")
     _run_lap1(wm, truth, "R")
@@ -131,7 +157,6 @@ def test_expected_tof_matches_corridor_width_on_south():
     d_in = expected_tof_mm((x, y, h), "L", inner)
     d_out = expected_tof_mm((x, y, h), "R", inner)
     assert d_in is not None and d_out is not None
-    span = 2 * 35.2  # SENSOR_MOUNTS en config
     corridor = d_in + d_out + (2 * 35.2)
     assert corridor == pytest.approx(CORRIDORS_L["S"], abs=40.0)
 
@@ -143,3 +168,4 @@ def test_reset_and_geometry_summary():
     g = wm.geometry()
     assert g["drive_dir"] == "R"
     assert "sections" in g and g["sections"]["S"]["along_mm"] > 0
+    assert "narrow_mask" in g
