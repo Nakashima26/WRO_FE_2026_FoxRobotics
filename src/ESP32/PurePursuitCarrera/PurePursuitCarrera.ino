@@ -3444,7 +3444,8 @@ void vigilarSinU() {
   if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) {
     parkSinUDec = 2;
     // Sync park_legado: cajón mid-recta no pasa por "cajón al inicio"; latch si venía lejos.
-    if (PARK_GEOM_ROJO && extCm >= PARK_PARED_CM + 18.0f) parkGeomVeniaLejos = true;  // 22/>41 dejaba s39 (ext≈41)
+    // +18 fallaba n2/s39: print(,0) redondea 40.6→41 pero 40.6<41.
+    if (PARK_GEOM_ROJO && extCm >= PARK_PARED_CM + 17.0f) parkGeomVeniaLejos = true;
     Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return;
   }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
@@ -3468,12 +3469,16 @@ bool vigilarGeomExt(float along, long distF) {
   }
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
-  if (fabsf(err) > PARK_GEOM_ANG_DEG) return false;
+  // ROJO: gate en anguloGyro (mismo que U por pose); err carril ≠ gyro dejaba s39@−11.5.
+  const float eGate = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) ? fabsf(anguloGyro) : fabsf(err);
+  const float angLim = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) ? 15.0f : PARK_GEOM_ANG_DEG;
+  if (eGate > angLim) return false;
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
   // Banda libre en ventana (sin pka+250). f45 solo si along<420.
+  // distF>50 bloqueaba n2/s39 (toma @530 con frente ya cerca; gyro ya ≤15).
   const bool rojo = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
                     && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
-                    && distF > 50;
+                    && distF > 25;
   if (!rojo && (!PARK_GEOM_EXT || !rutaPge || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
   const bool acercar = rojo && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
