@@ -6,6 +6,22 @@
 #include <stdlib.h>
 #include <string>
 #include <type_traits>
+// GCC/libstdc++ (Pi/Linux): sus headers usan std::min/max e isnan; incluirlos antes de las macros min/max.
+// Solo libstdc++: en libc++ (Mac) <cmath> choca con los overloads Arduino (ver abajo).
+#if defined(__GLIBCXX__)
+#include <algorithm>
+#include <deque>
+#include <vector>
+#include <map>
+#include <functional>
+#include <memory>
+#include <iostream>
+#include <sstream>
+#include <fstream>
+#include <locale>
+#include <cmath>
+using std::isnan; using std::isinf; using std::isfinite;
+#endif
 
 // Evitar <cmath>: en libc++ reexporta abs/asin y choca con los overloads Arduino.
 
