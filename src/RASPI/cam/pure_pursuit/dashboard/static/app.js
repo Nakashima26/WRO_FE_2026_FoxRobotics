@@ -36,7 +36,7 @@ $$("nav .tab").forEach((b) => b.onclick = () => {
   $$(".tab-page").forEach((p) => p.classList.toggle("on", p.id === "tab-" + b.dataset.tab));
   if (b.dataset.tab === "sys") { loadLogs(); loadRuns(); loadCalib(); }
   if (b.dataset.tab === "color") loadCalib();
-  if (b.dataset.tab === "runs") { loadRepList(); drawState(); }
+  if (b.dataset.tab === "runs") { loadRepList(); drawState(); if (REP.on) { REP.evShown = -2; repEvents(false); } }
 });
 
 // ── Servicio ────────────────────────────────────────────────────────────────
@@ -58,7 +58,10 @@ function connect() {
   };
   es.onerror = () => { setPill("#pill-link", "desconectado", "bad"); es.close(); setTimeout(connect, 2000); };
 }
-connect();
+// ?still=1: sin stream en vivo (capturas con Chrome headless de un momento de una corrida).
+const STILL = new URLSearchParams(location.search).has("still");
+if (STILL) api("/api/state").then((d) => { SLIVE = d; if (!REP.on) { S = d; onState(); } }).catch(() => {});
+else { connect(); $("#hud").src = "/api/hud.mjpg?fps=6"; }
 
 function setPill(sel, txt, cls) { const e = $(sel); e.textContent = txt; e.className = "pill " + (cls || ""); }
 
@@ -966,6 +969,7 @@ function repExit() {
   if ($("#hud").dataset.live) $("#hud").src = $("#hud").dataset.live;
   repReset();
   S = SLIVE; onState();
+  history.replaceState(null, "", location.pathname);
   loadRepList();
 }
 $("#rep-play").onclick = () => REP.playing ? repPause() : repPlay();
@@ -980,9 +984,10 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft") repGo(REP.i - (e.shiftKey ? 10 : 1));
 });
 
-const repFmtT = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+const repFmtT = (s) => { const a = Math.abs(s); return `${s < -0.05 ? "-" : ""}${Math.floor(a / 60)}:${(a % 60).toFixed(1).padStart(4, "0")}`; };
 function repUI() {
   const rel = REP.tcur - REP.t0;
+  if (!STILL) history.replaceState(null, "", `?run=${encodeURIComponent(REP.name)}&t=${rel.toFixed(1)}&tab=${($("nav .tab.on") || {}).dataset?.tab || "runs"}`);
   $("#rep-slider").value = Math.round(rel * 10);
   const a = (REP.st[REP.i] || {}).ack || {};
   $("#rep-time").textContent = `${repFmtT(rel)} / ${repFmtT(REP.t1 - REP.t0)}`;
@@ -1113,3 +1118,14 @@ $("#rep-chart").onclick = (ev) => {
   const L = 46, R = cv.width - 10;
   repSeekT(REP.t0 + (px - L) / (R - L) * (REP.t1 - REP.t0));
 };
+
+// Enlace directo a un momento de una corrida: ?run=orillas242.avi&t=17&tab=live (t en s desde el arranque).
+(async () => {
+  const q = new URLSearchParams(location.search), run = q.get("run"), tab = q.get("tab");
+  if (run) {
+    await repOpen(run);
+    if (REP.on && q.get("t")) repSeekT(REP.t0 + parseFloat(q.get("t")));
+  }
+  if (tab) { const b = document.querySelector(`nav .tab[data-tab="${tab}"]`); if (b) b.click(); }
+  if (run) setTimeout(() => REP.on && repGo(REP.i), 1500);   // otra vez, ya con la geometría de la pista
+})();

@@ -51,7 +51,7 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 | 📸 | **[0 · Vehicle Overview](#0-vehicle-overview)**<br>_Photos of the car from every side_ | |
 | ⚙️ | **[1 · Mobility & Mechanical Design](#1-mobility-and-mechanical-design)**<br>_How it moves and turns_ | [Chassis](#11-chassis--shorter-car-battery-in-the-middle-pi-on-top) · [Drivetrain](#12-drivetrain--gear-ratio-chosen-from-measured-speed) · [Steering](#13-steering--ackermann-rack-and-pinion) · [Camera mount](#14-camera-mount) · [Assembly](#15-assembly-order-v2) · [Stability](#16-mechanical-stability) |
 | 🔋 | **[2 · Power & Sensors](#2-power-and-sensor-architecture)**<br>_Electronics, PCB and what the car senses_ | [Power tree](#21-power-tree) · [Power budget](#22-power-budget) · [PCB](#23-pcb-revb--two-stacked-boards) · [Sensors](#24-sensors--selection-placement-and-calibration) · [Raspberry Pi 5](#25-main-computer--raspberry-pi-5) |
-| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) · [**MATLAB & Simulink**](#311-matlab-and-simulink--modeling-the-twins-physics) |
+| 🧠 | **[3 · Software & Obstacle Strategy](#3-software-architecture-and-obstacle-strategy)**<br>_How it thinks and drives_ | [Two controllers](#31-two-controllers-one-link) · [Modules](#32-module-map) · [Data flow](#33-data-flow-and-timing-one-pi-cycle) · [State machine](#34-esp32-firmware-and-state-machine) · [Start](#35-start-procedure) · [Open round](#36-open-challenge-esp32-only) · [**Obstacle round**](#37-obstacle-management--route-mode) · [Edge cases](#38-edge-cases--what-can-go-wrong-on-the-field-and-what-the-car-does) · [Digital twin](#39-digital-twin--software-in-the-loop-simulator) · [Testing](#310-testing-tuning-and-validation) · [Dashboard](#pit-dashboard) · [**MATLAB & Simulink**](#311-matlab-and-simulink--modeling-the-twins-physics) |
 | 🧩 | **[4 · Engineering Decisions](#4-systems-thinking-and-engineering-decisions)**<br>_Why we built it this way_ | [Constraints](#41-the-challenge-our-goals-and-the-design-constraints) · [v1 → v2](#42-from-v1-to-v2--what-the-national-final-taught-us) · [Subsystems](#43-how-the-subsystems-constrain-each-other) · [Trade-offs](#44-trade-offs--we-chose-x-instead-of-y-because) · [Risks](#45-risks-failure-modes-and-mitigations) · [Timeline](#46-iteration-timeline) |
 | 🛠️ | **[5 · Reproduce It](#5-reproducibility-and-github-quality)**<br>_Build, flash, calibrate and run your own_ | [Build](#51-build-the-car) · [ESP32 firmware](#52-esp32-firmware) · [Pi software](#53-raspberry-pi-5-software) · [Venue calibration](#54-calibration-at-a-new-venue--20-minutes) · [Run](#55-run) · [Twin on PC](#56-run-the-digital-twin-pc) · [Our results](#57-reproduce-our-results) · [Repo structure](#58-repository-structure) · [Versions](#59-versioning-releases-and-commit-history) |
 | 🚀 | **[6 · Next Steps](#6-next-steps)** | |
@@ -978,10 +978,17 @@ flowchart LR
 
 1. **Component tests** with small sketches before any full run: [`EncoderTest`](src/ESP32/EncoderTest/), [`TofTest4`](src/ESP32/TofTest4/), [`BnoRvcTest`](src/ESP32/BnoRvcTest/), [`TofBnoTest`](src/ESP32/TofBnoTest/), [`CalibFox`](src/ESP32/CalibFox/) (servo radius, encoder, ToF), [`PinScan`](src/ESP32/PinScan/) (UART wiring).
 2. **Motion bench without the Pi:** [`SeguirRuta`](src/ESP32/SeguirRuta/) + [`scripts/ruta_bt.py`](scripts/ruta_bt.py): the PC sends a route over Bluetooth and the ESP32 follows it with odometry ([results](docs/route-following-bench.md)).
-3. **Track runs:** every run records the camera/HUD video (`orillasNN.avi`), the clean BEV (`_bev.bin`) and the Pi journal with every message to and from the ESP32. Recording stops 5 s after the car stops. [`scripts/reporte_run.py`](scripts/reporte_run.py) turns the journal into a per-corner report.
+3. **Track runs:** every run records the camera/HUD video (`orillasNN.avi`), the clean BEV (`_bev.bin`), the run telemetry (`_tele.jsonl`: pose, route, sensors and events, ~12 per second) and the Pi journal with every message to and from the ESP32. Recording stops 5 s after the car stops. The [pit dashboard](#pit-dashboard) replays any run; [`scripts/reporte_run.py`](scripts/reporte_run.py) turns the journal into a per-corner report.
 4. **Acceptance:** a run passes only if it completes autonomously with no contact, every pillar on the correct side, and (obstacle round) a park inside the lot. Failed runs are kept: each one names the next thing to change. The full method is in [`docs/testing.md`](docs/testing.md).
 
 **Metrics we track per run:** corners completed, collisions/contacts, pillars on the wrong side, lap and total time, parking-lot position error, final park position, Pi frame rate, ESP32 loop time, UART errors (`ue`, `lc`), route points accepted (`rn`).
+
+<a id="pit-dashboard"></a>
+**Pit dashboard — what the car believes, live and after the run.** The Pi serves a web page ([`dashboard/`](src/RASPI/cam/pure_pursuit/dashboard/), full guide in [`docs/dashboard.md`](docs/dashboard.md)) that works offline over the Pi's hotspot or an Ethernet cable. It shows the localizer pose, the planned route, the pillars and every ToF ray next to the distance the map predicts, so a pose error is visible as a red ring before it becomes a crash. It also calibrates the ToF and the colors at a new venue, flashes the ESP32 from a laptop over USB, and **replays any recorded run**: map, synchronized video frame, sensor chart and event log on one time slider, with a link that points to the exact moment. The runtime only sends it non-blocking UDP datagrams, so the race behaves the same with or without it.
+
+<p align="center"><a href="docs/img/dashboard_runs.png"><img src="docs/img/dashboard_runs.png" width="100%" alt="Pit dashboard, replay of run orillas242: map with route and trail, video frame, summary, time chart and event list"></a></p>
+
+*Replay of run `orillas242` at 30 s: 12/12 corners, 21.6 m on the odometer, no UART errors; the chart shows the ESP states (following, lot exit, parking) and a mark at every re-plan.*
 
 ### 3.10.2 Component and bench results
 
@@ -1368,6 +1375,7 @@ All from `src/RASPI/cam/`. Full guide: [`pure_pursuit/INSTRUCCIONES.md`](src/RAS
 | 3. BEV (only if the camera mount moved) | `python -m pure_pursuit.calibrate` | Homography from floor crosses → `bev_calib.npz` |
 | 4. Servo center | Drive straight at PWM 150 from both sides | `centroServo` (75 on our car) |
 | 5. Sensor check | First ACKs after the button: all four ToF valid, `ue=0`, `rn` = route length | Wiring and UART |
+| 6. ToF and colors from the laptop | [Pit dashboard](docs/dashboard.md): **Calibrar ToF** (car parallel to a track wall, 3+ distances → table stored in the ESP32) and **Calibrar color** (photo, boxes, proposed bands, preview) | ToF correction table (NVS), color bands in `~/wro_calib.json` |
 
 ## 5.5 Run
 
@@ -1381,7 +1389,7 @@ python -m pure_pursuit.runtime_nuevo --serial-port /dev/ttyAMA0 --record-orillas
 python -m pure_pursuit.runtime_nuevo --serial-port /dev/ttyAMA0 --no-window --record-orillas --record-output ~/FoxRobotics/videos_orillas   # as the service runs it
 ```
 
-`carrera.json` (the race configuration exported from the twin) is loaded automatically on top of `config.py`; `--sin-carrera` disables it. Each run is recorded to `videos_orillas/` (video + clean BEV + journal). Summary: `python scripts/reporte_run.py --pi`.
+`carrera.json` (the race configuration exported from the twin) is loaded automatically on top of `config.py`; `--sin-carrera` disables it. Each run is recorded to `videos_orillas/` (video + clean BEV + `_tele.jsonl` + journal). Replay it in the dashboard's **Corridas** tab (`http://<pi>:8080`, [`docs/dashboard.md`](docs/dashboard.md)); text summary: `python scripts/reporte_run.py --pi`.
 
 ## 5.6 Run the digital twin (PC)
 
@@ -1414,6 +1422,7 @@ Every number in this document comes from a run, a log or a script. The scripts, 
 | Full simulated race (finish, collisions, lap times, park) | [§3.9](#39-digital-twin--software-in-the-loop-simulator) | `python -m pure_pursuit.chassis_twin --preset ruta_perfil --park-pos random --seed 1 --no-show` (set-up in [§5.6](#56-run-the-digital-twin-pc)); the last line prints `[TWIN] stop=… metrics={…}` | Firmware and Pi code of the commit you check out |
 | Paired benchmark (42 fields × 5 noise levels, base vs candidate) | [§3.9](#39-digital-twin--software-in-the-loop-simulator) | `pure_pursuit/twin/tools/banco/bench.sh <repo> <name> <preset_base> <preset_cand>`, then `python pure_pursuit/twin/tools/banco/vsref.py runs/<name>/base_n1… runs/<name>/cand_n1…`; the exact command line of each accepted change is in [`docs/notes/HANDOFF_PERFIL.md`](docs/notes/HANDOFF_PERFIL.md) | Seeds 1–41 + 3170839, fixed in `bench.sh` |
 | Race build used on the car | [§5.2](#52-esp32-firmware) | `python pure_pursuit/twin/tools/exportar_carrera.py ruta_perfil pure_pursuit/twin/tools/carrera_bench.json --pi-baud 460800` regenerates `carrera.json` and `PurePursuitCarrera.ino`; `git diff` must show no change | [`carrera.json`](src/RASPI/cam/pure_pursuit/carrera.json), [`PurePursuitCarrera.ino`](src/ESP32/PurePursuitCarrera/PurePursuitCarrera.ino) |
+| Replay of a real run (map, route, sensors, video, events) | [§3.10](#pit-dashboard) | Dashboard on the Pi, **Corridas** tab ([`docs/dashboard.md`](docs/dashboard.md)) | `videos_orillas/orillasN.avi` + `orillasN_tele.jsonl` on the Pi |
 | Per-corner report of a real run (corners, states, gaps, sensors) | [§3.10](#310-testing-tuning-and-validation) | `python scripts/reporte_run.py <run>_journal.txt` | Journal that the car saves with every run (`videos_orillas/` on the Pi); the recordings of our runs are not in the repository (about 2 GB) |
 | Turning radius, braking, grip, speed per PWM | [§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion) | Raw ESP32 logs, one CSV per test (servo command, PWM and battery voltage in the file name); method in [`docs/route-following-bench.md`](docs/route-following-bench.md) | [`logs_tof/`](logs_tof/) (`arco_*`, `freno*`, `grip_*`, `rev_*`) |
 | Encoder counts per mm, ToF static error, calibration laps | [§2.4](#24-sensors--selection-placement-and-calibration), [§3.10](#310-testing-tuning-and-validation) | Sketches [`CalibFox`](src/ESP32/CalibFox/), [`EncoderTest`](src/ESP32/EncoderTest/), [`TofTest4`](src/ESP32/TofTest4/) | [`logs_tof/calib_*`](logs_tof/), `ronda_*` |
@@ -1437,6 +1446,7 @@ WRO_FE_2026_FoxRobotics/
 │   ├── testing.md               ← testing workflow and checklists
 │   ├── releases.md              ← one release per event (v1.0-nacional, v2.0-internacional)
 │   ├── route-following-bench.md ← ESP32 route-following bench and measured dynamics
+│   ├── dashboard.md             ← pit dashboard: live telemetry, calibration, run replay
 │   └── notes/                   ← internal working notes in Spanish (hand-offs, plans, to-dos), kept as written
 ├── src/
 │   ├── ESP32/
@@ -1453,6 +1463,7 @@ WRO_FE_2026_FoxRobotics/
 │       └── pure_pursuit/            ← Pi race software (§3.2)
 │           ├── runtime_nuevo.py, config.py, carrera.json
 │           ├── digital_map.py, localizer.py, route_mode.py, ring_route.py, start_fix.py, …
+│           ├── dashboard/           ← pit dashboard (server.py, runs.py, static/), see docs/dashboard.md
 │           └── twin/                ← digital twin (simulator, benches, tests)
 ├── electrical/
 │   ├── WRO_RevB_1/, WRO_RevB_2/     ← v2 KiCad projects (logic, power)
