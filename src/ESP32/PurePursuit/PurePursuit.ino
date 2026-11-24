@@ -3442,7 +3442,7 @@ void vigilarSinU() {
                && (rutaPka - PARK_SINU_B2_OFF_MM - along) >= (float)PARK_SINU_CORRE_MM;   // y queda recta suficiente para armar el sonar antes de la madera
     if (!lin && PARK_SINU_GEOMETRIA && parkCabeAlineacion(along, extCm, rumboDeg)) return;
     parkSinUDec = lin ? 1 : 2;
-    parkGeomVeniaLejos = PARK_GEOM_ROJO && !lin && extCm > PARK_PARED_CM + 22.0f;
+    parkGeomVeniaLejos = PARK_GEOM_ROJO && !lin && extCm >= PARK_PARED_CM + 17.0f;  // sync no-llega +17
     parkRevDir = !lin && PARK_REV_DIR;
     Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
     if (!lin) return;
