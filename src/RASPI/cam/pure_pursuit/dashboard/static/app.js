@@ -976,6 +976,18 @@ $("#rep-play").onclick = () => REP.playing ? repPause() : repPlay();
 $("#rep-back").onclick = () => repSeekT(REP.tcur - 5);
 $("#rep-fwd").onclick = () => repSeekT(REP.tcur + 5);
 $("#rep-exit").onclick = repExit;
+// Enlace a este momento para mandarlo: con la IP de la Pi (Tailscale primero), no localhost:8091 de esta compu.
+function repLink() {
+  const ips = ((SLIVE && SLIVE.sys) || {}).ips || [];
+  const ip = ips.find((i) => i.startsWith("100.")) || ips.find((i) => !i.includes(":")) || location.hostname;
+  const tab = ($("nav .tab.on") || {}).dataset?.tab || "runs";
+  return `http://${ip}:8080/?run=${encodeURIComponent(REP.name)}&t=${(REP.tcur - REP.t0).toFixed(1)}&tab=${tab}`;
+}
+$("#rep-link").onclick = async () => {
+  const u = repLink();
+  try { await navigator.clipboard.writeText(u); toast("Enlace copiado: " + u); }
+  catch (e) { prompt("Copia el enlace:", u); }   // fuera de localhost el navegador no deja escribir al portapapeles
+};
 $("#rep-slider").oninput = (e) => repSeekT(REP.t0 + e.target.value / 10);
 document.addEventListener("keydown", (e) => {
   if (!REP.on || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;

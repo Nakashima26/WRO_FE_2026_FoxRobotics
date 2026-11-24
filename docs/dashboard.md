@@ -115,7 +115,7 @@ The lateral ToF read short at long range, and the error changes with the wall pa
 - While the replay is on, **every tab draws the recorded state**: En vivo shows the map, radar, sensors and HUD of that instant. **salir del replay** goes back to live.
 - Click the chart or an event to jump there. The event filter takes any text (`plan#`, `PARK`, `LOCUPD`…).
 - **Summary**: duration, firmware and direction, corners, final ESP state, odometer distance, minimum reading and % of time without a reading per ToF, UART errors during the run, parking messages, errors.
-- The URL follows the replay (`?run=orillas242.avi&t=30.0&tab=runs`): copy it to send someone the exact moment.
+- **🔗 copiar enlace** copies a link to the current moment (`http://<pi>:8080/?run=orillas242.avi&t=30.0&tab=runs`) using the Pi's Tailscale address, so it works for a teammate even when you opened the page through `fox_pc.py` on `localhost`. Opening the link loads that run at that second.
 - ⬇ downloads the `.avi`.
 
 ### ESP
