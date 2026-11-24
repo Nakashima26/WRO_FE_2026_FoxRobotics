@@ -1783,7 +1783,7 @@ PARK_AJ float        PARK_PL_W_DET               = 145.0f;  // 2026-11-12: 200 -
 PARK_AJ float        PARK_PL_W_DET_U             = 155.0f;  // 185 -> 130 -> 138 (12.5 V, U: truth del gemelo 8 mm mas adelante que 130), igual (ToF a 110.6)  // igual, tras la U (el poste 2 sale de la secuencia poste1-hueco-poste2)
 PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve la madera de atras solo con theta chico
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
-PARK_AJ float        PARK_PL_M_MM                = 10.0f;   // un tramo termina si la huella queda a menos de esto de una madera
+PARK_AJ float        PARK_PL_M_MM                = 12.0f;   // un tramo termina si la huella queda a menos de esto de una madera (cen96 91/96 vs 90; rescue s21)
 PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
 PARK_AJ float        PARK_PL_T2                  = 4.0f;
 PARK_AJ float        PARK_PL_HEND                = 94.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
