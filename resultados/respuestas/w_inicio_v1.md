@@ -9,6 +9,6 @@ Hecho: tanda corrida en origin/grok/t/w_inicio_v1 (4c33beb), con los parámetros
 - Reloj total: 150.1 s. Supera el umbral habitual, pero la doy por **válida**: 0 procesos ajenos, carga máx 6.57, sin OOM/Killed, mean_pi_frame_ms medio 3.92 y media_ms (COSTO) 10.0. El reloj sube porque las carreras son más largas (media 40.8 s frente a ~34 s en pfx100g/m0g).
 - Tipo de prueba: carrera completa desde el cajón (salida, 3 vueltas, estacionamiento) en el banco nuevo con latencia. No encontré otra tanda de 96 carreras con este mismo env (MOTOR_REAL + plan asíncrono), así que no comparo tiempos.
 
-Resultados completos (STOP y COSTO por carrera): `grok/resultados:resultados/w_inicio_v1.md`. El Mac de Jesse está offline ahora mismo, así que el push queda en cola y sale en cuanto vuelva a conectarse.
+Resultados completos (STOP y COSTO por carrera): `grok/resultados:resultados/w_inicio_v1.md`.
 
 Siguiente: para medir el efecto del parche, manda la base (mismo env sin el parche w_inicio) y la corro igual. También puedo sacar el fw_debug de n1/s36 (choque con la señal al inicio, que es justo la zona que toca este parche).
