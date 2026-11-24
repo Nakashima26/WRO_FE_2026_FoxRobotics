@@ -3483,15 +3483,23 @@ bool vigilarGeomExt(float along, long distF) {
   float geomMax = PARK_GEOM_MAX_MM, geomPasa = PARK_GEOM_PASA_MM;
   if (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) {
     geomMax = max(geomMax, 520.0f - rutaPka);
-    geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
+    // s37 (pka~110): U gira antes de pka+150 → abrir desde latch.
+    // pka<<0 (s22) o pka alto (s4): early take empeora / colisiona — r5 pasa.
+    if (rutaPka > 50.0f && rutaPka < 250.0f)
+      geomPasa = min(geomPasa, -450.0f);
+    else
+      geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
   }
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
-  // ROJO: gate en anguloGyro (mismo que U por pose); err carril ≠ gyro dejaba s39@−11.5.
-  const float eGate = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) ? fabsf(anguloGyro) : fabsf(err);
-  const float angLim = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) ? 15.0f : PARK_GEOM_ANG_DEG;
-  if (eGate > angLim) return false;
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
+  // ROJO: gate en anguloGyro (mismo que U por pose); err carril ≠ gyro dejaba s39@−11.5.
+  // angLim 23 solo banda s37 (pka 50..250) + lejos; else 15 (s22 early crook +1–2s).
+  const float eGate = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) ? fabsf(anguloGyro) : fabsf(err);
+  const bool s37banda = rutaPka > 50.0f && rutaPka < 250.0f;
+  const float angLim = (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge)
+                       ? ((s37banda && lejos) ? 23.0f : 15.0f) : PARK_GEOM_ANG_DEG;
+  if (eGate > angLim) return false;
   // Banda libre en ventana (sin pka+250). f45 solo si along<420.
   // distF>50 bloqueaba n2/s39 (toma @530 con frente ya cerca; gyro ya ≤15).
   const bool rojo = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
