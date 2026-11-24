@@ -734,6 +734,8 @@ Result: **12/12 corners in 29.6–29.9 s** in both directions on our track (runs
 
 **Next step — open round with route mode.** `RondaAbierta.ino` is reactive: it decides each corner from what the ToF sees at that moment, so it has to drive the whole round at a speed that is safe for a corner it has not seen yet. In the Open Challenge the inner walls can be placed in different positions, but they do not move during the round. We are adapting the obstacle-round firmware (`PurePursuit.ino`, §3.7) so that lap 1 maps the walls with the ToF and the encoder (the position of each straight's inner wall and where each corner starts), and laps 2–3 follow a planned route with pure pursuit and the speed profile, knowing in advance where to turn and how fast each section can be driven. One code base for both rounds also means one set of parameters to calibrate at the venue. Until this beats 29.6 s reliably on our track, `RondaAbierta.ino` stays as the open-round firmware.
 
+Lap-1 wall geometry on the Pi lives in [`open_map.py`](src/RASPI/cam/pure_pursuit/open_map.py) (`OpenWallMap`): each straight accumulates lateral ToF into corridor width; after three corners the fourth inner face is inferred and `inner_box_mm` is ready for the planner. Twin tests: `twin/tests/test_open_map.py`.
+
 ## 3.7 Obstacle Management — route mode
 
 ### 3.7.1 Idea
