@@ -307,6 +307,7 @@ int  turnsCompleted     = 0;
 const float MAP_SPAN_CM = 7.0f;   // ~ancho entre caras laterales de los VL53
 float mapSumLR = 0.0f;
 int   mapSamples = 0;
+float mapCorrCm[4] = {0, 0, 0, 0};
 int   mapPasilloCm[4] = {0, 0, 0, 0};
 bool  mapListo          = false;
 bool direccionIzquierda = true;
@@ -672,7 +673,10 @@ void mapReiniciar() {
   mapSumLR = 0.0f;
   mapSamples = 0;
   mapListo = false;
-  for (int i = 0; i < 4; i++) mapPasilloCm[i] = 0;
+  for (int i = 0; i < 4; i++) {
+    mapPasilloCm[i] = 0;
+    mapCorrCm[i] = 0;
+  }
 }
 
 // Índice de sección de la recta actual (0..3) según vueltas completadas.
@@ -734,18 +738,26 @@ void mapMuestra(long distL, long distR) {
   mapSamples++;
 }
 
+const float MAP_CORRIDOR_MID_CM = 80.0f;
+
+int mapSnapCorridor(float corridor) {
+  return corridor < MAP_CORRIDOR_MID_CM ? 60 : 100;
+}
+
 void mapCongelarSeccion(int secIndex) {
   if (secIndex < 0 || secIndex >= 4) return;
   // Sin muestras válidas no inventar 60 (corridor=0 < 80): deja 0 = desconocido.
   if (mapSamples <= 0) {
     mapPasilloCm[secIndex] = 0;
+    mapCorrCm[secIndex] = 0;
     Log.printf("MAP sec=%d pasillo=? (sin muestras)\n", secIndex + 1);
     mapSumLR = 0.0f;
     mapSamples = 0;
     return;
   }
   float corridor = (mapSumLR / (float)mapSamples) + MAP_SPAN_CM;
-  int pasillo = (corridor < 80.0f) ? 60 : 100;
+  mapCorrCm[secIndex] = corridor;
+  int pasillo = mapSnapCorridor(corridor);
   mapPasilloCm[secIndex] = pasillo;
   Log.printf("MAP sec=%d pasillo=%d cm (corr=%.0f n=%d)\n",
              secIndex + 1, pasillo, corridor, mapSamples);
@@ -756,6 +768,16 @@ void mapCongelarSeccion(int secIndex) {
 void mapListoSiCompleto() {
   if (mapPasilloCm[0] == 0 || mapPasilloCm[1] == 0 || mapPasilloCm[2] == 0 || mapPasilloCm[3] == 0)
     return;
+  // En orden de giro (L o R), las secciones separadas por dos son opuestas.
+  for (int i = 0; i < 2; i++) {
+    int j = i + 2;
+    if (mapPasilloCm[i] == mapPasilloCm[j]) continue;
+    float a = mapCorrCm[i], b = mapCorrCm[j];
+    float da = fabsf(a - MAP_CORRIDOR_MID_CM), db = fabsf(b - MAP_CORRIDOR_MID_CM);
+    int pasillo = mapSnapCorridor(da > db ? a : db > da ? b : min(a, b));
+    mapPasilloCm[i] = mapPasilloCm[j] = pasillo;
+    Log.printf("MAP fix opuestos sec=%d/%d corr=%.1f/%.1f pasillo=%d cm\n", i + 1, j + 1, a, b, pasillo);
+  }
   mapListo = true;
   Log.printf("MAP listo: %d/%d/%d/%d\n",
              mapPasilloCm[0], mapPasilloCm[1], mapPasilloCm[2], mapPasilloCm[3]);

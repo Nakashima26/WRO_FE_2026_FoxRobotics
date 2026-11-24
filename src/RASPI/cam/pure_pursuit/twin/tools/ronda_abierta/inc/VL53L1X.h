@@ -9,6 +9,7 @@ class VL53L1X {
   enum RangeStatus : uint8_t { RangeValid = 0, SigmaFail = 1, SignalFail = 2, RangeValidMinRangeClipped = 3,
     OutOfBoundsFail = 4, HardwareFail = 5, RangeValidNoWrapCheckFail = 6, WrapTargetFail = 7, None = 255 };
   struct { uint16_t range_mm; uint8_t range_status; } ranging_data{0, None};
+  uint8_t last_status = 0;
   void setTimeout(uint16_t) {}
   bool init() { return true; }
   void setAddress(uint8_t a) { idx_ = a == 0x30 ? 3 : a == 0x31 ? 0 : a == 0x32 ? 1 : 2; }
