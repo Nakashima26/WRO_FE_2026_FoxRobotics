@@ -82,6 +82,10 @@ public:
   }
 };
 LogAsync Log;
+// LOG_PI 1 = el log también sale por el UART de la Pi: wro-runtime imprime cada línea que recibe
+// ([SERIAL] RX: ...), así queda en el journal de la Pi sin cable USB.
+#define LOG_PI 1
+static volatile bool piUartListo = false;
 
 
 // ── Carrera ───────────────────────────────────────────────────────────────────
@@ -94,6 +98,8 @@ const bool          ARRANQUE_POR_COMANDO = true;
 // loop: con ella la "pausa max" por recta fue de 50-136 ms (run 141147).
 // false = solo RECTA, giros y alarmas.
 const bool          LOG_PERIODICO        = false;
+// ESQ: en SIGUIENDO con frontal < FRONT_ESQUINA_MAX, cada 50 ms: usado + crudo/status de L/R/F.
+const bool          LOG_ESQUINA          = true;
 // Reloj del I2C de los ToF. 400 kHz es lo de siempre; 100 kHz aguanta mejor el
 // ruido del motor (a 20 Hz por sensor sobra velocidad). Ver "i2c lentas/err" en RECTA.
 const uint32_t      I2C_HZ               = 400000;
@@ -110,7 +116,7 @@ const int SERVO_TOPE_DER = 1;     // giro a tope
 const int SERVO_TOPE_IZQ = 156;   // tope mecánico izquierdo
 
 // ── Velocidades (PWM 0-255) — números del carro viejo, calibrar en pista ─────
-const int MOTOR_MAX         = 255;   // rectas
+const int MOTOR_MAX         = 220;   // rectas
 const int VEL_INICIAL       = 180;   // antes del giro 1 (y todo el giro 1)
 const int VEL_APROX_CERRADA = 120;   // pared de enfrente < FRONT_SLOWDOWN_CM
 const int VEL_APROX2        = 90;    // giro 1: pared de enfrente < FRONT_SLOWDOWN2_CM
@@ -119,9 +125,10 @@ const int VEL_GIRO_MEDIO    = 200;   // GIRANDO, |ángulo| < 70
 const int VEL_GIRO_FINAL    = 220;   // GIRANDO, resto
 // Vueltas 2–3 con MAP (pasillo 60|100 cm por sección, tras esquina 4).
 // frontSlow: distF < X → frena; X MÁS BAJO = frena MÁS TARDE (más cerca de la pared).
-const int MAP_ANCHO_PWM         = 255;
-const int MAP_ANGOSTO_PWM       = 255;   // nunca más lento que sin mapa
-const int MAP_ANCHO_SLOW_CM     = 70;    // 100 era al revés: frenaba ANTES que sin mapa
+const int MAP_ANCHO_PWM         = 220;
+const int MAP_ANGOSTO_PWM       = 220;   // nunca más lento que sin mapa
+const int MAP_ANCHO_SLOW_CM     = 90;    // 2026-11-24: 70 llegaba a la esquina a >1 m/s (giro 5 chocó con F=15);
+                                         // la pared del fondo depende del pasillo SIGUIENTE, no del actual
 const int MAP_ANGOSTO_SLOW_CM   = 90;    // = FRONT_SLOWDOWN_CM
 const int MAP_ANCHO_GIRO_INI    = 220;
 const int MAP_ANCHO_GIRO_MED    = 215;
@@ -181,7 +188,7 @@ const int FRONT_ESQUINA_MAX   = 100;  // la esquina solo cuenta con pared de enf
 // girar, baja FRONT_ESQUINA_MAX a ~90.
 const int FRONT_SLOWDOWN_CM   = 90;
 const int FRONT_SLOWDOWN2_CM  = 60;   // freno fuerte con pared de enfrente cerca (todas las rectas)
-const int FRONT_FORCE_GIRO_CM = 40;   // forzar giro si el frontal baja de esto (antes solo giro 1)
+const int FRONT_FORCE_GIRO_CM = 50;   // forzar giro si el frontal baja de esto (antes solo giro 1; 40 llegaba tarde)
 const int FORZADO_DEBOUNCE    = 3;    // lecturas seguidas (reset duro)
 // orillas223: giro 3 con F=1 — sin forzado tras el giro 1 la apertura interior
 // llegó tarde y el carro pegó de frente. El forzado aplica en TODAS las rectas.
@@ -206,6 +213,7 @@ const uint32_t TOF_BUDGET_US  = 50000;   // 50 ms por medición -> ~20 Hz
 // Más chico = cono más angosto: menos riesgo de que los laterales vean el piso
 // cuando se acaba la pared (con 16 leían ~60 cm en vez de "sin pared").
 const uint8_t  TOF_ROI        = 8;
+const bool     TOF_LAT_SHORT  = false;  // laterales en modo Short (false = todos en Long como antes)
 const int      TOF_PERIODO_MS = 50;
 const unsigned long CONTROL_MS = 50;     // ritmo de filtros + lógica (un dato de ToF nuevo)
 const long     SIN_PARED_CM   = 200;     // lectura inválida / muy lejos = "sin pared" (como el HC-SR04)
@@ -393,7 +401,9 @@ bool arrancarTof(Tof& t) {
   t.s.setTimeout(500);
   if (!t.s.init()) return false;            // nace en 0x29
   t.s.setAddress(t.dir);
-  t.s.setDistanceMode(VL53L1X::Long);
+  // Laterales en Short como en PurePursuit (TOF_LAT_TRAS_SHORT): alcance ~1.3 m (el pasillo mide 1 m),
+  // más estable con luz ambiente; más allá da inválido = "sin pared" (la esquina). El frontal sigue en Long.
+  t.s.setDistanceMode((TOF_LAT_SHORT && &t != &tofF) ? VL53L1X::Short : VL53L1X::Long);
   t.s.setROISize(TOF_ROI, TOF_ROI);
   t.s.setMeasurementTimingBudget(TOF_BUDGET_US);
   t.s.startContinuous(TOF_PERIODO_MS);
@@ -438,6 +448,8 @@ void vigilarTof(Tof& t) {
 // la interior a 20-60 cm casi siempre con wrap fail. Sin pared, los laterales
 // salen con signal fail a 120-280 cm, no con wrap. Por eso la interior "no se
 // veía" (wall PID apagado) y el giro 1 eligió el lado equivocado.
+// 2026-11-24: probado false -> el giro 1 eligió el lado contrario (pared real der.
+// a 47 cm salió st 7 y se volvió 200). Las paredes reales SÍ salen con wrap: true.
 const bool ACEPTAR_WRAP = true;
 // SignalFail = regresó poca luz. Con ROI 8, una pared negra REAL a ~75 cm sale
 // con signal fail pero con la distancia correcta, y sin pared sale ~160-190 cm.
@@ -560,14 +572,39 @@ float filtroEMA(float nueva, float anterior) {
   return alpha * nueva + (1.0 - alpha) * anterior;
 }
 
+// Apertura por SALTO del interior (log ESQ 2026-11-24): al acabarse la isla el ToF
+// interior casi nunca pasa de 100 — marca 90-100 cm (st 2), justo en umbralPared,
+// y la esquina solo salía por el giro forzado. Ahora también cuenta si el lado
+// sube ESQ_SALTO_CM sobre su mínimo de los últimos ESQ_HIST lecturas (~400 ms) y
+// pasa de ESQ_SALTO_MIN_CM. Ej.: 30 -> 97 = esquina; 84 -> 93 (lejos) no.
+const int ESQ_SALTO_CM     = 35;
+const int ESQ_SALTO_MIN_CM = 80;
+const int ESQ_HIST         = 8;    // lecturas a CONTROL_MS (50 ms)
+long histL[ESQ_HIST], histR[ESQ_HIST];
+int  histN = 0, histI = 0, histGiros = -1;
+
+bool saltoApertura(const long *h, long d) {
+  if (histN < 3 || d < ESQ_SALTO_MIN_CM) return false;
+  long mn = SIN_PARED_CM;
+  for (int i = 0; i < histN; i++) mn = min(mn, h[i]);
+  return d - mn >= ESQ_SALTO_CM;
+}
+
 bool detectarEsquina(long distL, long distR, long distF) {
+  if (histGiros != turnsCompleted) { histGiros = turnsCompleted; histN = 0; histI = 0; }
+  bool saltoL = saltoApertura(histL, distL), saltoR = saltoApertura(histR, distR);
+  histL[histI] = distL; histR[histI] = distR;
+  histI = (histI + 1) % ESQ_HIST;
+  if (histN < ESQ_HIST) histN++;
+
   bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
   // Antes del giro 1 cualquier lado (todavía no se sabe la dirección); después
   // solo el INTERIOR: la esquina es donde se acaba la pared interior. Con el
   // exterior también contando, un exterior sin dato (o congelado -> 200)
   // dejaba la esquina en manos del frontal nada más.
-  bool abierto = !primerGiro ? (distL > umbralPared || distR > umbralPared)
-                             : ((direccionIzquierda ? distL : distR) > umbralPared);
+  bool abierto = !primerGiro ? (distL > umbralPared || distR > umbralPared || saltoL || saltoR)
+                             : (direccionIzquierda ? (distL > umbralPared || saltoL)
+                                                   : (distR > umbralPared || saltoR));
   bool apertura = paredFrente && abierto;
   if (apertura) contadorEsquina = min(contadorEsquina + 1, (int)esquinaDebounce);
   else          contadorEsquina = max(contadorEsquina - 1, 0);
@@ -943,6 +980,9 @@ void logTarea(void*) {
     portEXIT_CRITICAL(&logMux);
     if (k) {
       Serial.write(trozo, k);
+#if LOG_PI
+      if (piUartListo) Serial2.write(trozo, k);
+#endif
 #if BT_LOG
       if (SerialBT.hasClient()) SerialBT.write(trozo, k);
 #endif
@@ -1007,6 +1047,7 @@ void setup() {
       Serial2.setRxBufferSize(4096);
       Serial2.begin(PI_BAUD, SERIAL_8N1, 17, 16);   // RX=17, TX=16 -> Raspberry Pi
       listo = true;
+      piUartListo = true;
       vTaskDelete(NULL);
     }, "uartPi", 4096, NULL, 5, NULL, 0);
     while (!listo) delay(1);
@@ -1097,6 +1138,15 @@ void loop() {
     default: break;
   }
 
+  static unsigned long tLogEsq = 0;
+  if (LOG_ESQUINA && estado == SIGUIENDO && distF > 0 && distF < FRONT_ESQUINA_MAX
+      && ahora - tLogEsq >= 50) {
+    tLogEsq = ahora;
+    Log.printf("ESQ g%d L:%ld R:%ld F:%ld | crudo L:%ld/%d R:%ld/%d F:%ld/%d | cnt:%d pwm:%d\n",
+               turnsCompleted + 1, distL, distR, distF,
+               tofL.crudo, tofL.st, tofR.crudo, tofR.st, tofF.crudo, tofF.st,
+               contadorEsquina, velocidadMotor);
+  }
   if (LOG_PERIODICO && ahora - tLog >= 100) {
     tLog = ahora;
     const char* nombre = estado == ESPERANDO ? "ESPERANDO" : estado == SIGUIENDO ? "SIGUIENDO"
