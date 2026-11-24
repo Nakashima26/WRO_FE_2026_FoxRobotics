@@ -31,6 +31,7 @@
   <button class="tab on" data-tab="live">En vivo</button>
   <button class="tab" data-tab="tof">Calibrar ToF</button>
   <button class="tab" data-tab="color">Calibrar color</button>
+  <button class="tab" data-tab="runs">Corridas</button>
   <button class="tab" data-tab="sys">Sistema</button>
   <button class="tab" data-tab="esp">ESP</button>
 </nav>
@@ -227,7 +228,66 @@
     </div>
   </div>
 </section>
+<!-- ───────────── CORRIDAS ───────────── -->
+<section id="tab-runs" class="tab-page">
+  <div class="grid-live">
+    <div class="card map-card">
+      <div class="card-h">Replay <span class="muted" id="rep-title">elige una corrida de la lista</span></div>
+      <canvas id="rep-map" width="900" height="900"></canvas>
+      <div class="legend">
+        <span><i style="background:#7d4cff"></i>rastro (pose del localizador)</span>
+        <span><i style="background:var(--ray)"></i>ToF medido</span>
+        <span><i class="ring"></i>esperado por el mapa</span>
+        <span><i style="background:var(--route)"></i>ruta planeada</span>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <div class="card-h">Corridas grabadas <button id="btn-rep-list" class="small">actualizar</button></div>
+        <div class="runs-scroll"><table class="tbl" id="rep-runs"></table></div>
+      </div>
+      <div class="card">
+        <div class="card-h">Video <span class="muted">(HUD grabado, sincronizado)</span></div>
+        <img id="rep-frame" alt="sin video">
+      </div>
+      <div class="card">
+        <div class="card-h">Resumen</div>
+        <table id="rep-sum" class="kv"></table>
+      </div>
+    </div>
+    <div class="card span2">
+      <div class="card-h">En el tiempo <span class="muted">(clic para ir ahí · arriba ToF en cm, abajo PWM y servo · rayas = eventos)</span></div>
+      <canvas id="rep-chart" width="1600" height="420"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>ToF L</span><span><i style="background:var(--green)"></i>ToF R</span>
+        <span><i style="background:var(--ray)"></i>ToF F</span><span><i style="background:var(--pink)"></i>ToF B</span>
+        <span><i style="background:var(--orange)"></i>PWM</span><span><i style="background:#e6e9ee"></i>servo</span>
+        <span><i style="background:#ff4d4f"></i>PARK</span><span><i style="background:#4c9aff"></i>ROUTE</span>
+      </div>
+    </div>
+    <div class="card span2">
+      <div class="card-h">Eventos
+        <input id="rep-ev-q" placeholder="filtrar (ej. PARK, ROUTE, LOCUPD)">
+        <label class="chk"><input type="checkbox" id="rep-ev-esp" checked> líneas del ESP</label>
+        <label class="chk"><input type="checkbox" id="rep-ev-follow" checked> seguir</label>
+      </div>
+      <div id="rep-ev" class="log evlist"></div>
+    </div>
+  </div>
+</section>
 </main>
+
+<div id="repbar" style="display:none">
+  <b>REPLAY</b> <span id="rep-name" class="muted"></span>
+  <button id="rep-back" class="small" title="-5 s">⏪</button>
+  <button id="rep-play">▶</button>
+  <button id="rep-fwd" class="small" title="+5 s">⏩</button>
+  <select id="rep-speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+  <input type="range" id="rep-slider" min="0" max="1000" value="0" step="1">
+  <span id="rep-time" class="mono"></span>
+  <span id="rep-now" class="muted small"></span>
+  <button id="rep-exit" class="warn small">salir del replay</button>
+</div>
 
 <div id="toast"></div>
 <script src="/static/app.js"></script>

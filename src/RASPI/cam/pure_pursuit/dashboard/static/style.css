@@ -89,3 +89,22 @@ pre.log { background: #0b0d10; border-radius: 8px; padding: 8px; margin: 0; max-
   main { padding: 8px; }
   .live-tof { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Corridas / replay */
+#rep-map { aspect-ratio: 1; }
+#rep-frame { width: 100%; border-radius: 8px; background: #000; min-height: 120px; }
+#rep-chart { cursor: crosshair; }
+.runs-scroll { max-height: 230px; overflow-y: auto; }
+table.tbl tr.sel td { background: #4c9aff22; }
+.evlist { max-height: 300px; overflow-y: auto; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+.evlist div { cursor: pointer; padding: 0 4px; border-radius: 4px; }
+.evlist div:hover { background: var(--panel2); }
+.evlist div.cur { background: #4c9aff33; }
+.evlist div.esp { color: #9fd3ff; }
+.evlist div.err { color: var(--bad); }
+.evlist span.t { color: var(--muted); margin-right: 8px; }
+#repbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 14px; background: var(--panel); border-top: 2px solid var(--warn); }
+#repbar input[type=range] { flex: 1; min-width: 200px; }
+.mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
+body.replay main { padding-bottom: 70px; }

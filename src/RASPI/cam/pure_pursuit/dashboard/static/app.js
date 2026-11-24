@@ -8,7 +8,9 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const fmt = (v, d = 0) => (v === null || v === undefined || Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
 
-let S = { tele: {}, sys: {} };     // último estado
+let S = { tele: {}, sys: {} };     // estado que se dibuja (en vivo o el del replay)
+let SLIVE = S;                     // último estado en vivo
+const REP = { on: false };         // replay de una corrida (pestaña Corridas)
 let FIELD = null, fieldKey = "";
 const trail = [];
 const hist = {};                   // sparklines
@@ -34,6 +36,7 @@ $$("nav .tab").forEach((b) => b.onclick = () => {
   $$(".tab-page").forEach((p) => p.classList.toggle("on", p.id === "tab-" + b.dataset.tab));
   if (b.dataset.tab === "sys") { loadLogs(); loadRuns(); loadCalib(); }
   if (b.dataset.tab === "color") loadCalib();
+  if (b.dataset.tab === "runs") { loadRepList(); drawState(); }
 });
 
 // ── Servicio ────────────────────────────────────────────────────────────────
@@ -46,7 +49,13 @@ $$("[data-svc]").forEach((b) => b.onclick = async () => {
 // ── Stream ──────────────────────────────────────────────────────────────────
 function connect() {
   const es = new EventSource("/api/stream");
-  es.onmessage = (ev) => { try { S = JSON.parse(ev.data); onState(); } catch (e) { console.error(e); } };
+  es.onmessage = (ev) => {
+    try {
+      SLIVE = JSON.parse(ev.data);
+      if (REP.on) return;            // en replay lo en vivo se guarda pero no se dibuja
+      S = SLIVE; onState();
+    } catch (e) { console.error(e); }
+  };
   es.onerror = () => { setPill("#pill-link", "desconectado", "bad"); es.close(); setTimeout(connect, 2000); };
 }
 connect();
@@ -83,10 +92,27 @@ function listOf(v) {
   return null;
 }
 
-function onState() {
+function onState() { feedState(); drawState(); }
+// Acumula lo que depende de la historia (sparklines, rastro, pose de la open).
+function feedState() {
+  const t = S.tele || {}, a = t.ack || {};
+  const tof = tofNow();
+  if (tof) { push("tL", tof.L); push("tR", tof.R); push("tF", tof.F); push("tB", tof.B); }
+  push("yaw", a.yaw); push("vel", a.vel); push("srv", a.srv); push("pw", a.pw); push("fps", t.fps);
+  push("ue", a.ue);
+  if (t.loc && t.loc.pose) {
+    if (t.loc.sd) push("sdx", Math.hypot(t.loc.sd[0], t.loc.sd[1]));
+    const p = t.loc.pose, last = trail[trail.length - 1];
+    if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 15) { trail.push(p); if (trail.length > 3000) trail.shift(); }
+  }
+  if (fwNow() === "open") openUpdate();
+  if (!REP.on) for (const l of t.esp_rx || []) espRx(l);
+}
+function drawState() {
   const t = S.tele || {}, sy = S.sys || {};
   const age = t._age;
-  setPill("#pill-link", age === null || age === undefined ? "runtime sin datos" : age < 1.5 ? "en línea" : `sin datos ${fmt(age, 0)} s`,
+  if (REP.on) setPill("#pill-link", "REPLAY " + REP.name, "warn");
+  else setPill("#pill-link", age === null || age === undefined ? "runtime sin datos" : age < 1.5 ? "en línea" : `sin datos ${fmt(age, 0)} s`,
           age !== null && age < 1.5 ? "ok" : "bad");
   setPill("#pill-svc", "servicio " + (sy.service || "?"), sy.service === "active" ? "ok" : "bad");
   const fw = fwNow(), bld = (t.pre && t.pre.bld) || "";
@@ -103,22 +129,12 @@ function onState() {
   const on = rad.wlan || rad.bluetooth;
   setPill("#pill-radio", sy.radios ? (on ? "radios ON" : "radios OFF") : "radios ?", sy.radios ? (on ? "warn" : "ok") : "");
 
-  const tof = tofNow();
-  if (tof) { push("tL", tof.L); push("tR", tof.R); push("tF", tof.F); push("tB", tof.B); }
-  push("yaw", a.yaw); push("vel", a.vel); push("srv", a.srv); push("pw", a.pw); push("fps", t.fps);
-  push("ue", a.ue);
-  if (t.loc) {
-    push("sdx", Math.hypot(t.loc.sd[0], t.loc.sd[1]));
-    const p = t.loc.pose, last = trail[trail.length - 1];
-    if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 15) { trail.push(p); if (trail.length > 600) trail.shift(); }
-  }
-  if (fw === "open") openUpdate();
   ensureField();
   if ($("#tab-live").classList.contains("on")) { drawMap(); drawRadar(); drawSensors(); drawChecklist(); drawLoc(); }
   if ($("#tab-tof").classList.contains("on")) drawTofLive();
   if ($("#tab-sys").classList.contains("on")) drawSys();
   if ($("#tab-esp").classList.contains("on")) drawEsp();
-  for (const l of t.esp_rx || []) espRx(l);
+  if ($("#tab-runs").classList.contains("on")) { drawMap($("#rep-map")); repDrawChart(); }
 }
 
 // ── Geometría ───────────────────────────────────────────────────────────────
@@ -163,8 +179,8 @@ function raycast(ox, oy, dx, dy, segs) {
 }
 
 // ── Mapa ────────────────────────────────────────────────────────────────────
-function drawMap() {
-  const cv = $("#map"), g = cv.getContext("2d"), W = cv.width;
+function drawMap(cv = $("#map")) {
+  const g = cv.getContext("2d"), W = cv.width;
   g.clearRect(0, 0, W, W);
   if (fwNow() === "open") return drawOpen(g, W);
   if (!FIELD) return;
@@ -664,25 +680,44 @@ function openFrame(k, ccw) {
   };
 }
 function openWidth(o, k) { const w = o.map[k]; return w > 0 ? w * 10 : 0; }
+// Filtros de la pose estimada (run 11:33: el frontal de lejos brincaba 1560 -> 1000 -> 1720 mm
+// en la misma recta y el rastro salía en zigzag):
+//  - a lo largo solo con la pared del fondo cerca (OPEN_F_MAX); más lejos el frontal no sirve;
+//  - dentro de una recta el carro no va hacia atrás ni brinca más de OPEN_U_SALTO;
+//  - lo lateral se suaviza; cada recta empieza de cero.
+const OPEN_F_MAX = 1200, OPEN_U_ATRAS = 80, OPEN_U_SALTO = 500, OPEN_V_ALFA = 0.35, OPEN_LAT_FWD = 70;
+let openSt = { tc: -1, u: null, v: null, key: "" };
 function openUpdate() {
   const o = openInfo();
   if (!o.running) return;
   if (o.tc !== undefined && o.tc < openLastTc) openTrail.length = 0;   // arrancó otra corrida
   openLastTc = o.tc ?? openLastTc;
   if (o.est !== "S" || o.dir === "?" || o.tc === undefined) return;
+  const key = [o.tc, o.L, o.R, o.F, o.yaw].join("|");
+  if (key === openSt.key) return;   // el mismo ACK otra vez (el estado se repite hasta que llega otro)
+  openSt.key = key;
+  if (o.tc !== openSt.tc) openSt = { tc: o.tc, u: null, v: null, key };
   const ccw = o.dir === "L", k = ((o.tc % 4) + 4) % 4, w = openWidth(o, k) || 1000, half = OPEN_CAR.width / 2;
+  if (o.F > 0 && o.F < OPEN_F_MAX) {
+    const u = 2 * OPEN_H - o.F - (OPEN_CAR.len - OPEN_CAR.rear_overhang);
+    if (openSt.u === null || (u > openSt.u - OPEN_U_ATRAS && u < openSt.u + OPEN_U_SALTO)) openSt.u = Math.max(u, openSt.u ?? u);
+  }
+  if (openSt.u === null) return;   // lejos del fondo: no se sabe dónde va a lo largo
+  // Lateral: la pared de afuera sirve en toda la recta; la isla solo mientras el sensor
+  // todavía la tiene al lado. Pasando su orilla el ToF interior ve la pared de enfrente
+  // del siguiente pasillo (~90-100 cm) y el carro "brincaba" hacia afuera.
   const dInt = ccw ? o.L : o.R, dOut = ccw ? o.R : o.L;
-  let v;
-  if (dInt > 0 && dInt < w) v = w - dInt - half;
-  else if (dOut > 0 && dOut < w) v = dOut + half;
-  else return;
-  if (!(o.F > 0)) return;   // sin pared enfrente no se sabe dónde va a lo largo
-  const u = 2 * OPEN_H - o.F - (OPEN_CAR.len - OPEN_CAR.rear_overhang);
-  const f = openFrame(k, ccw), [x, y] = f.P(u, v);
+  const finIsla = 2 * OPEN_H - (openWidth(o, (k + 1) % 4) || 1000), uSensor = openSt.u + OPEN_LAT_FWD;
+  let v = null;
+  if (dOut > 0 && dOut < w - half) v = dOut + half;
+  else if (dInt > 0 && dInt < w && uSensor < finIsla - 50) v = w - dInt - half;
+  if (v !== null) openSt.v = openSt.v === null ? v : openSt.v + OPEN_V_ALFA * (v - openSt.v);
+  if (openSt.v === null) return;
+  const f = openFrame(k, ccw), [x, y] = f.P(openSt.u, openSt.v);
   const dev = (o.yaw ?? 0) - (o.ao ?? 0);   // + = a la izquierda
   openPose = [x, y, f.h0 - dev, k];
   const last = openTrail[openTrail.length - 1];
-  if (!last || Math.hypot(x - last[0], y - last[1]) > 20) { openTrail.push(openPose); if (openTrail.length > 1500) openTrail.shift(); }
+  if (!last || Math.hypot(x - last[0], y - last[1]) > 15) { openTrail.push(openPose); if (openTrail.length > 1500) openTrail.shift(); }
 }
 function drawOpen(g, W) {
   const o = openInfo(), ccw = o.dir !== "R";
@@ -718,14 +753,10 @@ function drawOpen(g, W) {
   const f0 = openFrame(0, ccw), pa = f0.P(300, 250), pb = f0.P(700, 250);
   g.strokeStyle = "#fff"; g.lineWidth = 3; g.beginPath(); g.moveTo(X(pa[0]), Y(pa[1])); g.lineTo(X(pb[0]), Y(pb[1])); g.stroke();
   g.beginPath(); g.arc(X(pb[0]), Y(pb[1]), 6, 0, 7); g.fillStyle = "#fff"; g.fill();
-  // rastro estimado (solo rectas: el giro no se estima)
-  if ($("#opt-trail").checked && openTrail.length > 1) {
-    g.strokeStyle = "#7d4cffcc"; g.lineWidth = 2;
-    for (let i = 1; i < openTrail.length; i++) {
-      const p = openTrail[i - 1], q = openTrail[i];
-      if (p[3] !== q[3]) continue;
-      g.beginPath(); g.moveTo(X(p[0]), Y(p[1])); g.lineTo(X(q[0]), Y(q[1])); g.stroke();
-    }
+  // rastro estimado: puntos (solo rectas; el giro no se estima)
+  if ($("#opt-trail").checked && openTrail.length) {
+    g.fillStyle = "#7d4cffaa";
+    for (const p of openTrail) { g.beginPath(); g.arc(X(p[0]), Y(p[1]), 2.5, 0, 7); g.fill(); }
   }
   $("#map-sub").textContent = `Open · ${o.dir === "L" ? "CCW (izquierda)" : o.dir === "R" ? "CW (derecha)" : "sentido ?"} · mapa ${o.map.join("/")}${o.mapok ? " listo" : ""}` +
     (o.running ? ` · recta ${(o.tc ?? 0) + 1} (S${(((o.tc ?? 0) % 4) + 4) % 4 + 1})` : "");
@@ -826,3 +857,248 @@ $$("[data-flash]").forEach((b) => b.onclick = async () => {
   } catch (e) { toast(e.message, true); }
 });
 $$('[data-tab="esp"]').forEach((b) => b.addEventListener("click", () => { flashStatus(); loadSorp(); }));
+
+
+// ── Corridas: replay de una corrida grabada ─────────────────────────────────
+// El runtime guarda <video>_tele.jsonl con el MISMO estado que llega en vivo (run_log.py); las
+// corridas de antes se reconstruyen del journal (pose aproximada, sin ruta). El replay pone ese
+// estado en S y usa el mismo dibujo de "En vivo" (mapa, radar, sensores, open), más esta pestaña.
+let REP_LIST = [];
+async function loadRepList() {
+  try {
+    REP_LIST = await api("/api/runs");
+    const src = { runtime: "completa", journal: "del journal (aprox.)", "?": "?" };
+    $("#rep-runs").innerHTML = "<tr><th>corrida</th><th>fecha</th><th>MB</th><th>telemetría</th><th></th></tr>" +
+      REP_LIST.map((f) => `<tr class="${REP.on && REP.name === f.name ? "sel" : ""}"><td>${f.name.replace(".avi", "")}</td><td>${f.t}</td><td>${f.mb}</td>` +
+        `<td>${f.tele ? src[f.tele] || f.tele : '<span class="muted">se arma del journal</span>'}</td>` +
+        `<td><button class="small ok" data-rep="${f.name}">ver</button> <a href="/api/runs/${f.name}" title="descargar .avi">⬇</a></td></tr>`).join("");
+    $$("[data-rep]").forEach((b) => b.onclick = () => repOpen(b.dataset.rep));
+  } catch (e) { $("#rep-runs").innerHTML = `<tr><td>${e.message}</td></tr>`; }
+}
+$("#btn-rep-list").onclick = loadRepList;
+
+async function repOpen(name) {
+  repPause();
+  $("#rep-title").textContent = `cargando ${name}…`;
+  let d;
+  try { d = await api(`/api/runs/${encodeURIComponent(name)}/timeline`); }
+  catch (e) { $("#rep-title").textContent = ""; return toast(`${name}: ${e.message}`, true); }
+  const st = d.states || [];
+  if (!st.length) { $("#rep-title").textContent = ""; return toast(`${name}: sin estados`, true); }
+  Object.assign(REP, {
+    on: true, name, d, st, ev: d.events || [], i: 0, applied: -1, playing: false, timer: null,
+    t0: st[0].t, t1: st[st.length - 1].t, tcur: st[0].t, frameIdx: -1, frameBusy: false, evShown: -1,
+  });
+  // tiempo del video: el .avi arranca con el header (o el 1er estado) y termina con el último estado
+  REP.v0 = (d.hdr && d.hdr.t) || REP.t0;
+  document.body.classList.add("replay");
+  $("#repbar").style.display = "";
+  $("#rep-name").textContent = name.replace(".avi", "");
+  $("#rep-slider").max = Math.max(1, Math.round((REP.t1 - REP.t0) * 10));
+  $("#hud").dataset.live = $("#hud").dataset.live || $("#hud").src;
+  $("#rep-title").textContent = `${name.replace(".avi", "")} · ${d.summary.src === "journal" ? "reconstruida del journal (pose aprox., sin ruta)" : "telemetría completa"}`;
+  repSummary();
+  repEvents(true);
+  loadRepList();
+  repGo(0);
+}
+
+function repReset() {
+  trail.length = 0; openTrail.length = 0; openPose = null; openLastTc = -1;
+  openSt = { tc: -1, u: null, v: null, key: "" };
+  for (const k of Object.keys(hist)) delete hist[k];
+}
+// Pone el estado i en S; lo que depende de la historia se re-acumula desde el principio si se va para atrás.
+function repGo(i) {
+  if (!REP.on) return;
+  i = Math.max(0, Math.min(REP.st.length - 1, i));
+  if (i < REP.applied) { repReset(); REP.applied = -1; }
+  const sys = (SLIVE && SLIVE.sys) || {};
+  for (let j = REP.applied + 1; j <= i; j++) { S = { tele: { ...REP.st[j], _age: 0 }, sys }; feedState(); }
+  REP.applied = i; REP.i = i;
+  if (!REP.playing) REP.tcur = REP.st[i].t;
+  drawState();
+  repUI();
+}
+function repSeekT(t) {
+  REP.tcur = Math.max(REP.t0, Math.min(REP.t1, t));
+  const st = REP.st;
+  let lo = 0, hi = st.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (st[m].t <= REP.tcur) lo = m; else hi = m - 1; }
+  repGo(lo);
+}
+function repTick() {
+  const sp = parseFloat($("#rep-speed").value) || 1, now = performance.now();
+  REP.tcur += (now - REP.lastTick) / 1000 * sp; REP.lastTick = now;
+  if (REP.tcur >= REP.t1) { REP.tcur = REP.t1; repSeekT(REP.t1); return repPause(); }
+  let i = REP.i;
+  while (i + 1 < REP.st.length && REP.st[i + 1].t <= REP.tcur) i++;
+  if (i !== REP.i) repGo(i); else repUI();
+}
+function repPlay() {
+  if (!REP.on) return;
+  if (REP.i >= REP.st.length - 1) repGo(0);
+  REP.playing = true; REP.lastTick = performance.now();
+  if (!REP.timer) REP.timer = setInterval(repTick, 50);
+  $("#rep-play").textContent = "⏸";
+}
+function repPause() {
+  if (REP.timer) clearInterval(REP.timer);
+  REP.timer = null; REP.playing = false;
+  if ($("#rep-play")) $("#rep-play").textContent = "▶";
+}
+function repExit() {
+  repPause();
+  REP.on = false;
+  document.body.classList.remove("replay");
+  $("#repbar").style.display = "none";
+  if ($("#hud").dataset.live) $("#hud").src = $("#hud").dataset.live;
+  repReset();
+  S = SLIVE; onState();
+  loadRepList();
+}
+$("#rep-play").onclick = () => REP.playing ? repPause() : repPlay();
+$("#rep-back").onclick = () => repSeekT(REP.tcur - 5);
+$("#rep-fwd").onclick = () => repSeekT(REP.tcur + 5);
+$("#rep-exit").onclick = repExit;
+$("#rep-slider").oninput = (e) => repSeekT(REP.t0 + e.target.value / 10);
+document.addEventListener("keydown", (e) => {
+  if (!REP.on || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if (e.key === " ") { e.preventDefault(); REP.playing ? repPause() : repPlay(); }
+  else if (e.key === "ArrowRight") repGo(REP.i + (e.shiftKey ? 10 : 1));
+  else if (e.key === "ArrowLeft") repGo(REP.i - (e.shiftKey ? 10 : 1));
+});
+
+const repFmtT = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+function repUI() {
+  const rel = REP.tcur - REP.t0;
+  $("#rep-slider").value = Math.round(rel * 10);
+  const a = (REP.st[REP.i] || {}).ack || {};
+  $("#rep-time").textContent = `${repFmtT(rel)} / ${repFmtT(REP.t1 - REP.t0)}`;
+  $("#rep-now").textContent = `est ${a.est ?? "—"} · esquina ${fmt(a.tc)}/${fmt(a.tpr)} · pwm ${fmt(a.pw)} · servo ${fmt(a.srv)}`;
+  repFrame();
+  repEvents(false);
+}
+// Cuadro del .avi que va con el tiempo actual (uno a la vez: el siguiente se pide al llegar el anterior).
+function repFrame() {
+  const vi = REP.d.video || {}, n = vi.frames || 0;
+  if (!n) return;
+  const span = Math.max(0.1, REP.t1 - REP.v0);
+  const idx = Math.max(0, Math.min(n - 1, Math.round((REP.tcur - REP.v0) / span * (n - 1))));
+  if (idx === REP.frameIdx || REP.frameBusy) return;
+  REP.frameIdx = idx; REP.frameBusy = true;
+  const url = `/api/runs/${encodeURIComponent(REP.name)}/frame?i=${idx}`;
+  const img = new Image();
+  img.onload = img.onerror = () => {
+    REP.frameBusy = false;
+    if (!REP.on) return;
+    $("#rep-frame").src = img.src; $("#hud").src = img.src;
+    repFrame();   // por si el tiempo ya avanzó
+  };
+  img.src = url;
+}
+
+function repSummary() {
+  const s = REP.d.summary || {};
+  const tof = (k) => s[k] ? `mín ${fmt(s[k].min / 10, 1)} cm · ${fmt(s[k].lost, 1)} % sin lectura` : "—";
+  const ests = Object.entries(s.est_count || {}).map(([k, v]) => `${k}×${v}`).join(" ");
+  const rows = [
+    ["Datos", s.src === "journal" ? "reconstruida del journal (pose aproximada, sin ruta)" : `telemetría completa (${s.n} estados)`],
+    ["Duración", s.armed_s !== undefined ? `${fmt(s.armed_s, 1)} s` : "—"],
+    ["Firmware / sentido", `${s.fw === "open" ? "Open" : "Obstáculos"}${REP.d.hdr && REP.d.hdr.surprise ? " + sorpresa" : ""} · ${s.dir === "L" ? "CCW" : s.dir === "R" ? "CW" : "—"}`],
+    ["Esquinas", `${fmt(s.tc_max)}/${fmt(s.tpr)}`],
+    ["Estado final", `${s.est_end ?? "—"} <span class="muted">(estados: ${ests || "—"})</span>`],
+    ["Distancia (odómetro)", s.dist_m !== undefined ? `${fmt(s.dist_m, 2)} m` : "—"],
+    ["ToF L", tof("tL")], ["ToF R", tof("tR")], ["ToF F", tof("tF")], ["ToF B", tof("tB")],
+    ["UART (errores en la corrida)", s.ue !== undefined ? `ue +${fmt(s.ue)} · uf +${fmt(s.uf)}` : "—"],
+    ["Park", (s.park || []).map((l) => l.replace(/^\[PARK[^\]]*\]\s*/, "")).join("<br>") || "—"],
+    ["Errores", (s.errors || []).length ? s.errors.join("<br>") : "ninguno"],
+  ];
+  $("#rep-sum").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+}
+
+function repEvents(rebuild) {
+  const box = $("#rep-ev");
+  if (rebuild) {
+    const q = $("#rep-ev-q").value.trim().toLowerCase(), esp = $("#rep-ev-esp").checked;
+    REP.evIdx = [];
+    const html = [];
+    REP.ev.forEach((e, k) => {
+      if (!esp && e[2] === "esp") return;
+      if (q && !e[1].toLowerCase().includes(q)) return;
+      const err = /AVISO|Traceback|Error/.test(e[1]);
+      REP.evIdx.push(k);
+      html.push(`<div data-k="${k}" class="${e[2] === "esp" ? "esp" : ""}${err ? " err" : ""}"><span class="t">${repFmtT(e[0] - REP.t0)}</span>${e[2] === "esp" ? "ESP " : ""}${e[1].replace(/</g, "&lt;")}</div>`);
+    });
+    box.innerHTML = html.join("") || '<span class="muted">sin eventos</span>';
+    $$("#rep-ev div[data-k]").forEach((d) => d.onclick = () => { const e = REP.ev[+d.dataset.k]; repSeekT(e[0]); });
+    REP.evShown = -1;
+  }
+  // el último evento que ya pasó
+  let cur = -1;
+  for (const k of REP.evIdx || []) { if (REP.ev[k][0] <= REP.tcur) cur = k; else break; }
+  if (cur === REP.evShown) return;
+  const old = box.querySelector("div.cur"); if (old) old.classList.remove("cur");
+  REP.evShown = cur;
+  const el = cur >= 0 ? box.querySelector(`div[data-k="${cur}"]`) : null;
+  if (el) {
+    el.classList.add("cur");
+    if ($("#rep-ev-follow").checked) box.scrollTop = el.offsetTop - box.offsetTop - box.clientHeight / 2;
+  }
+}
+$("#rep-ev-q").oninput = () => REP.on && repEvents(true);
+$("#rep-ev-esp").onchange = () => REP.on && repEvents(true);
+
+function repDrawChart() {
+  const cv = $("#rep-chart"), g = cv.getContext("2d"), W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+  if (!REP.on) { g.fillStyle = "#8a94a3"; g.font = "20px system-ui"; g.fillText("Elige una corrida para ver sus gráficas", 20, 40); return; }
+  const L = 46, R = W - 10, top1 = 10, h1 = H * 0.58, top2 = top1 + h1 + 14, h2 = H - top2 - 22;
+  const X = (t) => L + (t - REP.t0) / Math.max(0.1, REP.t1 - REP.t0) * (R - L);
+  g.font = "12px system-ui"; g.lineWidth = 1;
+  // franjas por estado del ESP
+  const estCol = { S: "#ffffff06", I: "#2fbf7118", E: "#e0a52618", G: "#4c9aff18", T: "#e5484d18" };
+  let s0 = 0;
+  for (let j = 1; j <= REP.st.length; j++) {
+    const a = j < REP.st.length ? ((REP.st[j].ack || {}).est) : null, b = (REP.st[s0].ack || {}).est;
+    if (j === REP.st.length || a !== b) {
+      if (b && estCol[b]) { g.fillStyle = estCol[b]; g.fillRect(X(REP.st[s0].t), top1, X(REP.st[Math.min(j, REP.st.length - 1)].t) - X(REP.st[s0].t), H - top1 - 20); }
+      s0 = j;
+    }
+  }
+  // rejilla
+  g.strokeStyle = "#2b313b"; g.fillStyle = "#8a94a3";
+  for (const cm of [0, 50, 100, 150]) { const y = top1 + h1 - cm / 150 * h1; g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke(); g.fillText(`${cm}`, 6, y + 4); }
+  for (const v of [0, 128, 255]) { const y = top2 + h2 - v / 255 * h2; g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke(); g.fillText(`${v}`, 6, y + 4); }
+  const dur = REP.t1 - REP.t0, step = dur > 120 ? 20 : dur > 40 ? 10 : 5;
+  for (let s = 0; s <= dur; s += step) { const x = X(REP.t0 + s); g.fillText(`${s}s`, x - 8, H - 5); }
+  // eventos importantes
+  for (const e of REP.ev) {
+    const c = /\[PARK/.test(e[1]) ? "#ff4d4f" : /\[ROUTE\] (plan#|arranque)/.test(e[1]) ? "#4c9aff" : /AVISO|Error|Traceback/.test(e[1]) ? "#e5484d" : null;
+    if (!c) continue;
+    g.strokeStyle = c + "aa"; g.beginPath(); g.moveTo(X(e[0]), top1); g.lineTo(X(e[0]), H - 20); g.stroke();
+  }
+  const series = (key, col, y0, hh, max, scale = 1) => {
+    g.strokeStyle = col; g.lineWidth = 1.6; g.beginPath(); let pen = false;
+    for (const s of REP.st) {
+      const v = (s.ack || {})[key];
+      if (!(typeof v === "number") || v < 0) { pen = false; continue; }
+      const y = y0 + hh - Math.min(max, v * scale) / max * hh;
+      if (pen) g.lineTo(X(s.t), y); else g.moveTo(X(s.t), y);
+      pen = true;
+    }
+    g.stroke();
+  };
+  series("tL", css("--accent"), top1, h1, 150, 0.1); series("tR", css("--green"), top1, h1, 150, 0.1);
+  series("tF", css("--ray"), top1, h1, 150, 0.1); series("tB", css("--pink"), top1, h1, 150, 0.1);
+  series("pw", css("--orange"), top2, h2, 255); series("srv", "#e6e9ee", top2, h2, 255);
+  // cursor
+  const x = X(REP.tcur);
+  g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.moveTo(x, top1); g.lineTo(x, H - 20); g.stroke();
+}
+$("#rep-chart").onclick = (ev) => {
+  if (!REP.on) return;
+  const cv = $("#rep-chart"), r = cv.getBoundingClientRect(), px = (ev.clientX - r.left) * cv.width / r.width;
+  const L = 46, R = cv.width - 10;
+  repSeekT(REP.t0 + (px - L) / (R - L) * (REP.t1 - REP.t0));
+};

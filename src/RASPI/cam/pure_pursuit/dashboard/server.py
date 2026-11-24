@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 from .. import calib_file
+from . import runs
 from ..telemetry import CMD_PORT, RAW_SNAP_PATH, TELE_PORT
 
 HERE = Path(__file__).resolve().parent
@@ -380,10 +381,19 @@ class Handler(BaseHTTPRequestHandler):
                 with TELE.lock:
                     return self._json({"pre": [[round(t, 2), d] for t, d in TELE.pre_hist if t > since]})
             if p == "/api/runs":
-                files = sorted(VIDEOS.glob("orillas*.avi"), key=lambda f: f.stat().st_mtime, reverse=True)[:40]
-                return self._json([{"name": f.name, "mb": round(f.stat().st_size / 1e6, 1),
-                                    "t": time.strftime("%m-%d %H:%M", time.localtime(f.stat().st_mtime))}
-                                   for f in files])
+                return self._json(runs.list_runs(VIDEOS))
+            if p.startswith("/api/runs/") and p.endswith("/timeline"):
+                name = p[len("/api/runs/"):-len("/timeline")]
+                try:
+                    return self._json(runs.load(VIDEOS, name))
+                except Exception as e:
+                    return self._json({"error": str(e)}, 404)
+            if p.startswith("/api/runs/") and p.endswith("/frame"):
+                name = p[len("/api/runs/"):-len("/frame")]
+                jpg = runs.frame_jpeg(VIDEOS, name, int(float(q.get("i", 0))), int(q.get("w", 640)))
+                if jpg is None:
+                    return self._send(404, b"sin frame", "text/plain")
+                return self._send(200, jpg, "image/jpeg")
             if p.startswith("/api/runs/"):
                 name = Path(p[len("/api/runs/"):]).name
                 return self._file(str(VIDEOS / name), "application/octet-stream",

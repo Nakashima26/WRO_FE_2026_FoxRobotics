@@ -64,6 +64,12 @@ Double-click `scripts/dashboard_pc.bat` (or run `python scripts/fox_pc.py`). It 
   - Which firmware the car has, when it was compiled, and the surprise rule.
   - **Sorpresa ON/OFF** buttons. They edit `carrera.json` on the Pi and restart the service.
   - Flashing, only when opened from `fox_pc.py`.
+- **Corridas** (replay of a recorded run)
+  - While the `.avi` records, the runtime writes `orillasN_tele.jsonl` next to it (`run_log.py`): the same state the live view gets (~12/s), plus the important runtime prints and the ESP's log lines.
+  - Runs recorded before this file existed are rebuilt from the service journal the first time you open them (ESP ACKs, `[LOCUPD]` pose, `[ROUTE]` box and pillars). That pose is approximate and there is no planned route. The result is cached as `_tele.jsonl` with `"src": "journal"`.
+  - **ver** loads the run. The bottom bar plays, pauses, jumps ±5 s and changes speed. Space plays/pauses; ←/→ step one state (Shift: 10).
+  - While the replay is on, every tab (En vivo included) draws the recorded state. **salir del replay** goes back to live.
+  - The tab shows the map with the trail, the recorded HUD frame for that moment, a summary (duration, corners, distance, ToF minimum and % lost, UART errors, park), a time chart (click to seek; ESP states as background bands, PARK/plan marks), and the event list (click to seek).
 - **En vivo** with the open firmware
   - The map draws the island with each side at the width measured in lap 1. 60 cm sides are orange; dashed sides were not measured.
   - Section 1 is drawn at the bottom.

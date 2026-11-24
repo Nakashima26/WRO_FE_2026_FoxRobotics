@@ -522,22 +522,32 @@ class PPRuntime:
         ack = getattr(self, "_prev_ack", None)
         if ack and ack.startswith("ACK:V2"):
             self._tele_ack = (now, ack)
-        last = getattr(self, "_tele_ack", None)
-        if last is not None and now - last[0] < 2.0:
-            st["ack"] = parse_ack(last[1])
-            st["ack_age"] = round(now - last[0], 2)
         recent = getattr(self.serial_link, "recent", None)
         if recent:
             t0 = getattr(self, "_tele_rx_t", 0.0)
             lines = [(t, l) for t, l in list(recent) if t > t0]
             if lines:
                 self._tele_rx_t = lines[-1][0]
+            # La open manda ACK sin que se los pidan, entre líneas de log: el ACK más nuevo
+            # de lo recibido (no solo si fue el último renglón, como con try_readline).
+            acks = [l for _t, l in lines if l.startswith("ACK:V2")]
+            if acks:
+                self._tele_ack = (now, acks[-1])
             pre = [l for _t, l in lines if l.startswith("PRE ")]
             if pre:
                 self._tele_pre = (now, pre[-1])
+            rl = getattr(self, "_run_log", None)
+            if rl and lines:
+                wall = time.time() - time.monotonic()
+                rl.add_esp([[round(t + wall, 3), l[:300]] for t, l in lines
+                            if not l.startswith(("ACK:", "PRE "))])
             cal = [l for _t, l in lines if l.startswith("CAL")]
             if cal:
                 st["esp_rx"] = cal
+        last = getattr(self, "_tele_ack", None)
+        if last is not None and now - last[0] < 2.0:
+            st["ack"] = parse_ack(last[1])
+            st["ack_age"] = round(now - last[0], 2)
         pre = getattr(self, "_tele_pre", None)
         if pre is not None and now - pre[0] < 3.0:   # antes del botón o ya TERMINADO
             st["pre"] = parse_pre(pre[1])
@@ -1446,13 +1456,38 @@ class PPRuntime:
             self.bev_recorder = None
         print(f"[REC] Grabación cortada: {float(quieto_s):.0f} s sin moverse "
               f"({self.record_count} frames).", flush=True)
+        self._run_log_close()
         return True
+
+    def _run_log_open(self) -> None:
+        """<video>_tele.jsonl con el estado del dashboard de toda la corrida (run_log.py)."""
+        self._run_log = False
+        if not getattr(C, "REC_TELE", True) or getattr(self, "_rec_fin", False):
+            return
+        try:
+            from .run_log import RunLog
+            p = self.output_file.with_name(self.output_file.stem + "_tele.jsonl")
+            self._run_log = RunLog(p, {"video": self.output_file.name,
+                                       "surprise": bool(getattr(C, "SURPRISE_RULE", False)),
+                                       "route_follow": bool(getattr(C, "ROUTE_FOLLOW", False))})
+            print(f"[REC] Telemetría de la corrida en {p}", flush=True)
+        except Exception as e:
+            print(f"[REC] sin telemetría de la corrida: {e}", flush=True)
+
+    def _run_log_close(self) -> None:
+        rl = getattr(self, "_run_log", None)
+        if rl:
+            rl.close()
+            self._run_log = False
+            print(f"[REC] Telemetría de la corrida cerrada ({rl._n} estados)", flush=True)
 
     def _maybe_record(self, frame: np.ndarray, fps: float,
                       bev: np.ndarray | None = None):
         if not self.cfg.record_orillas:
             return
         self.record_count += 1
+        if getattr(self, "_run_log", None) is None:
+            self._run_log_open()
         # BEV limpio de CADA frame (no 1 de cada record_every_n): el .avi del HUD
         # no permite re-probar la detección de la naranja offline.
         if bev is not None and getattr(C, "REC_BEV_CLEAN", False):
@@ -2746,7 +2781,10 @@ class PPRuntime:
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
                 if self._tele is not None and self._tele.due():
                     try:
-                        self._tele.send(self._tele_state(armed))
+                        _st = self._tele_state(armed)
+                        self._tele.send(_st)
+                        if getattr(self, "_run_log", None) and not getattr(self, "_rec_fin", False):
+                            self._run_log.write(_st)
                     except Exception as e:   # el dashboard nunca tumba la carrera
                         if not getattr(self, "_tele_err", False):
                             print(f"[TELE] error armando el estado: {e}", flush=True)
@@ -2765,6 +2803,7 @@ class PPRuntime:
                 self.video_writer.stop()
             if self.bev_recorder is not None:
                 self.bev_recorder.stop()
+            self._run_log_close()
             cv2.destroyAllWindows()
             self.serial_link.close()
 
