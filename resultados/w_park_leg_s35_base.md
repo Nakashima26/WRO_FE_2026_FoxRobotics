@@ -1,0 +1,52 @@
+# w_park_leg_s35_base
+
+Tipo de prueba: carrera completa con estacionamiento geométrico (latencia/uno.sh: 3 vueltas + estacionamiento) en el banco NUEVO con latencia. TWIN_FW_OVER PARK_GEOM_EXT=1 + PARK_GEOM_ROJO=1, TWIN_PI_EXTRA ROUTE_PARK_GEOM_EXT=1, TWIN_MOTOR_REAL=1, TWIN_VBAT=11.5, TWIN_COST_FIRST=1.95, FF 2.8 / FD 3.8, ruido 1-2 x semillas 35 32 16 36 (8 carreras), xargs -P 7. Commit ce769ef (origin/grok/t/w_park_leg_s35_base): commit vacío sobre 2398305, que es 094f93c (Park GEOM r13 rojoCerca + r14d stickyEarly) aplicado sobre una base anterior, sin los commits 1192b0f..6f9a7b6 (Open MAP y freno de isla por ToF/caras). Sin TWIN_CAMERA_FROM_CALIB ni TWIN_LENS_CALIB: no venían en la orden, a diferencia de w_geom_rojo_s35_base.
+
+## Resumen (resumen.py)
+
+w_park_leg_s35_base: 8/8 ok  media 44.41  mediana 44.06  mejor 42.93  fallas:
+
+## Carreras (última línea STOP)
+
+n1 s16 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 43.34, "turns_completed": 12, "tpr": 12, "lap_times_s": [16.189, 9.674, 10.145], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.738, "E": 6.951, "I": 0.942, "S": 35.149}, "collisions": [], "min_clearance_wall_mm": 40.84, "min_clearance_sign_mm": 51.4, "pass_side_violations": [], "signs_passed": 21, "distance_forward_mm": 24132.1, "distance_backward_mm": 329.2, "mean_speed_mm_s": 564.4, "frames_processed": 1402, "mean_pi_frame_ms": 3.63, "reverse_motor_s": 3.178, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 24813, "render_s": 1.344, "pi_s": 5.09, "other_s": 3.117, "wall_time_s": 9.551, "wall_per_sim_s": 0.22}
+n1 s32 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 45.179, "turns_completed": 12, "tpr": 12, "lap_times_s": [17.208, 10.081, 10.236], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.738, "E": 7.272, "I": 0.914, "S": 36.693}, "collisions": [], "min_clearance_wall_mm": 37.11, "min_clearance_sign_mm": 81.43, "pass_side_violations": [], "signs_passed": 21, "distance_forward_mm": 25043.6, "distance_backward_mm": 350.5, "mean_speed_mm_s": 562.1, "frames_processed": 1474, "mean_pi_frame_ms": 3.45, "reverse_motor_s": 3.331, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 25920, "render_s": 1.409, "pi_s": 5.08, "other_s": 3.181, "wall_time_s": 9.669, "wall_per_sim_s": 0.214}
+n1 s35 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 43.455, "turns_completed": 12, "tpr": 12, "lap_times_s": [14.701, 8.879, 8.739], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.739, "E": 9.067, "I": 0.85, "S": 33.239}, "collisions": [], "min_clearance_wall_mm": 39.96, "min_clearance_sign_mm": 50.03, "pass_side_violations": [], "signs_passed": 21, "distance_forward_mm": 23361.2, "distance_backward_mm": 743.9, "mean_speed_mm_s": 554.7, "frames_processed": 1406, "mean_pi_frame_ms": 3.5, "reverse_motor_s": 5.13, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 26406, "render_s": 1.343, "pi_s": 4.927, "other_s": 3.113, "wall_time_s": 9.383, "wall_per_sim_s": 0.216}
+n1 s36 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 43.837, "turns_completed": 12, "tpr": 12, "lap_times_s": [14.251, 9.775, 9.328], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.738, "E": 8.264, "I": 0.859, "S": 34.415}, "collisions": [], "min_clearance_wall_mm": 46.3, "min_clearance_sign_mm": 45.35, "pass_side_violations": [], "signs_passed": 18, "distance_forward_mm": 22957.7, "distance_backward_mm": 801.9, "mean_speed_mm_s": 542.0, "frames_processed": 1429, "mean_pi_frame_ms": 3.4, "reverse_motor_s": 5.218, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 26262, "render_s": 1.369, "pi_s": 4.859, "other_s": 3.125, "wall_time_s": 9.353, "wall_per_sim_s": 0.213}
+n2 s16 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 42.928, "turns_completed": 12, "tpr": 12, "lap_times_s": [15.641, 9.839, 10.179], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.738, "E": 6.909, "I": 0.921, "S": 34.799}, "collisions": [], "min_clearance_wall_mm": 20.61, "min_clearance_sign_mm": 62.07, "pass_side_violations": [], "signs_passed": 21, "distance_forward_mm": 24402.5, "distance_backward_mm": 343.2, "mean_speed_mm_s": 576.4, "frames_processed": 1403, "mean_pi_frame_ms": 3.53, "reverse_motor_s": 3.301, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 24498, "render_s": 1.375, "pi_s": 4.952, "other_s": 3.163, "wall_time_s": 9.49, "wall_per_sim_s": 0.221}
+n2 s32 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 47.035, "turns_completed": 12, "tpr": 12, "lap_times_s": [17.501, 10.084, 10.119], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.738, "E": 8.985, "I": 0.915, "S": 36.836}, "collisions": [], "min_clearance_wall_mm": 40.35, "min_clearance_sign_mm": 71.89, "pass_side_violations": [], "signs_passed": 21, "distance_forward_mm": 24827.8, "distance_backward_mm": 360.7, "mean_speed_mm_s": 535.5, "frames_processed": 1530, "mean_pi_frame_ms": 4.05, "reverse_motor_s": 3.631, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 27177, "render_s": 1.489, "pi_s": 6.198, "other_s": 3.289, "wall_time_s": 10.976, "wall_per_sim_s": 0.233}
+n2 s35 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 45.258, "turns_completed": 12, "tpr": 12, "lap_times_s": [15.585, 9.014, 8.879], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.739, "E": 9.68, "I": 0.969, "S": 34.31}, "collisions": [], "min_clearance_wall_mm": 39.95, "min_clearance_sign_mm": 62.18, "pass_side_violations": [], "signs_passed": 21, "distance_forward_mm": 23576.3, "distance_backward_mm": 733.3, "mean_speed_mm_s": 537.1, "frames_processed": 1466, "mean_pi_frame_ms": 5.28, "reverse_motor_s": 5.429, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 27251, "render_s": 1.381, "pi_s": 7.734, "other_s": 3.202, "wall_time_s": 12.317, "wall_per_sim_s": 0.272}
+n2 s36 STOP race_finished {"finished": true, "stop_reason": "race_finished", "total_time_s": 44.284, "turns_completed": 12, "tpr": 12, "lap_times_s": [14.574, 9.807, 9.254], "mean_corner_time_s": 0.0, "mean_time_in_g_s": 0.0, "time_per_state_s": {"?": 0.738, "E": 8.49, "I": 0.838, "S": 34.657}, "collisions": [], "min_clearance_wall_mm": 30.74, "min_clearance_sign_mm": 53.83, "pass_side_violations": [], "signs_passed": 18, "distance_forward_mm": 22954.1, "distance_backward_mm": 814.2, "mean_speed_mm_s": 536.7, "frames_processed": 1447, "mean_pi_frame_ms": 3.35, "reverse_motor_s": 5.46, "sign_contacts": [], "signs_touched": 0, "ignored_contacts": [], "sim_loops": 26558, "render_s": 1.357, "pi_s": 4.851, "other_s": 2.953, "wall_time_s": 9.161, "wall_per_sim_s": 0.207}
+
+## Costo por carrera
+
+COSTO n1 s16 {"FF": 2.8, "FD": 3.8, "cuadros": 1402, "media_ms": 10.45130466975752, "p50_ms": 6.964397999999861, "p95_ms": 25.69899080000013, "max_ms": 253.51948159999932, "pct_mas_25ms": 5.349500713266762, "dp_ms": [1950, 1950, 216, 119, 137, 111, 113, 104, 105, 92, 92, 99, 87, 79, 74, 110, 85]}
+COSTO n1 s32 {"FF": 2.8, "FD": 3.8, "cuadros": 1474, "media_ms": 9.944073262957998, "p50_ms": 6.824969200000197, "p95_ms": 23.980941600000527, "max_ms": 237.91672339999937, "pct_mas_25ms": 4.274084124830393, "dp_ms": [1950, 1950, 215, 120, 139, 180, 106, 88, 93, 98, 82, 76, 71, 85, 88]}
+COSTO n1 s35 {"FF": 2.8, "FD": 3.8, "cuadros": 1406, "media_ms": 10.190835090611657, "p50_ms": 7.0488292000000285, "p95_ms": 22.81094759999984, "max_ms": 236.29315680000013, "pct_mas_25ms": 3.769559032716927, "dp_ms": [1950, 1950, 214, 119, 137, 132, 118, 97, 167, 106, 93, 89, 95, 94, 81, 89, 100, 69, 82, 90]}
+COSTO n1 s36 {"FF": 2.8, "FD": 3.8, "cuadros": 1429, "media_ms": 9.776432566270175, "p50_ms": 6.944487200001247, "p95_ms": 21.691560799999717, "max_ms": 243.54932140000045, "pct_mas_25ms": 3.1490552834149756, "dp_ms": [1950, 1950, 221, 122, 121, 100, 165, 108, 107, 101, 98, 94, 72, 66, 74, 76, 80]}
+COSTO n2 s16 {"FF": 2.8, "FD": 3.8, "cuadros": 1403, "media_ms": 10.146343785744863, "p50_ms": 7.09248959999904, "p95_ms": 24.965138799999842, "max_ms": 243.4756772000001, "pct_mas_25ms": 4.989308624376337, "dp_ms": [1950, 1950, 221, 122, 143, 108, 108, 99, 98, 96, 82, 72, 88, 89]}
+COSTO n2 s32 {"FF": 2.8, "FD": 3.8, "cuadros": 1530, "media_ms": 11.569673174117682, "p50_ms": 7.810185600001773, "p95_ms": 27.59702400000137, "max_ms": 241.20084639999996, "pct_mas_25ms": 7.450980392156863, "dp_ms": [1950, 1950, 219, 120, 141, 165, 105, 106, 104, 97, 84, 78, 77, 86, 84]}
+COSTO n2 s35 {"FF": 2.8, "FD": 3.8, "cuadros": 1466, "media_ms": 15.129058910231969, "p50_ms": 11.598781599999164, "p95_ms": 25.947992000001108, "max_ms": 238.63759700000008, "pct_mas_25ms": 7.025920873124147, "dp_ms": [1950, 1950, 217, 120, 123, 129, 119, 97, 166, 105, 105, 87, 95, 92, 79, 78, 96, 74, 76, 78]}
+COSTO n2 s36 {"FF": 2.8, "FD": 3.8, "cuadros": 1447, "media_ms": 9.711848064685578, "p50_ms": 6.797993999999008, "p95_ms": 22.07423399999966, "max_ms": 239.4635940000005, "pct_mas_25ms": 2.48790601243953, "dp_ms": [1950, 1950, 218, 136, 130, 100, 180, 108, 100, 101, 91, 68, 64, 67, 79, 95]}
+
+## Tiempo de reloj total
+
+18.9 s (8 carreras, -P 7 = 2 oleadas, warm-up fuera del cronómetro)
+
+## Validez
+
+VÁLIDA. Corrió sola bajo twin.lock (0 procesos de banco ajenos al inicio), carga máx 2.69, sin OOM/Killed/MemoryError, mean_pi_frame_ms 3.35-5.28, media de media_ms (COSTO) 10.9 ms.
+
+## Comparación (mismo tipo: carrera completa con estacionamiento geométrico; ojo: esas tandas usaron cámara desde calibración y otra base de código)
+
+| carrera | w_geom_rojo_s35_base | r16_wstop | w_park_leg_s35_base |
+|---|---|---|---|
+| n1 s35 | choque 45.695 | 46.169 ok | 43.455 ok |
+| n1 s32 | 43.931 ok | 45.230 ok | 45.179 ok |
+| n1 s16 | 43.462 ok | 43.520 ok | 43.340 ok |
+| n1 s36 | - | choque 6.624 | 43.837 ok |
+| n2 s35 | 45.782 ok | 45.821 ok | 45.258 ok |
+| n2 s32 | 42.828 ok | 43.429 ok | 47.035 ok |
+| n2 s16 | 43.264 ok | 43.708 ok | 42.928 ok |
+| n2 s36 | - | choque 6.691 | 44.284 ok |
+
+- En las carreras que terminan en ambas: frente a w_geom_rojo_s35_base, 5 carreras, +4.47 s; frente a r16_wstop, 6 carreras, -0.68 s.
