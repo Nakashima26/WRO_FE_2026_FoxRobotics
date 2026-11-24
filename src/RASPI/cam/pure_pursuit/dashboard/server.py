@@ -114,12 +114,7 @@ def system_info() -> dict:
         d["service"] = _run(["systemctl", "is-active", SERVICE])
         d["service_since"] = _run(["systemctl", "show", SERVICE, "-p", "ActiveEnterTimestamp", "--value"])
         d["ips"] = _run(["hostname", "-I"]).split()
-        rf = _run(["rfkill", "-J"])
-        try:
-            d["radios"] = {r["type"]: r.get("soft") == "unblocked" and r.get("hard") == "unblocked"
-                           for r in json.loads(rf)[""]}
-        except Exception:
-            d["radios"] = None
+        d["radios"] = _radios() or None
         d["wifi_ssid"] = _run(["iwgetid", "-r"]) or None
     try:
         d["load"] = [round(v, 2) for v in os.getloadavg()]
@@ -155,11 +150,28 @@ def service_action(action: str) -> str:
     return "acción desconocida"
 
 
+def _radios() -> dict:
+    """{wlan: encendido, bluetooth: encendido} leyendo /sys/class/rfkill."""
+    out = {}
+    for dev in Path("/sys/class/rfkill").glob("rfkill*"):
+        try:
+            typ = (dev / "type").read_text().strip()
+            out[typ] = (dev / "soft").read_text().strip() == "0" and (dev / "hard").read_text().strip() == "0"
+        except OSError:
+            pass
+    return out
+
+
 def radio_action(on: bool) -> str:
     if not ON_PI:
         return "no es la Pi"
-    out = _run(["sudo", "-n", "rfkill", "unblock" if on else "block", "wifi"])
-    out += _run(["sudo", "-n", "rfkill", "unblock" if on else "block", "bluetooth"])
+    # Por sysfs (la Pi no trae el binario rfkill): soft=1 bloquea.
+    out = ""
+    for dev in sorted(Path("/sys/class/rfkill").glob("rfkill*")):
+        r = subprocess.run(["sudo", "-n", "tee", str(dev / "soft")], input="0" if on else "1",
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode:
+            out += (r.stderr or "error").strip() + " "
     _SYS["t"] = 0.0
     return out or "ok"
 

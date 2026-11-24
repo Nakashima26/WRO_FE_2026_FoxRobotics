@@ -12,7 +12,7 @@ sudo systemctl enable --now wro-dashboard
 
 # El dashboard (usuario user) arranca/para el runtime y apaga radios sin contraseña.
 if ! sudo -n -l -U user 2>/dev/null | grep -q "NOPASSWD: ALL"; then
-  echo "user ALL=(root) NOPASSWD: /usr/bin/systemctl start wro-runtime, /usr/bin/systemctl stop wro-runtime, /usr/sbin/rfkill" \
+  echo "user ALL=(root) NOPASSWD: /usr/bin/systemctl start wro-runtime, /usr/bin/systemctl stop wro-runtime, /usr/bin/tee /sys/class/rfkill/rfkill*/soft" \
     | sudo tee /etc/sudoers.d/fox-dashboard >/dev/null
   sudo chmod 440 /etc/sudoers.d/fox-dashboard
 fi
