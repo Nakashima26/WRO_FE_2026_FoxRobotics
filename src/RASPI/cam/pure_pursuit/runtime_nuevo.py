@@ -488,6 +488,87 @@ class PPRuntime:
                                        view_pose=view_pose)
         return self.digital.render(empty=empty, view_pose=view_pose)
 
+    # ── Dashboard ─────────────────────────────────────────────────────────────
+
+    def _tele_cmd(self, cmd: dict, armed: bool, frame) -> None:
+        """Comando del dashboard. Al ESP solo desarmado (calibración de ToF antes del botón)."""
+        line = cmd.get("esp")
+        if isinstance(line, str) and line and not armed:
+            line = line.strip()[:200]
+            if line.startswith(("CALQ", "CALT")):
+                self.serial_link.send_line(line)
+                print(f"[TELE] al ESP: {line}", flush=True)
+        if cmd.get("snap") and frame is not None:
+            # Lo que ve la visión: el frame con la corrección de color por el piso (sus bandas HSV
+            # se ajustaron sobre el piso de referencia), sin anotar.
+            from .telemetry import RAW_SNAP_PATH
+            tmp = RAW_SNAP_PATH + ".tmp.jpg"
+            try:
+                lut = getattr(self.color_corr, "_lut", None)
+                img = frame if lut is None else cv2.LUT(frame, lut)
+                if cv2.imwrite(tmp, img, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+                    os.replace(tmp, RAW_SNAP_PATH)
+            except Exception as e:
+                print(f"[TELE] snap falló: {e}", flush=True)
+
+    def _tele_state(self, armed: bool) -> dict:
+        from .telemetry import parse_ack, parse_pre
+        now = time.time()
+        st = {"t": now, "armed": bool(armed), "fps": round(float(getattr(self, "_fps", 0.0) or 0.0), 1),
+              "timing": {k: round(v, 1) for k, v in getattr(self, "_timing_ms", {}).items()},
+              "tc": getattr(self, "_tc", None), "tpr": getattr(self, "_tpr", None)}
+        ack = getattr(self, "_prev_ack", None)
+        if ack and ack.startswith("ACK:V2"):
+            self._tele_ack = (now, ack)
+        last = getattr(self, "_tele_ack", None)
+        if last is not None and now - last[0] < 2.0:
+            st["ack"] = parse_ack(last[1])
+            st["ack_age"] = round(now - last[0], 2)
+        recent = getattr(self.serial_link, "recent", None)
+        if recent:
+            t0 = getattr(self, "_tele_rx_t", 0.0)
+            lines = [(t, l) for t, l in list(recent) if t > t0]
+            if lines:
+                self._tele_rx_t = lines[-1][0]
+            pre = [l for _t, l in lines if l.startswith("PRE ")]
+            if pre:
+                self._tele_pre = (now, pre[-1])
+            cal = [l for _t, l in lines if l.startswith("CAL")]
+            if cal:
+                st["esp_rx"] = cal
+        pre = getattr(self, "_tele_pre", None)
+        if pre is not None and now - pre[0] < 3.0 and not armed:
+            st["pre"] = parse_pre(pre[1])
+        cc = getattr(self, "color_corr", None)
+        if cc is not None:
+            st["color"] = {"on": bool(cc.enabled), "gains": [round(float(g), 3) for g in cc.gains],
+                           "floor": None if cc.last_floor is None else [round(float(v)) for v in cc.last_floor],
+                           "frac": round(float(cc.last_frac), 2)}
+        dm = getattr(self, "digital", None)
+        if dm is not None:
+            st["map"] = {"direction": dm.direction, "parking": dm.parking,
+                         "park_w": float(getattr(dm, "park_w", 0.0) or 0.0),
+                         "confirmed": [[sec, seat, col] for (sec, seat), col in dict(dm.confirmed).items()],
+                         "pose": [float(dm.pose_xy[0]), float(dm.pose_xy[1]), float(dm.heading)]
+                         if getattr(dm, "pose_xy", None) is not None else None}
+        rm = getattr(self, "_rmode", None)
+        if rm is not None and getattr(rm, "loc", None) is not None and rm.loc.odom is not None:
+            loc = rm.loc
+            x, y, h = (float(v) for v in loc.pose())
+            P = loc.P
+            st["loc"] = {"pose": [round(x, 1), round(y, 1), round(h, 2)],
+                         "sd": [round(float(P[0, 0]) ** 0.5, 1), round(float(P[1, 1]) ** 0.5, 1),
+                                round(math.degrees(float(P[2, 2]) ** 0.5), 2)],
+                         "last": {k: list(v) for k, v in dict(loc.last).items()},
+                         "used": int(loc.n_used), "rej": int(loc.n_rej),
+                         "fixed": bool(rm.fixed), "shift": float(rm.shift or 0.0),
+                         "park_w": float(rm.park_w) if rm.park_w is not None else None}
+            pts = self._shown_line()
+            if pts:
+                step = max(1, len(pts) // 160)
+                st["route"] = [[round(float(px)), round(float(py))] for px, py in pts[::step]]
+        return st
+
     def _route_step(self, armed: bool, frame=None, orange=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
         if not getattr(C, "ROUTE_FOLLOW", False):
@@ -2518,6 +2599,14 @@ class PPRuntime:
         # en vez de arrancar la cámara/pipeline en frío con el carro encima.
         armed = False
         ready_ack = False
+        # Dashboard (pure_pursuit/dashboard): estado por UDP local + comandos. Nunca tumba la carrera.
+        self._tele = None
+        if getattr(C, "DASHBOARD_TELEMETRY", True):
+            try:
+                from .telemetry import Telemetry
+                self._tele = Telemetry()
+            except Exception as e:
+                print(f"[TELE] desactivada ({e})", flush=True)
 
         print("[INFO] Pure Pursuit + memoria runtime iniciado (desarmado). ESC para detener.", flush=True)
 
@@ -2554,6 +2643,13 @@ class PPRuntime:
                         self._camera_reopen_and_gate()
                         _cam_last_id, _cam_negros = -1, 0
                         continue
+
+                if self._tele is not None:
+                    for _cmd in self._tele.commands():
+                        try:
+                            self._tele_cmd(_cmd, armed, frame)
+                        except Exception as e:
+                            print(f"[TELE] comando falló: {e}", flush=True)
 
                 self.loop_count += 1
                 if self.loop_count % self.cfg.process_every_n != 0:
@@ -2646,6 +2742,13 @@ class PPRuntime:
                 if _do_rec:
                     self._maybe_record(combined, result.fps, bev=result.bev_frame)
                 self._write_cam_frame(combined)   # ← ahora manda cámara + BEV/ruta
+                if self._tele is not None and self._tele.due():
+                    try:
+                        self._tele.send(self._tele_state(armed))
+                    except Exception as e:   # el dashboard nunca tumba la carrera
+                        if not getattr(self, "_tele_err", False):
+                            print(f"[TELE] error armando el estado: {e}", flush=True)
+                            self._tele_err = True
 
                 self._t_prev_end = time.perf_counter()
                 self._timing_ms["rec"] = (self._t_prev_end - t_disp) * 1000.0
@@ -2786,6 +2889,14 @@ def main():
         if "BAUDRATE" in data and not any(a.startswith("--baudrate") for a in sys.argv):
             args.baudrate = data["BAUDRATE"]
         print(f"[carrera] {sum(not k.startswith('_') for k in data)} valores de carrera.json", flush=True)
+
+    # Calibración de la sede (~/wro_calib.json, la escribe el dashboard) encima de carrera.json.
+    try:
+        import vision as _vision_mod
+        from .calib_file import apply as _calib_apply
+        _calib_apply(C, _vision_mod)
+    except Exception as e:
+        print(f"[CALIB] no aplicada ({e})", flush=True)
 
     if args.surprise_rule is not None:
         C.SURPRISE_RULE = args.surprise_rule

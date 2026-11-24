@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import threading
+from collections import deque
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -287,6 +288,8 @@ class SerialLink:
 		# avanza y no le entran datos de la Pi").
 		self._queue = Queue(maxsize=256)
 		self._last_rx = ""
+		# Últimas líneas recibidas (dashboard: respuestas CAL* del ESP sin consumir _last_rx)
+		self.recent = deque(maxlen=64)
 		self._ready = threading.Event()   # se activa cuando el UART está listo
 		self._thread = threading.Thread(target=self._run, daemon=True)
 		self._thread.start()
@@ -374,6 +377,7 @@ class SerialLink:
 				rx = raw.decode("utf-8", errors="ignore").strip()
 				if rx:
 					self._last_rx = rx
+					self.recent.append((time.monotonic(), rx))
 					print(f"[SERIAL] RX: {rx}", flush=True)
 
 	def open(self, timeout: float = 5.0) -> bool:

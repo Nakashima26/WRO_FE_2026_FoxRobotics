@@ -19,8 +19,15 @@ _LENS_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pure_p
 _EXPO_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camera_tuning", "exposicion.json")
 
 
+# La calibración de la sede (pure_pursuit/calib_file.py, dashboard) puede fijar estos dos antes de abrir la cámara.
+EXPO_OVERRIDE = None             # {"ExposureTime": us, "AnalogueGain": g}: gana sobre el json de abajo
+CAM_GAINS_PI5 = (1.10, 1.37)     # ColourGains de la Pi 5 (ver open_camera)
+
+
 def exposicion_fija():
     """{"ExposureTime": us, "AnalogueGain": g} del json, o None (automática)."""
+    if EXPO_OVERRIDE:
+        return dict(EXPO_OVERRIDE)
     path = os.environ.get("FOX_CAM_EXPO", _EXPO_DEFAULT)
     if path in ("", "0") or not os.path.exists(path):
         return None
@@ -149,7 +156,7 @@ def open_camera(cam_index=0, undistort=True):
         # Pi 5: Picamera2 con el escalado en el ISP (ver _Picam2Cap). FOX_CAM_PIPE=gst|old = GStreamer.
         if gains == "<1.10,1.37>" and os.environ.get("FOX_CAM_PIPE") not in ("gst", "old"):
             try:
-                cap = _Picam2Cap(tuning_pi5, (1.10, 1.37), fps, exposicion_fija())
+                cap = _Picam2Cap(tuning_pi5, tuple(CAM_GAINS_PI5), fps, exposicion_fija())
                 return _wrap_undistort(cap) if undistort else cap
             except Exception as e:
                 print(f"[CAM] AVISO: Picamera2 no abrió ({e}); sigo con GStreamer", flush=True)

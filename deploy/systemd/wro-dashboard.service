@@ -1,0 +1,17 @@
+[Unit]
+Description=FoxRobotics dashboard (http :8080)
+After=network.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/FoxRobotics/src/RASPI/cam
+ExecStart=/home/user/FoxRobotics/.venv/bin/python -m pure_pursuit.dashboard.server
+Restart=always
+RestartSec=2
+Nice=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

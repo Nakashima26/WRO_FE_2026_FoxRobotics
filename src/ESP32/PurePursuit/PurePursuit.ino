@@ -453,7 +453,8 @@ int32_t leerEncoder() {
 #endif
 #endif
 #if FOX_TOF
-int tofMm[TOF_N] = {-1, -1, -1, -1};   // 0=L 1=R 2=trasero 3=frontal
+int tofMm[TOF_N] = {-1, -1, -1, -1};
+int tofRaw[TOF_N] = {-1, -1, -1, -1};   // sin corregirToF (dashboard: calibración de los laterales)   // 0=L 1=R 2=trasero 3=frontal
 // Diagnóstico del I2C (ltf= en el ACK): lo más que tardó la lectura de cada ToF desde el
 // ACK anterior, en µs. En el carro el loop dura 40 ms en casi todos los ACK (lpm=40.0, igual
 // parado que andando: no es el encoder) y el trasero no responde (tB=-1 siempre); un
@@ -2631,14 +2632,92 @@ const int16_t TOF_CAL_LEIDO[2][TOF_CAL_N] = {
   {95, 193, 292, 380, 481, 559, 626, 669},   // L (60 cm: media de 555 y 563)
   {97, 193, 295, 395, 488, 571, 653, 695},   // R
 };
+// Tabla en uso: la del firmware o la que mandó el dashboard (CALT, guardada en NVS "foxcal").
+int16_t tofCalLeido[2][TOF_CAL_N] = {
+  {95, 193, 292, 380, 481, 559, 626, 669},
+  {97, 193, 295, 395, 488, 571, 653, 695},
+};
+bool tofCalNvs[2] = {false, false};
 int corregirToF(int i, int mm) {
   if (!TOF_LAT_CALIB || i > 1 || mm < 0) return mm;
-  const int16_t *l = TOF_CAL_LEIDO[i];
+  const int16_t *l = tofCalLeido[i];
   if (mm <= l[0]) return mm + (TOF_CAL_REAL[0] - l[0]);
   int k = 1;
   while (k < TOF_CAL_N - 1 && mm > l[k]) k++;
   float r = TOF_CAL_REAL[k - 1] + (float)(mm - l[k - 1]) * (TOF_CAL_REAL[k] - TOF_CAL_REAL[k - 1]) / (float)(l[k] - l[k - 1]);
   return r > 1000.0f ? 1000 : (int)(r + 0.5f);
+}
+
+// ── Calibración de los ToF laterales desde el dashboard (solo antes del READY) ──
+//   CALQ                     -> "CALQ L=.. R=.. src=fw|nvs"
+//   CALT,<0|1>,v0,...,v7     -> lecturas CRUDAS a 100..800 mm; se guarda en NVS y se usa ya
+//   CALT,<0|1>,FW            -> vuelve a la tabla del firmware (borra la de NVS)
+// La tabla tiene que crecer estrictamente y quedar dentro de ±25 % de la distancia real.
+#if !defined(FOX_SIL)
+#include <Preferences.h>
+#endif
+void tofCalCargar() {
+#if !defined(FOX_SIL)
+  Preferences pr;
+  if (!pr.begin("foxcal", true)) return;
+  for (int i = 0; i < 2; i++) {
+    int16_t t[TOF_CAL_N];
+    char k[4] = {'t', (char)('0' + i), 0, 0};
+    if (pr.getBytesLength(k) == sizeof(t) && pr.getBytes(k, t, sizeof(t)) == sizeof(t)) {
+      memcpy(tofCalLeido[i], t, sizeof(t));
+      tofCalNvs[i] = true;
+    }
+  }
+  pr.end();
+#endif
+}
+void tofCalResponder() {
+  Serial2.print("CALQ");
+  for (int i = 0; i < 2; i++) {
+    Serial2.print(i == 0 ? " L=" : " R=");
+    for (int k = 0; k < TOF_CAL_N; k++) { if (k) Serial2.print('/'); Serial2.print(tofCalLeido[i][k]); }
+  }
+  Serial2.print(" src="); Serial2.print(tofCalNvs[0] ? "nvs" : "fw"); Serial2.print('/'); Serial2.println(tofCalNvs[1] ? "nvs" : "fw");
+}
+void tofCalComando(const String &line) {
+  if (line.startsWith("CALQ")) { tofCalResponder(); return; }
+  if (!line.startsWith("CALT,")) return;
+  int p = 5, c = line.indexOf(',', p);
+  if (c < 0) { Serial2.println("CALT error formato"); return; }
+  int i = line.substring(p, c).toInt();
+  if (i < 0 || i > 1) { Serial2.println("CALT error sensor"); return; }
+  String resto = line.substring(c + 1);
+  int16_t t[TOF_CAL_N];
+  if (resto.startsWith("FW")) {
+    memcpy(t, TOF_CAL_LEIDO[i], sizeof(t));
+  } else {
+    int n = 0; p = 0;
+    while (n < TOF_CAL_N && p <= (int)resto.length()) {
+      int c2 = resto.indexOf(',', p);
+      t[n++] = (int16_t)resto.substring(p, c2 < 0 ? resto.length() : c2).toInt();
+      if (c2 < 0) break;
+      p = c2 + 1;
+    }
+    if (n != TOF_CAL_N) { Serial2.println("CALT error n"); return; }
+    for (int k = 0; k < TOF_CAL_N; k++) {
+      if ((k && t[k] <= t[k - 1]) || t[k] < TOF_CAL_REAL[k] * 3 / 4 || t[k] > TOF_CAL_REAL[k] * 5 / 4) {
+        Serial2.print("CALT error tabla k="); Serial2.println(k); return;
+      }
+    }
+  }
+  memcpy(tofCalLeido[i], t, sizeof(t));
+  bool fw = resto.startsWith("FW");
+#if !defined(FOX_SIL)
+  Preferences pr;
+  if (pr.begin("foxcal", false)) {
+    char k[4] = {'t', (char)('0' + i), 0, 0};
+    if (fw) pr.remove(k); else pr.putBytes(k, t, sizeof(t));
+    pr.end();
+  }
+#endif
+  tofCalNvs[i] = !fw;
+  Serial2.print("CALT ok "); Serial2.println(i);
+  tofCalResponder();
 }
 
 #if FOX_TOF && !defined(FOX_SIL)
@@ -2784,6 +2863,7 @@ void leerToF() {
       // sigue solo con 0: su status 2 lee ~+20 cm.
       bool corto = (i < 3) && TOF_LAT_TRAS_SHORT;
       bool ok = (st == 0) || (corto && TOF_LAT_ACEPTA_ST2 && st == 2 && mm <= TOF_LAT_ST2_MAX_MM);
+      tofRaw[i] = ok ? (int)mm : -1;
       tofMm[i] = ok ? corregirToF(i, (int)mm) : -1;
       tofUltimoMs[i] = ahora;
     }
@@ -5359,6 +5439,7 @@ void setup() {
 
   // Esperar READY de la Pi (igual que Controller_PI.ino). Bloquea SIN timeout:
   // loop() siempre arranca con piReadyReceived = true.
+  tofCalCargar();
   Serial.println("Esperando READY desde Pi...");
   piReadyReceived = false;
 #if FOX_BNO && !defined(FOX_SIL)
@@ -5375,7 +5456,7 @@ void setup() {
     // Antes del botón: los ToF cada 500 ms al Pi (journal "[SERIAL] RX: PRE ...") para revisarlos sin arrancar.
     // Claves distintas a las del ACK para que nadie lo lea como ACK.
     leerToF();
-    if (millis() - preMs >= 500) {
+    if (millis() - preMs >= 250) {   // 500 -> 250 (2026-11-24): el dashboard calibra con estas lecturas
       preMs = millis();
       Serial2.print("PRE L="); Serial2.print(tofMm[0]);
       Serial2.print(" R=");    Serial2.print(tofMm[1]);
@@ -5388,6 +5469,8 @@ void setup() {
       Serial2.print(" r=");
       for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofReinicios[i]); }
       Serial2.print(" rst="); Serial2.print((int)esp_reset_reason());
+      Serial2.print(" rl=");   // crudas (sin la tabla de calibración)
+      for (int i = 0; i < TOF_N; i++) { if (i) Serial2.print('/'); Serial2.print(tofRaw[i]); }
 #if FOX_ENCODER
       Serial2.print(" enc="); Serial2.print(leerEncoder());   // banco: escala del encoder empujando a mano
 #endif
@@ -5421,7 +5504,9 @@ void setup() {
     if (Serial2.available()) {
       String line = Serial2.readStringUntil('\n');
       line.trim();
-      if (line.indexOf("READY") >= 0) {
+      if (line.startsWith("CAL")) {
+        tofCalComando(line);
+      } else if (line.indexOf("READY") >= 0) {
         piReadyReceived = true;
         timeStart = millis();
         readyMs   = millis();
@@ -5485,7 +5570,7 @@ void loop() {
   lpsMarca(0, lpsT);
 #if FOX_TOF
 #if defined(FOX_SIL)
-  for (int _ti = 0; _ti < TOF_N; _ti++) tofMm[_ti] = corregirToF(_ti, sil_tof_mm(_ti));
+  for (int _ti = 0; _ti < TOF_N; _ti++) { tofRaw[_ti] = sil_tof_mm(_ti); tofMm[_ti] = corregirToF(_ti, tofRaw[_ti]); }
 #else
   leerToF();
 #endif

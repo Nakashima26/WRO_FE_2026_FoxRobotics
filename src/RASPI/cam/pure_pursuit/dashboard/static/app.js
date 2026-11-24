@@ -1,0 +1,609 @@
+"use strict";
+// Fox dashboard. Sin librerías: corre offline desde la Pi.
+// Marco del tapete: x este, y norte, mm, origen al centro. Rumbo h en grados, horario desde el norte:
+// dirección = (sin h, cos h). Montajes de sensores: (derecha, adelante, ángulo relativo al rumbo).
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (v, d = 0) => (v === null || v === undefined || Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
+
+let S = { tele: {}, sys: {} };     // último estado
+let FIELD = null, fieldKey = "";
+const trail = [];
+const hist = {};                   // sparklines
+const HIST_N = 150;
+
+function toast(msg, bad = false) {
+  const d = document.createElement("div");
+  d.textContent = msg; if (bad) d.className = "bad";
+  $("#toast").appendChild(d); setTimeout(() => d.remove(), 5000);
+}
+async function api(path, body) {
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  const ct = r.headers.get("content-type") || "";
+  const out = ct.includes("json") ? await r.json() : await r.text();
+  if (!r.ok || (out && out.error)) throw new Error((out && out.error) || r.statusText);
+  return out;
+}
+
+// ── Pestañas ────────────────────────────────────────────────────────────────
+$$("nav .tab").forEach((b) => b.onclick = () => {
+  $$("nav .tab").forEach((x) => x.classList.toggle("on", x === b));
+  $$(".tab-page").forEach((p) => p.classList.toggle("on", p.id === "tab-" + b.dataset.tab));
+  if (b.dataset.tab === "sys") { loadLogs(); loadRuns(); loadCalib(); }
+  if (b.dataset.tab === "color") loadCalib();
+});
+
+// ── Servicio ────────────────────────────────────────────────────────────────
+$$("[data-svc]").forEach((b) => b.onclick = async () => {
+  const a = b.dataset.svc;
+  if (a !== "start" && S.tele.armed && !confirm("El carro está ARMADO (corriendo). ¿Seguro?")) return;
+  try { toast((await api("/api/service", { action: a })).msg || a); } catch (e) { toast(e.message, true); }
+});
+
+// ── Stream ──────────────────────────────────────────────────────────────────
+function connect() {
+  const es = new EventSource("/api/stream");
+  es.onmessage = (ev) => { try { S = JSON.parse(ev.data); onState(); } catch (e) { console.error(e); } };
+  es.onerror = () => { setPill("#pill-link", "desconectado", "bad"); es.close(); setTimeout(connect, 2000); };
+}
+connect();
+
+function setPill(sel, txt, cls) { const e = $(sel); e.textContent = txt; e.className = "pill " + (cls || ""); }
+
+function push(name, v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return;
+  (hist[name] = hist[name] || []).push(Number(v));
+  if (hist[name].length > HIST_N) hist[name].shift();
+}
+
+// Lecturas ToF vigentes: armado = ACK, desarmado = PRE (antes del botón).
+function tofNow() {
+  const t = S.tele || {}, a = t.ack || {}, p = t.pre || {};
+  if (t.ack) return { L: a.tL, R: a.tR, B: a.tB, F: a.tF, src: "ACK" };
+  if (t.pre) return { L: p.L, R: p.R, B: p.B, F: p.F, raw: p.rl, h: p.h, src: "PRE" };
+  return null;
+}
+
+function onState() {
+  const t = S.tele || {}, sy = S.sys || {};
+  const age = t._age;
+  setPill("#pill-link", age === null || age === undefined ? "runtime sin datos" : age < 1.5 ? "en línea" : `sin datos ${fmt(age, 0)} s`,
+          age !== null && age < 1.5 ? "ok" : "bad");
+  setPill("#pill-svc", "servicio " + (sy.service || "?"), sy.service === "active" ? "ok" : "bad");
+  setPill("#pill-arm", t.armed ? "ARMADO" : "esperando botón", t.armed ? "warn" : "");
+  const a = t.ack || {};
+  setPill("#pill-est", "est " + (a.est || "—"));
+  setPill("#pill-tc", `esquina ${fmt(a.tc ?? t.tc)}/${fmt(a.tpr ?? t.tpr)}`);
+  setPill("#pill-fps", `${fmt(t.fps, 0)} fps`, t.fps >= 30 ? "ok" : t.fps ? "warn" : "");
+  setPill("#pill-temp", `${fmt(sy.temp_c, 0)} °C`, sy.temp_c == null ? "" : sy.temp_c > 75 ? "bad" : sy.temp_c > 65 ? "warn" : "ok");
+  const rad = sy.radios || {};
+  const on = rad.wlan || rad.bluetooth;
+  setPill("#pill-radio", sy.radios ? (on ? "radios ON" : "radios OFF") : "radios ?", sy.radios ? (on ? "warn" : "ok") : "");
+
+  const tof = tofNow();
+  if (tof) { push("tL", tof.L); push("tR", tof.R); push("tF", tof.F); push("tB", tof.B); }
+  push("yaw", a.yaw); push("vel", a.vel); push("srv", a.srv); push("pw", a.pw); push("fps", t.fps);
+  push("ue", a.ue);
+  if (t.loc) {
+    push("sdx", Math.hypot(t.loc.sd[0], t.loc.sd[1]));
+    const p = t.loc.pose, last = trail[trail.length - 1];
+    if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 15) { trail.push(p); if (trail.length > 600) trail.shift(); }
+  }
+  ensureField();
+  if ($("#tab-live").classList.contains("on")) { drawMap(); drawRadar(); drawSensors(); drawChecklist(); drawLoc(); }
+  if ($("#tab-tof").classList.contains("on")) drawTofLive();
+  if ($("#tab-sys").classList.contains("on")) drawSys();
+  for (const l of t.esp_rx || []) espRx(l);
+}
+
+// ── Geometría ───────────────────────────────────────────────────────────────
+async function ensureField() {
+  const m = (S.tele && S.tele.map) || {}, l = (S.tele && S.tele.loc) || {};
+  const w0 = l.park_w ?? m.park_w ?? "";
+  const key = `${m.parking || ""}|${Math.round(w0 || 0)}`;
+  if (key === fieldKey) return;
+  fieldKey = key;
+  try { FIELD = await api(`/api/field?parking=${m.parking || ""}&w0=${w0 || ""}`); } catch (e) { fieldKey = ""; }
+}
+function mountWorld(pose, mount) {
+  const [x, y, h] = pose, [right, fwd, ang] = mount, r = h * Math.PI / 180;
+  const ox = x + fwd * Math.sin(r) + right * Math.cos(r), oy = y + fwd * Math.cos(r) - right * Math.sin(r);
+  const a = (h + ang) * Math.PI / 180;
+  return { ox, oy, dx: Math.sin(a), dy: Math.cos(a) };
+}
+function segments() {
+  if (!FIELD) return [];
+  const o = FIELD.outer, i = FIELD.inner, segs = [];
+  const sq = (h) => [[-h, -h], [h, -h], [h, h], [-h, h]];
+  const poly = (pts) => pts.forEach((p, k) => segs.push([p, pts[(k + 1) % pts.length]]));
+  poly(sq(o)); poly(sq(i));
+  const conf = (S.tele.map && S.tele.map.confirmed) || [];
+  const s = FIELD.sign / 2;
+  for (const [sec, seat] of conf) {
+    const c = FIELD.seats[`${sec}/${seat}`]; if (!c) continue;
+    poly([[c[0] - s, c[1] - s], [c[0] + s, c[1] - s], [c[0] + s, c[1] + s], [c[0] - s, c[1] + s]]);
+  }
+  for (const b of FIELD.barriers || []) poly(b);
+  return segs;
+}
+function raycast(ox, oy, dx, dy, segs) {
+  let best = Infinity;
+  for (const [[ax, ay], [bx, by]] of segs) {
+    const ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((ax - ox) * ey - (ay - oy) * ex) / den, u = ((ax - ox) * dy - (ay - oy) * dx) / den;
+    if (t > 0 && u >= 0 && u <= 1 && t < best) best = t;
+  }
+  return best;
+}
+
+// ── Mapa ────────────────────────────────────────────────────────────────────
+function drawMap() {
+  const cv = $("#map"), g = cv.getContext("2d"), W = cv.width;
+  g.clearRect(0, 0, W, W);
+  if (!FIELD) return;
+  const span = FIELD.outer * 2 + 200, k = W / span;
+  const X = (x) => (x + span / 2) * k, Y = (y) => (span / 2 - y) * k;
+  // tapete
+  g.fillStyle = css("--mat"); g.fillRect(X(-FIELD.outer), Y(FIELD.outer), 2 * FIELD.outer * k, 2 * FIELD.outer * k);
+  g.lineWidth = 6; g.strokeStyle = "#111"; g.strokeRect(X(-FIELD.outer), Y(FIELD.outer), 2 * FIELD.outer * k, 2 * FIELD.outer * k);
+  g.fillStyle = "#222"; g.fillRect(X(-FIELD.inner), Y(FIELD.inner), 2 * FIELD.inner * k, 2 * FIELD.inner * k);
+  const line = (a, b, col, w) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(X(a[0]), Y(a[1])); g.lineTo(X(b[0]), Y(b[1])); g.stroke(); };
+  FIELD.orange.forEach(([a, b]) => line(a, b, css("--orange"), 3));
+  FIELD.blue.forEach(([a, b]) => line(a, b, css("--blue"), 3));
+  // cajón
+  g.fillStyle = "#c98a4b";
+  for (const b of FIELD.barriers || []) { g.beginPath(); b.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.closePath(); g.fill(); }
+  // asientos
+  g.fillStyle = "#0002";
+  for (const c of Object.values(FIELD.seats)) { g.beginPath(); g.arc(X(c[0]), Y(c[1]), 3, 0, 7); g.fill(); }
+  const t = S.tele || {};
+  const conf = (t.map && t.map.confirmed) || [];
+  const s = FIELD.sign;
+  for (const [sec, seat, col] of conf) {
+    const c = FIELD.seats[`${sec}/${seat}`]; if (!c) continue;
+    g.fillStyle = col === "Red" ? css("--red") : col === "Green" ? css("--green") : "#999";
+    g.fillRect(X(c[0] - s / 2), Y(c[1] + s / 2), s * k, s * k);
+    g.strokeStyle = "#000"; g.lineWidth = 1; g.strokeRect(X(c[0] - s / 2), Y(c[1] + s / 2), s * k, s * k);
+  }
+  // ruta
+  if ($("#opt-route").checked && t.route && t.route.length > 1) {
+    g.strokeStyle = css("--route"); g.lineWidth = 2.5; g.setLineDash([]); g.beginPath();
+    t.route.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
+  }
+  // rastro
+  if ($("#opt-trail").checked && trail.length > 1) {
+    g.strokeStyle = "#7d4cff99"; g.lineWidth = 2; g.beginPath();
+    trail.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke();
+  }
+  const pose = t.loc ? t.loc.pose : null;
+  $("#map-sub").textContent = pose ? `x ${fmt(pose[0])} y ${fmt(pose[1])} rumbo ${fmt(pose[2], 1)}°` :
+    (t.map && t.map.direction ? `sentido ${t.map.direction}, cajón ${t.map.parking}` : "sin pose (el carro se ubica al salir del cajón)");
+  if (!pose) return;
+  // incertidumbre
+  if (t.loc.sd) { g.strokeStyle = "#7d4cff"; g.lineWidth = 1; g.beginPath(); g.ellipse(X(pose[0]), Y(pose[1]), Math.max(2, 2 * t.loc.sd[0] * k), Math.max(2, 2 * t.loc.sd[1] * k), 0, 0, 7); g.stroke(); }
+  // cámara (cono del BEV ~83° hasta ~700 mm)
+  if ($("#opt-cam").checked) {
+    const m = mountWorld(pose, [0, 120, 0]), r0 = pose[2] * Math.PI / 180, half = 41.5 * Math.PI / 180, R = 700;
+    g.fillStyle = "#4c9aff22"; g.beginPath(); g.moveTo(X(m.ox), Y(m.oy));
+    for (let a = -half; a <= half + 1e-6; a += half / 10) g.lineTo(X(m.ox + R * Math.sin(r0 + a)), Y(m.oy + R * Math.cos(r0 + a)));
+    g.closePath(); g.fill();
+  }
+  // rayos ToF
+  if ($("#opt-rays").checked) {
+    const tof = tofNow() || {}, segs = segments(), last = t.loc.last || {};
+    const map = { tL: ["tof_left", tof.L], tR: ["tof_right", tof.R], tB: ["tof_rear", tof.B], tF: ["tof_front", tof.F] };
+    for (const [key, [mname, z]] of Object.entries(map)) {
+      const mount = FIELD.mounts[mname]; if (!mount) continue;
+      const m = mountWorld(pose, mount), exp = raycast(m.ox, m.oy, m.dx, m.dy, segs);
+      if (z > 0) {
+        const used = last[key] ? " (usado)" : "";
+        g.strokeStyle = css("--ray"); g.lineWidth = 2; g.beginPath(); g.moveTo(X(m.ox), Y(m.oy));
+        g.lineTo(X(m.ox + z * m.dx), Y(m.oy + z * m.dy)); g.stroke();
+        g.fillStyle = css("--ray"); g.beginPath(); g.arc(X(m.ox + z * m.dx), Y(m.oy + z * m.dy), 3.5, 0, 7); g.fill();
+        if (Number.isFinite(exp) && exp < 1500) {
+          g.strokeStyle = Math.abs(z - exp) > 60 ? css("--bad") : css("--ray"); g.lineWidth = 2;
+          g.beginPath(); g.arc(X(m.ox + exp * m.dx), Y(m.oy + exp * m.dy), 6, 0, 7); g.stroke();
+        }
+      }
+    }
+  }
+  drawCar(g, X, Y, k, pose);
+}
+function drawCar(g, X, Y, k, pose) {
+  const car = (FIELD && FIELD.car) || { len: 176, width: 125, rear_overhang: 21.8 };
+  const r = pose[2] * Math.PI / 180, f = [Math.sin(r), Math.cos(r)], rt = [Math.cos(r), -Math.sin(r)];
+  const P = (fw, ri) => [pose[0] + fw * f[0] + ri * rt[0], pose[1] + fw * f[1] + ri * rt[1]];
+  const b = -car.rear_overhang, fr = car.len - car.rear_overhang, w = car.width / 2;
+  const pts = [P(b, -w), P(fr, -w), P(fr, w), P(b, w)];
+  g.fillStyle = "#1e66f5cc"; g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.beginPath();
+  pts.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.closePath(); g.fill(); g.stroke();
+  const n = P(fr, 0); g.fillStyle = "#fff"; g.beginPath(); g.arc(X(n[0]), Y(n[1]), 3, 0, 7); g.fill();
+}
+
+// ── Radar (vista desde el carro) ────────────────────────────────────────────
+function drawRadar() {
+  const cv = $("#radar"), g = cv.getContext("2d"), W = cv.width;
+  g.clearRect(0, 0, W, W);
+  const R = 1000, k = (W / 2 - 20) / R, cx = W / 2, cy = W / 2 + 40;
+  g.strokeStyle = "#2b313b"; g.fillStyle = "#8a94a3"; g.font = "11px system-ui"; g.lineWidth = 1;
+  for (const d of [200, 400, 600, 800]) { g.beginPath(); g.arc(cx, cy, d * k, 0, 7); g.stroke(); g.fillText(`${d / 10} cm`, cx + 3, cy - d * k - 2); }
+  const pose = [0, 0, 0], X = (x) => cx + x * k, Y = (y) => cy - y * k;
+  const tof = tofNow();
+  if (FIELD && tof) {
+    const raw = tof.raw || [], order = { L: 0, R: 1, B: 2, F: 3 };
+    for (const [key, mname] of [["L", "tof_left"], ["R", "tof_right"], ["B", "tof_rear"], ["F", "tof_front"]]) {
+      const mount = FIELD.mounts[mname]; if (!mount) continue;
+      const m = mountWorld(pose, mount), z = tof[key], ok = z > 0;
+      const zz = ok ? Math.min(z, R) : R * 0.25;
+      g.strokeStyle = ok ? css("--ray") : css("--bad"); g.setLineDash(ok ? [] : [4, 4]); g.lineWidth = 3;
+      g.beginPath(); g.moveTo(X(m.ox), Y(m.oy)); g.lineTo(X(m.ox + zz * m.dx), Y(m.oy + zz * m.dy)); g.stroke(); g.setLineDash([]);
+      // cono del sensor (~27°)
+      g.fillStyle = ok ? "#ffd84d18" : "#e5484d18"; g.beginPath(); g.moveTo(X(m.ox), Y(m.oy));
+      const a0 = Math.atan2(m.dx, m.dy);
+      for (let a = -0.235; a <= 0.236; a += 0.047) g.lineTo(X(m.ox + zz * Math.sin(a0 + a)), Y(m.oy + zz * Math.cos(a0 + a)));
+      g.closePath(); g.fill();
+      const lx = X(m.ox + (zz + 60) * m.dx), ly = Y(m.oy + (zz + 60) * m.dy);
+      g.fillStyle = ok ? "#fff" : css("--bad"); g.font = "bold 15px system-ui"; g.textAlign = "center";
+      g.fillText(ok ? `${key} ${Math.round(z)}` : `${key} —`, lx, ly);
+      if (raw[order[key]] !== undefined) { g.font = "11px system-ui"; g.fillStyle = "#8a94a3"; g.fillText(`crudo ${raw[order[key]]}`, lx, ly + 14); }
+      g.textAlign = "start";
+    }
+  } else {
+    g.fillStyle = "#8a94a3"; g.font = "14px system-ui"; g.fillText("sin lecturas del ESP", 20, 30);
+  }
+  drawCar(g, X, Y, k, pose);
+  g.fillStyle = "#8a94a3"; g.font = "11px system-ui"; g.fillText(tof ? `fuente: ${tof.src === "PRE" ? "antes del botón (PRE)" : "carrera (ACK)"}` : "", 10, W - 10);
+}
+
+// ── Sensores ────────────────────────────────────────────────────────────────
+const SENSORS = [
+  ["tL", "ToF izq", "mm"], ["tR", "ToF der", "mm"], ["tF", "ToF frente", "mm"], ["tB", "ToF atrás", "mm"],
+  ["yaw", "Rumbo (yaw)", "°"], ["vel", "Velocidad", "mm/s"], ["pw", "PWM", ""], ["srv", "Servo", ""],
+  ["fps", "Cámara/loop", "fps"], ["ue", "Errores UART", ""], ["sdx", "Incertidumbre pose", "mm"],
+];
+function spark(cv, arr) {
+  const g = cv.getContext("2d"), W = cv.width = cv.clientWidth || 140, H = cv.height = 34;
+  g.clearRect(0, 0, W, H); if (!arr || arr.length < 2) return;
+  let lo = Math.min(...arr), hi = Math.max(...arr); if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
+  g.strokeStyle = css("--accent"); g.lineWidth = 1.5; g.beginPath();
+  arr.forEach((v, i) => { const x = i / (HIST_N - 1) * W, y = H - 2 - (v - lo) / (hi - lo) * (H - 4); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.stroke();
+}
+function drawSensors() {
+  const box = $("#sensors");
+  if (!box.children.length) box.innerHTML = SENSORS.map(([k, n]) => `<div class="sensor" id="s-${k}"><div class="n">${n}</div><div class="v">—</div><canvas></canvas></div>`).join("");
+  for (const [k, , u] of SENSORS) {
+    const el = $(`#s-${k}`), a = hist[k] || [], v = a[a.length - 1];
+    el.querySelector(".v").innerHTML = v === undefined ? "—" : `${fmt(v, Math.abs(v) < 10 && k !== "ue" ? 1 : 0)} <small>${u}</small>`;
+    el.classList.toggle("bad", (k.startsWith("t") && k.length === 2 && v !== undefined && v <= 0) || (k === "ue" && v > 0));
+    spark(el.querySelector("canvas"), a);
+  }
+}
+
+// ── Checklist ───────────────────────────────────────────────────────────────
+function drawChecklist() {
+  const t = S.tele || {}, sy = S.sys || {}, items = [];
+  const add = (st, txt, d = "") => items.push(`<li class="${st}"><b>${st === "ok" ? "✓" : st === "bad" ? "✗" : "!"}</b>${txt}<span class="d">${d}</span></li>`);
+  add(sy.service === "active" ? "ok" : "bad", "Servicio wro-runtime", sy.service || "?");
+  add(t._age !== null && t._age < 1.5 ? "ok" : "bad", "Telemetría del runtime", t._age === null ? "nunca" : `hace ${fmt(t._age, 1)} s`);
+  const esp = t.armed ? !!t.ack : !!t.pre;
+  add(esp ? "ok" : "bad", "ESP32 respondiendo", t.armed ? (t.ack ? "ACK" : "sin ACK") : (t.pre ? "PRE" : "sin PRE (¿ESP apagado o ya armado?)"));
+  const tof = tofNow();
+  if (tof) {
+    const bad = ["L", "R", "F", "B"].filter((k) => !(tof[k] > 0));
+    add(bad.length ? (bad.length > 1 ? "bad" : "warn") : "ok", "4 ToF con lectura", bad.length ? `sin: ${bad.join(" ")}` : `${tof.L}/${tof.R}/${tof.F}/${tof.B}`);
+    if (t.pre && t.pre.i) add(String(t.pre.i) === "1111" ? "ok" : "bad", "ToF iniciados al arrancar el ESP", `i=${t.pre.i}`);
+  } else add("bad", "4 ToF con lectura", "sin datos");
+  add(t.fps >= 30 ? "ok" : t.fps >= 20 ? "warn" : "bad", "Cámara y loop", `${fmt(t.fps, 0)} fps`);
+  add(sy.temp_c == null ? "warn" : sy.temp_c < 70 ? "ok" : sy.temp_c < 80 ? "warn" : "bad", "Temperatura de la Pi", `${fmt(sy.temp_c, 0)} °C`);
+  add(sy.throttled === 0 ? "ok" : sy.throttled === null || sy.throttled === undefined ? "warn" : "bad", "Sin bajo voltaje ni throttling",
+      sy.throttled ? "0x" + sy.throttled.toString(16) + " (revisa la pila)" : "");
+  add(sy.disk_free_gb > 2 ? "ok" : "warn", "Espacio para grabar", `${fmt(sy.disk_free_gb, 1)} GB`);
+  add(sy.calib ? "ok" : "warn", "Calibración de la sede", sy.calib ? "cargada al arrancar" : "sin archivo (valores del repo)");
+  const cc = t.color;
+  if (cc) add(cc.floor ? "ok" : "warn", "Corrección de color por piso", cc.floor ? `ganancias ${cc.gains.map((v) => v.toFixed(2)).join("/")}` : "todavía no mide el piso");
+  const rad = sy.radios || {};
+  if (!sy.radios) add("warn", "Radios para la ronda (regla 11.10)", "no se pudo leer rfkill");
+  else add(rad.wlan || rad.bluetooth ? "warn" : "ok", "Radios para la ronda (regla 11.10)", rad.wlan || rad.bluetooth ? "Wi-Fi/BT encendidos: apágalos antes de la ronda" : "apagados");
+  $("#checklist").innerHTML = items.join("");
+}
+function drawLoc() {
+  const t = S.tele || {}, l = t.loc, a = t.ack || {}, m = t.map || {};
+  const rows = [
+    ["Sentido / cajón", `${m.direction || "—"} / ${m.parking || "—"}`],
+    ["Arranque ubicado", l ? (l.fixed ? `sí (δ pose ${fmt(l.shift)} mm, cajón w0 ${fmt(l.park_w)})` : "todavía no") : "—"],
+    ["Pose x, y, rumbo", l ? `${fmt(l.pose[0])}, ${fmt(l.pose[1])}, ${fmt(l.pose[2], 1)}°` : "—"],
+    ["σ pose", l ? `${fmt(l.sd[0])} / ${fmt(l.sd[1])} mm, ${fmt(l.sd[2], 2)}°` : "—"],
+    ["Lecturas usadas / tiradas", l ? `${l.used} / ${l.rej}` : "—"],
+    ["Postes confirmados", (m.confirmed || []).map((c) => `${c[0]}/${c[1]} ${c[2] === "Red" ? "🔴" : "🟢"}`).join("  ") || "—"],
+    ["Odómetro", `${fmt(a.od)} mm`],
+    ["Tiempos (ms)", Object.entries(t.timing || {}).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"],
+  ];
+  $("#loc-table").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+}
+
+// ── Sistema ─────────────────────────────────────────────────────────────────
+function drawSys() {
+  const sy = S.sys || {};
+  const thr = sy.throttled;
+  const thrTxt = thr === null || thr === undefined ? "?" : thr === 0 ? "ok" :
+    [[0, "bajo voltaje AHORA"], [1, "frecuencia limitada"], [2, "throttling"], [3, "límite térmico"], [16, "hubo bajo voltaje"], [18, "hubo throttling"]]
+      .filter(([b]) => thr & (1 << b)).map(([, s]) => s).join(", ");
+  const rows = [
+    ["Commit", sy.git], ["Servicio", `${sy.service} desde ${sy.service_since || "?"}`], ["Temperatura", `${fmt(sy.temp_c, 1)} °C`],
+    ["Alimentación", thrTxt], ["Carga", (sy.load || []).join(" ")], ["Disco libre", `${fmt(sy.disk_free_gb, 1)} GB`],
+    ["IPs", (sy.ips || []).join("  ")], ["Wi-Fi", sy.wifi_ssid || "—"],
+    ["Radios", sy.radios ? Object.entries(sy.radios).map(([k, v]) => `${k} ${v ? "ON" : "off"}`).join(", ") : "?"],
+    ["Calibración", sy.calib || "sin archivo"],
+  ];
+  $("#sys-table").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v ?? "—"}</td></tr>`).join("");
+}
+$("#btn-ronda").onclick = async () => {
+  if (!confirm("Apaga Wi-Fi y Bluetooth. Si estás conectado por Wi-Fi vas a perder el dashboard. ¿Seguir?")) return;
+  try { toast((await api("/api/radio", { on: false })).msg); } catch (e) { toast(e.message, true); }
+};
+$("#btn-radio-on").onclick = async () => { try { toast((await api("/api/radio", { on: true })).msg); } catch (e) { toast(e.message, true); } };
+async function loadLogs() {
+  try {
+    const f = $("#log-f").value, q = $("#log-q").value.trim();
+    const txt = await api(`/api/logs?n=300&f=${encodeURIComponent(q || f)}`);
+    const el = $("#log"), atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+    el.textContent = txt; if (atBottom) el.scrollTop = el.scrollHeight;
+  } catch (e) { $("#log").textContent = e.message; }
+}
+$("#btn-log").onclick = loadLogs; $("#log-f").onchange = loadLogs;
+setInterval(() => { if ($("#tab-sys").classList.contains("on") && $("#log-auto").checked) loadLogs(); }, 3000);
+async function loadRuns() {
+  try {
+    const r = await api("/api/runs");
+    $("#runs").innerHTML = "<tr><th>archivo</th><th>MB</th><th>fecha</th></tr>" +
+      r.map((f) => `<tr><td><a href="/api/runs/${f.name}">${f.name}</a></td><td>${f.mb}</td><td>${f.t}</td></tr>`).join("");
+  } catch (e) { $("#runs").innerHTML = `<tr><td>${e.message}</td></tr>`; }
+}
+$("#btn-runs").onclick = loadRuns;
+let CALIB = {};
+async function loadCalib() {
+  try {
+    const r = await api("/api/calib"); CALIB = r.data || {};
+    $("#calib-path").textContent = r.path;
+    const show = { ...CALIB }; if (show._hist) show._hist = `${show._hist.length} versiones anteriores`;
+    $("#calib-json").textContent = JSON.stringify(show, null, 1) || "{}";
+    if (!bandsInit) initBands();
+  } catch (e) { $("#calib-json").textContent = e.message; }
+}
+$("#btn-calib-undo").onclick = async () => {
+  if (!confirm("¿Regresar a la calibración anterior?")) return;
+  try { toast((await api("/api/calib/undo", {})).msg); loadCalib(); } catch (e) { toast(e.message, true); }
+};
+
+$("#btn-hud").onclick = () => {
+  const img = $("#hud");
+  if (img.dataset.off) { img.src = "/api/hud.mjpg?fps=6"; delete img.dataset.off; $("#btn-hud").textContent = "pausar"; }
+  else { img.src = ""; img.dataset.off = 1; $("#btn-hud").textContent = "reanudar"; }
+};
+$("#btn-clear-trail").onclick = () => { trail.length = 0; };
+
+// ── Calibración de ToF ──────────────────────────────────────────────────────
+const REAL = [100, 200, 300, 400, 500, 600, 700, 800];
+const tofPts = { L: [], R: [] };        // [real, crudoMediana, sigma]
+let espTable = null;                    // {L: [...], R: [...], src}
+function median(a) { const s = [...a].sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : NaN; }
+function std(a) { if (a.length < 2) return 0; const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / (a.length - 1)); }
+
+async function preWindow(sec) {
+  const since = Date.now() / 1000 - sec;
+  const r = await api(`/api/pre?since=${since}`);
+  return r.pre.map(([, d]) => d);
+}
+function drawTofLive() {
+  const p = (S.tele || {}).pre;
+  const box = $("#tof-live");
+  if (!p) { box.innerHTML = `<div class="sensor bad" style="grid-column: span 4"><div class="n">Sin lecturas PRE</div><div class="v small">El servicio tiene que estar corriendo y el carro SIN arrancar. Si ya se picó el botón, reinicia el servicio.</div></div>`; return; }
+  const raw = p.rl || [];
+  box.innerHTML = [["L", 0], ["R", 1], ["B", 2], ["F", 3]].map(([k, i]) =>
+    `<div class="sensor ${raw[i] > 0 ? "" : "bad"}"><div class="n">${k} crudo · corregido</div><div class="v">${raw[i] ?? "—"} <small>· ${p[k] ?? "—"} mm</small></div></div>`).join("");
+}
+$("#btn-tof-cap").onclick = async () => {
+  const rL = parseFloat($("#tof-real-L").value), rR = parseFloat($("#tof-real-R").value);
+  if (!(rL > 0) && !(rR > 0)) return toast("Escribe la distancia real de al menos un lado", true);
+  try {
+    const pre = await preWindow(2.2);
+    if (pre.length < 5) return toast("Pocas lecturas (¿el carro ya arrancó?). Espera 2 s y vuelve a capturar.", true);
+    for (const [side, real, i] of [["L", rL, 0], ["R", rR, 1]]) {
+      if (!(real > 0)) continue;
+      const vals = pre.map((d) => (d.rl || [])[i]).filter((v) => v > 0);
+      if (vals.length < 4) { toast(`${side}: sin lecturas válidas`, true); continue; }
+      const m = median(vals), sd = std(vals);
+      tofPts[side] = tofPts[side].filter((q) => Math.abs(q[0] - real) > 5);
+      tofPts[side].push([real, m, sd]); tofPts[side].sort((a, b) => a[0] - b[0]);
+      if (sd > 15) toast(`${side}: lecturas inestables (σ ${sd.toFixed(0)} mm). ¿Está paralelo y quieto?`, true);
+    }
+    drawTofCal();
+  } catch (e) { toast(e.message, true); }
+};
+// Tabla leído(real) a 100..800: interpolación lineal entre lo capturado; fuera, la pendiente del extremo.
+function fitTable(pts) {
+  if (pts.length < 2) return null;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const at = (r) => {
+    let i = 1; while (i < xs.length - 1 && r > xs[i]) i++;
+    const x0 = xs[i - 1], x1 = xs[i], y0 = ys[i - 1], y1 = ys[i];
+    return y0 + (r - x0) * (y1 - y0) / (x1 - x0);
+  };
+  const out = REAL.map((r) => Math.round(at(r)));
+  for (let k = 1; k < out.length; k++) if (out[k] <= out[k - 1]) out[k] = out[k - 1] + 1;
+  return out;
+}
+function drawTofCal() {
+  const tb = $("#tof-points tbody"); let n = 0;
+  tb.innerHTML = ["L", "R"].flatMap((s) => tofPts[s].map((p, j) =>
+    `<tr><td>${++n}</td><td>${s}</td><td>${p[0]}</td><td>${p[1].toFixed(0)}</td><td>${p[2].toFixed(1)}</td><td>${(p[1] - p[0]).toFixed(0)}</td><td><button class="small" data-del="${s}:${j}">✕</button></td></tr>`)).join("");
+  $$("[data-del]").forEach((b) => b.onclick = () => { const [s, j] = b.dataset.del.split(":"); tofPts[s].splice(+j, 1); drawTofCal(); });
+  const fit = { L: fitTable(tofPts.L), R: fitTable(tofPts.R) };
+  const row = (name, arr) => `<tr><td>${name}</td>${REAL.map((_, i) => `<td>${arr ? arr[i] : "—"}</td>`).join("")}</tr>`;
+  $("#tof-table").innerHTML = `<tr><th>real</th>${REAL.map((r) => `<th>${r}</th>`).join("")}</tr>` +
+    row("L nueva", fit.L) + row("R nueva", fit.R) +
+    (espTable ? row(`L ESP (${espTable.src[0]})`, espTable.L) + row(`R ESP (${espTable.src[1]})`, espTable.R) : "");
+  // gráfica
+  const cv = $("#tof-chart"), g = cv.getContext("2d"), W = cv.width, H = cv.height, P = 34;
+  g.clearRect(0, 0, W, H);
+  const X = (v) => P + (v / 900) * (W - P - 10), Y = (v) => H - P - (v / 900) * (H - P - 10);
+  g.strokeStyle = "#2b313b"; g.fillStyle = "#8a94a3"; g.font = "11px system-ui"; g.lineWidth = 1;
+  for (let v = 0; v <= 900; v += 100) { g.beginPath(); g.moveTo(X(v), Y(0)); g.lineTo(X(v), Y(900)); g.moveTo(X(0), Y(v)); g.lineTo(X(900), Y(v)); g.stroke(); g.fillText(v, X(v) - 8, H - P + 14); g.fillText(v, 2, Y(v) + 4); }
+  g.fillText("real (mm)", W - 70, H - 4); g.fillText("crudo", 4, 12);
+  g.strokeStyle = "#8a94a3"; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(900), Y(900)); g.stroke(); g.setLineDash([]);
+  const series = [["L", "#ffd84d"], ["R", "#4c9aff"]];
+  for (const [s, col] of series) {
+    if (espTable) { g.strokeStyle = col + "66"; g.lineWidth = 1.5; g.beginPath(); espTable[s].forEach((v, i) => i ? g.lineTo(X(REAL[i]), Y(v)) : g.moveTo(X(REAL[i]), Y(v))); g.stroke(); }
+    if (fit[s]) { g.strokeStyle = col; g.lineWidth = 2.5; g.beginPath(); fit[s].forEach((v, i) => i ? g.lineTo(X(REAL[i]), Y(v)) : g.moveTo(X(REAL[i]), Y(v))); g.stroke(); }
+    g.fillStyle = col; for (const p of tofPts[s]) { g.beginPath(); g.arc(X(p[0]), Y(p[1]), 4, 0, 7); g.fill(); }
+  }
+  g.fillStyle = "#8a94a3"; g.fillText("línea gruesa = nueva · delgada = la del ESP · punteada = perfecta", P + 6, 14);
+}
+function espRx(line) {
+  const el = $("#esp-rx"); el.textContent = (el.textContent + "\n" + line).split("\n").slice(-12).join("\n").trim();
+  const m = line.match(/^CALQ L=([\d/]+) R=([\d/]+) src=(\w+)\/(\w+)/);
+  if (m) { espTable = { L: m[1].split("/").map(Number), R: m[2].split("/").map(Number), src: [m[3], m[4]] }; drawTofCal(); }
+  if (line.startsWith("CALT ok")) toast("ESP: tabla guardada");
+  if (line.startsWith("CALT error")) toast("ESP rechazó la tabla: " + line, true);
+}
+async function sendEsp(line) {
+  if (S.tele.armed) return toast("El carro está armado: el ESP solo acepta antes del botón. Reinicia el servicio.", true);
+  try { await api("/api/esp", { line }); toast("enviado: " + line.slice(0, 40)); } catch (e) { toast(e.message, true); }
+}
+$("#btn-calq").onclick = () => sendEsp("CALQ");
+for (const [side, i] of [["L", 0], ["R", 1]]) {
+  $(`#btn-calt-${side}`).onclick = async () => {
+    const tab = fitTable(tofPts[side]);
+    if (!tab) return toast(`${side}: captura al menos 2 distancias (mejor 3+)`, true);
+    if (!confirm(`Enviar al ESP la tabla ${side}: ${tab.join(", ")}`)) return;
+    await sendEsp(`CALT,${i},${tab.join(",")}`);
+    try {
+      const d = (await api("/api/calib")).data || {};
+      d.tof = d.tof || {}; d.tof[side] = tab; d.tof[side + "_pts"] = tofPts[side]; d.tof.t = new Date().toISOString();
+      await api("/api/calib", { data: d });
+    } catch (e) { toast("no se guardó el registro: " + e.message, true); }
+    setTimeout(() => sendEsp("CALQ"), 600);
+  };
+}
+$("#btn-calt-fw").onclick = async () => {
+  if (!confirm("¿Regresar L y R a la tabla del firmware?")) return;
+  await sendEsp("CALT,0,FW"); setTimeout(() => sendEsp("CALT,1,FW"), 400); setTimeout(() => sendEsp("CALQ"), 900);
+};
+
+// ── Calibración de color ────────────────────────────────────────────────────
+const LABELS = [["Piso", "#d9d4c7"], ["Rojo", "#ff4d4f"], ["Verde", "#2ecc71"], ["Rosa", "#ff5fd2"], ["Naranja", "#ff9f1a"], ["Azul", "#3d7bff"]];
+let curLabel = "Rojo", rects = [], snapImg = null, drag = null;
+$("#labels").innerHTML = LABELS.map(([l, c]) => `<button class="small${l === curLabel ? " on" : ""}" data-lab="${l}"><i style="background:${c}"></i>${l}</button>`).join("");
+$$("[data-lab]").forEach((b) => b.onclick = () => { curLabel = b.dataset.lab; $$("[data-lab]").forEach((x) => x.classList.toggle("on", x === b)); });
+$("#btn-snap").onclick = async () => {
+  try {
+    await api("/api/snap", {});
+    snapImg = new Image(); snapImg.onload = drawSnap; snapImg.src = "/api/raw.jpg?t=" + Date.now();
+  } catch (e) { toast(e.message, true); }
+};
+$("#btn-clear-rects").onclick = () => { rects = []; drawSnap(); };
+function snapXY(ev) { const cv = $("#snap"), r = cv.getBoundingClientRect(); return [(ev.clientX - r.left) * cv.width / r.width, (ev.clientY - r.top) * cv.height / r.height]; }
+$("#snap").onpointerdown = (ev) => { if (!snapImg) return; drag = snapXY(ev); $("#snap").setPointerCapture(ev.pointerId); };
+$("#snap").onpointermove = (ev) => { if (!drag) return; drawSnap(); const [x, y] = snapXY(ev), g = $("#snap").getContext("2d"); g.strokeStyle = "#fff"; g.setLineDash([4, 3]); g.strokeRect(drag[0], drag[1], x - drag[0], y - drag[1]); g.setLineDash([]); };
+$("#snap").onpointerup = (ev) => {
+  if (!drag) return; const [x, y] = snapXY(ev);
+  const r = { label: curLabel, x: Math.min(x, drag[0]), y: Math.min(y, drag[1]), w: Math.abs(x - drag[0]), h: Math.abs(y - drag[1]) };
+  drag = null; if (r.w > 4 && r.h > 4) rects.push(r); drawSnap();
+};
+function drawSnap() {
+  const cv = $("#snap"), g = cv.getContext("2d");
+  g.clearRect(0, 0, cv.width, cv.height);
+  if (snapImg) g.drawImage(snapImg, 0, 0, cv.width, cv.height);
+  for (const r of rects) {
+    const col = (LABELS.find((l) => l[0] === r.label) || [0, "#fff"])[1];
+    g.strokeStyle = col; g.lineWidth = 2; g.strokeRect(r.x, r.y, r.w, r.h);
+    g.fillStyle = col; g.font = "bold 12px system-ui"; g.fillText(r.label, r.x + 3, r.y + 13);
+  }
+}
+let lastStats = [];
+$("#btn-analyze").onclick = async () => {
+  if (!rects.length) return toast("Marca al menos un recuadro", true);
+  try {
+    lastStats = (await api("/api/color/analyze", { rects })).regions;
+    $("#color-stats").innerHTML = "<tr><th>región</th><th>px</th><th>H p5/50/95</th><th>S</th><th>V</th><th>G/R</th><th>B/R</th></tr>" +
+      lastStats.map((s) => `<tr><td>${s.label}</td><td>${s.n}</td><td>${s.H.join(" / ")}</td><td>${s.S.join(" / ")}</td><td>${s.V.join(" / ")}</td><td>${s.GR}</td><td>${s.BR}</td></tr>`).join("");
+    suggestBands(lastStats);
+  } catch (e) { toast(e.message, true); }
+};
+
+// Bandas: {Red: [[lo,hi],[lo,hi]], Green: [[lo,hi]], Blue: [lo,hi]}
+const DEF = { Red: [[[0, 110, 40], [5, 255, 200]], [[168, 110, 40], [179, 255, 235]]], Green: [[[30, 35, 25], [85, 255, 255]]], Blue: [[95, 70, 60], [115, 255, 200]] };
+let BANDS = JSON.parse(JSON.stringify(DEF)), bandsInit = false;
+function initBands() {
+  const c = CALIB.colors || {};
+  if (c.Red) BANDS.Red = c.Red; if (c.Green) BANDS.Green = c.Green;
+  if (CALIB.config && CALIB.config.ROUTE_FIX_BLUE_HSV) BANDS.Blue = CALIB.config.ROUTE_FIX_BLUE_HSV;
+  bandsInit = true; drawBands();
+}
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
+function suggestBands(stats) {
+  const by = (l) => stats.filter((s) => s.label === l);
+  const merge = (arr, key, q) => q === 0 ? Math.min(...arr.map((s) => s[key][0])) : Math.max(...arr.map((s) => s[key][2]));
+  const red = by("Rojo"), green = by("Verde"), blue = by("Azul");
+  if (red.length) {
+    const hlo = merge(red, "H", 0) - 4, hhi = merge(red, "H", 2) + 4;
+    const smin = clamp(Math.max(60, merge(red, "S", 0) * 0.75), 0, 255), vmin = clamp(Math.max(30, merge(red, "V", 0) * 0.6), 0, 255);
+    const r = [];
+    if (hhi >= 0) r.push([[0, smin, vmin], [clamp(Math.max(hhi, 3), 0, 25), 255, 255]]);
+    if (hlo < 0) r.push([[clamp(180 + Math.min(hlo, -2), 150, 179), smin, vmin], [179, 255, 255]]);
+    else if (hlo > 0 && hlo > 150) r.push([[clamp(hlo, 150, 179), smin, vmin], [179, 255, 255]]);
+    BANDS.Red = r;
+  }
+  if (green.length) {
+    BANDS.Green = [[[clamp(merge(green, "H", 0) - 6, 20, 90), clamp(Math.max(25, merge(green, "S", 0) * 0.7), 0, 255), clamp(Math.max(20, merge(green, "V", 0) * 0.6), 0, 255)],
+                    [clamp(merge(green, "H", 2) + 6, 40, 100), 255, 255]]];
+  }
+  if (blue.length) {
+    BANDS.Blue = [[clamp(merge(blue, "H", 0) - 4, 80, 130), clamp(merge(blue, "S", 0) * 0.75, 0, 255), clamp(merge(blue, "V", 0) * 0.7, 0, 255)],
+                  [clamp(merge(blue, "H", 2) + 4, 90, 140), 255, clamp(merge(blue, "V", 2) * 1.25, 0, 255)]];
+  }
+  drawBands();
+  toast("Propuesta lista: revisa la vista previa antes de guardar");
+}
+function drawBands() {
+  const rows = [];
+  const hdr = `<div class="band"><span></span>${["H min", "S min", "V min", "H max", "S max", "V max"].map((h) => `<span class="h">${h}</span>`).join("")}</div>`;
+  const inp = (path, v) => `<input type="number" min="0" max="255" value="${v}" data-band="${path}">`;
+  BANDS.Red.forEach((r, i) => rows.push(`<div class="band"><b style="color:var(--red)">Rojo ${i + 1}</b>${[0, 1].flatMap((j) => r[j].map((v, c) => inp(`Red.${i}.${j}.${c}`, v))).join("")}</div>`));
+  BANDS.Green.forEach((r, i) => rows.push(`<div class="band"><b style="color:var(--green)">Verde</b>${[0, 1].flatMap((j) => r[j].map((v, c) => inp(`Green.${i}.${j}.${c}`, v))).join("")}</div>`));
+  rows.push(`<div class="band"><b style="color:var(--blue)">Azul</b>${[0, 1].flatMap((j) => BANDS.Blue[j].map((v, c) => inp(`Blue.${j}.${c}`, v))).join("")}</div>`);
+  $("#bands").innerHTML = hdr + rows.join("");
+  $$("[data-band]").forEach((el) => el.onchange = () => {
+    const p = el.dataset.band.split("."), v = clamp(+el.value, 0, 255);
+    if (p[0] === "Blue") BANDS.Blue[+p[1]][+p[2]] = v; else BANDS[p[0]][+p[1]][+p[2]][+p[3]] = v;
+  });
+}
+drawBands();
+$("#btn-preview").onclick = async () => {
+  if (!snapImg) return toast("Toma una foto primero", true);
+  try {
+    const cur = CALIB.colors || {};
+    const [a, b] = await Promise.all([api("/api/color/preview", { colors: cur, rects }), api("/api/color/preview", { colors: { Red: BANDS.Red, Green: BANDS.Green }, rects })]);
+    $("#prev-cur").src = a.img; $("#prev-new").src = b.img;
+    const labs = Object.keys(b.stats);
+    $("#prev-stats").innerHTML = "<tr><th>región</th><th>rojo actual</th><th>rojo nuevo</th><th>verde actual</th><th>verde nuevo</th></tr>" +
+      labs.map((l) => `<tr><td>${l}</td><td>${a.stats[l]?.Red ?? "—"} %</td><td>${b.stats[l]?.Red ?? "—"} %</td><td>${a.stats[l]?.Green ?? "—"} %</td><td>${b.stats[l]?.Green ?? "—"} %</td></tr>`).join("");
+  } catch (e) { toast(e.message, true); }
+};
+$("#btn-color-save").onclick = async () => {
+  if (!confirm("¿Guardar estas bandas de color? Se aplican al reiniciar el servicio.")) return;
+  try {
+    const d = (await api("/api/calib")).data || {};
+    d.colors = { Red: BANDS.Red, Green: BANDS.Green };
+    if ($("#opt-save-blue").checked) { d.config = d.config || {}; d.config.ROUTE_FIX_BLUE_HSV = BANDS.Blue; }
+    d.colors_t = new Date().toISOString();
+    toast((await api("/api/calib", { data: d })).msg);
+    loadCalib();
+  } catch (e) { toast(e.message, true); }
+};
+drawTofCal();

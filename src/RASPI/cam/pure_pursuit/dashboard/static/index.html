@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fox Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">🦊 <b>Fox</b> <span class="muted">dashboard</span></div>
+  <div class="pills">
+    <span id="pill-link" class="pill bad">sin datos</span>
+    <span id="pill-svc" class="pill">servicio ?</span>
+    <span id="pill-arm" class="pill">—</span>
+    <span id="pill-est" class="pill">est —</span>
+    <span id="pill-tc" class="pill">esquina —</span>
+    <span id="pill-fps" class="pill">— fps</span>
+    <span id="pill-temp" class="pill">— °C</span>
+    <span id="pill-radio" class="pill">radios ?</span>
+  </div>
+  <div class="actions">
+    <button data-svc="start" class="ok">Iniciar</button>
+    <button data-svc="stop" class="warn">Parar</button>
+    <button data-svc="restart">Reiniciar</button>
+  </div>
+</header>
+
+<nav>
+  <button class="tab on" data-tab="live">En vivo</button>
+  <button class="tab" data-tab="tof">Calibrar ToF</button>
+  <button class="tab" data-tab="color">Calibrar color</button>
+  <button class="tab" data-tab="sys">Sistema</button>
+</nav>
+
+<main>
+<!-- ───────────── EN VIVO ───────────── -->
+<section id="tab-live" class="tab-page on">
+  <div class="grid-live">
+    <div class="card map-card">
+      <div class="card-h">Pista <span class="muted" id="map-sub"></span>
+        <label class="chk"><input type="checkbox" id="opt-rays" checked> rayos ToF</label>
+        <label class="chk"><input type="checkbox" id="opt-cam" checked> cámara</label>
+        <label class="chk"><input type="checkbox" id="opt-route" checked> ruta</label>
+        <label class="chk"><input type="checkbox" id="opt-trail" checked> rastro</label>
+        <button id="btn-clear-trail" class="small">borrar rastro</button>
+      </div>
+      <canvas id="map" width="900" height="900"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--ray)"></i>ToF medido</span>
+        <span><i class="ring"></i>esperado por el mapa</span>
+        <span><i style="background:var(--route)"></i>ruta planeada</span>
+        <span><i style="background:var(--red)"></i><i style="background:var(--green)"></i>postes</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <div class="card-h">Lo que ve el carro <span class="muted">(ToF, vista desde arriba)</span></div>
+        <canvas id="radar" width="420" height="420"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-h">Cámara + BEV <span class="muted">(HUD del runtime)</span>
+          <button id="btn-hud" class="small">pausar</button></div>
+        <img id="hud" alt="sin video" src="/api/hud.mjpg?fps=6">
+      </div>
+    </div>
+
+    <div class="card span2">
+      <div class="card-h">Sensores</div>
+      <div id="sensors" class="sensors"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">Antes de correr</div>
+      <ul id="checklist" class="checklist"></ul>
+    </div>
+    <div class="card">
+      <div class="card-h">Localización y estado</div>
+      <table id="loc-table" class="kv"></table>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── ToF ───────────── -->
+<section id="tab-tof" class="tab-page">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-h">Cómo calibrar los ToF laterales</div>
+      <ol class="steps">
+        <li>Servicio <b>corriendo</b> y el carro <b>sin arrancar</b> (antes del botón): el ESP solo acepta la tabla en ese momento.</li>
+        <li>Pon el carro <b>paralelo</b> a una pared de la pista. Mide con flexómetro de la <b>cara del sensor</b> a la pared.</li>
+        <li>Escribe la distancia real de cada lado (deja vacío el lado que no esté frente a una pared) y pica <b>Capturar</b>. Toma la mediana de las lecturas crudas de ~2 s.</li>
+        <li>Repite en 3 o más distancias entre 10 y 80 cm (mejor 10, 20, 40, 60 y 80).</li>
+        <li><b>Enviar al ESP</b>: queda guardada en su memoria (NVS) y se usa desde ese momento, también al reiniciar.</li>
+      </ol>
+      <div class="live-tof" id="tof-live"></div>
+      <div class="row">
+        <label>L real (mm) <input id="tof-real-L" type="number" min="50" max="1000" step="1"></label>
+        <label>R real (mm) <input id="tof-real-R" type="number" min="50" max="1000" step="1"></label>
+        <button id="btn-tof-cap" class="ok">Capturar</button>
+      </div>
+      <table class="tbl" id="tof-points"><thead><tr><th>#</th><th>lado</th><th>real</th><th>crudo</th><th>σ</th><th>error</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="card">
+      <div class="card-h">Tabla (leído crudo → real 100…800 mm)</div>
+      <canvas id="tof-chart" width="560" height="340"></canvas>
+      <table class="tbl" id="tof-table"></table>
+      <div class="row">
+        <button id="btn-calq">Leer tabla del ESP</button>
+        <button id="btn-calt-L" class="ok">Enviar L al ESP</button>
+        <button id="btn-calt-R" class="ok">Enviar R al ESP</button>
+        <button id="btn-calt-fw" class="warn">Volver a la de fábrica</button>
+      </div>
+      <pre id="esp-rx" class="log small"></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── COLOR ───────────── -->
+<section id="tab-color" class="tab-page">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-h">Foto de la cámara <span class="muted">(con la corrección de piso aplicada: lo que ve la visión)</span></div>
+      <div class="row">
+        <button id="btn-snap" class="ok">Tomar foto</button>
+        <span class="muted">Etiqueta:</span>
+        <div id="labels" class="labels"></div>
+        <button id="btn-clear-rects" class="small">borrar recuadros</button>
+      </div>
+      <canvas id="snap" width="640" height="480"></canvas>
+      <p class="muted small">Arrastra recuadros sobre: el <b>piso</b>, un poste <b>rojo</b> y uno <b>verde</b> (de cerca y de lejos si se puede). Opcional: pared <b>rosa</b> del cajón y cinta <b>azul</b>/<b>naranja</b>.</p>
+      <div class="row"><button id="btn-analyze">Analizar</button><button id="btn-preview">Vista previa</button></div>
+      <table class="tbl" id="color-stats"></table>
+    </div>
+
+    <div class="card">
+      <div class="card-h">Bandas HSV <span class="muted">(propuesta editable)</span></div>
+      <div id="bands"></div>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="opt-save-blue"> guardar también la cinta azul (arranque)</label>
+      </div>
+      <div class="previews">
+        <figure><img id="prev-cur"><figcaption>actual</figcaption></figure>
+        <figure><img id="prev-new"><figcaption>propuesta</figcaption></figure>
+      </div>
+      <table class="tbl" id="prev-stats"></table>
+      <div class="row">
+        <button id="btn-color-save" class="ok">Guardar calibración</button>
+        <button id="btn-calib-undo" class="warn">Deshacer (versión anterior)</button>
+        <button data-svc="restart">Reiniciar servicio para aplicar</button>
+      </div>
+      <p class="muted small">Se guarda en <code id="calib-path">~/wro_calib.json</code> con historial. El runtime la lee al arrancar.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── SISTEMA ───────────── -->
+<section id="tab-sys" class="tab-page">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-h">Raspberry Pi</div>
+      <table id="sys-table" class="kv"></table>
+      <div class="row">
+        <button id="btn-ronda" class="warn">Modo ronda (apagar Wi-Fi y Bluetooth)</button>
+        <button id="btn-radio-on">Encender radios</button>
+      </div>
+      <p class="muted small">Regla 11.10: en las rondas oficiales los radios van apagados. Si estás conectado por Wi-Fi, al apagarlo pierdes el dashboard: vuelve por cable Ethernet o reinicia la Pi.</p>
+    </div>
+    <div class="card">
+      <div class="card-h">Corridas grabadas <span class="muted">(descargar)</span> <button id="btn-runs" class="small">actualizar</button></div>
+      <table class="tbl" id="runs"></table>
+    </div>
+    <div class="card span2">
+      <div class="card-h">Log del runtime
+        <select id="log-f"><option value="importante">importante</option><option value="">todo</option></select>
+        <input id="log-q" placeholder="buscar (ej. LOCUPD)">
+        <label class="chk"><input type="checkbox" id="log-auto" checked> auto</label>
+        <button id="btn-log" class="small">actualizar</button>
+      </div>
+      <pre id="log" class="log"></pre>
+    </div>
+    <div class="card span2">
+      <div class="card-h">Calibración guardada</div>
+      <pre id="calib-json" class="log small"></pre>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
