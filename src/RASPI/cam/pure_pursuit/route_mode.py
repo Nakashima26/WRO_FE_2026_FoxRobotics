@@ -192,6 +192,32 @@ def _stall_far_along(parking: str, direction: str, park_w: float) -> float:
     return max(px * fx + py * fy for b in _barrier_corners(parking, park_w) for px, py in b)
 
 
+def _park_geom_flag(dm, tc, pose=None, pka=None) -> int:
+    """pge (ROUTE_PARK_GEOM_EXT): 1 si el ESP puede cambiar la U por pegarse a la pared exterior pasado el cajon
+    y buscarlo en reversa. Modo 1: solo si la senal de entrada de la recta del cajon (la primera en el sentido de
+    marcha; ahi solo hay asientos de la fila interior T2/X1/T1) es verde. Modo 2: con cualquier color."""
+    mode = int(getattr(C, "ROUTE_PARK_GEOM_EXT", 0) or 0)
+    if mode <= 0:
+        return 0
+    if float(tc or 0) < float(getattr(C, "ROUTE_PARK_GEOM_TC", 12)):
+        return 0   # solo tras la esquina 12: la línea al ESP no cambia en las vueltas 1-3
+    if pose is None or pka is None:
+        return 0
+    from .wro_field import _heading
+    h = math.radians(_heading(dm.parking, dm.direction))
+    if pose[0] * math.sin(h) + pose[1] * math.cos(h) < pka:
+        return 0   # y con el carro ya pasado el cajón (la vuelta 3 ya cerró en la línea de salida); el ESP lo usa desde pka + PARK_GEOM_PASA_MM
+    if mode >= 2:
+        return 1
+    order = ("T2", "X1", "T1") if dm.direction == "CW" else ("T1", "X1", "T2")
+    conf = getattr(dm, "confirmed", {}) or {}
+    for seat in order:
+        col = conf.get((dm.parking, seat))
+        if col is not None:
+            return 1 if col == "Green" else 0
+    return 0
+
+
 _WARM_DONE = False
 
 
@@ -1232,6 +1258,7 @@ class RouteMode:
         if self.fixed and self.park_w is not None:
             park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
             self.pka = _stall_far_along(dm.parking, dm.direction, park_w)
+            self.pge = _park_geom_flag(dm, getattr(self, "_tc_max", 0), pose, self.pka)
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
@@ -2283,6 +2310,8 @@ class RouteMode:
             s += f",ps=1,pw={self.pi_wheel:.2f}"
         if self.fixed and getattr(self, "pka", None) is not None:
             s += f",pka={self.pka:.0f}"
+            if getattr(self, "pge", 0):
+                s += ",pge=1"
         if self.rv is not None:
             s += f",rv={_rv_mando(self.rv)}"
         return s
