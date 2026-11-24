@@ -1365,6 +1365,55 @@ class RouteMode:
             sign = float(gap.min())
         return wall, sign, island
 
+    def _l23_clear_curve_lead_red_s(self, l23, conf, kmax, dist, span, lead, v_max) -> float:
+        """Segundos de alivio de adelanto (0 = off). Main tc∈[TC_MIN,TC_MAX); early opc. en [EARLY_MIN,TC_MIN)."""
+        red_main = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S", 0.0) or 0.0)
+        red_early = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_EARLY_S", 0.0) or 0.0)
+        if not l23 or self.follower is None or (red_main <= 0.0 and red_early <= 0.0):
+            return 0.0
+        tc = float(getattr(self, "_tc_max", 0) or 0)
+        tc_lo = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_TC_MIN", 5))
+        tc_hi = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_TC_MAX", 11))
+        tc_early = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_TC_EARLY_MIN", 5))
+        if tc_lo <= tc < tc_hi and red_main > 0.0:
+            red_s = red_main
+        elif tc_early <= tc < tc_lo and red_early > 0.0:
+            red_s = red_early
+        else:
+            return 0.0
+        if self.upload or self._delay_left is not None or self._job is not None:
+            return 0.0
+        if abs(float(self.follower.cte)) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
+            return 0.0
+        inside = dist <= span
+        if not np.any(inside):
+            return 0.0
+        head_k = kmax[inside][:min(8, int(inside.sum()))]
+        if bool(getattr(C, "ROUTE_L23_CLEAR_CURVE_PURSUIT_GATE", False)) and self.follower is not None:
+            r = self.follower.route
+            n = len(r.kappa)
+            win = int(C.ROUTE_PROFILE_KAPPA_WIN)
+            step = r.length_mm / n
+            i = max(self.follower.i, 0)
+            m = int(span / step) + 1
+            idx = (i + np.arange(-win, m + win)) % n
+            j = idx[win:win + m]
+            pk = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM),
+                                getattr(C, "ROUTE_L23_LEFT_K_FACTOR", None) if float(getattr(self, "_tc_max", 0) or 0)
+                                < float(getattr(C, "ROUTE_L23_LEFT_K_TC_MAX", 12)) else None)
+            head_k = pk[inside][:min(8, int(inside.sum()))]
+        if head_k.size and float(np.max(head_k)) > 1.0 / 300.0:
+            return 0.0
+        extra = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_CLEAR_MM", 50.0))
+        sign_x = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_SIGN_EXTRA_MM", 0.0) or 0.0)
+        base = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
+        w, s, isl = self._offset_body(conf or {})
+        if min(w, isl) < base + extra:
+            return 0.0
+        if s < base + extra + sign_x:
+            return 0.0
+        return red_s
+
     def _sign_xy(self, conf, empty) -> np.ndarray:
         """Posiciones (x, y) en mm del tapete de las señales y asientos sin resolver.
 
@@ -1421,11 +1470,26 @@ class RouteMode:
         if l23:   # vueltas 2-3: frenado propio (sin tope del lazo el carro llega a ~830 mm/s)
             a_brk = float(getattr(C, "ROUTE_L23_A_BRAKE_MM_S2", None) or a_brk)
             a_lat = float(getattr(C, "ROUTE_L23_A_LAT_MM_S2", None) or a_lat)
+            tc_l = float(getattr(self, "_tc_max", 0) or 0)
+            lap_cut = float(getattr(C, "ROUTE_LAP23_BRAKE_TC_MAX", 8))
+            if 4 <= tc_l < lap_cut:
+                if getattr(C, "ROUTE_LAP2_L23_A_BRAKE_MM_S2", None) is not None:
+                    a_brk = float(C.ROUTE_LAP2_L23_A_BRAKE_MM_S2)
+            elif lap_cut <= tc_l < 11:
+                if getattr(C, "ROUTE_LAP3_L23_A_BRAKE_MM_S2", None) is not None:
+                    a_brk = float(C.ROUTE_LAP3_L23_A_BRAKE_MM_S2)
         win = int(C.ROUTE_PROFILE_KAPPA_WIN)
         # Adelanto por latencia a la velocidad máxima (conservador).
         lat_s = float(C.ROUTE_PROFILE_LATENCY_S)
         if l23 and getattr(C, "ROUTE_L23_LATENCY_S", None) is not None:
             lat_s = float(C.ROUTE_L23_LATENCY_S)   # vueltas 2-3: menos adelanto = suelta el freno antes
+        if l23:
+            tc_l = float(getattr(self, "_tc_max", 0) or 0)
+            lap_cut = float(getattr(C, "ROUTE_LAP23_BRAKE_TC_MAX", 8))
+            if 4 <= tc_l < lap_cut and getattr(C, "ROUTE_LAP2_L23_LATENCY_S", None) is not None:
+                lat_s = float(C.ROUTE_LAP2_L23_LATENCY_S)
+            elif lap_cut <= tc_l < 11 and getattr(C, "ROUTE_LAP3_L23_LATENCY_S", None) is not None:
+                lat_s = float(C.ROUTE_LAP3_L23_LATENCY_S)
         lead = v_max * lat_s
         span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
         step = r.length_mm / n
@@ -1447,6 +1511,7 @@ class RouteMode:
             kmax > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
         v_c = np.where(kmax < 1e-9, v_max,
                        np.clip(np.sqrt(a_c / np.maximum(kmax, 1e-12)), v_min, v_max))
+        v_c_curve = v_c
         if signs is not None and len(signs):
             # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
             sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))
@@ -1557,12 +1622,31 @@ class RouteMode:
             f = np.clip((di - isl_near) / max(isl_mm - isl_near, 1.0), 0.0, 1.0)
             v_isl = v_min + (v_base - v_min) * f
             v_c = np.where(di < isl_mm, np.minimum(v_c, v_isl), v_c)
+        if l23 and bool(getattr(C, "ROUTE_L23_CLEAR_CURVE_CURVE_K_PURSUIT", False)):
+            tc_l = float(getattr(self, "_tc_max", 0) or 0)
+            lap_cut = float(getattr(C, "ROUTE_LAP23_BRAKE_TC_MAX", 8))
+            if tc_l >= lap_cut:
+                k_pursuit = _pursuit_kappa(r, j, float(C.ROUTE_LOOKAHEAD_MM),
+                                           getattr(C, "ROUTE_L23_LEFT_K_FACTOR", None) if tc_l
+                                           < float(getattr(C, "ROUTE_L23_LEFT_K_TC_MAX", 12)) else None)
+                v_c_curve = np.where(k_pursuit < 1e-9, v_max,
+                                       np.clip(np.sqrt(a_c / np.maximum(k_pursuit, 1e-12)), v_min, v_max))
+        red_s = self._l23_clear_curve_lead_red_s(l23, conf, kmax, dist, span, lead, v_max) if l23 else 0.0
+        clear_ok = red_s > 0.0
         allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
+        if clear_ok:
+            red = red_s * v_max
+            d_red = np.maximum(dist - max(lead - red, 0.0), 0.0)
+            curve_dom = v_c_curve <= (v_c + 1.0)   # señal/isla no aprietan el techo local
+            allowed_curve = np.sqrt(v_c_curve ** 2 + 2.0 * a_brk * d_red)
+            allowed = np.where(curve_dom, allowed_curve, allowed)
         inside = np.nonzero(dist <= span)[0]
         k_min = inside[int(np.argmin(allowed[inside]))]
         v_allow = min(v_max, float(allowed[k_min]))
         lo = floor if corner_floor is None else min(floor, corner_floor)
         ff = getattr(C, "ROUTE_PROFILE_BRAKE_FF_S", None)
+        if clear_ok and bool(getattr(C, "ROUTE_L23_CLEAR_CURVE_NO_FF", False)):
+            ff = None
         if ff is not None and d[k_min] > 0.0 and v_allow < v_max:
             # Frenando hacia una muestra de adelante: se adelanta el retraso del motor.
             v_allow -= float(ff) * a_brk
@@ -2358,4 +2442,4 @@ class RouteMode:
             lines.append(f"RTP,{i},{pts}")
         lines.append(f"RTE,{n}")
         return lines
-
+

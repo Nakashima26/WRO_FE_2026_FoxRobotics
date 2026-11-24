@@ -1855,6 +1855,22 @@ ROUTE_FULL_W_KAPPA = None         # peso de curvatura del plan con el mapa compl
 ROUTE_FULL_W_CLEAR = 2.0          # peso de holgura del plan con el mapa completo
 ROUTE_FULL_HARD_CLEAR_MM = None   # None = ROUTE_HARD_CLEAR_MM
 ROUTE_L23_LATENCY_S = 0.06        # vueltas 2-3: adelanto del frenado del perfil (None = ROUTE_PROFILE_LATENCY_S)
+# Opt-in por vuelta dentro de L23 (corte tc = ROUTE_LAP23_BRAKE_TC_MAX, default 8). None = ROUTE_L23_*.
+ROUTE_LAP23_BRAKE_TC_MAX = 8
+ROUTE_LAP2_L23_LATENCY_S = 0.14  # vuelta 2, tc 4..<corte; accept VELOCIDAD cen94/96+rep 375/384
+ROUTE_LAP3_L23_LATENCY_S = None   # vuelta 3, tc corte..10
+ROUTE_LAP2_L23_A_BRAKE_MM_S2 = None
+ROUTE_LAP3_L23_A_BRAKE_MM_S2 = None
+ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S = 0.0  # opt-in: acorta adelanto solo al sobre de curvatura (tc TC_MIN..TC_MAX)
+ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_EARLY_S = 0.0  # opt-in: reducción menor en tc EARLY_MIN..TC_MIN (p.ej. 0.01 + 0.02)
+ROUTE_L23_CLEAR_CURVE_LEAD_TC_EARLY_MIN = 5  # inicio ventana early (exclusivo del main si EARLY_S>0)
+ROUTE_L23_CLEAR_CURVE_LEAD_TC_MIN = 5
+ROUTE_L23_CLEAR_CURVE_LEAD_TC_MAX = 11  # exclusivo (no tc>=11)
+ROUTE_L23_CLEAR_CURVE_CLEAR_MM = 50.0   # holgura extra mínima en la huella para activar el alivio
+ROUTE_L23_CLEAR_CURVE_SIGN_EXTRA_MM = 0.0  # holgura adicional exigida solo a señales (pared/isla usan CLEAR_MM)
+ROUTE_L23_CLEAR_CURVE_PURSUIT_GATE = False  # gate de recta con |κ| pursuit en lugar del kmax del perfil
+ROUTE_L23_CLEAR_CURVE_NO_FF = False  # no restar BRAKE_FF en el muestreo donde aplica el alivio de curva
+ROUTE_L23_CLEAR_CURVE_CURVE_K_PURSUIT = False  # sobre de curvatura del alivio con κ pursuit (tc≥LAP2 cut)
 ROUTE_MAP_FREEZE_PARK = True      # el congelado también cubre la recta del cajón
 ROUTE_MAP_FREEZE = True           # vueltas 2-3: el mapa del planificador no pierde señales (ver route_mode)
 ROUTE_MAP_FREEZE_TC = 0           # desde qué esquina congela (antes fijo 4); 0 = desde que ubica el cajón (orillas135/137: soltaba el rojo de S/T1 antes de la esquina 1)
