@@ -1746,7 +1746,7 @@ bool                 parkRevDir                  = false;  // el cajon al inicio
 int                  parkSinUDec                 = 0;     // para pka < PKA_MIN: 0 sin decidir, 1 directo, 2 con U
 PARK_AJ float        PARK_SINU_DEC_TOL_CM        = 12.0f;
 PARK_AJ long         PARK_SINU_CORRE_MM          = 200;
-PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
+PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 12.0f;
 PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
@@ -3486,6 +3486,8 @@ bool vigilarGeomExt(float along, long distF) {
     else
       geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
   }
+  // verde s16: pge early; tomar ~200 mm antes de pka (aún cerca; -450 chocaba magenta).
+  if (rutaPge) geomPasa = min(geomPasa, -200.0f);
   if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
@@ -4603,7 +4605,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
-    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); rutaPge = campoPi(line, ",pge=", v) && campoInt(v) != 0; }
+    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0; }  // sticky: pka sin pge no apaga (s16)
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
