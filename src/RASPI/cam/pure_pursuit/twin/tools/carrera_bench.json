@@ -120,6 +120,7 @@
     "ROUTE_L23_MAX_PWM": null,
     "ROUTE_L23_SIGN_MM": null,
     "ROUTE_L23_SIGN_NEAR_MM": null,
+    "ROUTE_L23_SIGN_MM_L3": 0.0,
     "ROUTE_EXIT_UNSEEN_PWM": 255
   },
   "fw": {

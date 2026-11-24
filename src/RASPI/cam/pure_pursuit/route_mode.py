@@ -1465,6 +1465,8 @@ class RouteMode:
             sign_mm = float(getattr(C, "ROUTE_PROFILE_SIGN_MM", 300.0))
             if l23 and getattr(C, "ROUTE_L23_SIGN_MM", None) is not None:
                 sign_mm = float(C.ROUTE_L23_SIGN_MM)   # vueltas 2-3: zona lenta de la señal más corta
+            if l23 and getattr(C, "ROUTE_L23_SIGN_MM_L3", None) is not None and float(getattr(self, "_tc_max", 0) or 0) >= 8:
+                sign_mm = float(C.ROUTE_L23_SIGN_MM_L3)   # vuelta 3 (tc 8..11): zona de señal propia (0 = sin tope)
             pxy = np.stack((r.x[j], r.y[j]), axis=1)                       # (m, 2)
             dd = np.hypot(pxy[:, None, 0] - signs[None, :, 0],
                           pxy[:, None, 1] - signs[None, :, 1]).min(axis=1)  # (m,)
