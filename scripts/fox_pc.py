@@ -13,12 +13,14 @@ Solo librería estándar de Python.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -163,7 +165,35 @@ def git_info() -> dict:
             "esp_sin_commit": sucios}
 
 
-def flashear(sketch: str, port: str, sorpresa: bool | None):
+BUILD_ROOT = Path(tempfile.gettempdir()) / "fox_build"
+
+
+def huella_sketch(nombre: str) -> str:
+    """sha1 de todos los archivos del sketch (+ placa). Las librerías de fuera no cuentan:
+    si actualizas una librería, usa "compilar de nuevo"."""
+    h = hashlib.sha1(FQBN.encode())
+    raiz = ESP_DIR / nombre
+    for f in sorted(p for p in raiz.rglob("*") if p.is_file()):
+        h.update(str(f.relative_to(raiz)).encode())
+        h.update(f.read_bytes())
+    return h.hexdigest()
+
+
+def correr(cmd: list[str]) -> bool:
+    JOB.add("$ arduino-cli " + " ".join(cmd[1:]))
+    pr = subprocess.Popen(cmd, cwd=ESP_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                          encoding="utf-8", errors="replace", bufsize=1)
+    for line in pr.stdout:
+        line = line.rstrip()
+        if line:
+            JOB.add(line)
+    pr.wait()
+    if pr.returncode != 0:
+        JOB.add(f"!! arduino-cli terminó con código {pr.returncode}")
+    return pr.returncode == 0
+
+
+def flashear(sketch: str, port: str, sorpresa: bool | None, forzar: bool = False):
     nombre, titulo = SKETCHES[sketch]
     cli = cli_path()
     ok = False
@@ -171,19 +201,25 @@ def flashear(sketch: str, port: str, sorpresa: bool | None):
         if not cli:
             JOB.add("!! no encuentro arduino-cli (instala el Arduino IDE o pon FOX_ARDUINO_CLI)")
             return
+        # Compilar solo si el sketch cambió: el binario de cada sketch se guarda en su
+        # carpeta de build con la huella de sus archivos (compilar ~40 s, subir ~8 s).
+        build = BUILD_ROOT / sketch
+        huella = huella_sketch(nombre)
+        marca = build / "fox_huella.txt"
+        previa = marca.read_text(encoding="utf-8").strip() if marca.is_file() else ""
+        if forzar or previa != huella or not any(build.glob(f"{nombre}.ino.bin")):
+            with JOB.lock:
+                JOB.state = f"compilando {titulo}"
+            JOB.add("compilando: " + ("forzado" if forzar else "el código cambió" if previa else "primera vez"))
+            marca.unlink(missing_ok=True)
+            if not correr([cli, "compile", "--fqbn", FQBN, "--build-path", str(build), nombre]):
+                return
+            marca.write_text(huella, encoding="utf-8")
+        else:
+            JOB.add("sin cambios desde la última compilación: solo se sube el binario guardado")
         with JOB.lock:
-            JOB.state = f"compilando y subiendo {titulo} a {port}"
-        JOB.add(f"$ arduino-cli compile --fqbn {FQBN} -u -p {port} {nombre}")
-        pr = subprocess.Popen([cli, "compile", "--fqbn", FQBN, "-u", "-p", port, nombre], cwd=ESP_DIR,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                              encoding="utf-8", errors="replace", bufsize=1)
-        for line in pr.stdout:
-            line = line.rstrip()
-            if line:
-                JOB.add(line)
-        pr.wait()
-        if pr.returncode != 0:
-            JOB.add(f"!! arduino-cli terminó con código {pr.returncode}")
+            JOB.state = f"subiendo {titulo} a {port}"
+        if not correr([cli, "upload", "--fqbn", FQBN, "-p", port, "--input-dir", str(build), nombre]):
             return
         JOB.add(f"✓ {titulo} subido")
         # Siempre reiniciar wro-runtime tras flashear (el ESP arrancó de cero).
@@ -286,8 +322,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json({"error": "ya está flasheando"}, 409)
                     JOB.busy, JOB.sketch, JOB.ok, JOB.log = True, sketch, None, []
                     JOB.t0, JOB.t1, JOB.state = time.time(), 0.0, "empezando"
-                threading.Thread(target=flashear, args=(sketch, port, None if sorpresa is None else bool(sorpresa)),
-                                 daemon=True).start()
+                threading.Thread(target=flashear, args=(sketch, port, None if sorpresa is None else bool(sorpresa),
+                                                        bool(b.get("force"))), daemon=True).start()
                 return self._json({"msg": f"flasheando {SKETCHES[sketch][1]} en {port}"})
             return self._json({"error": "no"}, 404)
         except Exception as e:

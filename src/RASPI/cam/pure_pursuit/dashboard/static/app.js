@@ -815,11 +815,11 @@ async function pollJob() {
 }
 $("#btn-flash-ports").onclick = flashStatus;
 $$("[data-flash]").forEach((b) => b.onclick = async () => {
-  const sketch = b.dataset.flash, body = { sketch, port: $("#flash-port").value };
+  const sketch = b.dataset.flash, body = { sketch, port: $("#flash-port").value, force: $("#flash-force").checked };
   if (b.dataset.sorp !== undefined) body.surprise = b.dataset.sorp === "1";
   const name = sketch === "open" ? "Open" : `Obstáculos (sorpresa ${body.surprise ? "ON" : "OFF"})`;
   if (S.tele.armed && !confirm("El carro está corriendo. ¿Flashear igual?")) return;
-  if (!confirm(`¿Flashear ${name} en ${body.port || "el puerto de la ESP"}? Tarda ~1-2 min y al final reinicia el servicio.`)) return;
+  if (!confirm(`¿Flashear ${name} en ${body.port || "el puerto de la ESP"}? Si el código no cambió solo sube (~10 s); si cambió compila (~1 min). Al final reinicia el servicio.`)) return;
   try {
     const d = await api("/local/flash", body); toast(d.msg || d.error, !!d.error);
     if (!d.error && !flashPoll) flashPoll = setInterval(pollJob, 1000);

@@ -29,7 +29,11 @@ Double-click `scripts/dashboard_pc.bat` (or run `python scripts/fox_pc.py`). It 
 - The page comes from the PC's repo; all data (`/api/*`) comes from the Pi.
 - The **ESP** tab flashes with arduino-cli, without opening the Arduino IDE:
   1. Connect the ESP32 to the PC by USB. The port with a CP210x/CH340 chip is picked automatically.
-  2. Press **Flashear Open**, **Obstáculos** or **Obstáculos + sorpresa**. It compiles the code in the PC's repo, as it is, and uploads it in about 1 minute.
+  2. Press **Flashear Open**, **Obstáculos** or **Obstáculos + sorpresa**. It uses the code in the PC's repo, as it is.
+     - If the sketch changed since its last compile: compile (~40 s) + upload (~10 s).
+     - If it didn't change (for example, switching between open and obstacles): it only uploads the saved binary (~12 s).
+     - The binaries are kept in `%TEMP%\fox_build\<open|obs>`.
+     - **compilar de nuevo** forces a compile, for example after updating a library outside the sketch.
   3. When it finishes it restarts `wro-runtime` on the Pi. With **Obstáculos** it also sets `SURPRISE_RULE` in the Pi's `carrera.json`.
 - The header shows what the car has: `ESP: Open <build>` or `ESP: Obstáculos <build> · sorpresa ON/OFF`.
   - The build is the compile date and time.
