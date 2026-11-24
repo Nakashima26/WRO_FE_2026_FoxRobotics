@@ -3482,7 +3482,8 @@ void vigilarSinU() {
 bool vigilarGeomExt(float along, long distF) {
   if ((!PARK_GEOM_EXT && !PARK_GEOM_ROJO) || isnan(rutaPka) || parkGeomModo) return false;
   // s35 sticky temprano: ROJO; cerca de pka (along>=pka-80) vuelve sticky verde (s36@138).
-  const bool stickyEarly = parkGeomVeniaLejos && rutaPge && along < rutaPka - 80.0f;
+  // s5 pka=30: stickyEarly retrasaba GEOM verde (fuera 5.48); s35 pka=224 / s36=114 siguen (>=100).
+  const bool stickyEarly = parkGeomVeniaLejos && rutaPge && rutaPka >= 100.0f && along < rutaPka - 80.0f;
   const bool pgeEff = rutaPge && !stickyEarly;
   // ROJO: pka<<0 alarga max (U@~500); pka alto baja pasa (si no, U dispara antes de pka+150).
   float geomMax = PARK_GEOM_MAX_MM, geomPasa = PARK_GEOM_PASA_MM;
