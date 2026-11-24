@@ -1374,6 +1374,10 @@ ROUTE_FIX_UNIQUE_PREFIX_SEAT = False  # CCW: ancla la pose con una señal establ
 ROUTE_PREFIX_STOP_CM = 40.0
 ROUTE_PREFIX_STOP_FRAMES = 20
 ROUTE_FIX_STUCK_DF_CM = 12.0
+ROUTE_FIX_SEAT_ROWS = False   # CCW: ancla el avance cruzando señales de la recta del cajón (columna, 500 mm) y de la siguiente (fila, 200 mm); ver RouteMode._seat_rows_delta
+ROUTE_FIX_SEAT_ROWS_MAX_FWD_MM = 1300.0
+ROUTE_FIX_SEAT_ROWS_COL_TOL_MM = 80.0
+ROUTE_FIX_SEAT_ROWS_SPAN_MM = 60.0
 # Prueba de la salida del cajón: si este archivo existe en la Pi, el carro se para al
 # ubicar el cajón y escribe [PRUEBA] con lo que cree (touch para armarla, rm para quitarla).
 ROUTE_PRUEBA_CAJON_FILE = "/home/user/prueba_cajon"

@@ -765,6 +765,12 @@ class RouteMode:
                     and self._pix_blind_heading_ok(pose, 25.0)):
                 seat_delta = self._unique_prefix_seat_delta(dm, pose)
                 delta = seat_delta
+            if (delta is None and getattr(C, "ROUTE_FIX_SEAT_ROWS", False)
+                    and dm.direction == "CCW" and ack_est == "S" and tc == 0
+                    and self._pix_blind_heading_ok(pose, 25.0)):
+                # Como el asiento único, pero cruzando también las señales de la recta siguiente.
+                seat_delta = self._seat_rows_delta(dm, pose)
+                delta = seat_delta
             forced = False
             if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
@@ -1941,6 +1947,113 @@ class RouteMode:
             if np.max(self.fix.logp[near]) < self.fix.logp.max() - 3.0:
                 return None
         print(f"[ROUTE] avance por asiento único: {delta:+.0f} mm", flush=True)
+        return delta
+
+    def _seat_rows_delta(self, dm, pose) -> float | None:
+        """Ancla el avance cruzando dos rejillas de asientos (ROUTE_FIX_SEAT_ROWS).
+
+        Una señal de la recta del cajón (fila interior) fija el avance módulo 500 mm (columnas
+        T2/X1/T1); una de la recta SIGUIENTE, vista desde el cajón, cae en una columna conocida
+        (su w no depende del avance) y su fila (400/600 mm) lo fija módulo 200 mm, porque el eje
+        del cajón es el eje h de esa recta. Cada señal seguida en >= 5 cuadros desde posiciones
+        distintas da un juego de hipótesis; vale el avance que explica TODAS las señales con un
+        asiento legal y queda solo en el rango del cajón. Si quedan dos, decide el histograma de
+        los ToF solo si una está >= 3 nats por encima. (n1/s36: la verde S/T1 tras la roja W/T2
+        se veía a 1.1 m desde la salida, pero sin el avance el plan no la tenía hasta la esquina.)
+        Solo CCW: en CW (probado en el gemelo) cambia la fijación por cinta, que ya llega temprano, y
+        sumó 2 choques en 96."""
+        frames = dm._deferred or ()
+        if not frames:
+            return None
+        ax, ay = self.axis
+        step = 1 if dm.direction == "CW" else -1
+        nxt = SECTIONS_CW[(SECTIONS_CW.index(dm.parking) + step) % len(SECTIONS_CW)]
+        lo = PARK_W_MIN - self.fix.w0_guess
+        hi = PARK_W_MAX - self.fix.w0_guess
+        # Cuánto se mueve cada coordenada por mm de avance (±1 o 0).
+        x0, y0 = section_to_world(dm.parking, _ROW_H, 1500.0)
+        dw = world_to_section(dm.parking, x0 + ax, y0 + ay)[1] - world_to_section(dm.parking, x0, y0)[1]
+        dh = world_to_section(nxt, x0 + ax, y0 + ay)[0] - world_to_section(nxt, x0, y0)[0]
+        if abs(abs(dw) - 1.0) > 1e-6 or abs(abs(dh) - 1.0) > 1e-6:
+            return None
+        row_w = [w for seat, (_, w) in SEATS.items() if seat not in PARKING_FORBIDDEN_SEATS]
+        cols: dict[float, list[float]] = {}
+        for _seat, (h, w) in SEATS.items():
+            cols.setdefault(w, []).append(h)
+        max_fwd = float(getattr(C, "ROUTE_FIX_SEAT_ROWS_MAX_FWD_MM", 1300.0))
+        col_tol = float(getattr(C, "ROUTE_FIX_SEAT_ROWS_COL_TOL_MM", 80.0))
+        tracks: dict[tuple, list[tuple[float, float]]] = {}
+        for feet, camera_pose, heading, *_ in frames:
+            _, view_w = world_to_section(dm.parking, *camera_pose)
+            per: dict[tuple, list[float]] = {}
+            for x, y, color, fwd, _lat in feet_world(feet, camera_pose, heading):
+                if fwd > max_fwd:
+                    continue
+                h, w = world_to_section(dm.parking, x, y)
+                if abs(h - _ROW_H) <= SIGN_MM and 0.0 < w < 3000.0:
+                    per.setdefault(("P", color), []).append(w)
+                hn, wn = world_to_section(nxt, x, y)
+                for cw in cols:
+                    if abs(wn - cw) <= col_tol and 200.0 <= hn <= 1500.0:
+                        per.setdefault(("N", cw, color), []).append(hn)
+            for key, vals in per.items():
+                if len(vals) == 1:   # dos pies en competencia no informan
+                    tracks.setdefault(key, []).append((vals[0], view_w))
+        tol = {"P": 45.0, "N": float(getattr(C, "ROUTE_FIX_SEAT_ROWS_SPAN_MM", 60.0))}
+        hyps = []   # por señal: hipótesis de avance
+        for key, obs in tracks.items():
+            if len(obs) < 5:
+                continue
+            vals = [o[0] for o in obs][-12:]
+            views = [o[1] for o in obs]
+            if max(vals) - min(vals) > tol[key[0]] or max(views) - min(views) < 45.0:
+                continue
+            v = float(np.median(vals))
+            if key[0] == "P":
+                cand = [(seat_w - v) / dw for seat_w in row_w]
+            else:
+                cand = [(seat_h - v) / dh for seat_h in cols[key[1]]]
+            cand = [d for d in cand if lo - SIGN_MM <= d <= hi + SIGN_MM]
+            if not cand:
+                return None   # una señal sin asiento legal: algo está mal, no anclar
+            hyps.append((key, cand))
+        if not hyps:
+            return None
+        # Hipótesis comunes a todas las señales (dentro de SIGN_MM).
+        common = []
+        for d0 in hyps[0][1]:
+            matched = [d0]
+            for _key, cand in hyps[1:]:
+                near = [d for d in cand if abs(d - d0) <= SIGN_MM]
+                if not near:
+                    break
+                matched.append(min(near, key=lambda d: abs(d - d0)))
+            else:
+                common.append(float(np.mean(matched)))
+        if not common:
+            return None
+        if len(common) > 1:
+            if self.fix.n_inform < 3:
+                return None
+            score = []
+            for d in common:
+                near = np.abs(self.fix.deltas - d) <= SIGN_MM
+                score.append(float(np.max(self.fix.logp[near])) if np.any(near) else -1e9)
+            order = np.argsort(score)[::-1]
+            if score[order[0]] - score[order[1]] < 3.0:
+                return None
+            common = [common[order[0]]]
+        delta = common[0]
+        if not lo <= delta <= hi:
+            return None
+        if self._line_d and abs(delta - self._line_median()) > SIGN_MM:
+            return None
+        if self.fix.n_inform >= 3:
+            near = np.abs(self.fix.deltas - delta) <= SIGN_MM
+            if not np.any(near) or np.max(self.fix.logp[near]) < self.fix.logp.max() - 3.0:
+                return None
+        kinds = "+".join(sorted({k[0] for k, _ in hyps}))
+        print(f"[ROUTE] avance por filas de asientos ({kinds}, {len(hyps)} señales): {delta:+.0f} mm", flush=True)
         return delta
 
     def _pillar_pair_delta(self, dm, delta: float, min_shift: float | None = None) -> float:
