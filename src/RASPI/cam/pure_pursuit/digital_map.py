@@ -1107,17 +1107,30 @@ class DigitalMap:
             return None
         nxt = self._next_section(self.section)
         lead = self._left_pass(nxt)
-        if lead is None:
-            return None
-        corner = _lane_pose(self.section, self.direction, 2500.0, 0.0)
-        na, _ = self._section_frame(corner[0], corner[1], nxt)
-        hx, hy, _ = _lane_pose(nxt, self.direction, na, lead[1])
+        on_next = lead is not None
+        if not on_next:
+            # Ya en la recta del verde: sigue contando mientras no lo hayamos pasado.
+            lead = self._left_pass(self.section)
+            if lead is None or float(lead[0]) < float(self.along_mm) - 40.0:
+                return None
+        if on_next:
+            corner = _lane_pose(self.section, self.direction, 2500.0, 0.0)
+            na, _ = self._section_frame(corner[0], corner[1], nxt)
+            hx, hy, _ = _lane_pose(nxt, self.direction, na, lead[1])
+            # Al yaw-ear hacia la esquina la proyección body-forward al
+            # vértice puede salir negativa aunque aún falte carril.
+            remain = (2500.0 - float(self.along_mm)) + max(0.0, float(lead[0]) - float(na))
+        else:
+            hx, hy, _ = _lane_pose(self.section, self.direction, lead[0], lead[1])
+            remain = float(lead[0]) - float(self.along_mm)
         against_wall = max(abs(hx), abs(hy)) > 1250.0
         hx = max(-1100.0, min(1100.0, hx))
         hy = max(-1100.0, min(1100.0, hy))
         dx, dy = hx - self.pose_xy[0], hy - self.pose_xy[1]
         h = math.radians(self.heading)
         fwd = dx * math.sin(h) + dy * math.cos(h)
+        if remain > 0.0:
+            fwd = max(fwd, remain)
         return fwd, against_wall
 
     def _route_known(self) -> bool:
@@ -1179,7 +1192,11 @@ class DigitalMap:
             return False
         if self._pp_turn_tc == self._tc and not self.in_stall:
             return True
-        if self._inner_lead(self._next_section(self.section)):
+        nxt = self._next_section(self.section)
+        # Inner lead (p.ej. rojo por dentro en CW) suelta el bloqueo. Un verde
+        # a la izquierda en la *siguiente* recta también es "inner" en CCW, pero
+        # girar temprano corta hacia él: debe pasar por _green_ahead.
+        if self._inner_lead(nxt) and self._left_pass(nxt) is None:
             return False
         plan = self.corner_plan()
         if plan is not None and not plan.opens_out:

@@ -158,6 +158,28 @@ def test_gr_gf_from_mapped_entry_sign(monkeypatch):
     assert not rt._map_failed
 
 
+def test_map_geometry_anchors_to_digital_parking(monkeypatch):
+    """Inicio en cajón: ancla MAP = stall_start_xy(dm.parking), no hardcode S."""
+    from pure_pursuit.odometry import OdomPose
+    from pure_pursuit.wro_field import _heading, stall_start_xy
+
+    monkeypatch.setattr(C, "TRACK_MAP_ENABLED", True, raising=False)
+    monkeypatch.setattr(C, "DIGITAL_MAP_PARKING", "W", raising=False)
+    monkeypatch.setattr(C, "DIGITAL_MAP_DIRECTION", "CCW", raising=False)
+    rt, _serial = _make_runtime()
+    rt._inicio_estacionamiento = True
+    rt.digital.parking = "W"
+    rt.digital.set_direction("CCW")
+    rt._ensure_map_geometry("L", OdomPose(0.0, 0.0, 0.0, 0.0, "esp_pose", "high"))
+    sx, sy = stall_start_xy("W", "CCW", rt.digital.park_w)
+    pose = rt._map_localizer.pose
+    assert abs(pose.x_mm - sx) < 1.0
+    assert abs(pose.y_mm - sy) < 1.0
+    assert abs((pose.heading_deg - _heading("W", "CCW") + 180.0) % 360.0 - 180.0) < 1.0
+    # No debe quedar el hardcode histórico de cajón en S (~323, -1400).
+    assert abs(pose.x_mm - 323.0) > 200.0
+
+
 def test_shadow_cost_budget(monkeypatch):
     monkeypatch.setattr(C, "TRACK_MAP_SHADOW", True, raising=False)
     monkeypatch.setattr(C, "TRACK_MAP_ENABLED", False, raising=False)
