@@ -3521,7 +3521,8 @@ bool vigilarGeomExt(float along, long distF) {
                          && fabsf(ext - PARK_PARED_CM) <= PARK_GEOM_TOL_CM && distF > 25;
   const bool rojo = rojoFar || rojoCerca;
   if (!rojo && (!PARK_GEOM_EXT || !pgeEff || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
-  const bool acercar = rojoFar && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
+  // s35@60 sticky: f45 pre-pka ~1s; solo acercar pasado pka (s26@501 sigue).
+  const bool acercar = rojoFar && lejos && along < 420.0f && along >= rutaPka;
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
