@@ -256,6 +256,17 @@ function drawCar(g, X, Y, k, pose) {
   const car = (FIELD && FIELD.car) || { len: 176, width: 125, rear_overhang: 21.8 };
   const r = pose[2] * Math.PI / 180, f = [Math.sin(r), Math.cos(r)], rt = [Math.cos(r), -Math.sin(r)];
   const P = (fw, ri) => [pose[0] + fw * f[0] + ri * rt[0], pose[1] + fw * f[1] + ri * rt[1]];
+  // El carro del gemelo: el modelo 3D visto desde arriba (pieza por pieza, de abajo hacia arriba).
+  const top = FIELD && FIELD.car_top;
+  if (top && top.length) {
+    g.lineJoin = "round";
+    for (const part of top) {
+      g.fillStyle = part.rgb; g.beginPath();
+      part.pts.forEach(([ri, fw], i) => { const p = P(fw, ri); i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1])); });
+      g.closePath(); g.fill();
+    }
+    return;
+  }
   const b = -car.rear_overhang, fr = car.len - car.rear_overhang, w = car.width / 2;
   const pts = [P(b, -w), P(fr, -w), P(fr, w), P(b, w)];
   g.fillStyle = "#1e66f5cc"; g.strokeStyle = "#fff"; g.lineWidth = 1.5; g.beginPath();

@@ -246,7 +246,25 @@ def field(parking: str | None, w0: float | None) -> dict:
         "mounts": {k: list(v) for k, v in getattr(C, "SENSOR_MOUNTS", {}).items()},
         "car": {"len": float(getattr(C, "ROBOT_LENGTH_MM", 176.0)), "width": float(getattr(C, "ROBOT_WIDTH_MM", 125.0)),
                 "rear_overhang": float(getattr(C, "REAR_OVERHANG_MM", 21.8))},
+        "car_top": car_top(),
     }
+
+
+_CAR_TOP: list = []
+
+
+def car_top() -> list:
+    """Vista de arriba del modelo 3D del carro (la del gemelo, twin/assets/car_top.json):
+    piezas [{pts [[derecha, adelante] mm desde el eje trasero], rgb}] de abajo hacia arriba."""
+    if not _CAR_TOP:
+        try:
+            src = Path(__file__).resolve().parents[1] / "twin" / "assets" / "car_top.json"
+            for part in json.loads(src.read_text()):
+                b, g, r = part["bgr"]
+                _CAR_TOP.append({"pts": part["pts"], "rgb": f"rgb({r},{g},{b})"})
+        except Exception:
+            pass
+    return _CAR_TOP
 
 
 # ── Calibración de color ─────────────────────────────────────────────────────
