@@ -3603,7 +3603,9 @@ bool vigilarGeomExt(float along, long distF) {
   // Solo ROJO cerca: el de lejos (banda) ya toma antes a proposito.
   if (rojoCerca && !rojoFar && along + fabsf(encVelMmS) * PARK_GEOM_FRENO_S < rutaPka + PARK_GEOM_DET_MM) return false;
   if (!rojo && (!PARK_GEOM_EXT || !pgeEff || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
-  const bool acercar = rojoFar && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
+  // Verde/pge: a ext > PARED+5 (real: DIRECTO a 29-31 cm) acerca a la pared con f45 antes de la reversa; con 33-35 cm la reversa llegaba con h>350 y chocaba.
+  const bool acercar = (rojoFar && lejos && along < 420.0f)
+                    || (pgeEff && ext > PARK_PARED_CM + PARK_LEJOS_CM && along < 420.0f);  // s26@501+f45 pegaba al fondo
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
@@ -7370,7 +7372,7 @@ void loop() {
               parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevEnMadera = false;
               parkRevModo = true; parkGeomModo = true;
               // s20: ext ya ~TOL; f45 seguía hasta along~300 y el plan chocaba magenta.
-              const bool lejosG = extG > PARK_PARED_CM + PARK_GEOM_TOL_CM;
+              const bool lejosG = extG > PARK_PARED_CM + PARK_LEJOS_CM;   // 28: DIRECTO a 29-31 cm acerca antes de la reversa
               parkFase = lejosG ? 45 : 44; parkFaseMs = millis(); parkOdom0 = odomMm;
               Serial.print("PARK: ventana vencida lejos -> GEOM along="); Serial.print(alongG, 0);
               Serial.print(" ext="); Serial.print(extG, 1); Serial.print(" f="); Serial.println(parkFase);
