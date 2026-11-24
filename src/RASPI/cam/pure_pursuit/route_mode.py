@@ -1129,7 +1129,9 @@ class RouteMode:
                       or _grip_pwm(wheel) < int(C.ROUTE_PROFILE_MAX_PWM)):
                     # Soltar el 110 a tope abre el estacionamiento: sin tope, n5 s21
                     # entra 9.8 mm; con el PWM del agarre, n4 s21 queda a 3.0 mm.
-                    cte_cap = min(cte_cap, int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120)))
+                    urgent_pwm = int(getattr(C, "ROUTE_CTE_URGENT_PWM", 120))
+                    recovery_pwm = self._lap3_cte_recovery_cap(tc, conf, empty, hd, wheel, urgent_pwm)
+                    cte_cap = min(cte_cap, recovery_pwm)
             self.rv = cte_cap if self.rv is None else min(self.rv, cte_cap)
         l0cap = getattr(C, "ROUTE_L0_CTE_PWM", None)
         if l0cap is not None and self.fixed and tc is not None and float(tc) < 1.0 and abs(self.follower.cte) > float(getattr(C, "ROUTE_L0_CTE_MM", 40.0)):
@@ -1312,7 +1314,26 @@ class RouteMode:
         lim = float(C.ROUTE_CTE_URGENT_MM)
         return bool(np.any((c1 < lim) & (c1 < c0 - 20.0)))
 
-    def _offset_body(self, conf) -> tuple[float, float, float]:
+    def _lap3_cte_recovery_cap(self, tc, conf, empty, heading, wheel, urgent_pwm) -> int:
+        if (tc is None or not 8 <= tc < 11 or not self.route.report.get("feasible")
+                or self.upload or self._rte_n is not None or self._job is not None
+                or self._delay_left is not None or self.route_shift != self.shift):
+            return urgent_pwm
+        route_heading = self.follower.route.heading_deg[max(self.follower.i, 0)]
+        heading_error = (heading - route_heading + 180.0) % 360.0 - 180.0
+        cte = self.follower.cte
+        # Solo liberar con corrección activa: el volante casi recto no confirma el retorno.
+        if not 0.0 < abs(heading_error) < 25.0 or cte * heading_error >= 0.0 or cte * wheel >= 0.0 or abs(wheel) < 3.0:
+            return urgent_pwm
+        grip_pwm = _grip_pwm(wheel)
+        if grip_pwm <= urgent_pwm:
+            return urgent_pwm
+        clearance = min(self._offset_body(conf, empty=empty))
+        reserve = 40.0
+        available = max(0.0, min((clearance - reserve) / abs(cte), 1.0))
+        return urgent_pwm + int(available * (grip_pwm - urgent_pwm))
+
+    def _offset_body(self, conf, *, empty=None) -> tuple[float, float, float]:
         """Holgura de la huella (pared, lata confirmada, isla), corrida el cte y sobre la ruta."""
         r = self.follower.route
         n = len(r.kappa)
@@ -1332,8 +1353,11 @@ class RouteMode:
                 wall = min(wall, float(OUTER_HALF_MM - np.maximum(np.abs(cx), np.abs(cy)).max()))
                 isl = np.hypot(np.maximum(np.abs(cx) - ih, 0.0), np.maximum(np.abs(cy) - ih, 0.0))
                 island = min(island, float(isl.min()))
-        signs = np.asarray(
-            [section_to_world(sec, *SEATS[seat]) for sec, seat in conf], dtype=float).reshape(-1, 2)
+        if empty is None:
+            signs = np.asarray(
+                [section_to_world(sec, *SEATS[seat]) for sec, seat in conf], dtype=float).reshape(-1, 2)
+        else:
+            signs = self._sign_xy(conf, empty)
         if len(signs) == 0:
             sign = 1e9
         else:
