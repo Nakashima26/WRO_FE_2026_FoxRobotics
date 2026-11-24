@@ -1206,7 +1206,11 @@ class DigitalMap:
             return False
         block = ahead[0] > (480.0 if ahead[1] else 260.0)
         pp_cm = float(getattr(C, "DIGITAL_MAP_PP_TURN_CM", 0.0))
-        if block and pp_cm > 0.0 and self._dF is not None and 0.0 < self._dF <= pp_cm:
+        # Latch con verde en la siguiente, o en esta solo si tc<2 (n1/s36).
+        # Latch en tc altos con verde ya en la recta → pared (n1/s45).
+        allow_latch = self._left_pass(nxt) is not None or self._tc < 2
+        if (block and allow_latch and pp_cm > 0.0 and self._dF is not None
+                and 0.0 < self._dF <= pp_cm):
             self._pp_turn_tc = self._tc
             print(f"[DMAP] esquina por PP tc={self._tc} dF={self._dF:.0f}", flush=True)
         return block
