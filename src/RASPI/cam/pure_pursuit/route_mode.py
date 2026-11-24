@@ -1870,18 +1870,6 @@ class RouteMode:
         ToF no está más de ROUTE_FIX_LINE_TOF_LR (log) bajo su máximo. Corridas 100/101
         (2026-11-20, seed 23, mediodía): la cinta votó -565 cinco veces seguidas y decidió;
         los ToF daban ~-150 y ese δ quedaba ~e^-11..e^-25 abajo -> ruta a la isla."""
-        contra = getattr(C, "ROUTE_FIX_LINE_TOF_CONTRA", None)
-        if contra is not None and self.fix.n_inform >= int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3)):
-            # Contradicción gruesa: ToF seguros (masa >= contra[0]) y la cinta a más de contra[1] mm de su pico.
-            # El logp fino rechaza cinta buena a 30 mm del pico (gemelo: 44/48); esto solo atrapa lo imposible
-            # (2026-11-23 20:41: un voto "recta" a 13 cm, d=-924, ToF masa 0.89 en ~-86 -> pose 0.9 m mal y choque).
-            pk, pm = self.fix.estimate(float(getattr(C, "ROUTE_FIX_WIN_MM", 20.0)))
-            if pm >= float(contra[0]) and abs(float(d) - pk) > float(contra[1]):
-                if getattr(self, "_line_rej_d", None) != round(d):
-                    self._line_rej_d = round(d)
-                    print(f"[ROUTE] cinta δ={d:+.0f} rechazada: ToF pico {pk:+.0f} masa {pm:.2f} "
-                          f"({self.fix.n_inform} informativas)", flush=True)
-                return False
         lr = getattr(C, "ROUTE_FIX_LINE_TOF_LR", None)
         if lr is None or self.fix.n_inform < int(getattr(C, "ROUTE_FIX_LINE_TOF_MIN_INFORM", 3)):
             return True

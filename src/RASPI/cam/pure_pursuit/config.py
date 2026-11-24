@@ -1569,8 +1569,6 @@ ROUTE_FIX_LINE_TOL_MM = None
 # y al final de la recta va el pico de los ToF. None = apagado. Corridas 100/101 (2026-11-20): cinta -565, ToF ~-150 -> isla.
 ROUTE_FIX_LINE_TOF_LR = None
 ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
-# (masa mínima de los ToF, mm): la cinta no decide si los ToF están así de seguros y ella cae a más de esto de su pico. None = apagado
-ROUTE_FIX_LINE_TOF_CONTRA = None
 # Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
 ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
 ROUTE_PARK_REFINE = False  # Solo Pi: refina pka con las dos maderas vistas por el ToF exterior.
