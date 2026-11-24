@@ -1821,7 +1821,7 @@ PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 // U evitada por la pared exterior (g_geom, opt-in con pge=1 de la Pi = ROUTE_PARK_GEOM_EXT): si ya se decidio la U y la ruta
 // de la Pi deja al carro sobre la linea de escaneo pasado el cajon, en vez de la U frena con reversa, retrocede recto
 // buscando la madera de adelante con el sonar (fase 42, w=284), avanza al w de parada (fase 41) y hace el plan normal.
-PARK_AJ int          PARK_GEOM_EXT               = 0;       // 0 = apagado (como antes); 1 = solo con pge=1 de la Pi
+PARK_AJ int          PARK_GEOM_EXT               = 1;       // 1 = solo con pge=1 de la Pi (default on; 0 apaga)
 PARK_AJ float        PARK_GEOM_PASA_MM           = 150.0f;  // along >= pka + esto para tomar el mando (el sonar ya paso la madera)
 PARK_AJ float        PARK_GEOM_MAX_MM            = 550.0f;  // mas alla de pka + esto ya no (sigue la U): la reversa larga sale mas lenta que la U (6/6 en el gemelo con 600-640)
 PARK_AJ float        PARK_GEOM_TOL_CM            = 12.0f;   // |ext - PARK_PARED_CM| maximo para tomar el mando
@@ -1841,9 +1841,11 @@ PARK_AJ float        PARK_GEOM_WSTOP             = 268.0f;  // w de parada antes
 PARK_AJ long         PARK_GEOM_BUSCA_MS          = 6000;
 PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
-PARK_AJ int          PARK_GEOM_ROJO              = 0;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
+PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
 PARK_AJ int          PARK_GEOM_ROJO_PWM          = 155;     // avance durante el acercamiento
+PARK_AJ float        PARK_GEOM_FRENO_S           = 0.30f;   // s: la frenada recorre v*esto antes de arrancar la reversa (n1/s21: 651 mm/s -> ~190 mm)
+PARK_AJ float        PARK_GEOM_DET_MM            = 40.0f;   // ROJO cerca: la reversa debe arrancar al menos en pka + esto (madera nominal pka-105, ±50); si no, la busqueda retrocede lejos de ella
 bool                 parkGeomVeniaLejos          = false;
 bool                 parkGeomModo                = false;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
@@ -3596,11 +3598,16 @@ bool vigilarGeomExt(float along, long distF) {
   // distF>50 bloqueaba n2/s39 (toma @530 con frente ya cerca; gyro ya ≤15).
   const bool rojoFar = PARK_GEOM_ROJO && !pgeEff && parkGeomVeniaLejos
                     && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
-                    && distF > 25;
+                    && distF > 25
+                    && !(lejos && along >= 420.0f);   // lejos y sin fase 45 (along>=420): la reversa llega con h>350 y falla (n5/s26, n6/s26)
   // s32: no_llega cerca (ext en TOL) sin pge/veniaLejos — GEOM en vez de U.
   const bool rojoCerca = PARK_GEOM_ROJO && !pgeEff && !parkGeomVeniaLejos
                          && fabsf(ext - PARK_PARED_CM) <= PARK_GEOM_TOL_CM && distF > 25;
   const bool rojo = rojoFar || rojoCerca;
+  // La reversa arranca donde para el coche: si la frenada deja el arranque ya pasada la madera (nominal pka-105), la
+  // busqueda retrocede lejos de ella y acaba en U desde atras (n1/s21 ROJO cerca: tomado a pka-388 frena a pka-202).
+  // Solo ROJO cerca: el de lejos (banda) ya toma antes a proposito.
+  if (rojoCerca && !rojoFar && along + fabsf(encVelMmS) * PARK_GEOM_FRENO_S < rutaPka + PARK_GEOM_DET_MM) return false;
   if (!rojo && (!PARK_GEOM_EXT || !pgeEff || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
   const bool acercar = rojoFar && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
@@ -8157,6 +8164,12 @@ void loop() {
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
           if (parkGeomModo && PARK_GEOM_PLAN_NORMAL) parkRevModo = false;   // PARK_GEOM_EXT: llega pegado a la pared como el escaneo directo
+          // PARK_GEOM no pasa por la fase 1 (no midio la pared junto al poste): parkBase quedaba en 0 y el plan de
+          // entrada creia estar pegado a la pared (d=0) y barria hacia la madera magenta (n1/s21). Usa la ext de la ruta.
+          if (parkGeomModo && !(parkBaseLlegada > 5.0f)) {
+            const float extG = rutaExtTapeteCm();
+            parkBaseLlegada = (isfinite(extG) && extG > 5.0f && extG <= (float)PARK_PARED_MAX_CM) ? extG : PARK_PARED_CM;
+          }
 #if FOX_TOF
           if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
 #endif
