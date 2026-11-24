@@ -180,9 +180,11 @@ const int FRONT_ESQUINA_MAX   = 100;  // la esquina solo cuenta con pared de enf
 // giro salía 200-300 ms tarde (run 133246). Si ahora roza la esquina interior al
 // girar, baja FRONT_ESQUINA_MAX a ~90.
 const int FRONT_SLOWDOWN_CM   = 90;
-const int FRONT_SLOWDOWN2_CM  = 60;   // solo giro 1
-const int FRONT_FORCE_GIRO_CM = 40;   // solo giro 1: forzar el giro hacia el lado más abierto
+const int FRONT_SLOWDOWN2_CM  = 60;   // freno fuerte con pared de enfrente cerca (todas las rectas)
+const int FRONT_FORCE_GIRO_CM = 40;   // forzar giro si el frontal baja de esto (antes solo giro 1)
 const int FORZADO_DEBOUNCE    = 3;    // lecturas seguidas (reset duro)
+// orillas223: giro 3 con F=1 — sin forzado tras el giro 1 la apertura interior
+// llegó tarde y el carro pegó de frente. El forzado aplica en TODAS las rectas.
 // El servo vuelve a recto a GIRO_ANTICIPO_DEG del rumbo de la recta siguiente:
 // lo que falta lo completan la inercia y el gyro PID (que apunta a n x 90° exactos).
 // Si el giro se pasa de 90, súbelo; si queda corto y el PID tarda en completarlo, bájalo.
@@ -802,7 +804,7 @@ void siguiendo(long distL, long distR, long distF) {
     velocidadMotor = (turnsCompleted == 0) ? VEL_INICIAL : MOTOR_MAX;
     if (distF > 0 && distF < FRONT_SLOWDOWN_CM)
       velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
-    if (turnsCompleted == 0 && distF > 0 && distF < FRONT_SLOWDOWN2_CM)
+    if (distF > 0 && distF < FRONT_SLOWDOWN2_CM)
       velocidadMotor = min(velocidadMotor, VEL_APROX2);
   } else {
     mapLogRectaSiNuevo();
@@ -811,6 +813,8 @@ void siguiendo(long distL, long distR, long distF) {
     velocidadMotor = pwmRecta;
     if (distF > 0 && distF < frontSlowCm)
       velocidadMotor = min(velocidadMotor, VEL_APROX_CERRADA);
+    if (distF > 0 && distF < FRONT_SLOWDOWN2_CM)
+      velocidadMotor = min(velocidadMotor, VEL_APROX2);
   }
 
   actualizarDesvio(distL_filtrada, distR_filtrada);
@@ -819,7 +823,8 @@ void siguiendo(long distL, long distR, long distF) {
   if (millis() - lastTurnTime <= cooldownGiro || millis() - timeStart <= GRACIA_ARRANQUE_MS) return;
 
   bool giroNormal  = detectarEsquina(distL, distR, distF);
-  bool forzadoCond = (turnsCompleted == 0 && !primerGiro && distF > 0 && distF < FRONT_FORCE_GIRO_CM);
+  // Antes solo giro 1: en orillas223 el 3 llegó a F=1 sin apertura a tiempo.
+  bool forzadoCond = (distF > 0 && distF < FRONT_FORCE_GIRO_CM);
   contadorForzado  = forzadoCond ? min(contadorForzado + 1, FORZADO_DEBOUNCE) : 0;
   bool giroForzado = (contadorForzado >= FORZADO_DEBOUNCE);
 
@@ -830,7 +835,8 @@ void siguiendo(long distL, long distR, long distF) {
       direccionIzquierda = (distL > distR);
       primerGiro         = true;
     }
-    if (giroForzado && !giroNormal) Log.println("Giro 1 FORZADO (pared de enfrente)");
+    if (giroForzado && !giroNormal)
+      Log.printf("Giro %d FORZADO (pared de enfrente)\n", turnsCompleted + 1);
     Log.printf("Giro %d %s  (L:%ld R:%ld F:%ld)\n", turnsCompleted + 1,
                   direccionIzquierda ? "izquierda" : "derecha", distL, distR, distF);
   }
