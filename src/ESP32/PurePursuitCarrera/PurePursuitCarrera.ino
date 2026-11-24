@@ -1756,6 +1756,7 @@ PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
 PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
+PARK_AJ float        PARK_SINU_ABORT_ANG        = 15.0f;  // DIRECTO fase0: |gyro| sobre esto → U (s20 derivaba a −22° antes de ventana vencida)
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
@@ -3144,7 +3145,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_U_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -7226,6 +7227,20 @@ void loop() {
         bool p1Reciente = PARK_D_P1_ODOM_MM > 0 && parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= PARK_POSTE2_POSE_MM - 100 && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM + PARK_D_P1_ODOM_MM;   // el poste 2 no puede estar a menos de ~240 mm del 1
         // p1Reciente también tras la U (run 181: el poste 2 cayó 108 mm después de pka y abortó 2 mm antes de verlo).
         bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
+          // DIRECTO chueco: abortar a U antes de gastar la ventana del poste (s20: ang−18@+0.15s, ventana@+1.7s).
+          if (PARK_SINU_FORZAR_U && parkDirecto && parkScanSubFase == 0
+              && PARK_SINU_ABORT_ANG > 0.0f && fabsf(anguloGyro) > PARK_SINU_ABORT_ANG
+              && millis() - parkEntryMs > 150UL) {
+            parkSinUDec = 2;
+            parkDirecto = false;
+            parkUturnPendiente = true;
+            parkUturnOdom0 = odomMm;
+            parkUturnDisparoOdom = -1;
+            contadorEsquina13 = 0;
+            estado = SIGUIENDO;
+            Serial.print("PARK: DIRECTO chueco ang="); Serial.print(anguloGyro, 1); Serial.println(" -> U");
+            break;
+          }
         if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
           // La ruta puede rodear una señal por dentro y saltarse el cajón antes de volver a la pared.
           // Seguir la ruta hasta el disparo normal de la U si el escaneo directo nunca se alineó.
