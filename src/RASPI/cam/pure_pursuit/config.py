@@ -1370,6 +1370,7 @@ ROUTE_BLIND_PWM = None   # tope antes de fijar el avance del cajón (arranque ci
 # tramo, alto (rv=0, hasta ROUTE_PREFIX_STOP_FRAMES cuadros; luego ROUTE_SLOW_PWM) si el frontal ve algo a
 # menos de ROUTE_PREFIX_STOP_CM, y sin evidencia para el cajón con el frontal pegado (odometría patinando).
 ROUTE_PREFIX_PWM = 130
+ROUTE_FIX_UNIQUE_PREFIX_SEAT = False  # CCW: ancla la pose con una señal estable y un único asiento posible
 ROUTE_PREFIX_STOP_CM = 40.0
 ROUTE_PREFIX_STOP_FRAMES = 20
 ROUTE_FIX_STUCK_DF_CM = 12.0

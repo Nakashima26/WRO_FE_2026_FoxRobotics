@@ -759,6 +759,12 @@ class RouteMode:
                         and (span is None or max(last) - min(last) <= float(span))
                         and self._line_ok(float(np.median(last)))):
                     delta = self._line_median(last=int(n_dec))
+            seat_delta = None
+            if (delta is None and getattr(C, "ROUTE_FIX_UNIQUE_PREFIX_SEAT", False)
+                    and dm.direction == "CCW" and ack_est == "S" and tc == 0
+                    and self._pix_blind_heading_ok(pose, 25.0)):
+                seat_delta = self._unique_prefix_seat_delta(dm, pose)
+                delta = seat_delta
             forced = False
             if delta is None and self._past_straight(dm, pose) and not self._force_wait(pose):
                 # Sin pico al final de la recta: la media (sin lecturas que
@@ -802,7 +808,10 @@ class RouteMode:
                         if self._recta_vote_span() >= float(getattr(C, "ROUTE_FIX_LINE_RECTA_DRIFT_MM", 40.0)):
                             p_shift = SIGN_MM
                     delta = self._pillar_pair_delta(dm, delta, p_shift)
-                pose = self._apply_fix(dm, ack, delta, forced)
+                # El pie proyectado del pilar adelanta ligeramente el avance
+                # estimado en CCW. Compensa el sesgo de la madera por separado.
+                park_bias = 15.0 if seat_delta is not None else 0.0
+                pose = self._apply_fix(dm, ack, delta, forced, park_bias=park_bias)
                 conf, empty = self._resolved(dm)
         elif (getattr(C, "ROUTE_FIX_BLUE", False) and not self._post_blue_done
               and tc is not None and tc <= 0):
@@ -1876,6 +1885,46 @@ class RouteMode:
               f"na={float(n @ a):.2f} c=({c[0]:.0f},{c[1]:.0f}) pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
         return True
 
+    def _unique_prefix_seat_delta(self, dm, pose) -> float | None:
+        """Ancla el avance con una señal seguida desde dos posiciones distintas."""
+        frames = dm._deferred or ()
+        # La fila interior es la única legal en la recta del cajón.
+        row = [w for seat, (_, w) in SEATS.items() if seat not in PARKING_FORBIDDEN_SEATS]
+        _, car_w = world_to_section(dm.parking, *pose[:2])
+        direction = 1 if dm.direction == "CW" else -1
+        observations = []
+        for feet, camera_pose, heading, *_ in frames[-16:]:
+            candidates = []
+            for x, y, color, fwd, _ in feet_world(feet, camera_pose, heading):
+                h, w = world_to_section(dm.parking, x, y)
+                if abs(h - _ROW_H) <= SIGN_MM and 0 < direction * (w - car_w) and fwd <= 850.0:
+                    candidates.append((w, color))
+            if len(candidates) == 1:
+                _, view_w = world_to_section(dm.parking, *camera_pose)
+                observations.append((*candidates[0], view_w))
+        if len(observations) < 5:
+            return None
+        ws, colors, views = zip(*observations)
+        if len(set(colors)) != 1 or max(ws) - min(ws) > 45.0 or max(views) - min(views) < 45.0:
+            return None
+        w = float(np.median(ws))
+        # Mantén las hipótesis próximas al límite como alternativas hasta
+        # distinguirlas. Una diferencia de asiento desplaza el mapa 500 mm.
+        lo = PARK_W_MIN - self.fix.w0_guess
+        hi = PARK_W_MAX - self.fix.w0_guess
+        shifts = [seat_w - w for seat_w in row if lo - SIGN_MM <= seat_w - w <= hi + SIGN_MM]
+        if len(shifts) != 1 or not lo <= shifts[0] <= hi:
+            return None
+        delta = shifts[0]
+        if self._line_d and abs(delta - self._line_median()) > SIGN_MM:
+            return None
+        if self.fix.n_inform >= 3:
+            near = np.abs(self.fix.deltas - delta) <= SIGN_MM
+            if np.max(self.fix.logp[near]) < self.fix.logp.max() - 3.0:
+                return None
+        print(f"[ROUTE] avance por asiento único: {delta:+.0f} mm", flush=True)
+        return delta
+
     def _pillar_pair_delta(self, dm, delta: float, min_shift: float | None = None) -> float:
         """Contrasta el ajuste de la cinta con un par inequívoco de asientos."""
         ax, ay = self.axis
@@ -1916,7 +1965,7 @@ class RouteMode:
             return pairs[0]
         return delta
 
-    def _apply_fix(self, dm, ack, delta: float, forced: bool):
+    def _apply_fix(self, dm, ack, delta: float, forced: bool, park_bias: float = 0.0):
         """Avance resuelto: corre la pose, vota lo guardado y repasa las vistas."""
         # w0 fuera de [PARK_W_MIN, PARK_W_MAX] no existe en el reglamento (corrida 99: 1820 con máx 1696).
         lo, hi = PARK_W_MIN - self.fix.w0_guess, PARK_W_MAX - self.fix.w0_guess
@@ -1939,7 +1988,8 @@ class RouteMode:
         # no es del cajón: sin esto el cajón quedaba ~9 cm corrido y el carro chocaba al estacionar (133).
         adj = getattr(C, "ROUTE_FIX_PARK_ADJ_MM", 0.0)
         adj = float(adj.get(dm.direction, 0.0)) if isinstance(adj, dict) else float(adj)
-        self.park_w = float(min(max(self.fix.w0_guess + float(delta) + adj, PARK_W_MIN), PARK_W_MAX))
+        adj += park_bias
+        self.park_w = float(min(max(self.fix.w0_guess + delta + adj, PARK_W_MIN), PARK_W_MAX))
         dm.park_w = self.park_w
         n = dm.replay_deferred(dx, dy)
         pose = self.loc.pose()
