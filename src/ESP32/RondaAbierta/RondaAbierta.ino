@@ -100,6 +100,10 @@ const bool          ARRANQUE_POR_COMANDO = true;
 const bool          LOG_PERIODICO        = false;
 // ESQ: en SIGUIENDO con frontal < FRONT_ESQUINA_MAX, cada 50 ms: usado + crudo/status de L/R/F.
 const bool          LOG_ESQUINA          = true;
+// Telemetría para el dashboard de la Pi (pure_pursuit/dashboard), mismo formato que
+// PurePursuitCarrera: "PRE ..." cada 250 ms quieto (ESPERANDO / TERMINADO) y
+// "ACK:V2,..." cada 100 ms corriendo. Distancias en mm, -1 = sin lectura.
+const bool          TELEMETRIA_PI        = true;
 // Reloj del I2C de los ToF. 400 kHz es lo de siempre; 100 kHz aguanta mejor el
 // ruido del motor (a 20 Hz por sensor sobra velocidad). Ver "i2c lentas/err" en RECTA.
 const uint32_t      I2C_HZ               = 400000;
@@ -1098,12 +1102,66 @@ void leerComandos() {
   }
 }
 
+// mm para el dashboard: -1 si no hay pared/lectura (como tofMm en PurePursuitCarrera).
+// "Nov24-11:22" de la compilación: el dashboard muestra qué build trae el ESP.
+const char* buildTag() {
+  static char b[16] = "";
+  if (!b[0]) {
+    const char* d = __DATE__;   // "Nov 24 2026"
+    int n = 0;
+    b[n++] = d[0]; b[n++] = d[1]; b[n++] = d[2];
+    if (d[4] != ' ') b[n++] = d[4];
+    b[n++] = d[5]; b[n++] = '-';
+    for (int i = 0; i < 5; i++) b[n++] = __TIME__[i];
+    b[n] = 0;
+  }
+  return b;
+}
+
+long tofMmTele(const Tof& t) { return (t.ok && t.cm > 0 && t.cm < SIN_PARED_CM) ? t.cm * 10 : -1; }
+
+void enviarTelemetria() {
+  if (!TELEMETRIA_PI) return;
+  static unsigned long tTele = 0;
+  unsigned long ahora = millis();
+  bool quieto = (estado == ESPERANDO || estado == TERMINADO);
+  if (ahora - tTele < (quieto ? 250UL : 100UL)) return;
+  tTele = ahora;
+  const char* dir = !primerGiro ? "?" : (direccionIzquierda ? "L" : "R");
+  if (quieto) {
+    // Sin trasero en la open: B=-1, h '-' e i '0' en su lugar (orden L/R/B/F como el carrera).
+    // fw/bld: qué firmware trae el ESP; map/mc: pasillos medidos en la vuelta 1 (0 = sin medir).
+    Log.printf("PRE L=%ld R=%ld B=-1 F=%ld h=%c/%c/-/%c i=%c%c0%c rst=%d rl=%ld/%ld/-1/%ld"
+               " fw=open bld=%s dir=%s tc=%d mapok=%d map=%d/%d/%d/%d mc=%.0f/%.0f/%.0f/%.0f\n",
+               tofMmTele(tofL), tofMmTele(tofR), tofMmTele(tofF),
+               tofL.ok ? 'o' : 'n', tofR.ok ? 'o' : 'n', tofF.ok ? 'o' : 'n',
+               tofL.ok ? '1' : '0', tofR.ok ? '1' : '0', tofF.ok ? '1' : '0',
+               (int)esp_reset_reason(),
+               tofL.crudo * 10, tofR.crudo * 10, tofF.crudo * 10,
+               buildTag(), dir, turnsCompleted, mapListo ? 1 : 0,
+               mapPasilloCm[0], mapPasilloCm[1], mapPasilloCm[2], mapPasilloCm[3],
+               mapCorrCm[0], mapCorrCm[1], mapCorrCm[2], mapCorrCm[3]);
+  } else {
+    const char* est = estado == GIRANDO ? "G" : estado == TERMINANDO ? "T" : "S";
+    Log.printf("ACK:V2,fw=open,est=%s,dir=%s,tc=%d,tpr=%d,sec=%d,mapok=%d,map=%d/%d/%d/%d,"
+               "yaw=%.2f,bno=%.1f,ao=%.1f,srv=%d,pw=%d,"
+               "tL=%ld,tR=%ld,tB=-1,tF=%ld,dL=%ld,dR=%ld,dF=%ld,stL=%d,stR=%d,stF=%d,mod=%s,trim=%.1f\n",
+               est, dir, turnsCompleted, TURNS_PER_RACE, mapSecRecta() + 1, mapListo ? 1 : 0,
+               mapPasilloCm[0], mapPasilloCm[1], mapPasilloCm[2], mapPasilloCm[3],
+               anguloGyro, anguloGyro, anguloObjetivo, servoActual, velocidadMotor,
+               tofMmTele(tofL), tofMmTele(tofR), tofMmTele(tofF),
+               (long)distL_filtrada, (long)distR_filtrada, (long)distF_filtrada,
+               tofL.st, tofR.st, tofF.st, modoServo, trimRumbo);
+  }
+}
+
 void loop() {
   leerBno();
   leerTofs();
   leerBno();   // otra vez: que el I2C de los ToF no deje acumular paquetes del BNO
   leerComandos();
 
+  enviarTelemetria();
   if (estado == TERMINADO) return;
 
   // El giro se revisa en cada vuelta (ángulo a 100 Hz) y el gyro PID corre con

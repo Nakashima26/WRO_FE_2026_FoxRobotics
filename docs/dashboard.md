@@ -21,6 +21,20 @@ A web page served by the Pi itself (`pure_pursuit/dashboard/server.py`, port **8
 
   It installs `wro-dashboard.service`, the sudoers rules and the `fox-ap` and `fox-eth` profiles.
 
+## From your PC (flash the ESP32 over USB)
+
+Double-click `scripts/dashboard_pc.bat` (or run `python scripts/fox_pc.py`). It opens `http://localhost:8091`.
+
+- It finds the Pi by itself (cable 10.43.0.1, hotspot 10.42.0.1, Tailscale) or takes `--pi IP`.
+- The page comes from the PC's repo; all data (`/api/*`) comes from the Pi.
+- The **ESP** tab flashes with arduino-cli, without opening the Arduino IDE:
+  1. Connect the ESP32 to the PC by USB. The port with a CP210x/CH340 chip is picked automatically.
+  2. Press **Flashear Open**, **Obstáculos** or **Obstáculos + sorpresa**. It compiles the code in the PC's repo, as it is, and uploads it in about 1 minute.
+  3. When it finishes it restarts `wro-runtime` on the Pi. With **Obstáculos** it also sets `SURPRISE_RULE` in the Pi's `carrera.json`.
+- The header shows what the car has: `ESP: Open <build>` or `ESP: Obstáculos <build> · sorpresa ON/OFF`.
+  - The build is the compile date and time.
+  - The surprise rule shown is the one the runtime loaded.
+
 ## Tabs
 
 - **En vivo**
@@ -42,6 +56,14 @@ A web page served by the Pi itself (`pure_pursuit/dashboard/server.py`, port **8
   3. Press **Analizar** to get the proposed bands.
   4. Press **Vista previa** to compare the current mask against the proposed one, region by region.
   5. Press **Guardar**, then restart the service.
+- **ESP**
+  - Which firmware the car has, when it was compiled, and the surprise rule.
+  - **Sorpresa ON/OFF** buttons. They edit `carrera.json` on the Pi and restart the service.
+  - Flashing, only when opened from `fox_pc.py`.
+- **En vivo** with the open firmware
+  - The map draws the island with each side at the width measured in lap 1. 60 cm sides are orange; dashed sides were not measured.
+  - Section 1 is drawn at the bottom.
+  - The car is drawn at an estimated pose on each straight: inner ToF to the island, front ToF to the end wall. Turns are not estimated.
 - **Sistema**
   - Pi state: temperature, low voltage, disk, IPs and radios.
   - **Modo ronda** turns off Wi-Fi and Bluetooth.

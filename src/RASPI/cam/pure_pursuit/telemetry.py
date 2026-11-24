@@ -23,7 +23,9 @@ RAW_SNAP_PATH = os.environ.get("FOX_RAW_SNAP", "/dev/shm/wro_raw.jpg")
 # Campos del ACK que se publican tal cual (números o letras cortas).
 ACK_KEYS = ("est", "dir", "tc", "tpr", "yaw", "od", "px", "py", "vel", "srv", "pw",
             "tL", "tR", "tB", "tF", "dL", "dR", "dF", "rn", "ue", "uf", "enc", "bno",
-            "pkf", "hug", "rst", "tfh", "ltf", "fase", "rev", "lv")
+            "pkf", "hug", "rst", "tfh", "ltf", "fase", "rev", "lv",
+            # RondaAbierta (fw=open): mapa de pasillos y estado del seguidor de pared.
+            "fw", "sec", "mapok", "map", "ao", "mod", "trim", "stL", "stR", "stF")
 
 
 def parse_ack(ack: str | None) -> dict:

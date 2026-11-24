@@ -516,7 +516,9 @@ class PPRuntime:
         now = time.time()
         st = {"t": now, "armed": bool(armed), "fps": round(float(getattr(self, "_fps", 0.0) or 0.0), 1),
               "timing": {k: round(v, 1) for k, v in getattr(self, "_timing_ms", {}).items()},
-              "tc": getattr(self, "_tc", None), "tpr": getattr(self, "_tpr", None)}
+              "tc": getattr(self, "_tc", None), "tpr": getattr(self, "_tpr", None),
+              # Regla sorpresa (solo existe del lado de la Pi): el dashboard la muestra junto al firmware.
+              "surprise": bool(getattr(C, "SURPRISE_RULE", False))}
         ack = getattr(self, "_prev_ack", None)
         if ack and ack.startswith("ACK:V2"):
             self._tele_ack = (now, ack)

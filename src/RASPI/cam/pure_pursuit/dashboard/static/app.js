@@ -67,12 +67,32 @@ function tofNow() {
   return null;
 }
 
+// ── Firmware del ESP ────────────────────────────────────────────────────────
+// La open (RondaAbierta) manda fw=open en PRE y ACK; obstáculos manda fw=obs en PRE.
+// Sin fw pero con PRE/ACK = obstáculos con firmware anterior a este campo.
+function fwNow() {
+  const t = S.tele || {};
+  const f = (t.pre && t.pre.fw) || (t.ack && t.ack.fw);
+  if (f) return String(f);
+  return t.pre || t.ack ? "obs" : null;
+}
+function listOf(v) {
+  if (Array.isArray(v)) return v.map(Number);
+  if (typeof v === "string") return v.split("/").map(Number);
+  if (typeof v === "number") return [v];
+  return null;
+}
+
 function onState() {
   const t = S.tele || {}, sy = S.sys || {};
   const age = t._age;
   setPill("#pill-link", age === null || age === undefined ? "runtime sin datos" : age < 1.5 ? "en línea" : `sin datos ${fmt(age, 0)} s`,
           age !== null && age < 1.5 ? "ok" : "bad");
   setPill("#pill-svc", "servicio " + (sy.service || "?"), sy.service === "active" ? "ok" : "bad");
+  const fw = fwNow(), bld = (t.pre && t.pre.bld) || "";
+  setPill("#pill-fw", fw === "open" ? `ESP: Open ${bld}` :
+          fw === "obs" ? `ESP: Obstáculos ${bld} · sorpresa ${t.surprise ? "ON" : "OFF"}` : "ESP: sin datos",
+          fw === "open" ? "ok" : fw === "obs" ? (t.surprise ? "warn" : "ok") : "bad");
   setPill("#pill-arm", t.armed ? "ARMADO" : "esperando botón", t.armed ? "warn" : "");
   const a = t.ack || {};
   setPill("#pill-est", "est " + (a.est || "—"));
@@ -92,10 +112,12 @@ function onState() {
     const p = t.loc.pose, last = trail[trail.length - 1];
     if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 15) { trail.push(p); if (trail.length > 600) trail.shift(); }
   }
+  if (fw === "open") openUpdate();
   ensureField();
   if ($("#tab-live").classList.contains("on")) { drawMap(); drawRadar(); drawSensors(); drawChecklist(); drawLoc(); }
   if ($("#tab-tof").classList.contains("on")) drawTofLive();
   if ($("#tab-sys").classList.contains("on")) drawSys();
+  if ($("#tab-esp").classList.contains("on")) drawEsp();
   for (const l of t.esp_rx || []) espRx(l);
 }
 
@@ -144,6 +166,7 @@ function raycast(ox, oy, dx, dy, segs) {
 function drawMap() {
   const cv = $("#map"), g = cv.getContext("2d"), W = cv.width;
   g.clearRect(0, 0, W, W);
+  if (fwNow() === "open") return drawOpen(g, W);
   if (!FIELD) return;
   const span = FIELD.outer * 2 + 200, k = W / span;
   const X = (x) => (x + span / 2) * k, Y = (y) => (span / 2 - y) * k;
@@ -237,6 +260,7 @@ function drawRadar() {
     const raw = tof.raw || [], order = { L: 0, R: 1, B: 2, F: 3 };
     for (const [key, mname] of [["L", "tof_left"], ["R", "tof_right"], ["B", "tof_rear"], ["F", "tof_front"]]) {
       const mount = FIELD.mounts[mname]; if (!mount) continue;
+      if (key === "B" && fwNow() === "open") continue;   // la open no trae trasero
       const m = mountWorld(pose, mount), z = tof[key], ok = z > 0;
       const zz = ok ? Math.min(z, R) : R * 0.25;
       g.strokeStyle = ok ? css("--ray") : css("--bad"); g.setLineDash(ok ? [] : [4, 4]); g.lineWidth = 3;
@@ -294,9 +318,13 @@ function drawChecklist() {
   add(esp ? "ok" : "bad", "ESP32 respondiendo", t.pre ? "PRE (quieto)" : t.ack ? "ACK (carrera)" : "nada (¿ESP apagado o firmware viejo?)");
   const tof = tofNow();
   if (tof) {
-    const bad = ["L", "R", "F", "B"].filter((k) => !(tof[k] > 0));
-    add(bad.length ? (bad.length > 1 ? "bad" : "warn") : "ok", "4 ToF con lectura", bad.length ? `sin: ${bad.join(" ")}` : `${tof.L}/${tof.R}/${tof.F}/${tof.B}`);
-    if (t.pre && t.pre.i) add(String(t.pre.i) === "1111" ? "ok" : "bad", "ToF iniciados al arrancar el ESP", `i=${t.pre.i}`);
+    const open = fwNow() === "open", keys = open ? ["L", "R", "F"] : ["L", "R", "F", "B"];
+    const bad = keys.filter((k) => !(tof[k] > 0));
+    add(bad.length ? (bad.length > 1 ? "bad" : "warn") : "ok", `${keys.length} ToF con lectura`, bad.length ? `sin: ${bad.join(" ")}` : keys.map((k) => tof[k]).join("/"));
+    if (t.pre && t.pre.i) {
+      const okI = open ? "1101" : "1111";   // open: L/R/-/F (sin trasero)
+      add(String(t.pre.i) === okI ? "ok" : "bad", "ToF iniciados al arrancar el ESP", `i=${t.pre.i}`);
+    }
   } else add("bad", "4 ToF con lectura", "sin datos");
   add(t.fps >= 30 ? "ok" : t.fps >= 20 ? "warn" : "bad", "Cámara y loop", `${fmt(t.fps, 0)} fps`);
   add(sy.temp_c == null ? "warn" : sy.temp_c < 70 ? "ok" : sy.temp_c < 80 ? "warn" : "bad", "Temperatura de la Pi", `${fmt(sy.temp_c, 0)} °C`);
@@ -312,6 +340,7 @@ function drawChecklist() {
   $("#checklist").innerHTML = items.join("");
 }
 function drawLoc() {
+  if (fwNow() === "open") return drawLocOpen();
   const t = S.tele || {}, l = t.loc, a = t.ack || {}, m = t.map || {};
   const rows = [
     ["Sentido / cajón", `${m.direction || "—"} / ${m.parking || "—"}`],
@@ -607,3 +636,193 @@ $("#btn-color-save").onclick = async () => {
   } catch (e) { toast(e.message, true); }
 };
 drawTofCal();
+
+
+// ── Ronda abierta ───────────────────────────────────────────────────────────
+// La open no tiene pose: se estima en cada recta con el ToF interior (distancia a la
+// isla), el frontal (distancia a la pared del fondo) y el rumbo contra el objetivo.
+// Recta k = sección k+1 del mapa; CCW (dir L) gira a la izquierda, CW (dir R) a la derecha.
+// La sección 1 se dibuja abajo (no se sabe la orientación real de la pista).
+const OPEN_H = 1500, OPEN_CAR = { len: 176, width: 125, rear_overhang: 21.8 };
+const openTrail = [];
+let openLastTc = -1, openPose = null;
+function openInfo() {
+  const t = S.tele || {}, a = (t.ack && t.ack.fw === "open") ? t.ack : {}, p = (t.pre && t.pre.fw === "open") ? t.pre : {};
+  return {
+    dir: a.dir || p.dir || "?", map: listOf(a.map ?? p.map) || [0, 0, 0, 0], mc: listOf(p.mc), mapok: a.mapok ?? p.mapok,
+    tc: a.tc ?? p.tc, est: a.est, yaw: a.yaw, ao: a.ao, L: a.tL, R: a.tR, F: a.tF,
+    mod: a.mod, trim: a.trim, pw: a.pw, srv: a.srv, running: !!t.ack && t.ack.fw === "open",
+  };
+}
+// Marco de la recta k: (u a lo largo, v desde la pared de afuera hacia la isla) -> mundo.
+function openFrame(k, ccw) {
+  const th = (ccw ? 1 : -1) * k * Math.PI / 2, c = Math.cos(th), s = Math.sin(th);
+  const rot = (x, y) => [x * c - y * s, x * s + y * c];
+  return {
+    P: (u, v) => rot(ccw ? -OPEN_H + u : OPEN_H - u, -OPEN_H + v),
+    h0: (ccw ? 90 : -90) - (ccw ? 1 : -1) * k * 90,   // rumbo de la recta (0 = +y, horario)
+  };
+}
+function openWidth(o, k) { const w = o.map[k]; return w > 0 ? w * 10 : 0; }
+function openUpdate() {
+  const o = openInfo();
+  if (!o.running) return;
+  if (o.tc !== undefined && o.tc < openLastTc) openTrail.length = 0;   // arrancó otra corrida
+  openLastTc = o.tc ?? openLastTc;
+  if (o.est !== "S" || o.dir === "?" || o.tc === undefined) return;
+  const ccw = o.dir === "L", k = ((o.tc % 4) + 4) % 4, w = openWidth(o, k) || 1000, half = OPEN_CAR.width / 2;
+  const dInt = ccw ? o.L : o.R, dOut = ccw ? o.R : o.L;
+  let v;
+  if (dInt > 0 && dInt < w) v = w - dInt - half;
+  else if (dOut > 0 && dOut < w) v = dOut + half;
+  else return;
+  if (!(o.F > 0)) return;   // sin pared enfrente no se sabe dónde va a lo largo
+  const u = 2 * OPEN_H - o.F - (OPEN_CAR.len - OPEN_CAR.rear_overhang);
+  const f = openFrame(k, ccw), [x, y] = f.P(u, v);
+  const dev = (o.yaw ?? 0) - (o.ao ?? 0);   // + = a la izquierda
+  openPose = [x, y, f.h0 - dev, k];
+  const last = openTrail[openTrail.length - 1];
+  if (!last || Math.hypot(x - last[0], y - last[1]) > 20) { openTrail.push(openPose); if (openTrail.length > 1500) openTrail.shift(); }
+}
+function drawOpen(g, W) {
+  const o = openInfo(), ccw = o.dir !== "R";
+  const span = 2 * OPEN_H + 200, kk = W / span;
+  const X = (x) => (x + span / 2) * kk, Y = (y) => (span / 2 - y) * kk;
+  g.fillStyle = css("--mat"); g.fillRect(X(-OPEN_H), Y(OPEN_H), 2 * OPEN_H * kk, 2 * OPEN_H * kk);
+  g.lineWidth = 6; g.strokeStyle = "#111"; g.strokeRect(X(-OPEN_H), Y(OPEN_H), 2 * OPEN_H * kk, 2 * OPEN_H * kk);
+  // Isla: cada lado a la distancia medida de la pared de afuera (sin medir = 100 cm, punteado).
+  const ext = {}, sideOf = [];
+  for (let k = 0; k < 4; k++) {
+    const f = openFrame(k, ccw), a = f.P(0, 0), b = f.P(2 * OPEN_H, 0);
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const side = Math.abs(mid[0]) > Math.abs(mid[1]) ? (mid[0] > 0 ? "E" : "W") : (mid[1] > 0 ? "N" : "S");
+    const w = openWidth(o, k);
+    ext[side] = OPEN_H - (w || 1000); sideOf[k] = { side, w, mid };
+  }
+  const x0 = -ext.W, x1 = ext.E, y0 = -ext.S, y1 = ext.N;
+  g.fillStyle = "#222"; g.fillRect(X(x0), Y(y1), (x1 - x0) * kk, (y1 - y0) * kk);
+  const faces = { S: [[x0, y0], [x1, y0]], N: [[x0, y1], [x1, y1]], W: [[x0, y0], [x0, y1]], E: [[x1, y0], [x1, y1]] };
+  g.font = "bold 16px system-ui"; g.textAlign = "center";
+  for (let k = 0; k < 4; k++) {
+    const { side, w, mid } = sideOf[k], [a, b] = faces[side];
+    g.strokeStyle = w ? (w === 600 ? css("--orange") : css("--accent")) : "#8a94a3"; g.lineWidth = 5;
+    g.setLineDash(w ? [] : [10, 8]); g.beginPath(); g.moveTo(X(a[0]), Y(a[1])); g.lineTo(X(b[0]), Y(b[1])); g.stroke(); g.setLineDash([]);
+    const sc = 1 - (w || 1000) / 2 / OPEN_H, c = [mid[0] * sc, mid[1] * sc];   // centro del pasillo
+    const now = o.running && o.tc !== undefined && ((o.tc % 4) + 4) % 4 === k;
+    g.fillStyle = now ? "#d9480f" : "#222";   // sobre el tapete claro
+    const mc = o.mc && o.mc[k] ? ` (${Math.round(o.mc[k])})` : "";
+    g.fillText(`S${k + 1}: ${w ? w / 10 + " cm" : "?"}${mc}`, X(c[0]), Y(c[1]));
+  }
+  g.textAlign = "start";
+  // flecha de sentido en la sección 1
+  const f0 = openFrame(0, ccw), pa = f0.P(300, 250), pb = f0.P(700, 250);
+  g.strokeStyle = "#fff"; g.lineWidth = 3; g.beginPath(); g.moveTo(X(pa[0]), Y(pa[1])); g.lineTo(X(pb[0]), Y(pb[1])); g.stroke();
+  g.beginPath(); g.arc(X(pb[0]), Y(pb[1]), 6, 0, 7); g.fillStyle = "#fff"; g.fill();
+  // rastro estimado (solo rectas: el giro no se estima)
+  if ($("#opt-trail").checked && openTrail.length > 1) {
+    g.strokeStyle = "#7d4cffcc"; g.lineWidth = 2;
+    for (let i = 1; i < openTrail.length; i++) {
+      const p = openTrail[i - 1], q = openTrail[i];
+      if (p[3] !== q[3]) continue;
+      g.beginPath(); g.moveTo(X(p[0]), Y(p[1])); g.lineTo(X(q[0]), Y(q[1])); g.stroke();
+    }
+  }
+  $("#map-sub").textContent = `Open · ${o.dir === "L" ? "CCW (izquierda)" : o.dir === "R" ? "CW (derecha)" : "sentido ?"} · mapa ${o.map.join("/")}${o.mapok ? " listo" : ""}` +
+    (o.running ? ` · recta ${(o.tc ?? 0) + 1} (S${(((o.tc ?? 0) % 4) + 4) % 4 + 1})` : "");
+  if (!openPose || !o.running) return;
+  const pose = openPose;
+  if ($("#opt-rays").checked) {
+    const r = pose[2] * Math.PI / 180, fwd = [Math.sin(r), Math.cos(r)], rt = [Math.cos(r), -Math.sin(r)];
+    const ref = OPEN_CAR.len - OPEN_CAR.rear_overhang;
+    const rays = [[o.L, [-OPEN_CAR.width / 2, 70], [-rt[0], -rt[1]]], [o.R, [OPEN_CAR.width / 2, 70], rt], [o.F, [0, ref], fwd]];
+    for (const [z, [ri, fw], d] of rays) {
+      if (!(z > 0)) continue;
+      const ox = pose[0] + fw * fwd[0] + ri * rt[0], oy = pose[1] + fw * fwd[1] + ri * rt[1];
+      g.strokeStyle = css("--ray"); g.lineWidth = 2; g.beginPath(); g.moveTo(X(ox), Y(oy)); g.lineTo(X(ox + z * d[0]), Y(oy + z * d[1])); g.stroke();
+      g.fillStyle = css("--ray"); g.beginPath(); g.arc(X(ox + z * d[0]), Y(oy + z * d[1]), 3.5, 0, 7); g.fill();
+    }
+  }
+  drawCar(g, X, Y, kk, pose);
+}
+function drawLocOpen() {
+  const o = openInfo(), t = S.tele || {};
+  const est = { S: "siguiendo", G: "girando", T: "terminando" }[o.est] || (o.running ? o.est : "quieto");
+  const rows = [
+    ["Firmware", `RondaAbierta ${(t.pre && t.pre.bld) || ""}`],
+    ["Sentido", o.dir === "L" ? "CCW (izquierda)" : o.dir === "R" ? "CW (derecha)" : "todavía no gira"],
+    ["Estado / giros", `${est} · ${fmt(o.tc)}/12`],
+    ["Mapa (pasillo por sección)", o.map.map((w, k) => `S${k + 1} ${w || "?"}${o.mc && o.mc[k] ? ` (${Math.round(o.mc[k])})` : ""}`).join(" · ") + (o.mapok ? " ✓" : "")],
+    ["Rumbo / objetivo", `${fmt(o.yaw, 1)}° / ${fmt(o.ao, 1)}°`],
+    ["Modo de manejo", `${o.mod || "—"} · trim ${fmt(o.trim, 1)}°`],
+    ["PWM / servo", `${fmt(o.pw)} / ${fmt(o.srv)}`],
+    ["Cómo se dibuja", "pose estimada por recta: ToF interior → isla, frontal → pared del fondo. El giro no se dibuja."],
+  ];
+  $("#loc-table").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+}
+
+
+// ── ESP: qué firmware trae, regla sorpresa y flasheo desde la compu ─────────
+// El flasheo solo existe cuando el dashboard se abre con scripts/fox_pc.py en la compu
+// (localhost:8091): ese programa atiende /local/* y le pasa todo lo demás a la Pi.
+let FLASH = null, flashPoll = null, sorpFile = null;
+function drawEsp() {
+  const t = S.tele || {}, fw = fwNow(), pre = t.pre || {}, a = t.ack || {};
+  const rows = [
+    ["Firmware", fw === "open" ? "Open (RondaAbierta)" : fw === "obs" ? "Obstáculos (PurePursuitCarrera)" : "sin datos del ESP"],
+    ["Compilado", pre.bld || "— (firmware sin este dato o corriendo)"],
+    ["Estado", t.armed ? "corriendo" : t.pre ? "quieto" : "—"],
+    ["Regla sorpresa (runtime)", fw === "open" ? "no aplica en la open" : t.surprise ? "ON" : "OFF"],
+    ["Último reset del ESP", pre.rst !== undefined ? `motivo ${pre.rst}` : "—"],
+  ];
+  $("#esp-now").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+  $("#sorp-file").textContent = sorpFile === null ? "" : `carrera.json: ${sorpFile ? "ON" : "OFF"}`;
+}
+async function loadSorp() { try { sorpFile = (await api("/api/surprise")).on; } catch (e) { sorpFile = null; } drawEsp(); }
+for (const [id, on] of [["#btn-sorp-on", true], ["#btn-sorp-off", false]]) {
+  $(id).onclick = async () => {
+    if (S.tele.armed && !confirm("El carro está corriendo. ¿Reiniciar el servicio igual?")) return;
+    try { const d = await api("/api/surprise", { on }); sorpFile = d.on; toast(d.msg || d.error, !!d.error); } catch (e) { toast(e.message, true); }
+    drawEsp();
+  };
+}
+async function flashStatus() {
+  try { FLASH = await api("/local/flash/status"); } catch (e) { FLASH = null; }
+  $("#flash-off").style.display = FLASH ? "none" : "";
+  $("#flash-on").style.display = FLASH ? "" : "none";
+  if (!FLASH) return;
+  const sel = $("#flash-port"), cur = sel.value;
+  sel.innerHTML = FLASH.ports.map((p) => `<option value="${p.port}">${p.port}${p.esp ? " (ESP)" : ""}</option>`).join("") ||
+    `<option value="">sin puertos</option>`;
+  if (cur && FLASH.ports.some((p) => p.port === cur)) sel.value = cur;
+  const g = FLASH.git || {};
+  $("#flash-git").textContent = `código: ${g.branch || "?"} · ${g.commit || "?"}` +
+    (g.esp_sin_commit && g.esp_sin_commit.length ? ` · sin commit: ${g.esp_sin_commit.join(", ")}` : "") +
+    (FLASH.cli ? "" : " · ¡no encuentro arduino-cli!");
+  showJob(FLASH.job);
+}
+function showJob(j) {
+  if (!j) return;
+  $("#flash-state").textContent = j.busy ? `${j.state}… ${fmt(j.secs, 0)} s` :
+    j.ok === null ? "" : j.ok ? `✓ listo en ${fmt(j.secs, 0)} s` : `✗ ${j.state}`;
+  const box = $("#flash-log"); box.textContent = (j.log || []).join("\n"); box.scrollTop = box.scrollHeight;
+  $$("[data-flash]").forEach((b) => b.disabled = !!j.busy);
+}
+async function pollJob() {
+  try {
+    const j = (await api("/local/flash/job")).job; showJob(j);
+    if (!j.busy) { clearInterval(flashPoll); flashPoll = null; toast(j.ok ? "ESP flasheada y servicio reiniciado" : "El flasheo falló (ve el log)", !j.ok); loadSorp(); }
+  } catch (e) { clearInterval(flashPoll); flashPoll = null; }
+}
+$("#btn-flash-ports").onclick = flashStatus;
+$$("[data-flash]").forEach((b) => b.onclick = async () => {
+  const sketch = b.dataset.flash, body = { sketch, port: $("#flash-port").value };
+  if (b.dataset.sorp !== undefined) body.surprise = b.dataset.sorp === "1";
+  const name = sketch === "open" ? "Open" : `Obstáculos (sorpresa ${body.surprise ? "ON" : "OFF"})`;
+  if (S.tele.armed && !confirm("El carro está corriendo. ¿Flashear igual?")) return;
+  if (!confirm(`¿Flashear ${name} en ${body.port || "el puerto de la ESP"}? Tarda ~1-2 min y al final reinicia el servicio.`)) return;
+  try {
+    const d = await api("/local/flash", body); toast(d.msg || d.error, !!d.error);
+    if (!d.error && !flashPoll) flashPoll = setInterval(pollJob, 1000);
+  } catch (e) { toast(e.message, true); }
+});
+$$('[data-tab="esp"]').forEach((b) => b.addEventListener("click", () => { flashStatus(); loadSorp(); }));

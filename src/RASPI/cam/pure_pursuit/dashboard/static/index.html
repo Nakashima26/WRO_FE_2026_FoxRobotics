@@ -11,6 +11,7 @@
   <div class="brand">🦊 <b>Fox</b> <span class="muted">dashboard</span></div>
   <div class="pills">
     <span id="pill-link" class="pill bad">sin datos</span>
+    <span id="pill-fw" class="pill">ESP ?</span>
     <span id="pill-svc" class="pill">servicio ?</span>
     <span id="pill-arm" class="pill">—</span>
     <span id="pill-est" class="pill">est —</span>
@@ -31,6 +32,7 @@
   <button class="tab" data-tab="tof">Calibrar ToF</button>
   <button class="tab" data-tab="color">Calibrar color</button>
   <button class="tab" data-tab="sys">Sistema</button>
+  <button class="tab" data-tab="esp">ESP</button>
 </nav>
 
 <main>
@@ -78,6 +80,43 @@
     <div class="card">
       <div class="card-h">Localización y estado</div>
       <table id="loc-table" class="kv"></table>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── ESP ───────────── -->
+<section id="tab-esp" class="tab-page">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-h">Qué trae el carro</div>
+      <table id="esp-now" class="kv"></table>
+      <div class="card-h" style="margin-top:14px">Regla sorpresa <span class="muted">(carrera.json de la Pi; reinicia el servicio)</span></div>
+      <div class="row">
+        <button id="btn-sorp-on" class="warn">Sorpresa ON</button>
+        <button id="btn-sorp-off">Sorpresa OFF</button>
+        <span id="sorp-file" class="muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h">Flashear la ESP32 <span class="muted">(por USB desde tu compu)</span></div>
+      <div id="flash-off" class="muted">
+        Para flashear abre el dashboard con <code>scripts\dashboard_pc.bat</code> en tu compu
+        (<code>http://localhost:8091</code>) y conecta la ESP por USB a la compu.
+      </div>
+      <div id="flash-on" style="display:none">
+        <div class="row">
+          <label>Puerto <select id="flash-port"></select></label>
+          <button id="btn-flash-ports" class="small">buscar</button>
+        </div>
+        <div class="row">
+          <button data-flash="open" class="ok">Flashear Open</button>
+          <button data-flash="obs" data-sorp="0" class="ok">Obstáculos</button>
+          <button data-flash="obs" data-sorp="1" class="warn">Obstáculos + sorpresa</button>
+        </div>
+        <div id="flash-git" class="muted small"></div>
+        <div id="flash-state" class="muted"></div>
+        <pre id="flash-log" class="log small"></pre>
+      </div>
     </div>
   </div>
 </section>

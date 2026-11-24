@@ -4653,6 +4653,11 @@ void enviarPRE() {
 #if FOX_ENCODER
   Serial2.print(" enc="); Serial2.print(leerEncoder());   // banco: escala del encoder empujando a mano
 #endif
+  // Qué firmware trae el ESP (el dashboard distingue open / obstáculos) y de cuándo es el build.
+  Serial2.print(" fw=obs bld=");
+  { const char* d = __DATE__; Serial2.print(d[0]); Serial2.print(d[1]); Serial2.print(d[2]);
+    if (d[4] != ' ') Serial2.print(d[4]); Serial2.print(d[5]); Serial2.print('-');
+    for (int i = 0; i < 5; i++) Serial2.print(__TIME__[i]); }
   Serial2.println();
 }
 #endif

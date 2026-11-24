@@ -150,6 +150,35 @@ def service_action(action: str) -> str:
     return "acción desconocida"
 
 
+CARRERA_JSON = HERE.parent / "carrera.json"
+
+
+def surprise_get() -> bool | None:
+    """SURPRISE_RULE de carrera.json (lo que cargará el runtime al reiniciar). None si no se puede leer."""
+    try:
+        return bool(json.loads(CARRERA_JSON.read_text(encoding="utf-8")).get("SURPRISE_RULE", False))
+    except Exception:
+        return None
+
+
+def surprise_set(on: bool) -> str:
+    """Cambia SURPRISE_RULE en carrera.json sin reformatear el archivo y reinicia el runtime.
+
+    En la Pi esa línea es un cambio local (no está en git): `git stash; pull; stash pop` la conserva."""
+    import re
+    txt = CARRERA_JSON.read_text(encoding="utf-8")
+    val = "true" if on else "false"
+    if re.search(r'"SURPRISE_RULE"\s*:\s*(true|false)', txt):
+        txt = re.sub(r'("SURPRISE_RULE"\s*:\s*)(true|false)', r"\g<1>" + val, txt, count=1)
+    else:
+        txt = txt.replace("{", '{\n "SURPRISE_RULE": ' + val + ",", 1)
+    json.loads(txt)   # que siga siendo JSON válido antes de escribir
+    tmp = CARRERA_JSON.with_suffix(".tmp")
+    tmp.write_text(txt, encoding="utf-8")
+    os.replace(tmp, CARRERA_JSON)
+    return f"regla sorpresa {'ON' if on else 'OFF'} en carrera.json; " + service_action("restart")
+
+
 def _radios() -> dict:
     """{wlan: encendido, bluetooth: encendido} leyendo /sys/class/rfkill."""
     out = {}
@@ -341,6 +370,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, logs(int(q.get("n", 200)), q.get("f", "")).encode(), "text/plain; charset=utf-8")
             if p == "/api/calib":
                 return self._json({"path": str(calib_file.path()), "data": calib_file.load()})
+            if p == "/api/surprise":
+                return self._json({"on": surprise_get()})
             if p == "/api/esp_rx":
                 with TELE.lock:
                     return self._json({"lines": [[round(t, 2), l] for t, l in TELE.esp_rx]})
@@ -375,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"msg": service_action(str(b.get("action")))})
             if p == "/api/radio":
                 return self._json({"msg": radio_action(bool(b.get("on")))})
+            if p == "/api/surprise":
+                return self._json({"msg": surprise_set(bool(b.get("on"))), "on": surprise_get()})
             if p == "/api/esp":
                 line = str(b.get("line", ""))
                 if not line.startswith(("CALQ", "CALT")):
