@@ -51,6 +51,7 @@ LogAsync Log;""", t, count=1, flags=re.S)
     if os.environ.get("RA_VIEJO"):
         reps += [("float KiWall = 0.08;", "float KiWall = 0;"),
                  ("CORR_FRONTAL_MM[3] = { 30, 200,  30 }", "CORR_FRONTAL_MM[3] = { 0, 0, 0 }")]
+    t = t.replace("esp_reset_reason()", "1")  # el SIL no trae esp_system.h
     for a, b in reps:
         assert a in t, f"RondaAbierta cambió, revisa el parche: {a}"
         t = t.replace(a, b)
