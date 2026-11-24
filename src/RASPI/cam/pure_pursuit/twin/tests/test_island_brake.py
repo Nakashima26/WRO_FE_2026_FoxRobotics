@@ -74,12 +74,10 @@ def test_profile_lejos_de_isla_no_toca_base(monkeypatch):
 
 
 def test_tof_interior_cap_rampa():
-    """dL=15 cm (orillas219) debe capar < 255; dL=9 cerca del piso."""
-    near = 10.0
-    cm = 20.0
-    lo = 120
-    for d_int, hi in ((15.0, 200), (9.0, 130)):
-        span = cm - near
-        t = min(max((d_int - near) / span, 0.0), 1.0)
-        cap = int(round(lo + t * (255 - lo)))
-        assert lo <= cap <= hi, (d_int, cap)
+    """Solo roce (<12 cm): dL=15 no entra; dL=9 cerca del piso."""
+    near, cm, lo = 8.0, 12.0, 130
+    assert not (0.0 < 15.0 < cm)
+    span = cm - near
+    t = min(max((9.0 - near) / span, 0.0), 1.0)
+    cap = int(round(lo + t * (255 - lo)))
+    assert lo <= cap <= 170, cap
