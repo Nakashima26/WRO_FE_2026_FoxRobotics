@@ -3441,7 +3441,12 @@ void vigilarSinU() {
   bool enLinea = fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rumboDeg) <= PARK_SINU_ANG_DEG;
   if (!enLinea && !isnan(rutaPka) && along < rutaPka - (float)PARK_SINU_FORZAR_MM) return;
   if (!enLinea && PARK_SINU_GEOMETRIA && !isnan(rutaPka) && parkCabeAlineacion(along, extCm, rumboDeg)) return;
-  if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) { parkSinUDec = 2; Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return; }
+  if (!enLinea && PARK_SINU_FORZAR_U && !isnan(rutaPka)) {
+    parkSinUDec = 2;
+    // Sync park_legado: cajón mid-recta no pasa por "cajón al inicio"; latch si venía lejos.
+    if (PARK_GEOM_ROJO && extCm > PARK_PARED_CM + 22.0f) parkGeomVeniaLejos = true;
+    Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return;
+  }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
   if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
   parkUturnPendiente = false;
@@ -3455,22 +3460,22 @@ void vigilarSinU() {
 // PARK_GEOM_EXT: con la U ya decidida, toma el mando sobre la linea de escaneo pasado el cajon. true = tomo el mando.
 bool vigilarGeomExt(float along, long distF) {
   if ((!PARK_GEOM_EXT && !PARK_GEOM_ROJO) || isnan(rutaPka) || parkGeomModo) return false;
-  // ROJO con pka<<0: la ventana pka+MAX cierra antes del umbral U (~500); alargar solo si veniaLejos.
-  float geomMax = PARK_GEOM_MAX_MM;
-  if (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge)
+  // ROJO: pka<<0 alarga max (U@~500); pka alto baja pasa (si no, U dispara antes de pka+150).
+  float geomMax = PARK_GEOM_MAX_MM, geomPasa = PARK_GEOM_PASA_MM;
+  if (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge) {
     geomMax = max(geomMax, 520.0f - rutaPka);
-  if (along < rutaPka + PARK_GEOM_PASA_MM || along > rutaPka + geomMax) return false;
+    geomPasa = min(geomPasa, max(50.0f, 500.0f - rutaPka));
+  }
+  if (along < rutaPka + geomPasa || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
   if (fabsf(err) > PARK_GEOM_ANG_DEG) return false;
   const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
-  // Banda: quitar tope pka+360 (mataba s46). err usa ANG_DEG (antes 5° mataba s46@9°).
+  // Banda: sin along>=pka+250 (con pka~300 pedía ≥548 y el U@500 ganaba). f45 solo si aún hay recta.
   const bool rojo = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
                     && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
-                    && distF > 50
-                    && (lejos || (along >= max(340.0f, rutaPka + 250.0f)
-                                  && along <= rutaPka + geomMax));
+                    && distF > 50;
   if (!rojo && (!PARK_GEOM_EXT || !rutaPge || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
-  const bool acercar = rojo && lejos;
+  const bool acercar = rojo && lejos && along < 420.0f;  // s26@501+f45 pegaba al fondo
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
