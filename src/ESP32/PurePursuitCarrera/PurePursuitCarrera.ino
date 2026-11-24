@@ -238,7 +238,7 @@ int   piMemoryFrames = 0;     // mem=N: frames de memoria restantes
 bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
 // ACK de un V2 que ya quedó viejo (hay otra línea de la Pi esperando): 0 = se
 // manda siempre (como antes); 1 = se salta solo en ESTACIONANDO/ESTACIONANDO_PUNTA
-// (el ACK largo del parking satura el UART y el loop se iba a >1 s); 2 = siempre.
+// (el ACK largo del parking satura el UART y el loop se iba a >1 s).
 // La Pi usa el último ACK, así que saltar los viejos no le quita información.
 const int ACK_SALTA_VIEJOS = 0;
 // Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
@@ -288,6 +288,7 @@ bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
+bool  rutaPge       = false; // pge=1 : la Pi permite cambiar la U por la pared exterior + busqueda del cajon en reversa (PARK_GEOM_EXT)
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
@@ -1814,6 +1815,30 @@ PARK_AJ float        PARK_REV_EXT_CM             = 66.0f;   // al iniciar el esc
 PARK_AJ float        PARK_REV_DF_CM              = 25.0f;   // el sonar frontal ve algo (senal) a menos de esto: para de avanzar
 PARK_AJ float        PARK_REV_H0                 = 400.0f;
 PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
+// U evitada por la pared exterior (g_geom, opt-in con pge=1 de la Pi = ROUTE_PARK_GEOM_EXT): si ya se decidio la U y la ruta
+// de la Pi deja al carro sobre la linea de escaneo pasado el cajon, en vez de la U frena con reversa, retrocede recto
+// buscando la madera de adelante con el sonar (fase 42, w=284), avanza al w de parada (fase 41) y hace el plan normal.
+PARK_AJ int          PARK_GEOM_EXT               = 0;       // 0 = apagado (como antes); 1 = solo con pge=1 de la Pi
+PARK_AJ float        PARK_GEOM_PASA_MM           = 150.0f;  // along >= pka + esto para tomar el mando (el sonar ya paso la madera)
+PARK_AJ float        PARK_GEOM_MAX_MM            = 550.0f;  // mas alla de pka + esto ya no (sigue la U): la reversa larga sale mas lenta que la U (6/6 en el gemelo con 600-640)
+PARK_AJ float        PARK_GEOM_TOL_CM            = 12.0f;   // |ext - PARK_PARED_CM| maximo para tomar el mando
+PARK_AJ float        PARK_GEOM_ANG_DEG           = 10.0f;   // |error de carril| maximo para tomar el mando
+PARK_AJ int          PARK_GEOM_FRENO_PWM         = 160;     // fase 44: reversa para frenar
+PARK_AJ float        PARK_GEOM_V_REV             = 120.0f;  // mm/s: por debajo, a la busqueda en reversa (fase 42)
+PARK_AJ int          PARK_GEOM_BUSCA_PWM         = 100;     // fase 42 en este modo, cerca de la madera
+PARK_AJ int          PARK_GEOM_RAPIDO_PWM        = 200;     // fase 42 lejos de la madera (along > pka + LENTO_MM)
+PARK_AJ float        PARK_GEOM_LENTO_MM          = 100.0f;  // lento desde pka + esto (la deteccion nominal es en pka - 105; +-50 mm de error de along)
+PARK_AJ float        PARK_GEOM_W_REV             = 181.0f;  // w del eje al ver la cara de atras de la madera en reversa con el eje a 300 mm de la pared (gemelo, 21 corridas)
+PARK_AJ float        PARK_GEOM_W_REV_KH          = -0.29f;  // mm de w por mm de altura del sonar sobre 300 (cono del ToF)
+PARK_AJ int          PARK_GEOM_TOPE              = 200;     // tope de PWM de la busqueda en reversa
+PARK_AJ float        PARK_GEOM_H_OBJ             = 300.0f;  // altura del eje (mm de la pared) que busca la reversa (la del escaneo directo)
+PARK_AJ float        PARK_GEOM_KH                = 0.15f;   // grados de nariz a la isla por mm de altura de mas, en reversa
+PARK_AJ float        PARK_GEOM_TH_MAX            = 10.0f;
+PARK_AJ float        PARK_GEOM_WSTOP             = 268.0f;  // w de parada antes del plan (el escaneo directo arranca en ~285 tras el coast); 0 = formula de la reversa en S
+PARK_AJ long         PARK_GEOM_BUSCA_MS          = 6000;
+PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
+PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
+bool                 parkGeomModo                = false;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
 PARK_AJ int          PARK_PL_ARC1_PWM           = 130;     // PWM del arco EXT del tramo 1 mientras th < 0.4*T1
 PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
@@ -3441,6 +3466,28 @@ void vigilarSinU() {
   anguloGyro = rutaErrCarrilDeg();   // 0 = paralelo al carril, como tras la U
 }
 
+// PARK_GEOM_EXT: con la U ya decidida, toma el mando sobre la linea de escaneo pasado el cajon. true = tomo el mando.
+bool vigilarGeomExt(float along) {
+  if (!PARK_GEOM_EXT || !rutaPge || isnan(rutaPka) || parkGeomModo) return false;
+  if (along < rutaPka + PARK_GEOM_PASA_MM || along > rutaPka + PARK_GEOM_MAX_MM) return false;
+  const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
+  if (fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM || fabsf(err) > PARK_GEOM_ANG_DEG) return false;
+  parkUturnPendiente = false; parkUturnDisparoOdom = -1;
+  parkDirecto = true;
+  turnsCompleted = TURNS_PER_RACE;
+  iniciarEstacionando();
+  parkRevGyroOff = anguloGyro - err;
+  anguloGyro = err;                                      // 0 = paralelo al carril
+  parkRumboRef = 0.0f;
+  parkDetAlong = rutaPka - 64.0f;                        // prior de la Pi hasta que el sonar vea la madera
+  parkDetHPose = parkHPoseMm(); parkDetHSon = parkDetHPose; parkDetTh = 0.0f;
+  parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevEnMadera = false; parkRevModo = true; parkGeomModo = true;
+  parkFase = 44; parkFaseMs = millis(); parkOdom0 = odomMm;
+  Serial.print("PARK GEOM: pared exterior sin U, along="); Serial.print(along, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
+  Serial.print(" ext="); Serial.print(ext, 1); Serial.print(" err="); Serial.print(err, 1); Serial.print(" v="); Serial.println(encVelMmS, 0);
+  return true;
+}
+
 void vigilarUturn(long distL, long distR, long distF) {
   if (!parkUturnPendiente || PARK_MODO == PARK_NINGUNO || sinUActivo()) return;
   // La naranja de la vuelta 12 es la esquina que ACABAS de tomar; no cuenta
@@ -3469,6 +3516,7 @@ void vigilarUturn(long distL, long distR, long distF) {
                   || (PARK_UTURN_ADELANTO_POSE_CM > 0.0f && rutaExtTapeteCm() >= PARK_UTURN_ADELANTO_POSE_CM);
     if (PARK_UTURN_ADELANTO_MM > 0 && huecoU) umbralU = min(umbralU, (float)PARK_UTURN_ADELANTO_MM);
     if (PARK_UTURN_RUTA_PKA_MM > 0 && !isnan(rutaPka)) umbralU = max(umbralU, rutaPka + (float)PARK_UTURN_RUTA_PKA_MM);   // la U no cae encima de la madera del cajón
+    if (vigilarGeomExt(along)) return;
     if (!fondoR && along < umbralU) return;
     if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
     parkUturnDisparoOdom = -1;
@@ -4524,7 +4572,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
-    if (campoPi(line, ",pka=", v)) rutaPka = campoFloat(v);
+    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v); rutaPge = campoPi(line, ",pge=", v) && campoInt(v) != 0; }
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
     lastPiMsgMs = millis();
@@ -7754,6 +7802,18 @@ void loop() {
         break;
       }
 
+      // ── Fase 44 (PARK_GEOM_EXT): frena con reversa sobre la linea de escaneo, luego busca la madera retrocediendo (fase 42) ──
+      if (parkFase == 44) {
+        motorReversa();
+        servoRumboPark(0.0f);                             // todavia va hacia adelante: paralelo al carril
+        setMotor(PARK_GEOM_FRENO_PWM);
+        if (encVelMmS <= PARK_GEOM_V_REV || millis() - parkFaseMs > 1500) {
+          Serial.print("PARK GEOM: frenado v="); Serial.print(encVelMmS, 0); Serial.print(" along="); Serial.print(alongSalidaMm(), 0); Serial.println(" -> busco la madera en reversa");
+          parkFase = 42; parkFaseMs = millis(); parkOdom0 = odomMm; parkRevBase = 0.0f; parkRevDrop = 0; parkRevEnMadera = false;
+        }
+        break;
+      }
+
       // ── Fase 41: pasa el cajon recto por el carril hasta w = PARK_REV_W_MM y de ahi al plan de reversa ──
       if (parkFase == 41) {
         motorAdelante();
@@ -7782,6 +7842,7 @@ void loop() {
         // para donde la recta a PARK_REV_TH1 (arco EXT + recta + arco INT) llega a (WF, HEND): w = WF + R(2 sin t) + (h-HEND-2R(1-cos t))/tan t
         float t1 = PARK_REV_TH1 * 0.0174533f;
         float wStop = PARK_PL_WF + 2.0f * PARK_PL_RI * sinf(t1) + max(ph - PARK_PL_HEND - 2.0f * PARK_PL_RI * (1.0f - cosf(t1)), 0.0f) / tanf(t1);
+        if (parkGeomModo && PARK_GEOM_WSTOP > 0.0f) wStop = PARK_GEOM_WSTOP;
         bool senalAdelante = distF_filtrada > 0 && distF_filtrada <= PARK_REV_DF_CM && fabsf(parkThCarril()) <= 12.0f && millis() - parkFaseMs > 300;   // la senal de la entrada del cuadrante esta delante del cajon
         if (!parkRevAnc && (pw >= wStop + PARK_REV_SIN_ANCLA_MM || senalAdelante || millis() - parkFaseMs > 6000)) { parkRevCaeAU(senalAdelante ? "senal adelante" : "sin ver la madera"); break; }
         if (parkRevAnc && (pw >= wStop || senalAdelante || millis() - parkFaseMs > 6000)) {
@@ -7796,8 +7857,17 @@ void loop() {
       if (parkFase == 42) {
         motorReversa();
         escribirServo(centroServo);
-        setMotor(PARK_REV_BUSCA_PWM);
+        if (!parkGeomModo) setMotor(PARK_REV_BUSCA_PWM);
+        else setMotorTope(alongSalidaMm() > rutaPka + PARK_GEOM_LENTO_MM ? PARK_GEOM_RAPIDO_PWM : PARK_GEOM_BUSCA_PWM, PARK_GEOM_TOPE);
         float pw, ph; parkPlanPose(pw, ph);
+        if (parkGeomModo) {
+          // reversa hacia la linea del escaneo: nariz a la isla (th > 0) si sobra altura; en reversa el volante va al reves
+          float thObj = constrain(PARK_GEOM_KH * (parkHPoseMm() - PARK_GEOM_H_OBJ), -PARK_GEOM_TH_MAX, PARK_GEOM_TH_MAX);
+          float ref = direccionIzquierda ? thObj : -thObj;
+          float out = -(PARK_KP_ANG * (ref - anguloGyro) - PARK_KD_RATE * gyroRate);
+          out = constrain(out, (float)-PARK_SERVO_MAX, (float)PARK_SERVO_MAX);
+          escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
+        }
         if (extRaw > 2 && extRaw < 150) {
           float esperada = (ph - 68.0f) / 10.0f;
           bool pared = (float)extRaw >= esperada - 6.0f, madera = (float)extRaw < esperada - PARK_REV_CAIDA_CM;
@@ -7817,15 +7887,21 @@ void loop() {
             // en reversa la deteccion adelanta hacia atras: el cono suma en vez de restar (parkPlanPose resta CONO*(h-350) siempre)
             float wNom = (borde == 1 ? 220.0f : 200.0f) + PARK_REV_B0 + PARK_REV_B1 * (parkDetHSon - 350.0f) + PARK_REV_B2 * (parkDetHSon - 200.0f) * tanf(parkDetTh * 0.0174533f)
                           + PARK_PL_CONO * (parkDetHSon - 350.0f);   // el cono de ida no aplica al reves: se cancela lo que resta parkPlanPose; B0 B1 B2 ajustados con 33 corridas (rmse 3.3 mm)
+            // PARK_GEOM_EXT: ToF lateral (110.6 mm delante del eje) cruzando la cara de atras (284) / de adelante (264) de la madera, medido en el gemelo;
+            // se cancelan la inclinacion y el cono que resta parkPlanPose para que w quede en ese valor.
+            if (parkGeomModo) wNom = PARK_GEOM_W_REV + PARK_GEOM_W_REV_KH * (parkDetHSon - 300.0f) - (borde == 1 ? 0.0f : 20.0f)
+                                     + (PARK_PL_TILT ? (parkDetHSon - 200.0f) * tanf(parkDetTh * 0.0174533f) : 0.0f) + PARK_PL_CONO * (parkDetHSon - 350.0f);
             parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET);
-            Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
+            Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" hp="); Serial.print(parkDetHPose, 0); Serial.print(" v="); Serial.print(encVelMmS, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
             parkRevAnc = true;
             parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;   // con el ancla, de nuevo hacia adelante hasta el w de parada
             motorAdelante();
             break;
           }
         }
-        if (pw < PARK_REV_BUSCA_W_MIN || millis() - parkFaseMs > 4000) { parkRevCaeAU("no encuentro la madera"); }
+        bool sinMadera = parkGeomModo ? (alongSalidaMm() < rutaPka - PARK_GEOM_BUSCA_FIN_MM || millis() - parkFaseMs > (unsigned long)PARK_GEOM_BUSCA_MS)
+                                      : (pw < PARK_REV_BUSCA_W_MIN || millis() - parkFaseMs > 4000UL);
+        if (sinMadera) { parkRevCaeAU("no encuentro la madera"); }
         break;
       }
 
@@ -7870,6 +7946,7 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (PARK_PLAN_ON && millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
+          if (parkGeomModo && PARK_GEOM_PLAN_NORMAL) parkRevModo = false;   // PARK_GEOM_EXT: llega pegado a la pared como el escaneo directo
 #if FOX_TOF
           if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
 #endif
