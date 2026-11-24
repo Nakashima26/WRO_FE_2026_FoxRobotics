@@ -1868,7 +1868,9 @@ ROUTE_LAP2_L23_LATENCY_S = None   # vuelta 2, tc 4..<corte
 ROUTE_LAP3_L23_LATENCY_S = None   # vuelta 3, tc corte..10
 ROUTE_LAP2_L23_A_BRAKE_MM_S2 = None
 ROUTE_LAP3_L23_A_BRAKE_MM_S2 = None
-ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S = 0.0  # opt-in: acorta adelanto solo al sobre de curvatura (tc 5..10)
+ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S = 0.0  # opt-in: acorta adelanto solo al sobre de curvatura (tc TC_MIN..TC_MAX)
+ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_EARLY_S = 0.0  # opt-in: reducción menor en tc EARLY_MIN..TC_MIN (p.ej. 0.01 + 0.02)
+ROUTE_L23_CLEAR_CURVE_LEAD_TC_EARLY_MIN = 5  # inicio ventana early (exclusivo del main si EARLY_S>0)
 ROUTE_L23_CLEAR_CURVE_LEAD_TC_MIN = 5
 ROUTE_L23_CLEAR_CURVE_LEAD_TC_MAX = 11  # exclusivo (no tc>=11)
 ROUTE_L23_CLEAR_CURVE_CLEAR_MM = 50.0   # holgura extra mínima en la huella para activar el alivio

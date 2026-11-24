@@ -1378,23 +1378,29 @@ class RouteMode:
             sign = float(gap.min())
         return wall, sign, island
 
-    def _l23_clear_curve_lead_ok(self, l23, conf, kmax, dist, span, lead, v_max) -> bool:
-        """Recta L23 despejada: menos adelanto solo si el sobre de curvatura manda y hay holgura."""
-        red_s = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S", 0.0) or 0.0)
-        if not l23 or red_s <= 0.0 or self.follower is None:
-            return False
+    def _l23_clear_curve_lead_red_s(self, l23, conf, kmax, dist, span, lead, v_max) -> float:
+        """Segundos de alivio de adelanto (0 = off). Main tc∈[TC_MIN,TC_MAX); early opc. en [EARLY_MIN,TC_MIN)."""
+        red_main = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S", 0.0) or 0.0)
+        red_early = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_EARLY_S", 0.0) or 0.0)
+        if not l23 or self.follower is None or (red_main <= 0.0 and red_early <= 0.0):
+            return 0.0
         tc = float(getattr(self, "_tc_max", 0) or 0)
         tc_lo = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_TC_MIN", 5))
         tc_hi = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_TC_MAX", 11))
-        if tc < tc_lo or tc >= tc_hi:
-            return False
+        tc_early = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_LEAD_TC_EARLY_MIN", 5))
+        if tc_lo <= tc < tc_hi and red_main > 0.0:
+            red_s = red_main
+        elif tc_early <= tc < tc_lo and red_early > 0.0:
+            red_s = red_early
+        else:
+            return 0.0
         if self.upload or self._delay_left is not None or self._job is not None:
-            return False
+            return 0.0
         if abs(float(self.follower.cte)) > float(getattr(C, "ROUTE_CTE_SLOW_MM", 40.0)):
-            return False
+            return 0.0
         inside = dist <= span
         if not np.any(inside):
-            return False
+            return 0.0
         head_k = kmax[inside][:min(8, int(inside.sum()))]
         if bool(getattr(C, "ROUTE_L23_CLEAR_CURVE_PURSUIT_GATE", False)) and self.follower is not None:
             r = self.follower.route
@@ -1410,16 +1416,16 @@ class RouteMode:
                                 < float(getattr(C, "ROUTE_L23_LEFT_K_TC_MAX", 12)) else None)
             head_k = pk[inside][:min(8, int(inside.sum()))]
         if head_k.size and float(np.max(head_k)) > 1.0 / 300.0:
-            return False
+            return 0.0
         extra = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_CLEAR_MM", 50.0))
         sign_x = float(getattr(C, "ROUTE_L23_CLEAR_CURVE_SIGN_EXTRA_MM", 0.0) or 0.0)
         base = float(getattr(C, "ROUTE_FULL_SOFT_CLEAR_MM", 100.0))
         w, s, isl = self._offset_body(conf or {})
         if min(w, isl) < base + extra:
-            return False
+            return 0.0
         if s < base + extra + sign_x:
-            return False
-        return True
+            return 0.0
+        return red_s
 
     def _sign_xy(self, conf, empty) -> np.ndarray:
         """Posiciones (x, y) en mm del tapete de las señales y asientos sin resolver.
@@ -1639,10 +1645,11 @@ class RouteMode:
                                            < float(getattr(C, "ROUTE_L23_LEFT_K_TC_MAX", 12)) else None)
                 v_c_curve = np.where(k_pursuit < 1e-9, v_max,
                                        np.clip(np.sqrt(a_c / np.maximum(k_pursuit, 1e-12)), v_min, v_max))
-        clear_ok = l23 and self._l23_clear_curve_lead_ok(l23, conf, kmax, dist, span, lead, v_max)
+        red_s = self._l23_clear_curve_lead_red_s(l23, conf, kmax, dist, span, lead, v_max) if l23 else 0.0
+        clear_ok = red_s > 0.0
         allowed = np.sqrt(v_c ** 2 + 2.0 * a_brk * d)
         if clear_ok:
-            red = float(C.ROUTE_L23_CLEAR_CURVE_LEAD_REDUCTION_S) * v_max
+            red = red_s * v_max
             d_red = np.maximum(dist - max(lead - red, 0.0), 0.0)
             curve_dom = v_c_curve <= (v_c + 1.0)   # señal/isla no aprietan el techo local
             allowed_curve = np.sqrt(v_c_curve ** 2 + 2.0 * a_brk * d_red)
