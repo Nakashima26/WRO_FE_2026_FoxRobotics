@@ -1832,6 +1832,9 @@ PARK_AJ float        PARK_GEOM_WSTOP             = 268.0f;  // w de parada antes
 PARK_AJ long         PARK_GEOM_BUSCA_MS          = 6000;
 PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
+PARK_AJ int          PARK_GEOM_ROJO              = 0;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
+PARK_AJ int          PARK_GEOM_ROJO_PWM          = 155;     // avance durante el acercamiento
+bool                 parkGeomVeniaLejos          = false;
 bool                 parkGeomModo                = false;
 PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
 PARK_AJ int          PARK_PL_ARC1_PWM           = 130;     // PWM del arco EXT del tramo 1 mientras th < 0.4*T1
@@ -3421,6 +3424,7 @@ void vigilarSinU() {
                && (rutaPka - PARK_SINU_B2_OFF_MM - along) >= (float)PARK_SINU_CORRE_MM;   // y queda recta suficiente para armar el sonar antes de la madera
     if (!lin && PARK_SINU_GEOMETRIA && parkCabeAlineacion(along, extCm, rumboDeg)) return;
     parkSinUDec = lin ? 1 : 2;
+    parkGeomVeniaLejos = PARK_GEOM_ROJO && !lin && extCm > PARK_PARED_CM + 22.0f;
     parkRevDir = !lin && PARK_REV_DIR;
     Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
     if (!lin) return;
@@ -3443,11 +3447,24 @@ void vigilarSinU() {
 }
 
 // PARK_GEOM_EXT: con la U ya decidida, toma el mando sobre la linea de escaneo pasado el cajon. true = tomo el mando.
-bool vigilarGeomExt(float along) {
-  if (!PARK_GEOM_EXT || !rutaPge || isnan(rutaPka) || parkGeomModo) return false;
-  if (along < rutaPka + PARK_GEOM_PASA_MM || along > rutaPka + PARK_GEOM_MAX_MM) return false;
+bool vigilarGeomExt(float along, long distF) {
+  if ((!PARK_GEOM_EXT && !PARK_GEOM_ROJO) || isnan(rutaPka) || parkGeomModo) return false;
+  // ROJO con pka<<0: la ventana pka+MAX cierra antes del umbral U (~500); alargar solo si veniaLejos.
+  float geomMax = PARK_GEOM_MAX_MM;
+  if (PARK_GEOM_ROJO && parkGeomVeniaLejos && !rutaPge)
+    geomMax = max(geomMax, 520.0f - rutaPka);
+  if (along < rutaPka + PARK_GEOM_PASA_MM || along > rutaPka + geomMax) return false;
   const float ext = rutaExtTapeteCm(), err = rutaErrCarrilDeg();
-  if (fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM || fabsf(err) > PARK_GEOM_ANG_DEG) return false;
+  if (fabsf(err) > PARK_GEOM_ANG_DEG) return false;
+  const bool lejos = ext > PARK_PARED_CM + PARK_GEOM_TOL_CM;
+  // Banda: quitar tope pka+360 (mataba s46). err usa ANG_DEG (antes 5° mataba s46@9°).
+  const bool rojo = PARK_GEOM_ROJO && !rutaPge && parkGeomVeniaLejos
+                    && ext >= PARK_PARED_CM - 10.0f && ext <= 90.0f
+                    && distF > 50
+                    && (lejos || (along >= max(340.0f, rutaPka + 250.0f)
+                                  && along <= rutaPka + geomMax));
+  if (!rojo && (!PARK_GEOM_EXT || !rutaPge || fabsf(ext - PARK_PARED_CM) > PARK_GEOM_TOL_CM)) return false;
+  const bool acercar = rojo && lejos;
   parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
@@ -3458,8 +3475,8 @@ bool vigilarGeomExt(float along) {
   parkDetAlong = rutaPka - 64.0f;                        // prior de la Pi hasta que el sonar vea la madera
   parkDetHPose = parkHPoseMm(); parkDetHSon = parkDetHPose; parkDetTh = 0.0f;
   parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevEnMadera = false; parkRevModo = true; parkGeomModo = true;
-  parkFase = 44; parkFaseMs = millis(); parkOdom0 = odomMm;
-  Serial.print("PARK GEOM: pared exterior sin U, along="); Serial.print(along, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
+  parkFase = acercar ? 45 : 44; parkFaseMs = millis(); parkOdom0 = odomMm;
+  Serial.print(rojo ? "PARK GEOM ROJO: toma el mando, along=" : "PARK GEOM: pared exterior sin U, along="); Serial.print(along, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
   Serial.print(" ext="); Serial.print(ext, 1); Serial.print(" err="); Serial.print(err, 1); Serial.print(" v="); Serial.println(encVelMmS, 0);
   return true;
 }
@@ -3492,7 +3509,7 @@ void vigilarUturn(long distL, long distR, long distF) {
                   || (PARK_UTURN_ADELANTO_POSE_CM > 0.0f && rutaExtTapeteCm() >= PARK_UTURN_ADELANTO_POSE_CM);
     if (PARK_UTURN_ADELANTO_MM > 0 && huecoU) umbralU = min(umbralU, (float)PARK_UTURN_ADELANTO_MM);
     if (PARK_UTURN_RUTA_PKA_MM > 0 && !isnan(rutaPka)) umbralU = max(umbralU, rutaPka + (float)PARK_UTURN_RUTA_PKA_MM);   // la U no cae encima de la madera del cajón
-    if (vigilarGeomExt(along)) return;
+    if (vigilarGeomExt(along, distF)) return;
     if (!fondoR && along < umbralU) return;
     if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
     parkUturnDisparoOdom = -1;
@@ -7766,6 +7783,26 @@ void loop() {
                         : atrasPegadoF ? "REV FINAL: pegado atras"
                                        : "REV FINAL: TIMEOUT (ciclos agotados)");
           }
+        }
+        break;
+      }
+
+      // Fase 45: acerca hacia la pared exterior y vuelve al rumbo del carril.
+      if (parkFase == 45) {
+        const float errorCm = rutaExtTapeteCm() - PARK_PARED_CM;
+        const float rumbo = rutaErrCarrilDeg();
+        if (fabsf(errorCm) <= 10.0f && fabsf(rumbo) <= PARK_GEOM_ANG_DEG) {
+          parkFase = 44; parkFaseMs = millis(); parkOdom0 = odomMm;
+          Serial.print("PARK GEOM ROJO: alineado, ext="); Serial.println(errorCm + PARK_PARED_CM, 1);
+        } else if (millis() - parkFaseMs > 3000UL || alongSalidaMm() > 1100.0f
+                   || (distF_filtrada > 0 && distF_filtrada <= PARK_UTURN_DF_FORZAR_CM)) {
+          parkGeomModo = false;
+          parkRevCaeAU("acercamiento GEOM fuera de margen");
+        } else {
+          const float haciaPared = constrain(errorCm * 1.5f, -25.0f, 55.0f);
+          motorAdelante();
+          servoRumboPark(direccionIzquierda ? -haciaPared : haciaPared);
+          setMotor(PARK_GEOM_ROJO_PWM);
         }
         break;
       }
