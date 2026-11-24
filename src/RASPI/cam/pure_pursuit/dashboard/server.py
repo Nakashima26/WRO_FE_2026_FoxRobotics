@@ -406,6 +406,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(runs.load(VIDEOS, name))
                 except Exception as e:
                     return self._json({"error": str(e)}, 404)
+            if p.startswith("/api/runs/") and p.endswith(("/acks", "/log")):
+                name, _sp, kind = p[len("/api/runs/"):].rpartition("/")
+                rango = dict(desde=float(q.get("t0", -1e9)), hasta=float(q.get("t1", 1e9)))
+                try:
+                    if kind == "acks":
+                        txt = runs.acks_tsv(VIDEOS, name, q.get("f", runs.ACK_CAMPOS), paso=float(q.get("paso", 0)),
+                                            cambio=q.get("cambio", ""), **rango)
+                    else:
+                        txt = runs.log_grep(VIDEOS, name, q.get("q", r"\[PARK|\[ROUTE\] plan"),
+                                            maxc=int(q.get("c", 240)), n=int(q.get("n", 400)), **rango)
+                except Exception as e:
+                    return self._send(404, str(e).encode(), "text/plain; charset=utf-8")
+                return self._send(200, txt.encode(), "text/plain; charset=utf-8")
             if p.startswith("/api/runs/") and p.endswith("/frame"):
                 name = p[len("/api/runs/"):-len("/frame")]
                 jpg = runs.frame_jpeg(VIDEOS, name, int(float(q.get("i", 0))), int(q.get("w", 640)))

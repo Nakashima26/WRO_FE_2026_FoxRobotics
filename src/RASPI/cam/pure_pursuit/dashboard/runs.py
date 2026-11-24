@@ -270,3 +270,56 @@ def from_journal(video: Path, out: Path) -> None:
         for r in states:
             fh.write(json.dumps(r, separators=(",", ":")) + "\n")
     tmp.replace(out)
+
+
+# ── Consultas compactas para análisis (texto plano, t relativo al [INICIO]) ──
+ACK_CAMPOS = "est,tc,pkf,pns,pal,ang,dL,dR,dF,pw,tL,tR,tF,tB"
+
+
+def _ventana(videos: Path, name: str) -> tuple[float, float, float]:
+    """(t_inicio, desde, hasta) en epoch: el cero es el [INICIO] de la corrida (o el inicio del video)."""
+    d = load(videos, name)
+    s = d["summary"]
+    t0 = next((e[0] for e in d["events"] if "[INICIO]" in e[1]), s.get("t0") or d["hdr"].get("t", 0.0))
+    return t0, (s.get("t0") or t0) - 1.0, (s.get("t1") or t0 + 600) + 1.0
+
+
+def acks_tsv(videos: Path, name: str, campos: str = ACK_CAMPOS, desde: float = -1e9, hasta: float = 1e9,
+             paso: float = 0.0, cambio: str = "") -> str:
+    """ACK del ESP a tasa completa desde el journal. paso: s mínimos entre filas; cambio: campos cuya
+    variación fuerza fila (p. ej. "pkf,pns")."""
+    t0, a, b = _ventana(videos, name)
+    keys = [k for k in campos.split(",") if k]
+    ver = [k for k in cambio.split(",") if k]
+    out, last_raw, last_t, last_v = ["t\t" + "\t".join(keys)], None, -1e9, None
+    for t, msg in _journal(a, b, grep="ACK:V2"):
+        m = _RX_ACK.search(msg)
+        if not m or m.group(1) == last_raw:
+            continue
+        last_raw = m.group(1)
+        rt = t - t0
+        if rt < desde or rt > hasta:
+            continue
+        d = dict(p.split("=", 1) for p in m.group(1)[7:].split(",") if "=" in p)
+        v = tuple(d.get(k, "") for k in ver)
+        if (ver and v != last_v) or (paso > 0 and rt - last_t >= paso) or (not ver and not paso):
+            out.append(f"{rt:.2f}\t" + "\t".join(d.get(k, "").split("*")[0] for k in keys))
+            last_t, last_v = rt, v
+    return "\n".join(out) + "\n"
+
+
+def log_grep(videos: Path, name: str, patron: str, desde: float = -1e9, hasta: float = 1e9,
+             maxc: int = 240, n: int = 400) -> str:
+    """Líneas del journal de la corrida que cumplen la regex, recortadas, con t relativo al [INICIO]."""
+    t0, a, b = _ventana(videos, name)
+    rx = re.compile(patron)
+    out = []
+    for t, msg in _journal(a, b):
+        rt = t - t0
+        if desde <= rt <= hasta:
+            m = rx.search(msg)
+            if m:
+                out.append(f"{rt:.2f}\t{msg[m.start():m.start() + maxc]}")
+                if len(out) >= n:
+                    break
+    return "\n".join(out) + "\n"

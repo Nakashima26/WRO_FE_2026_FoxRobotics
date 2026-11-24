@@ -191,6 +191,8 @@ All on the Pi, port 8080. `fox_pc.py` adds the `/local/*` routes on the laptop a
 | GET | `/api/runs` | Recorded runs and whether they have telemetry |
 | GET | `/api/runs/<name>/timeline` | Full run: header, states, events, summary, video info |
 | GET | `/api/runs/<name>/frame?i=` | One video frame as JPEG |
+| GET | `/api/runs/<name>/acks?f=&t0=&t1=&paso=&cambio=` | Full-rate ESP ACKs from the journal as TSV (t relative to [INICIO]); `cambio=pkf,pns` emits a row only when those fields change |
+| GET | `/api/runs/<name>/log?q=<regex>&t0=&t1=&c=&n=` | Matching journal lines of the run, trimmed to `c` chars (default `[PARK` and route plans) |
 | GET | `/api/runs/<name>` | Download the `.avi` |
 | GET / POST | `/local/flash/status` · `/local/flash` · `/local/flash/job` | (laptop only) ports, flash, progress |
 
