@@ -192,10 +192,23 @@ def _stall_far_along(parking: str, direction: str, park_w: float) -> float:
     return max(px * fx + py * fy for b in _barrier_corners(parking, park_w) for px, py in b)
 
 
+def _park_far_signal_along(dm) -> float | None:
+    """Along del asiento interior en la salida lejana del cajón, si hay señal confirmada."""
+    if not int(getattr(C, "ROUTE_PARK_FAR_SIGNAL", 0) or 0):
+        return None
+    from .wro_field import SEATS, _heading, section_to_world
+    far = "T1" if dm.direction == "CW" else "T2"
+    conf = getattr(dm, "confirmed", {}) or {}
+    if conf.get((dm.parking, far)) is None:
+        return None
+    h, w = SEATS[far]
+    x, y = section_to_world(dm.parking, h, w)
+    hd = math.radians(_heading(dm.parking, dm.direction))
+    return x * math.sin(hd) + y * math.cos(hd)
+
+
 def _park_geom_flag(dm, tc, pose=None, pka=None) -> int:
-    """pge (ROUTE_PARK_GEOM_EXT): 1 si el ESP puede cambiar la U por pegarse a la pared exterior pasado el cajon
-    y buscarlo en reversa. Modo 1: solo si la senal de entrada de la recta del cajon (la primera en el sentido de
-    marcha; ahi solo hay asientos de la fila interior T2/X1/T1) es verde."""
+    """pge (ROUTE_PARK_GEOM_EXT): 1 si la senal de ENTRADA del cajon (T2 en CW, T1 en CCW) es verde."""
     mode = int(getattr(C, "ROUTE_PARK_GEOM_EXT", 0) or 0)
     if mode <= 0:
         return 0
@@ -1272,6 +1285,7 @@ class RouteMode:
             park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
             self.pka = _stall_far_along(dm.parking, dm.direction, park_w)
             self.pge = _park_geom_flag(dm, getattr(self, "_tc_max", 0), pose, self.pka)
+            self.pgf = _park_far_signal_along(dm)
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
@@ -2440,6 +2454,9 @@ class RouteMode:
             s += f",pka={self.pka:.0f}"
             if getattr(self, "pge", 0):
                 s += ",pge=1"
+            pgf = getattr(self, "pgf", None)
+            if pgf is not None:
+                s += f",pgf={pgf:.0f}"
         if self.rv is not None:
             s += f",rv={_rv_mando(self.rv)}"
         return s
