@@ -1522,6 +1522,7 @@ ROUTE_L23_MIN_PWM = 190    # piso del perfil en vueltas 2-3 (tc 4..11). Con el l
 # inside_exit_only limita a señales confirmadas con paso por la isla, en los primeros exit_mm de recta.
 ROUTE_L23_CORNER_SIGN = None
 ROUTE_CORNER_EXIT_CLEAR_MM = 70.0  # orillas170 (semilla 4) con 40 rozo E/T2R y S/T3G en v2 saliendo de esquina; twin: 0 47/48 min15mm, 40 44/48 +0.4s min27mm, 70 44/48 +0.7s; deriva de pose tras esquina ~8-14cm. reserva blanda ante señales en los primeros 500 mm de recta
+ROUTE_FIRST_SIGN_SOFT_MM = None  # holgura blanda extra (mm), primera señal confirmada en vuelta 1
 ROUTE_CORNER_EXIT_INSIDE_EXTRA_MM = 0.0  # reserva adicional si se pasa del lado de la isla
 ROUTE_L1_SOFT_CLEAR_MM = None  # margen blando de la ruta en vuelta 1 desde tc>=1 (con asientos sin ver). None = ROUTE_SOFT_CLEAR_MM
 ROUTE_L1_MIN_PWM = None    # piso del perfil en vuelta 1 (1<=tc<4). None = ROUTE_PROFILE_MIN_PWM

@@ -335,9 +335,11 @@ def plan(*a, **k) -> "Route":
 def _plan(direction: str, seats: dict, parking: str | None = None,
          prm: RouteParams | None = None, start_section: str | None = None,
          laps: int = 3, unknown=None, anchor=None, lock=None,
-         park_w: float | None = None, extra=None, hug=None) -> Route:
+         park_w: float | None = None, extra=None, hug=None,
+         first_sign_soft: tuple[tuple[str, str], float] | None = None) -> Route:
     """seats: {(sección, asiento): "Red"|"Green"} en el marco del tapete.
 
+    first_sign_soft: (asiento confirmado, mm extra de holgura blanda).
     park_w: w0 del cajón en su recta (None = el del programa oficial).
     extra: obstáculos sueltos [(x, y, "Red"|"Green"|None)] fuera de los
     asientos (arranque ciego: la señal vista antes de saber dónde está el
@@ -465,6 +467,11 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
                 color = seats.get((sname, seat))
                 inside = color is not None and (color == "Red") == (direction == "CW")
                 exit_signs[xy] = prm.corner_exit_clear_mm + (prm.corner_exit_inside_extra_mm if inside else 0.0)
+    if first_sign_soft is not None:
+        (sec, seat), margin = first_sign_soft
+        if (sec, seat) in seats and sec in order and seat in SEATS and margin > 0.0:
+            xy = section_to_world(sec, *SEATS[seat])
+            exit_signs[xy] = exit_signs.get(xy, 0.0) + margin
     exit_clear = np.full_like(clear, np.inf) if exit_signs else None
     r_sign = SIGN_MM / 2.0 * math.sqrt(2.0)
     for cx, cy in centers:

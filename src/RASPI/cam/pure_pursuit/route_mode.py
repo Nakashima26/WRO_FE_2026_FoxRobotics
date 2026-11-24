@@ -366,6 +366,7 @@ class RouteMode:
         self._pre_poses: list = []
         self._fence = None
         self._pre_key = None
+        self._first_confirmed_sign: tuple[str, str] | None = None
         self._pre_stop = 0
         self.frame = None            # frame de perspectiva BGR (SEAT_ROI_LOG)
         self.bev = None              # BEVTransformer del runtime (H_inv para la ROI)
@@ -1017,8 +1018,16 @@ class RouteMode:
             if True:
               hug = (float(getattr(C, "ROUTE_FINAL_D_MM", 640.0)), pk - 304.0 - float(getattr(C, "ROUTE_FINAL_LEAD_MM", 1300.0)),
                    pk, float(getattr(C, "ROUTE_FINAL_W", 20.0)))
+        first_sign_soft = None
+        margin = getattr(C, "ROUTE_FIRST_SIGN_SOFT_MM", None)
+        if margin is not None and margin > 0.0 and (tcf or 0) < 4:
+            if self._first_confirmed_sign is None:
+                self._first_confirmed_sign = next(iter(dm.confirmed), None)
+            first = self._first_confirmed_sign
+            if first in dm.confirmed and first in plan_seats:
+                first_sign_soft = (first, float(margin))
         key = (dm.direction, dm.parking, self.park_w, self.shift,
-               tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key, hug)
+               tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key, hug, first_sign_soft)
         if key != self.key and key != self._job_key:
             # Continuidad: la ruta nueva empata EXACTO con la anterior en las
             # estaciones de adelante del carro (por ahí va mientras sube al
@@ -1040,7 +1049,8 @@ class RouteMode:
                 lock = {(k0 + j) % nst: float(self.route.d_stations[(k0 + j) % nst]) for j in range(nl)}
                 anchor = None
             args = (dm.direction, plan_seats, dm.parking, plan_unknown, anchor, lock, self.park_w, extra, hug)
-            plan_kwargs = {"fb": self._ghost_fb, "tc": getattr(self, "_tc_max", 0)}
+            plan_kwargs = {"fb": self._ghost_fb, "tc": getattr(self, "_tc_max", 0),
+                           "first_sign_soft": first_sign_soft}
             hold = anchor_replan and self.route is not None
             if getattr(C, "ROUTE_PLAN_ASYNC", False):
                 # Carro real: la DP tarda ~1-2 s en la Pi; corre aparte y el
@@ -2209,10 +2219,10 @@ class RouteMode:
         self._job_out, self._job_conf, self._job_unknown = self._solve_plan(*args, **kwargs)
 
     @staticmethod
-    def _solve_plan(direction, conf, parking, unknown, anchor, lock, park_w, extra, hug, *, fb, tc):
+    def _solve_plan(direction, conf, parking, unknown, anchor, lock, park_w, extra, hug, *, fb, tc, first_sign_soft=None):
         for seats, unk in ((conf, unknown), fb) if fb is not None and getattr(C, "ROUTE_GHOST_FALLBACK", False) else ((conf, unknown),):
             route = RR.plan(direction, seats, parking, prm=_prm_for(unk, tc), unknown=unk, anchor=anchor,
-                            lock=lock, park_w=park_w, extra=extra, hug=hug)
+                            lock=lock, park_w=park_w, extra=extra, hug=hug, first_sign_soft=first_sign_soft)
             if route.report.get("feasible"):
                 break   # con fantasmas infactible (dos filas de la misma columna pegadas): se planea sin ellos
         return route, seats, unk
