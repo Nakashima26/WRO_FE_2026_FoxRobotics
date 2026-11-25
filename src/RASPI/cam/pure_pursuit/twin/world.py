@@ -68,6 +68,26 @@ def body_corners(
     return world
 
 
+def fox_v2_footprint(length_mm, width_mm, rear_overhang_mm, wheelbase_mm):
+    """Envolvente del Fox v2 en coordenadas (derecha, avance) del eje trasero."""
+    half_width = width_mm / 2.0
+    nose = length_mm - rear_overhang_mm
+    # El ancho total lo dan ruedas y soportes laterales. El morro que
+    # contiene cámara y sonar mide unos 45 mm de ancho en el CAD v2.
+    # La banda delantera del CAD llega a ±56 mm cerca del eje; la
+    # proyección se estrecha hacia la punta de la rueda redonda.
+    shoulder = wheelbase_mm
+    tire_tip = wheelbase_mm + 22.0
+    tire_tip_half_width = 56.0
+    nose_half_width = 23.0
+    return np.array([
+        (-half_width, -rear_overhang_mm), (half_width, -rear_overhang_mm),
+        (half_width, shoulder), (tire_tip_half_width, tire_tip),
+        (nose_half_width, nose), (-nose_half_width, nose),
+        (-tire_tip_half_width, tire_tip), (-half_width, shoulder),
+    ], dtype=np.float64)
+
+
 def _poly_edges(poly: list, material: MaterialName, object_index: int) -> list[Segment]:
     pts = np.asarray(poly, dtype=np.float64)
     if len(pts) < 2:
@@ -364,9 +384,16 @@ def collision(
     width_mm: float,
     rear_overhang_mm: float,
     ignore: tuple[str, ...] = (),
+    *,
+    footprint: np.ndarray | None = None,
 ) -> str | None:
     """Primera causa de contacto, saltando las de `ignore` (p. ej. "pared exterior")."""
-    corners = body_corners(x, y, heading_deg, length_mm, width_mm, rear_overhang_mm)
+    if footprint is None:
+        corners = body_corners(x, y, heading_deg, length_mm, width_mm, rear_overhang_mm)
+    else:
+        h = math.radians(heading_deg)
+        sh, ch = math.sin(h), math.cos(h)
+        corners = footprint @ np.array([[ch, -sh], [sh, ch]]) + (x, y)
     corner_list = [tuple(c) for c in corners]
     inner_bounds = getattr(world, "_inner_bounds", _DEFAULT_INNER_BOUNDS)
     for cx, cy in corner_list:
