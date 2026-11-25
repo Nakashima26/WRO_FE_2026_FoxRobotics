@@ -929,7 +929,8 @@ class RouteMode:
                 roi_seats.add(k)
                 prov.setdefault(k, rc)
             p, red, green = inferred.get(k, (0, 0, 0))
-            if p and (red == 0 or green == 0):
+            # Un color cierto condicionado a presencia no basta para añadir un obstáculo.
+            if p == 1 and (red == 0 or green == 0):
                 prov.setdefault(k, "Red" if red else "Green")
         plan_seats = {**conf, **prov}
         plan_unknown = [k for k in unknown if k not in prov]
