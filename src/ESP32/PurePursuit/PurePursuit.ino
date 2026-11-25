@@ -4662,6 +4662,7 @@ PARK_AJ bool PARK_PL_CIERRE_HUELLA = true;
 PARK_AJ bool PARK_PL_ARCO_CALIBRADO = true;
 // Radio efectivo del contravolante en reversa, incluido el transitorio del servo.
 PARK_AJ float PARK_PL_RI_INT_MM = 104.0f;
+PARK_AJ int PARK_PL_RECTA_TB_MM = 105;   // fondo mínimo (ToF trasero crudo, mm) al terminar la recta; 0 = apagado (2026-11-25 orillas254)
 PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;
 PARK_AJ float PARK_PL_ARCO_W_MM = 48.0f;
 
@@ -7714,7 +7715,7 @@ void loop() {
         bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
           // DIRECTO chueco: abortar a U antes de gastar la ventana del poste (s20: ang−18@+0.15s, ventana@+1.7s).
           if (PARK_SINU_FORZAR_U && parkDirecto && parkScanSubFase == 0
-              && PARK_SINU_ABORT_ANG > 0.0f && fabsf(anguloGyro) > PARK_SINU_ABORT_ANG
+              && PARK_SINU_ABORT_ANG > 0.0f && parkSinULinea && fabsf(anguloGyro) > PARK_SINU_ABORT_ANG
               && millis() - parkEntryMs > 150UL) {
             parkSinUDec = 2;
             parkDirecto = false;
@@ -8727,6 +8728,9 @@ void loop() {
             if ((ph - thr) / max(sinf(th * 0.0174533f), 0.3f) > PARK_PL_RECTA_FRENA_MM) setMotor(PARK_PL_RECTA_PWM);
           }
           if (!fin && parkAtrasPegado()) { fin = true; why = "ATRAS"; }
+          // orillas254: la recta real terminó con la cola a 8.5 cm (gemelo: 13.6 mediana, p5 10.9) y el arco INT
+          // ya no tuvo fondo para enderezar. La recta no baja de este fondo medido por el ToF trasero.
+          if (!fin && parkPlanRectaOn && PARK_PL_RECTA_TB_MM > 0 && tofMm[2] > 0 && tofMm[2] <= PARK_PL_RECTA_TB_MM) { fin = true; why = "FONDO"; }
         }
         else if (i == 0) { fin = (PARK_PL_HEND > 0.0f) ? (ph <= PARK_PL_HEND + PARK_PL_RI * (cosf(PARK_PL_T2 * 0.0174533f) - cosf(th * 0.0174533f)) || th >= PARK_PL_TA_MAX) : th >= parkPlanT1; why = "T1";
           if (!fin && !parkDirecto && !parkGeomModo && isfinite(rutaPgf) && alongSalidaMm() > rutaPgf - 60.0f && fabsf(th) >= PARK_PL_U_PG_TH_MAX) { fin = true; why = "PGF"; }
