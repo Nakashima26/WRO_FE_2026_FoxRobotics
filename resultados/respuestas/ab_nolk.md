@@ -1,11 +1,12 @@
 # Respuesta: ab_nolk
 
-_2026-11-25 12:30 PST (Tijuana)_
+_2026-11-25 13:53 PST (Tijuana)_
 
-Recibida. La tanda `ab_nolk` (origin/grok/t/ab_nolk @ 820d1145, n1-6 x s1-48 = **288 carreras**, -P 7, FF 2.8 / FD 3.8, banco NUEVO con latencia) quedó **en cola bajo twin.lock**. Hay varias tandas por delante (cal2_288_base, cal2_288_radios, s20cal2_radios, pk2_*, tw1_*, l1v_*, ab_nocs…), así que corre en cuanto se libere el lock, sin carga paralela.
+Hecho: corrí la tanda en origin/grok/t/ab_nolk (820d1145) con el comando que mandaste: n1-6 x s1-48 (288 carreras), -P 7, bajo twin.lock.
 
-Comando tal cual lo mandaste: `TWIN_FW_OVER={"MOTOR_CURVE_LIVE":"false"}` (string), `TWIN_PI_EXTRA={"ROUTE_MOTOR_CURVE_LIVE": false, "ROUTE_PROFILE_LEFT_K_FACTOR": 1.0, "ROUTE_L23_LEFT_K_FACTOR": 1.0}`, MOTOR_CURVA_REAL=1, COST_FIJO=1, COST_FIRST 1.95, VBAT 11.5, TOF_SHORT_K 0.5.
+- resumen.py: `ab_nolk: 272/288 ok  media 35.61  mediana 35.12  mejor 31.70  fallas: n1/s47 n2/s13 n2/s26 n3/s12 n3/s20 n3/s26 n3/s27 n3/s3 n4/s26 n5/s16 n5/s36 n5/s45 n6/s23 `
+- Paradas: collision 9, race_finished 276, stuck 3
+- Reloj total: 367.2 s. VÁLIDA: corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 367.2 s para 288 carreras (referencia ~300-330 s sin carga), carga máx 7.61, mem máx 8160 MB, OOM/Killed/MemoryError: 0, mean_pi_frame_ms 3.09-7.45 (media 3.82).
+- Tipo de prueba: carrera completa (FF 2.8 / FD 3.8), variante ab_nolk, 288 carreras (n1-6 x s1-48); solo comparable con tandas de ese mismo tipo y mismo set de semillas.
 
-Al terminar subo `resultados/ab_nolk.md` a grok/resultados (línea de resumen.py, STOP y COSTO por carrera ordenados, reloj total, tipo de prueba y validez de carga) y actualizo esta respuesta. Referencia de reloj sin carga: ~300-330 s para 288 carreras; la marco inválida si pasa de ~400 s, hay OOM o carga máx ≥ 12.
-
-Tipo de prueba: carrera completa (FF 2.8 / FD 3.8), n1-6 x s1-48. Comparable con otras tandas de 288 del mismo tipo y semillas (p. ej. ab_nocs, cal2_288_base), no con FF 4.28.
+Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/ab_nolk.md`.
