@@ -1651,6 +1651,12 @@ ROUTE_CTE_HORIZON_MM = 600.0
 # que tiene el ESP en los próximos HORIZON_MM delante del carro. None: siempre (como antes).
 ROUTE_UPLOAD_DIFF_MM = None
 ROUTE_UPLOAD_STEP_MM = 40.0   # separación de puntos de la ruta subida al ESP (más = menos líneas RTP = subida más corta)
+ROUTE_UPLOAD_KEEP_MM = 40.0   # plan nuevo a <= esto (mm, toda la vuelta) de la ruta que va subiendo: no reinicia la subida (orillas273). None = siempre reinicia
+# Mientras sube: si la ruta nueva se aparta > NEAR_DIFF de la del ESP en los próximos NEAR_MM, tope NEAR_PWM
+# de golpe (sin ROUTE_UPLOAD_RAMP_PWM): la vieja va contra algo cerca (orillas273 N/T1). None = apagado.
+ROUTE_UPLOAD_NEAR_MM = 400.0
+ROUTE_UPLOAD_NEAR_DIFF_MM = 120.0
+ROUTE_UPLOAD_NEAR_PWM = 0
 ROUTE_UPLOAD_LINES = 1        # líneas de subida de ruta por frame (>1 necesita baud > 115200 en Pi y ESP)
 ROUTE_UPLOAD_HORIZON_MM = 700.0
 ROUTE_UPLOAD_RAMP_PWM = None  # tope de subida: baja a lo más esto por cuadro desde el último mando (sin frenón); None = de golpe

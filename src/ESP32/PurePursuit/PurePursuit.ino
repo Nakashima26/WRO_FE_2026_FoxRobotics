@@ -336,6 +336,12 @@ const float RUTA_SUB_SAT        = 0.5f;    // fraccion de RUEDA_TOPE_DEG
 const float RUTA_SUB_RISE_MM    = 4.0f;    // crecimiento minimo del error en RUTA_SUB_VENT_MS
 const unsigned long RUTA_SUB_VENT_MS = 100;
 const unsigned long RUTA_SUB_HOLD_MS = 150;
+// Lejos de la ruta: tope de PWM sin importar el volante (orillas272: al salir de la esquina NE la ruta se movió 640 mm
+// por un rojo recién visto en N/T3, el carro quedó 100-220 mm fuera apuntando a la pared N con pw ~200 y no alcanzó a
+// girar; RUTA_SUB_* no actuó porque el volante no iba saturado). 0 = apagado.
+const float RUTA_LEJOS_CTE_MM   = 90.0f;
+const int   RUTA_LEJOS_PWM      = 110;
+const unsigned long RUTA_LEJOS_HOLD_MS = 300;
 int rutaSubCap = -1;                       // tope vigente (-1 = ninguno)
 const float RUTA_BATALLA_MM     = 113.0f;
 const float RUTA_LAG_S          = 0.10f;   // retraso rueda tras servo (twin lag_tau_s); 0 = sin predicción
@@ -4798,7 +4804,11 @@ void rutaSubvirajeActualiza(float x, float y) {
     if (enLaps && sat && crece && cte > RUTA_SUB_CTE_MM) tHold = now + RUTA_SUB_HOLD_MS;
     cteRef = cte; tRef = now;
   }
+  static unsigned long tLejos = 0;
+  if (RUTA_LEJOS_CTE_MM > 0.0f && turnsCompleted >= 1 && estado != INICIO && fabsf(cte) > RUTA_LEJOS_CTE_MM)
+    tLejos = now + RUTA_LEJOS_HOLD_MS;
   rutaSubCap = (now < tHold) ? RUTA_SUB_PWM : -1;
+  if (now < tLejos) rutaSubCap = (rutaSubCap >= 0) ? min(rutaSubCap, RUTA_LEJOS_PWM) : RUTA_LEJOS_PWM;
 
 }
 

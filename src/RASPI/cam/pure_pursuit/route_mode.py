@@ -325,6 +325,7 @@ class RouteMode:
         self.key = None
         self.upload: list[str] = []
         self._upload_full: list[str] = []   # la subida completa, para reenviarla
+        self._up_route = None        # la ruta de esa subida (puede no ser self.route: ROUTE_UPLOAD_KEEP_MM)
         self._rte_n = None           # puntos del último RTE mandado, hasta que el ACK traiga rn igual
         self._rte_wait = 0
         self.n_retries = 0
@@ -709,6 +710,11 @@ class RouteMode:
                 self._plan_frame is not None and self._step_frame - self._plan_frame <= replan_frames
             )
         self._rv_last = 255 if self.rv is None else self.rv   # último mando (ROUTE_UPLOAD_RAMP_PWM)
+        _pw = _ack_num(ack or "", "pw")
+        if _pw is not None and _pw > 0:
+            # La rampa baja desde lo que de verdad lleva el motor: sin tope previo (_rv_last=255) tardaba
+            # ~11 cuadros en bajar de 255 a los ~130 reales y la subida entera iba sin frenar (orillas273).
+            self._rv_last = min(self._rv_last, int(_pw))
         self.rv = None
         ack_est = _ack_est(ack)
         if (C.LOC_MANEUVER_VIEW and armed and self.fixed and self.loc is not None
@@ -1188,7 +1194,14 @@ class RouteMode:
                 # la ruta recién ubicado el cajón cambia de lado (n2 s33 chocó Green E/T1 a 160). U/parking igual.
                 cap = 0 if self.hold else (int(_l1u) if _l1u is not None and _tc is not None and 1 <= _tc < 4 else _pwm("ROUTE_UPLOAD_PWM"))
                 ramp = getattr(C, "ROUTE_UPLOAD_RAMP_PWM", None)
-                if ramp is not None and cap > 0 and self._rv_last is not None:
+                near_mm = getattr(C, "ROUTE_UPLOAD_NEAR_MM", None)
+                near = (near_mm is not None and not self.hold
+                        and self._upload_risky(float(C.ROUTE_UPLOAD_NEAR_DIFF_MM), float(near_mm)))
+                if near:
+                    # orillas273: la ruta vieja del ESP iba al rojo de N/T1 (la nueva se aparta 220 mm en los
+                    # próximos 400): sin rampa, tope ROUTE_UPLOAD_NEAR_PWM hasta que llegue el RTE.
+                    cap = min(cap, int(C.ROUTE_UPLOAD_NEAR_PWM))
+                if ramp is not None and cap > 0 and self._rv_last is not None and not near:
                     # Sin frenón: el tope baja desde el último mando a ramp PWM por cuadro (el ESP sigue la ruta vieja).
                     cap = max(cap, int(self._rv_last) - int(ramp))
                 self.rv = cap if self.rv is None else min(self.rv, cap)
@@ -1302,7 +1315,7 @@ class RouteMode:
             if getattr(C, "ROUTE_SWAP_NEW_ONLY", False) and not getattr(self, "_new_sign", True):
                 self._swap_left = 0
             self.esp_shift = self.upload_shift
-            self.esp_route = self.route
+            self.esp_route = self.route if self._up_route is None else self._up_route
         line = "\n".join(lines) if lines else None
         if self.fixed and self.park_w is not None:
             park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
@@ -1318,7 +1331,7 @@ class RouteMode:
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
         return obs, suffix, line
 
-    def _upload_risky(self, tol=None) -> bool:
+    def _upload_risky(self, tol=None, horizon=None) -> bool:
         """Mientras sube la ruta: ¿la nueva se aparta de la del ESP en el tramo de adelante?
 
         Sin ROUTE_UPLOAD_DIFF_MM, sin ruta previa en el ESP o en otro marco (arranque
@@ -1330,7 +1343,8 @@ class RouteMode:
             return True
         r = self.follower.route
         n = len(r.x)
-        m = int(float(getattr(C, "ROUTE_UPLOAD_HORIZON_MM", 700.0)) / (r.length_mm / n)) + 1
+        hz = float(getattr(C, "ROUTE_UPLOAD_HORIZON_MM", 700.0)) if horizon is None else float(horizon)
+        m = int(hz / (r.length_mm / n)) + 1
         j = (max(self.follower.i, 0) + np.arange(m)) % n
         d = np.hypot(r.x[j, None] - old.x[None, :], r.y[j, None] - old.y[None, :]).min(axis=1)
         return bool(d.max() > float(tol))
@@ -2373,9 +2387,20 @@ class RouteMode:
         self.key = key
         self.n_plans += 1
         self._plan_frame = self._step_frame + 1  # la siguiente llamada ya encuentra la ruta adoptada
-        self.upload = self._upload_lines(route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
-        self._upload_full = list(self.upload)
-        self._rte_n = None
+        keep = getattr(C, "ROUTE_UPLOAD_KEEP_MM", None)
+        if (keep is not None and self.upload and not hold and not self.hold and self._up_route is not None
+                and shift == self.upload_shift
+                and np.hypot(route.x[:, None] - self._up_route.x[None, :],
+                             route.y[:, None] - self._up_route.y[None, :]).min(axis=1).max() <= float(keep)):
+            # orillas273: cada plan reiniciaba la subida (RTB 106 -> 107 -> 104) y la ruta llegó al ESP 0.35 s
+            # después del plan que esquivaba N/T1. Si la nueva casi no cambia (<= keep mm en toda la vuelta),
+            # se termina de subir la que va en camino.
+            pass
+        else:
+            self.upload = self._upload_lines(route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
+            self._upload_full = list(self.upload)
+            self._rte_n = None
+            self._up_route = route
         self.upload_shift = shift
         self.hold = hold
         self.loc.set_map(conf, unknown, dm.parking, self.park_w)
