@@ -1896,6 +1896,8 @@ PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: cort
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+PARK_AJ float        PARK_PL_FRENTE_LIBRE_CM     = 5.0f;   // zigzag adelante: con mas holgura frontal no corte HOLGURA/cierre huella
+PARK_AJ bool         PARK_PL_ZZ_ANCLA             = true;   // reancla parkDet al inicio de cada tramo del zigzag (ToF lateral + pose)
 // Centrado final (2026-11-23, 3265): la reversa del zigzag corta en el ToF trasero (~3 cm) y el avance antes,
 // por holgura de la pose; sin objetivo longitudinal quedaba tB 29 / tF 111 mm. Al cerrar, recto hasta dF ~ dB.
 PARK_AJ int          PARK_PL_CENTRAR             = 1;
@@ -4383,6 +4385,24 @@ static void parkPlAnclaMadera() {
   Serial.print("PARK ancla ToF lateral delta=");
   Serial.println(delta, 1);
 }
+
+static void parkPlZzReancla(float th) {
+  if (!PARK_PL_ZZ_ANCLA) return;
+  parkDetHPose = parkHPoseMm();
+  const int side = parkParedEsIzquierda ? 0 : 1;
+  const float range = tofMm[side];
+  if (range < 25.0f || range > 160.0f || fabsf(th) > 22.0f) return;
+  float w, h;
+  parkPlanPose(w, h);
+  const float yaw = th * DEG_TO_RAD;
+  const float along = alongSalidaMm() * (parkDirecto ? 1.0f : -1.0f);
+  const float hit = along + 110.6f * cosf(yaw) + (35.2f + range) * sinf(yaw);
+  const float measuredW = along - hit + 274.0f;
+  const float delta = measuredW - w;
+  if (fabsf(delta) < 8.0f || fabsf(delta) > 55.0f) return;
+  parkDetAlong -= (parkDirecto ? 1.0f : -1.0f) * delta;
+  Serial.print("PARK zz ancla delta="); Serial.println(delta, 1);
+}
 #endif
 
 // Termina el ajuste si la huella barrida hasta detenerse cabe en el cajon.
@@ -4394,7 +4414,7 @@ PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;
 PARK_AJ float PARK_PL_ARCO_W_MM = 48.0f;
 
 static bool parkPlHuellaDentro(float w, float h, float th, float avance) {
-  if (fabsf(th) > 12.0f) return false;
+  if (fabsf(th) > PARK_PL_TOK) return false;
   const float c = cosf(th * DEG_TO_RAD), s = sinf(th * DEG_TO_RAD);
   // Envolvente del chasis. Deja margen para el error residual del ancla y el giro al soltar.
   for (float a : {-34.0f, 155.0f}) {
@@ -8254,6 +8274,9 @@ void loop() {
             }
             parkDespInicio = true; parkDespPico = 0;
             parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
+#if FOX_TOF
+            if (i == 6) parkPlZzReancla(th);
+#endif
             if (parkPlanDir > 0) motorAdelante(); else motorReversa();
             Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
             Serial.print(parkPlanDir > 0 ? " ADELANTE " : " REVERSA ");
@@ -8292,6 +8315,8 @@ void loop() {
         float pw, ph;
         parkPlanPose(pw, ph);
         if (PARK_PL_CIERRE_HUELLA && parkPlanI >= 2 - (arcoCalibrado ? 1 : 0)
+            && fabsf(th) <= PARK_PL_TOK
+            && !(parkPlanDir > 0 && distF_filtrada > PARK_PL_FRENTE_LIBRE_CM && distF_filtrada < 40.0f)
             && parkPlHuellaDentro(pw, ph, th, encVelMmS * 0.18f)) {
           motorCoast();
           parkCerrarCentrando("PLAN huella dentro", th);
@@ -8353,7 +8378,7 @@ void loop() {
         // Reversa del zigzag: solo el ToF trasero (orillas177: la pose cortaba con 15 cm libres). Adelante sí
         // corta la pose: la esquina de la nariz toca la madera antes de que el ToF frontal la vea (gemelo
         // 34/48 sin este corte vs 44/48).
-        if (!fin && i >= 1 && cerca && (!zz || cercaTof || parkPlanDir > 0)) { fin = true; why = "HOLGURA"; }
+        if (!fin && i >= 1 && cerca && (!zz || cercaTof || (parkPlanDir > 0 && !(distF_filtrada > PARK_PL_FRENTE_LIBRE_CM)))) { fin = true; why = "HOLGURA"; }
         if (!fin && zz && parkPlanDir > 0 && (distF_filtrada <= 0 || distF_filtrada >= 100) && mm >= PARK_PL_CIEGO_MM) { fin = true; why = "CIEGO"; }
         {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
             // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
