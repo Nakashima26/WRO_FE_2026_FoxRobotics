@@ -47,6 +47,16 @@ class Vehicle:
             self.wheel_lag_deg = self.wheel_servo_deg
         self.v_wheel = self.v
         self._w_max: float | None = None
+        motor = self.params.motor
+        self._reverse_scale_right = self._reverse_scale_left = motor.reverse_wheel_scale
+        if motor.reverse_radii_mm is not None:
+            steering = self.params.steering
+            wheelbase = self.params.vehicle.wheelbase_mm
+            right_mm, left_mm = motor.reverse_radii_mm
+            right_lock = wheel_deg_from_servo(steering.servo_min_deg + steering.backlash_deg, steering)
+            left_lock = -wheel_deg_from_servo(steering.servo_max_deg - steering.backlash_deg, steering)
+            self._reverse_scale_right = math.degrees(math.atan(wheelbase / right_mm)) / right_lock
+            self._reverse_scale_left = math.degrees(math.atan(wheelbase / left_mm)) / left_lock
         self.last_wheel_deg = wheel_deg_from_servo(self.wheel_lag_deg, self.params.steering)
 
     @property
@@ -204,7 +214,7 @@ class Vehicle:
             self.sliding = False
 
         if vel < 0.0:
-            wheel *= mot.reverse_wheel_scale
+            wheel *= self._reverse_scale_right if wheel >= 0.0 else self._reverse_scale_left
         wh = _radians(wheel)
         if abs(wh) > 1e-9 and abs(veh.wheelbase_mm) > 1e-6:
             yaw_rate_rad = vel / veh.wheelbase_mm * _tan(wh)
