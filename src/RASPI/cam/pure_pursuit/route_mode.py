@@ -1648,6 +1648,17 @@ class RouteMode:
                     # solo asientos aún sin resolver (la ruta puede cambiar de lado): los confirmados ya los traza la DP
                     u = getattr(self, "_unk_pts", None)
                     dd_c = np.full_like(dd, 1e9) if u is None or not len(u) else np.hypot(pxy[:, None, 0] - u[None, :, 0], pxy[:, None, 1] - u[None, :, 1]).min(axis=1)
+                if l1 and corner_sign.get("unk_only") and conf:
+                    # A confirmed color fixes the passing side. It does not
+                    # guarantee clearance while the car is recovering the line.
+                    sx, sy = np.asarray([section_to_world(sec, *SEATS[seat])
+                                         for sec, seat in conf]).T
+                    reserve = float(C.ROUTE_CORNER_EXIT_CLEAR_MM) + abs(self.follower.cte)
+                    gap = RR._rect_dist_pose(sx, sy, pxy[:, 0], pxy[:, 1],
+                                             np.radians(r.heading_deg[j]))
+                    constrained = gap < SIGN_MM / math.sqrt(2.0) + reserve
+                    confirmed_dist = np.hypot(pxy[:, None, 0] - sx, pxy[:, None, 1] - sy)
+                    dd_c = np.minimum(dd_c, np.where(constrained, confirmed_dist, np.inf).min(axis=1))
                 reach = float(corner_sign.get("mm", 350.0))
                 if not l23 and corner_sign.get("selective") and parking:
                     # Preserve the original reach around the stall and around
