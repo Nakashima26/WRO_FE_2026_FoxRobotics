@@ -603,6 +603,23 @@ class PPRuntime:
 
     # ── Serial ────────────────────────────────────────────────────────────────
 
+    def _battery_v2_suffix(self) -> str:
+        if not (C.ROUTE_MOTOR_CURVE_LIVE and C.ROUTE_MOTOR_VBAT_FILE):
+            return ""
+        now = time.monotonic()
+        if now < getattr(self, "_motor_vbat_poll", 0.0):
+            return ""
+        self._motor_vbat_poll = now + 0.1
+        source = Path(C.ROUTE_MOTOR_VBAT_FILE)
+        try:
+            if 0 <= time.time() - source.stat().st_mtime <= 0.5:
+                mv = int(source.read_text().strip())
+                if 9000 <= mv <= 13500:
+                    return f",bv={mv}"
+        except (OSError, ValueError):
+            pass
+        return ""
+
     def _build_serial_message(self, obs_norm: float, state: str, n_mem_obs: int,
                                pasado: bool, interior: bool,
                                turn_block: bool = False) -> str:
@@ -2418,6 +2435,7 @@ class PPRuntime:
             # no da para más junto con el V2).
             if _route_line:
                 self.serial_link.send_line(_route_line)
+            serial_msg += self._battery_v2_suffix()
             self.serial_link.send_line(serial_msg)
             serial_ack = self.serial_link.try_readline()
         else:

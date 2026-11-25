@@ -29,6 +29,7 @@ from __future__ import annotations
 from copy import copy
 import math
 import os
+import time
 
 import cv2
 import numpy as np
@@ -696,6 +697,11 @@ class RouteMode:
     def step(self, dm, est: str | None, ack: str | None, armed: bool):
         """(obs normalizado o None, sufijo del V2, línea de subida o None)."""
         self._step_frame += 1
+        if C.ROUTE_MOTOR_CURVE_LIVE:
+            mv = _ack_num(ack or "", "vb")
+            now = time.monotonic()
+            if mv is not None:
+                self._motor_vbat_ack = (mv / 1000.0 if 9000 <= mv <= 13500 else None, now)
         tc = _ack_num(ack or "", "tc")
         replan_frames = getattr(C, "ROUTE_L23_ENTRY_REPLAN_FRAMES", None)
         if tc == 4 and self._l23_entry_cap is None:
@@ -1506,7 +1512,11 @@ class RouteMode:
         v_base = K * (base - pwm0)
         v_max = K * (top - pwm0)
         v_lead = v_max  # Conserva la distancia de anticipación al recortar el techo por batería.
-        voltage = C.ROUTE_MOTOR_CURVE_VBAT
+        voltage = None
+        if C.ROUTE_MOTOR_CURVE_LIVE:
+            measured, received = getattr(self, "_motor_vbat_ack", (None, -math.inf))
+            if time.monotonic() - received <= 1.0:
+                voltage = measured
         if voltage is not None and voltage > 0:
             # Los PWM del perfil son perillas en escala virtual. El ESP
             # consigue esas velocidades invirtiendo la curva del motor.

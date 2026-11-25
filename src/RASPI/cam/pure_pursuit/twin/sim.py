@@ -438,6 +438,11 @@ class Sim:
         self.park_pos = park_pos
         self.params = params or TwinParams()
         self.battery = battery
+        self.battery_voltage_v = float(os.environ.get("TWIN_VBAT") or 12.0)
+        pack_resistance = os.environ.get("TWIN_BATTERY_RESISTANCE_OHM")
+        if self.battery is None and pack_resistance is not None:
+            self.battery = BatteryDrive(open_voltage_v=self.battery_voltage_v,
+                                        pack_resistance_ohm=float(pack_resistance))
         # Relación de engranes (estudio): TWIN_SPEED_SCALE escala mm/s por PWM y
         # TWIN_TAU_SCALE la constante de tiempo de arranque (menos torque = más lento).
         speed_scale = float(os.environ.get("TWIN_SPEED_SCALE", speed_scale))
@@ -573,6 +578,8 @@ class Sim:
         )
         for k, v in self.fw_params.items():
             fw.set_param(k, float(v))
+        fw.set_param("battery_voltage_v", self.battery_voltage_v if self.battery is None
+                     else self.battery.terminal_voltage_v)
         link = SimSerialLink(fw)
 
         # deque(maxlen=...) descarta el extremo viejo en O(1); con list +
@@ -817,6 +824,8 @@ class Sim:
                     if collision_cause:
                         break
                     t_loop_start = time.perf_counter()
+                    if self.battery is not None:
+                        fw.set_param("battery_voltage_v", self.battery.terminal_voltage_v)
                     fw.loop()
                     link.drain_tx()
                     loops += 1

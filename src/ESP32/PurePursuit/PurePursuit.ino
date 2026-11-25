@@ -1825,6 +1825,7 @@ PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
 // U evitada por la pared exterior (g_geom, opt-in con pge=1 de la Pi = ROUTE_PARK_GEOM_EXT): si ya se decidio la U y la ruta
 // de la Pi deja al carro sobre la linea de escaneo pasado el cajon, en vez de la U frena con reversa, retrocede recto
 // buscando la madera de adelante con el sonar (fase 42, w=284), avanza al w de parada (fase 41) y hace el plan normal.
+const bool PARK_SCAN_ARRIVAL_COMP = true;
 PARK_AJ int          PARK_GEOM_EXT               = 1;       // 1 = solo con pge=1 de la Pi (default on; 0 apaga)
 PARK_AJ float        PARK_GEOM_PASA_MM           = 150.0f;  // along >= pka + esto para tomar el mando (el sonar ya paso la madera)
 PARK_AJ float        PARK_GEOM_MAX_MM            = 550.0f;  // mas alla de pka + esto ya no (sigue la U): la reversa larga sale mas lenta que la U (6/6 en el gemelo con 600-640)
@@ -2258,9 +2259,43 @@ float vMando(float pwm, int dir) {
   return k * (pwm - p0);
 }
 
-// N30, medidas_20261117. 0 = feedforward anterior. Configurar el mismo
-// voltaje medido en ROUTE_MOTOR_CURVE_VBAT (la Pi no recibe voltaje por ACK).
-const float MOTOR_CURVE_VBAT = 0.0f;
+// N30, medidas_20261117. Usa el voltaje de batería publicado por el ESP
+// en el ACK (vb, milivoltios). Sin una medida reciente se usa el lazo anterior.
+const bool MOTOR_CURVE_LIVE = true;
+const int MOTOR_VBAT_ADC_PIN = -1;  // GPIO ADC1 del divisor calibrado; -1 permite muestras de la Pi.
+const float MOTOR_VBAT_DIVIDER = 0.0f;  // V batería / V en el pin.
+static float motorCurveVbat = 0.0f;
+static unsigned long motorVbatMs = 0;
+static unsigned long motorVbatPollMs = 0;
+static unsigned long motorVbatAckMs = 0;
+
+static void motorVbatSample(float voltage, unsigned long now) {
+  if (!isfinite(voltage) || voltage < 9.0f || voltage > 13.5f) return;
+  const unsigned long dt = now - motorVbatMs;
+  if (motorCurveVbat <= 0.0f || dt > 1000) motorCurveVbat = voltage;
+  else motorCurveVbat += (voltage - motorCurveVbat) * ((float)dt / (400.0f + dt));
+  motorVbatMs = now;
+}
+
+static void motorVbatUpdate() {
+  if (!MOTOR_CURVE_LIVE) return;
+  const unsigned long now = millis();
+  if (now - motorVbatPollMs >= 100) {
+    motorVbatPollMs = now;
+#if defined(FOX_SIL)
+    motorVbatSample(sil_param("battery_voltage_v", 0.0), now);
+#else
+    if (MOTOR_VBAT_ADC_PIN >= 0 && MOTOR_VBAT_DIVIDER > 0.0f)
+      motorVbatSample(analogReadMilliVolts(MOTOR_VBAT_ADC_PIN) * MOTOR_VBAT_DIVIDER / 1000.0f, now);
+#endif
+  }
+  if (now - motorVbatMs > 1000) motorCurveVbat = 0.0f;
+}
+
+static float motorVbatUsed() {
+  // Cuantiza una vez, en la misma unidad que recibe el perfil de la Pi.
+  return roundf(motorCurveVbat * 1000.0f) / 1000.0f;
+}
 static const float motorCurvePwm[] = {11, 60, 100, 140, 150, 180, 220, 255};
 static const float motorCurveLow[] = {0, 251.856f, 503, 739, 798, 1062, 1296.1333f, 1501};
 static const float motorCurveFull[] = {2.91820061f, 265, 593, 809, 876, 1077, 1366, 1556};
@@ -2268,10 +2303,11 @@ static const float motorCurveFull[] = {2.91820061f, 265, 593, 809, 876, 1077, 13
 static constexpr unsigned MOTOR_CURVE_N = sizeof(motorCurvePwm) / sizeof(motorCurvePwm[0]);
 
 static float motorCurveSpeed(unsigned i) {
-  const float blend = constrain((MOTOR_CURVE_VBAT - 11.88f) / (12.5f - 11.88f), 0.0f, 1.0f);
+  const float voltage = motorVbatUsed();
+  const float blend = constrain((voltage - 11.88f) / (12.5f - 11.88f), 0.0f, 1.0f);
   const float ref = 11.88f + blend * (12.5f - 11.88f);
   return (motorCurveLow[i] + blend * (motorCurveFull[i] - motorCurveLow[i]))
-      * (MOTOR_CURVE_VBAT / ref);
+      * (voltage / ref);
 }
 
 static float motorCurvePwmFor(float speed) {
@@ -2288,7 +2324,7 @@ static float motorCurvePwmFor(float speed) {
 
 // El plan f40 conserva el control de sus pulsos de arranque a baja velocidad.
 static bool motorCurveClosedLoop(int dir) {
-  return dir > 0 && MOTOR_CURVE_VBAT > 0.0f &&
+  return dir > 0 && motorVbatUsed() > 0.0f &&
       !(estado == ESTACIONANDO && parkFase == 40);
 }
 
@@ -4290,7 +4326,7 @@ static bool parkUPruebaArcoLargo(float rueda, float &tiempo) {
                                         PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, pwmArco));
     const float ruedaRel = actual / (RUEDA_TOPE_DEG * DEG_TO_RAD);
     float vObj = vMando(pwm, 1);
-    if (MOTOR_CURVE_VBAT > 0.0f) vObj = min(vObj, motorCurveSpeed(MOTOR_CURVE_N - 1));
+    if (motorVbatUsed() > 0.0f) vObj = min(vObj, motorCurveSpeed(MOTOR_CURVE_N - 1));
     vObj *= 1.0f - 0.12f * ruedaRel * ruedaRel;
     v += (vObj - v) * alphaMotor;
     const float k = constrain(tanf(actual) / RUTA_BATALLA_MM, -agarre / (v * v), agarre / (v * v));
@@ -4940,6 +4976,8 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     }
     if (campoPi(line, ",pkr=", v)) rutaPkr = campoFloat(v);
     if (campoPi(line, ",pkl=", v)) { rutaPkl = campoFloat(v); rutaPklMs = millis(); }
+    if (MOTOR_CURVE_LIVE && MOTOR_VBAT_ADC_PIN < 0 && campoPi(line, ",bv=", v))
+      motorVbatSample(campoFloat(v) / 1000.0f, millis());
     if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v) + PARK_PKA_OFS_MM; if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0; }  // sticky: pka sin pge no apaga (s16)
     if (campoPi(line, ",pgf=", v)) rutaPgf = campoFloat(v);
 
@@ -5145,6 +5183,10 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     for (int i = 0; i < TOF_N; i++) ackOut.print(tofInitBoot[i] ? '1' : '0');
     ackOut.print(",rst="); ackOut.print((int)esp_reset_reason());
 #endif
+    if (MOTOR_CURVE_LIVE && millis() - motorVbatAckMs >= 100) {
+      motorVbatAckMs = millis();
+      ackOut.print(",vb="); ackOut.print((int)roundf(motorCurveVbat * 1000.0f));
+    }
     ackOut.println();
 #if !defined(FOX_SIL)
     ackOut.enviar();
@@ -5812,6 +5854,7 @@ void loop() {
     distB_filtrada = filtroEMA(tofMm[2] / 10.0f, distB_filtrada < 0 ? tofMm[2] / 10.0f : distB_filtrada);
 #endif
 
+  motorVbatUpdate();
   lpsMarca(1, lpsT);
   readPiSerial();
   lpsMarca(2, lpsT);
@@ -7612,11 +7655,17 @@ void loop() {
         if (parkDirecto && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
             && ((scanDirectoInicial && validaPoste2 && !posteSintetico && extRaw <= PARK_POSTE2_EXT_MAX_CM)
                 || fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM)) {
-          Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
-          parkDetPorPose = true;
-          parkScanSubFase  = 2;
-          parkHuecoEntryMs = millis();
-          parkPoste1Ms     = 0;
+          // Una lectura rasante temprana es el borde del haz. Sin poste 1,
+          // mantén el escaneo hasta ver la cara o llegar al centro previsto.
+          const bool ecoRasante = posteSintetico || extRaw > PARK_POSTE2_EXT_MAX_CM;
+          if (!PARK_SCAN_ARRIVAL_COMP || !ecoRasante ||
+              alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM) {
+            Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
+            parkDetPorPose = true;
+            parkScanSubFase  = 2;
+            parkHuecoEntryMs = millis();
+            parkPoste1Ms     = 0;
+          }
         }
         const bool regresoPoseOk = parkScanSubFase >= 1
             || (parkOdomLastBajada >= 0 && odomMm - parkOdomLastBajada >= 200.0f);
@@ -8277,14 +8326,23 @@ void loop() {
         float pw, ph; parkPlanPose(pw, ph);
         if (parkGeomModo) {
           // reversa hacia la linea del escaneo: nariz a la isla (th > 0) si sobra altura; en reversa el volante va al reves
-          float thObj = constrain(PARK_GEOM_KH * (parkHPoseMm() - PARK_GEOM_H_OBJ), -PARK_GEOM_TH_MAX, PARK_GEOM_TH_MAX);
+          float altura = parkHPoseMm();
+          if (PARK_SCAN_ARRIVAL_COMP && parkRevBase > 0.0f) {
+            const float rumbo = (direccionIzquierda ? anguloGyro : -anguloGyro) * DEG_TO_RAD;
+            altura = (parkRevBase * 10.0f + 68.0f) * cosf(rumbo) - 64.0f * sinf(rumbo);
+          }
+          float thObj = constrain(PARK_GEOM_KH * (altura - PARK_GEOM_H_OBJ), -PARK_GEOM_TH_MAX, PARK_GEOM_TH_MAX);
           float ref = direccionIzquierda ? thObj : -thObj;
           float out = -(PARK_KP_ANG * (ref - anguloGyro) - PARK_KD_RATE * gyroRate);
           out = constrain(out, (float)-PARK_SERVO_MAX, (float)PARK_SERVO_MAX);
           escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
         }
         if (extRaw > 2 && extRaw < 150) {
-          float esperada = (ph - 68.0f) / 10.0f;
+          // Fuera del tramo del cajón, aprende la pared durante la reversa.
+          // Una vez vista, detecta el salto relativo y evita que un sesgo de
+          // pose transversal convierta la cara de la madera en pared.
+          float esperada = PARK_SCAN_ARRIVAL_COMP && parkGeomModo && parkRevBase > 0.0f
+                         ? parkRevBase : (ph - 68.0f) / 10.0f;
           bool pared = (float)extRaw >= esperada - 6.0f, madera = (float)extRaw < esperada - PARK_REV_CAIDA_CM;
           int borde = 0;   // 1: pared -> madera (cara de atras, w_sonar 284), 2: madera -> pared (cara de adelante, w_sonar 264)
           if (pared) {
