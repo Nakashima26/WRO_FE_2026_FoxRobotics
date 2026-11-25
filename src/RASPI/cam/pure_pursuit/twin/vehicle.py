@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .battery import BatteryDrive
 from .params import (
     TwinParams,
+    forward_speed_mm_s,
     max_wheel_deg,
     wheel_deg_from_servo,
 )
@@ -158,11 +159,10 @@ class Vehicle:
             else:
                 if direction < 0 and mot.pwm0_rev is not None:
                     v = mot.k_rev_mm_s_per_pwm * (drive_pwm - mot.pwm0_rev)
+                elif direction > 0:
+                    v = forward_speed_mm_s(drive_pwm, mot)
                 else:
                     v = mot.k_mm_s_per_pwm * (drive_pwm - mot.pwm0)
-                if direction > 0 and mot.high_pwm_gain_mm_s_per_pwm2 and drive_pwm > mot.high_pwm_knee:
-                    excess = drive_pwm - mot.high_pwm_knee
-                    v += mot.high_pwm_gain_mm_s_per_pwm2 * excess * excess
                 w_max = self._w_max
                 if w_max is None:
                     w_max = self._w_max = max_wheel_deg(st)   # constante: params no cambian en la corrida
