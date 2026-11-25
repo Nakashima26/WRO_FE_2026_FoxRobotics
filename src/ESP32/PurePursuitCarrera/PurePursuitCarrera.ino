@@ -322,6 +322,10 @@ const float RUTA_AMORT_V_MIN       = 300.0f;  // mm/s: abajo de esto no (giro/v 
 const float RUTA_REFLEJO_MM        = 100.0f;  // gemelo 11-25: al azar 48/48 (base 47/48), acomodo 262-267 21/24 (base 22/24, fallas de parking pkf=8)
 const float RUTA_REFLEJO_K         = 0.15f;   // ° de rueda por mm debajo del umbral
 const float RUTA_REFLEJO_MAX_DEG   = 15.0f;
+// Pi callada en modo RUTA (orillas270: el loop de la Pi se trabó 3.7 s, a los 0.8 s la ESP soltó la ruta y el
+// respaldo pared+gyro se fue recto contra la pared E): se sigue la ruta ya cargada con la odometría, con un tope de PWM
+// porque el rv de la Pi (más lento antes de las curvas) ya no se actualiza. 0 = comportamiento viejo (respaldo).
+const int   RUTA_SOLA_PWM          = 120;
 float rutaLookMm = 0.0f;                      // último lookahead usado (diagnóstico)
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
@@ -5595,10 +5599,12 @@ void controlPID(long distL, long distR) {
 
   // ── Decisión según modo ───────────────────────────────────────────────────
   bool piAlive = (millis() - lastPiMsgMs) <= piTimeoutMs;
+  bool rutaSola = !piAlive && RUTA_SOLA_PWM > 0 && rondaObstaculos && piPurePursuit && piRuta && rutaN >= 10 && rutaTfOk
+                  && estado != INICIO && estado != ESTACIONANDO;
   float outputVision = 0.0;
   float outputFinal  = 0.0;
 
-  if (!piAlive) {
+  if (!piAlive && !rutaSola) {
     // Pi desconectada → fallback autónomo: paredes + gyro
     piPriority    = false;
     piMemoryFrames = 0;
@@ -5710,7 +5716,7 @@ void controlPID(long distL, long distR) {
   } else if (piPurePursuit) {
     // ── Modo RUTA: el ESP sigue la vuelta con su odometría ───────────────────
     float ruedaDeg;
-    if (piSteerPi && piRuta) {
+    if (piSteerPi && piRuta && !rutaSola) {
       // ps=1 (ruta nueva subiendo): rueda que calculó la Pi con la ruta nueva, mismo mapeo que la ruta.
       int servoAngle = constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
@@ -5729,10 +5735,13 @@ void controlPID(long distL, long distR) {
       // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
       // el carro se para al cruzar la meta. Si no, igual que antes: min(rutaVel, velocidadMotor).
       if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
-        setMotorTope(rutaSubCap >= 0 ? min(rutaVel, rutaSubCap) : rutaVel, min(RUTA_PWM_MAX, 255));
+        int cap = rutaSubCap >= 0 ? min(rutaVel, rutaSubCap) : rutaVel;
+        if (rutaSola) cap = min(cap, RUTA_SOLA_PWM);
+        setMotorTope(cap, min(RUTA_PWM_MAX, 255));
       } else {
         int vm = rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor;
         if (rutaSubCap >= 0) vm = min(vm, rutaSubCap);
+        if (rutaSola) vm = min(vm, RUTA_SOLA_PWM);
         setMotor(vm);
       }
       Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);

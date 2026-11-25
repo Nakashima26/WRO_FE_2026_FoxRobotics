@@ -23,14 +23,72 @@ EV_TAGS = ("[ROUTE]", "[PARK", "[INICIO]", "[REC]", "[FIXVOTE]", "[DMAP]", "[CAM
 EV_ANY = ("AVISO", "Traceback", "Error")
 
 
-class _Tee:
-    """stdout que además guarda las líneas con EV_TAGS (mismo texto que va al journal)."""
+class _Disk:
+    """Hilo que hace TODA la escritura a disco/journal de la corrida (orillas263/266/270).
 
-    def __init__(self, orig, sink: list, lock: threading.Lock):
-        self.orig, self.sink, self.lock, self.buf = orig, sink, lock, ""
+    Con el SD ocupado (video + BEV + journal) un write() de 1.5 kB se bloquea hasta 4 s (medido en la
+    Pi 5, dd de 400 MB en paralelo). Escrito desde el loop de control, la Pi dejaba de mandar a la ESP
+    2-3 s: la ESP soltaba la ruta y se iba recto (270 contra la pared E, 266 a PWM 255 en la recta E).
+    Aquí el loop solo encola; el hilo escribe. Si el disco no avanza, la cola se recorta (se pierde log,
+    nunca control)."""
+
+    MAX_ITEMS = 50000
+
+    def __init__(self, f, orig):
+        import queue
+        self.f, self.orig = f, orig
+        self.q = queue.SimpleQueue()
+        self.n = 0
+        self.dropped = 0
+        self.t = threading.Thread(target=self._run, name="runlog-disk", daemon=True)
+        self.t.start()
+
+    def put(self, kind, data=None):
+        if self.n > self.MAX_ITEMS and kind == "o":
+            self.dropped += 1
+            return
+        self.n += 1
+        self.q.put((kind, data))
+
+    def _run(self):
+        n_f = 0
+        while True:
+            kind, data = self.q.get()
+            self.n -= 1
+            try:
+                if kind == "f":
+                    if self.f is None:
+                        continue
+                    self.f.write(data)
+                    n_f += 1
+                    if n_f % 24 == 0:   # ~2 s: si matan el servicio a media corrida queda casi todo
+                        self.f.flush()
+                elif kind == "o":
+                    self.orig.write(data)
+                    if self.q.empty():
+                        self.orig.flush()
+                elif kind == "of":
+                    self.orig.flush()
+                elif kind == "close":
+                    # Solo el archivo: el hilo sigue sacando los prints (el carro aún estaciona tras cortar).
+                    f, self.f = self.f, None
+                    f.close()
+                    self.orig.flush()
+            except Exception:
+                pass
+
+
+class _Tee:
+    """stdout que además guarda las líneas con EV_TAGS (mismo texto que va al journal).
+    La escritura real al journal la hace el hilo _Disk (journald también escribe al SD)."""
+
+    def __init__(self, orig, sink: list, lock: threading.Lock, disk: "_Disk"):
+        self.orig, self.sink, self.lock, self.buf, self.disk = orig, sink, lock, "", disk
 
     def write(self, s):
-        n = self.orig.write(s)
+        self.disk.put("o", s)
+        if self.sink is None:   # registro cerrado: solo journal (por el hilo)
+            return len(s)
         try:
             with self.lock:
                 self.buf += s
@@ -44,10 +102,10 @@ class _Tee:
                     self.buf = ""
         except Exception:
             pass
-        return n
+        return len(s)
 
     def flush(self):
-        self.orig.flush()
+        self.disk.put("of")
 
     def __getattr__(self, a):
         return getattr(self.orig, a)
@@ -62,11 +120,13 @@ class RunLog:
         self.esp: list = []
         self._route = None
         self._n = 0
-        self._orig = sys.stdout
+        prev = sys.stdout
+        self._orig = prev.orig if isinstance(prev, _Tee) else prev   # corrida anterior: su Tee queda sin uso
+        self._disk = _Disk(self.f, self._orig)
         hdr = {"hdr": 1, "t": round(time.time(), 3)}
         hdr.update(header)
-        self.f.write(json.dumps(hdr, default=_jsonable) + "\n")
-        sys.stdout = _Tee(self._orig, self.ev, self.lock)
+        self._disk.put("f", json.dumps(hdr, default=_jsonable) + "\n")
+        sys.stdout = _Tee(self._orig, self.ev, self.lock, self._disk)
 
     def add_esp(self, items) -> None:
         with self.lock:
@@ -92,20 +152,17 @@ class RunLog:
                 rec["ev"] = ev
             if esp:
                 rec["esp"] = esp
-            self.f.write(json.dumps(rec, separators=(",", ":"), default=_jsonable) + "\n")
+            self._disk.put("f", json.dumps(rec, separators=(",", ":"), default=_jsonable) + "\n")
             self._n += 1
-            if self._n % 24 == 0:   # ~2 s: si matan el servicio a media corrida queda casi todo
-                self.f.flush()
         except Exception as e:
             self.close()
             print(f"[REC] registro de la corrida apagado: {e}", flush=True)
 
     def close(self) -> None:
-        if sys.stdout is not self._orig and isinstance(sys.stdout, _Tee):
-            sys.stdout = self._orig
+        # stdout se queda en el Tee (sin capturar eventos): los prints siguen yendo al journal por el hilo.
+        if isinstance(sys.stdout, _Tee) and sys.stdout.disk is self._disk:
+            with self.lock:
+                sys.stdout.sink = None
         if self.f is not None:
-            try:
-                self.f.close()
-            except Exception:
-                pass
+            self._disk.put("close")   # el hilo vacía la cola y cierra; el loop no espera al disco
             self.f = None
