@@ -192,7 +192,7 @@ def _stall_far_along(parking: str, direction: str, park_w: float) -> float:
     from .wro_field import _barrier_corners, _heading
     h = math.radians(_heading(parking, direction))
     fx, fy = math.sin(h), math.cos(h)
-    return max(px * fx + py * fy for b in _barrier_corners(parking, park_w) for px, py in b)
+    return max(px * fx + py * fy for b in _barrier_corners(parking, park_w) for px, py in b) + 200.0
 
 
 def _park_far_signal_along(dm) -> float | None:
