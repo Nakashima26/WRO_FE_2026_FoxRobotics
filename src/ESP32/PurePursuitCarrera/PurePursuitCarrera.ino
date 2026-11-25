@@ -298,11 +298,17 @@ float rutaPgf       = NAN;   // pgf= : along (mm) de senal ocupada en la salida 
 const bool RUTA_SALIDA_ANCLA_PARED = true;  // ToF lateral corrige el seguimiento hacia la primera pared
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
-// 2026-11-25 (orillas240-261): con lookahead fijo el volante cambia de lado ~15 veces por 100 ACK y el rumbo oscila
-// ±20° (~0.9 s) en rectas rápidas (261 recta E). Opt-in: lookahead >= RUTA_LOOKAHEAD_V_S x velocidad del encoder,
-// con tope RUTA_LOOKAHEAD_V_MAX_MM. 0 = apagado (lookahead fijo como antes). Para probar en el gemelo (Jesse).
-const float RUTA_LOOKAHEAD_V_S      = 0.0f;   // s (típ. 0.25-0.35)
-const float RUTA_LOOKAHEAD_V_MAX_MM = 450.0f;
+// Lookahead adaptativo (opt-in, 2026-11-25). seguimiento_run.py sobre orillas244-261: el rumbo cruza la ruta ~2 veces/s
+// (rms 11-14°) y en rectas de vueltas 2-3 (340 mm fijos, más rápido) 2.7/s: el fijo se queda corto con la velocidad.
+// Con RUTA_LOOK_ADAPT: L = clamp(RUTA_LOOK_T_S x v_plan, fijo, RUTA_LOOK_MAX_MM), v_plan = vMando(rv) (el tope que la Pi
+// ya baja antes de las curvas; sin rv, el encoder). Y nunca más que RUTA_LOOK_R_K x radio mínimo de la ruta en los
+// próximos RUTA_LOOK_CURV_WIN_MM (solo muerde en curvas cerradas, no en el slalom suave). false = lookahead fijo.
+const bool  RUTA_LOOK_ADAPT        = false;
+const float RUTA_LOOK_T_S          = 0.30f;   // s de anticipación a la velocidad planeada
+const float RUTA_LOOK_MAX_MM       = 450.0f;
+const float RUTA_LOOK_R_K          = 1.2f;    // L <= k x R_min adelante
+const float RUTA_LOOK_CURV_WIN_MM  = 400.0f;
+float rutaLookMm = 0.0f;                      // último lookahead usado (diagnóstico)
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
 // RUTA_SUB_CTE_MM y sigue creciendo -> tope de PWM RUTA_SUB_PWM hasta que deja de crecer. 0 = apagado.
@@ -4833,6 +4839,26 @@ static void rutaAnclaParedSalida(float &x, float &y, float h) {
 }
 #endif
 
+// Lookahead adaptativo (RUTA_LOOK_ADAPT): largo a velocidad planeada alta, acotado por la curva más cerrada de adelante.
+float rutaLookAdapt(float base) {
+  float v = (rutaVel >= 0) ? vMando((float)rutaVel, 1) : fabsf(encVelMmS);
+  if (LAZO_V_MAX_L1 > 0.0f && turnsCompleted < 4) v = min(v, LAZO_V_MAX_L1);
+  float L = constrain(RUTA_LOOK_T_S * v, base, RUTA_LOOK_MAX_MM);
+  // Curvatura: cambio de rumbo entre segmentos separados 2 pasos, en la ventana de adelante.
+  int n = (int)(RUTA_LOOK_CURV_WIN_MM / rutaPaso + 0.5f);
+  float kMax = 0.0f;
+  for (int o = 0; o + 3 <= n && rutaN > 4; o++) {
+    int a = (rutaI + o) % rutaN, b = (a + 1) % rutaN, c = (a + 2) % rutaN, d = (a + 3) % rutaN;
+    float h1 = atan2f(rutaX[b] - rutaX[a], rutaY[b] - rutaY[a]);
+    float h2 = atan2f(rutaX[d] - rutaX[c], rutaY[d] - rutaY[c]);
+    float dh = fabsf(remainderf(h2 - h1, 2.0f * PI));
+    float k = dh / (2.0f * rutaPaso);
+    if (k > kMax) kMax = k;
+  }
+  if (kMax > 1e-5f) L = min(L, max(base, RUTA_LOOK_R_K / kMax));
+  return L;
+}
+
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
 // Devuelve false si no aplica. ruedaDeg: + = derecha.
 bool rutaSteer(float &ruedaDeg) {
@@ -4919,8 +4945,8 @@ bool rutaSteer(float &ruedaDeg) {
   if (RUTA_SUB_CTE_MM > 0.0f) rutaSubvirajeActualiza(x0, y0);
   float lookMm = (RUTA_LOOKAHEAD_L23_MM > 0.0f && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE) ? RUTA_LOOKAHEAD_L23_MM : RUTA_LOOKAHEAD_MM;
   if (RUTA_LOOKAHEAD_L1_MM > 0.0f && turnsCompleted < 4 && estado != INICIO) lookMm = RUTA_LOOKAHEAD_L1_MM;
-  if (RUTA_LOOKAHEAD_V_S > 0.0f && estado != INICIO)
-    lookMm = max(lookMm, min(RUTA_LOOKAHEAD_V_MAX_MM, RUTA_LOOKAHEAD_V_S * fabsf(encVelMmS)));
+  if (RUTA_LOOK_ADAPT && estado != INICIO) lookMm = rutaLookAdapt(lookMm);
+  rutaLookMm = lookMm;
   int j = (rutaI + (int)(lookMm / rutaPaso + 0.5f)) % rutaN;
   float dx = rutaX[j] - x, dy = rutaY[j] - y;
   float fwd = dx * sh + dy * ch;
