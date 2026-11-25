@@ -326,6 +326,11 @@ const float RUTA_REFLEJO_MAX_DEG   = 15.0f;
 // respaldo pared+gyro se fue recto contra la pared E): se sigue la ruta ya cargada con la odometría, con un tope de PWM
 // porque el rv de la Pi (más lento antes de las curvas) ya no se actualiza. 0 = comportamiento viejo (respaldo).
 const int   RUTA_SOLA_PWM          = 120;
+// wallPanic (empujón fijo con un lateral < WALL_PANIC_CM = 18 cm) también en modo RUTA. La ruta pasa los conos a propósito
+// a 7-14 cm: en orillas268/271 se activaba 33-37 % del tiempo en S, peleando contra la ruta (servo cambiando de lado
+// cada ~0.5 s). false = en las 3 vueltas solo el reflejo de ToF (RUTA_REFLEJO_MM) como red; tras la última esquina
+// (llegada al cajón) sigue el wallPanic (gemelo: sin él 3 parkings más fuera del cajón).
+const bool  RUTA_WALL_PANIC        = false;  // gemelo 11-25: osc -27 %, al azar 47/48 (=base), acomodo real 22/24 (base 21)
 float rutaLookMm = 0.0f;                      // último lookahead usado (diagnóstico)
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
@@ -5718,7 +5723,7 @@ void controlPID(long distL, long distR) {
     float ruedaDeg;
     if (piSteerPi && piRuta && !rutaSola) {
       // ps=1 (ruta nueva subiendo): rueda que calculó la Pi con la ruta nueva, mismo mapeo que la ruta.
-      int servoAngle = constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      int servoAngle = constrain(rutaServo(piWheelDeg) + ((RUTA_WALL_PANIC || turnsCompleted >= TURNS_PER_RACE) ? (int)wallPanic : 0), SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
       if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
         setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
@@ -5729,7 +5734,7 @@ void controlPID(long distL, long distR) {
       return;
     }
     if (rutaSteer(ruedaDeg)) {
-      int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      int servoAngle = constrain(rutaServo(ruedaDeg) + ((RUTA_WALL_PANIC || turnsCompleted >= TURNS_PER_RACE) ? (int)wallPanic : 0), SERVO_MIN_DEG, SERVO_MAX_DEG);
       escribirServo(servoAngle);
       // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
       // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0
