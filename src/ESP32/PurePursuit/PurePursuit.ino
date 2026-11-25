@@ -310,6 +310,13 @@ const float RUTA_LOOK_CURV_WIN_MM  = 400.0f;
 const float RUTA_AMORT_K           = 0.0f;
 const float RUTA_AMORT_MAX_DEG     = 15.0f;   // tope de la corrección (° de rueda)
 const float RUTA_AMORT_V_MIN       = 300.0f;  // mm/s: abajo de esto no (giro/v se dispara)
+// Reflejo de ToF lateral (2026-11-25, orillas267: la pose iba ~25 cm corrida en la diagonal a la esquina NW y el
+// localizador no podía usar tL (43° de incidencia, 3σ); tL bajó 231->145->61 mm en 0.2 s y pegó con la isla).
+// Si tL/tR leen menos de RUTA_REFLEJO_MM, la rueda se mueve al lado contrario RUTA_REFLEJO_K °/mm, sin pasar por la
+// pose ni la Pi. No toca la ruta: con un cono a ese lado se sigue dejando del mismo lado. 0 = apagado.
+const float RUTA_REFLEJO_MM        = 0.0f;
+const float RUTA_REFLEJO_K         = 0.15f;   // ° de rueda por mm debajo del umbral
+const float RUTA_REFLEJO_MAX_DEG   = 15.0f;
 float rutaLookMm = 0.0f;                      // último lookahead usado (diagnóstico)
 const float RUTA_LOOKAHEAD_L23_MM = 0.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
@@ -4979,6 +4986,15 @@ bool rutaSteer(float &ruedaDeg) {
       ruedaDeg -= constrain(RUTA_AMORT_K * (ruedaReal - ruedaRuta), -RUTA_AMORT_MAX_DEG, RUTA_AMORT_MAX_DEG);
     }
   }
+#if FOX_TOF
+  if (RUTA_REFLEJO_MM > 0.0f && estado != INICIO && estado != ESTACIONANDO && fabsf(encVelMmS) > 150.0f) {
+    const int l = tofMm[0], r = tofMm[1];
+    float c = 0.0f;
+    if (l > 0 && l < RUTA_REFLEJO_MM) c += (RUTA_REFLEJO_MM - l) * RUTA_REFLEJO_K;   // algo a la izquierda: a la derecha (+)
+    if (r > 0 && r < RUTA_REFLEJO_MM) c -= (RUTA_REFLEJO_MM - r) * RUTA_REFLEJO_K;
+    ruedaDeg += constrain(c, -RUTA_REFLEJO_MAX_DEG, RUTA_REFLEJO_MAX_DEG);
+  }
+#endif
   rutaSubWheelDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
   return true;
 }
