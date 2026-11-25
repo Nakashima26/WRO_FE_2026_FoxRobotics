@@ -1,17 +1,23 @@
 # Respuesta: l1v_diag288
 
-_2026-11-25 12:30 PST (Tijuana) — estado: EN COLA_
+_2026-11-25 15:01 PST (Tijuana) — estado: TERMINADA_
 
-Recibido. Preparé la tanda diagnóstica en origin/grok/t/l1v_diag288 = 63886cd9 ("Grok: diagnóstico de límites en vuelta 1"), cuyo padre es 0ee69022 (mismo algoritmo base + la sonda l1v_diag.py). Está esperando el twin.lock global; una tanda a la vez.
+Hecho: corrí la tanda en origin/grok/t/l1v_diag288 (63886cd9 (padre 0ee69022)) con tu comando (l1v_uno.sh con l1v_diag.py, FF 4.28 / FD 5.8, PI_EXTRA {}, FW_OVER {}): n1-6 x s1-48 (288 carreras), -P 7, bajo twin.lock. HEAD esperado 0ee69022: coincide.
 
-Cómo correrá (tal cual pediste):
-- Desde src/RASPI/cam: `sed 's|"$D/costo.py"|l1v_diag.py|' uno.sh > pure_pursuit/twin/tools/latencia/l1v_uno.sh` (mismo directorio; si el sed no tiene efecto, la tanda aborta en vez de correr con costo.py).
-- n1-6 × s1-48 = 288 carreras, -P 7, FF 4.28 / FD 5.8, TWIN_PI_EXTRA {}, TWIN_FW_OVER {}, TOF_SHORT_K 0.5, MOTOR_CURVA_REAL=1, CAMERA_FROM_CALIB=1, MOTOR_REAL=1, VBAT 11.5, COST_FIJO=1, COST_FIRST 1.95, LENS_CALIB pure_pursuit/lens_calib.npz.
-- Después: `l1v_diag.py summary /tmp/lat/l1v_diag288` y `resumen.py l1v_diag288`. Ambos resúmenes, las 288 líneas STOP y COSTO, config, reloj y validez (carga/OOM/mean_pi_frame_ms) irán a `grok/resultados:resultados/l1v_diag288.md`, y este archivo se reemplazará con el resultado.
-- Sin flashear, sin push a main, sin exportar_carrera.
+- resumen.py: `l1v_diag288: 270/288 ok  media 35.83  mediana 35.37  mejor 31.89  fallas: n1/s23 n1/s32 n1/s47 n2/s13 n2/s23 n2/s36 n3/s12 n3/s27 n3/s48 n4/s15 n4/s16 n5/s3 n5/`
+- l1v_diag.py summary (inicio): `Carreras con muestras: 288. Media por carrera en segundos.
+tc0 | CTE/subida/espera | 0.60524 | 0.36392
+tc0 | asiento | 0.00071 | 0.00008
+tc0 | esquina | 0.15908 | 0.05711
+tc0 | otro | 0.01031 | 0.00000
+tc0 | pared sin ver | 0.00750 | 0.00165
+tc0 | perfil restante | 1.20471 | 0.58217
+tc0 | perfil restante + rampa | 0.00010 | 0.00000
+tc0 | prefijo | 2.05264 | 1.43114
+tc0 | rampa | 0.00219 | 0.00002
+`
+- Paradas: collision 7, race_finished 278, stuck 3
+- Reloj total: 369.8 s. VÁLIDA: corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 369.8 s para 288 carreras (referencia ~300-330 s sin carga, 3x la de 96), carga máx 7.71, mem máx 4665 MB, OOM/Killed/MemoryError: 0, mean_pi_frame_ms 3.18-7.20 (media 3.83).
+- Tipo de prueba: carrera completa, banco diagnóstico sin variante (PI_EXTRA {}, FW_OVER {}), FF 4.28 / FD 5.8, 288 carreras (n1-6 x s1-48). Por la corrección l1v_ajuste, estos mismos STOP/COSTO se publican también como la0g (árbol idéntico a ae0f25ed), y son la base de l1v_cartas_288 (FF 4.28 / FD 5.8, FW_OVER {}).
 
-Cola: ahora corre ciego25 y hay unas 16 tandas esperando el lock (tw1_*, pk2_*, la0g, cal2_288_radios, s20cal2_radios, l1v_cartas288, l1v_cartas_288, ...), así que puede tardar más de una hora.
-
-Sobre la0g: sigue EN COLA, pero con otra configuración: origin/grok/t/la0g = ae0f25ed (parche de prueba sobre 0ee69022), FF 2.8 / FD 3.8, TWIN_FW_OVER {"MOTOR_CURVE_LIVE":"false"}, PI_EXTRA {}, n1-6 × s1-48. No la cambié porque no está claro que lo pidas. Por lo tanto NO es comparable directamente con l1v_diag288 (FF/FD y FW_OVER distintos). Pregunta: ¿quieres que reconfigure la0g a FF 4.28 / FD 5.8 y FW_OVER {} antes de que arranque? Responde con eso explícito y lo cambio.
-
-Sobre l1v_cartas_288 (y l1v_cartas288): también en cola con FF 2.8 / FD 3.8 y PI_EXTRA {"ROUTE_L1_CARD_SPEED":true}. Los STOP de esta tanda diagnóstica (FF 4.28 / FD 5.8) no son una base exacta para ese par por el FF/FD distinto; si quieres la base exacta del par, manda una tanda base con FF 2.8 / FD 3.8. (Ojo: siguen las dos variantes con y sin guion bajo; si una es duplicado, dime cuál omito.)
+Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/l1v_diag288.md`.
