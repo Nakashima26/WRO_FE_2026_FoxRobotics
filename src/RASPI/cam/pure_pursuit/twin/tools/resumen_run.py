@@ -19,7 +19,7 @@ def main(path, seg=False):
         s = x.get("s", {})
         a = s.get("ack")
         t = x["t"] - t0
-        if a:
+        if a and "tc" in a and "est" in a:
             acks.append((t, a, s.get("loc", {}).get("pose")))
         for te, e in x.get("ev", []):
             evs.append((te - t0, e))

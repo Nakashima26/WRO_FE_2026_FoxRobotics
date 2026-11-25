@@ -299,8 +299,8 @@ const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 
 // ya baja antes de las curvas; sin rv, el encoder). Y nunca más que RUTA_LOOK_R_K x radio mínimo de la ruta en los
 // próximos RUTA_LOOK_CURV_WIN_MM (solo muerde en curvas cerradas, no en el slalom suave). false = lookahead fijo.
 const bool  RUTA_LOOK_ADAPT        = false;
-const float RUTA_LOOK_T_S          = 0.40f;   // s de anticipación a la velocidad planeada (0.30 en 263-265: rectas aún oscilan)
-const float RUTA_LOOK_MAX_MM       = 550.0f;   // 450 en 263-265
+const float RUTA_LOOK_T_S          = 0.30f;   // s de anticipación a la velocidad planeada (0.40/550 + amort 0.4 en orillas266: cte ±100 mm, flojo)
+const float RUTA_LOOK_MAX_MM       = 450.0f;
 const float RUTA_LOOK_R_K          = 1.2f;    // L <= k x R_min adelante
 const float RUTA_LOOK_CURV_WIN_MM  = 400.0f;
 // Amortiguamiento de giro (2026-11-25, orillas263-265: rumbo rebota ~0.75 s en rectas, roza pared al salir de la esquina).
