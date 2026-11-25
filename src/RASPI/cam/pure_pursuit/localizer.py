@@ -185,6 +185,13 @@ class Localizer:
         """Corrección EKF con el eco de una señal conocida (orillas162: 369 ecos cortos con señal en el cono,
         residuo mediano 11 mm; donde la pose decía 267 mm al bloque el ToF lo tenía a 30)."""
         nu = z - zs
+        sig = float(getattr(C, "LOC_TOF_SIGN_SIGMA_MM", 15.0)) + 0.02 * z
+        # El EKF puede tener mucha incertidumbre de pose después de una curva.
+        # Antes de usarla, valida la asociación: un eco largo que rebasa todo
+        # el bloque más el ruido del ToF puede venir del fondo del cono.
+        if nu > math.hypot(SIGN_MM, SIGN_MM) + 3.0 * sig:
+            self.n_rej += 1
+            return
         if self._sign_corner_active(ack):
             cap = getattr(C, "LOC_SIGN_CORNER_MAX_INNOV_MM", None)
             if cap is not None and abs(nu) > float(cap):
@@ -198,7 +205,6 @@ class Localizer:
             if not math.isfinite(z2):
                 return
             H[j] = (z2 - zs) / eps
-        sig = float(getattr(C, "LOC_TOF_SIGN_SIGMA_MM", 15.0)) + 0.02 * z
         S = float(H @ self.P @ H + sig * sig)
         if nu * nu / S > 9.0:
             self.n_rej += 1
