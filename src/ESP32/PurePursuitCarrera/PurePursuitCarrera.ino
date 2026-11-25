@@ -303,7 +303,7 @@ const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 
 // Con RUTA_LOOK_ADAPT: L = clamp(RUTA_LOOK_T_S x v_plan, fijo, RUTA_LOOK_MAX_MM), v_plan = vMando(rv) (el tope que la Pi
 // ya baja antes de las curvas; sin rv, el encoder). Y nunca más que RUTA_LOOK_R_K x radio mínimo de la ruta en los
 // próximos RUTA_LOOK_CURV_WIN_MM (solo muerde en curvas cerradas, no en el slalom suave). false = lookahead fijo.
-const bool  RUTA_LOOK_ADAPT        = false;
+const bool  RUTA_LOOK_ADAPT        = true;   // 2026-11-25: activado para prueba en pista (sin gemelo)
 const float RUTA_LOOK_T_S          = 0.30f;   // s de anticipación a la velocidad planeada
 const float RUTA_LOOK_MAX_MM       = 450.0f;
 const float RUTA_LOOK_R_K          = 1.2f;    // L <= k x R_min adelante
