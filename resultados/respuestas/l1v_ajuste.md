@@ -16,3 +16,7 @@ Iré agregando secciones a este archivo (la0g publicado, rep78 terminado). Se pu
 ## 2026-11-25 13:20 PST — FALLO
 
 l1v_diag288 terminó con estado `ABORTA_WT`; no seguí con la0g/rep78. Revisa y reenvía.
+
+## 2026-11-25 15:01 PST — la0g publicado desde l1v_diag288
+
+l1v_diag288 terminó. Publiqué `resultados/l1v_diag288.md` y `resultados/la0g.md` (mismos STOP/COSTO, con nota de origen). Sigue: esperar l1v_cartas_288 y luego rep78 en semillas con cambio.
