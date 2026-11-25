@@ -241,6 +241,7 @@ bool  piPurePursuit = false;  // pp=1: Pi en modo Pure Pursuit
 // (el ACK largo del parking satura el UART y el loop se iba a >1 s).
 // La Pi usa el último ACK, así que saltar los viejos no le quita información.
 const int ACK_SALTA_VIEJOS = 0;
+const int  PARK_ACK_SALTA_BYTES = 200;   // 2026-11-24: solo con cola profunda en pkf 1..43 (orillas250)
 // Estacionando el ACK (316 B = 27 ms a 115200) llega a 40 Hz y satura Serial2: cada loop dura 30-60 ms.
 // Mínimo de ms entre ACKs en ESTACIONANDO/ESTACIONANDO_PUNTA; 0 = cada V2 (antes). 2026-10-16: 100 (prepark motor físico 0/100 -> 100/100 junto con LOG_MIN_MS y PARK_ANG_IN_DEG 70 / PARK_POSTE2_MM 60; ver docs/HANDOFF_PARKING.md).
 const int ACK_E_MIN_MS = 100;
@@ -4759,8 +4760,12 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     lastPiMsgMs = millis();
     if (Serial2.available() > 0
         && (ACK_SALTA_VIEJOS == 2
-            || (ACK_SALTA_VIEJOS == 1 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)))) {
-      return;   // ver ACK_SALTA_VIEJOS
+            || (ACK_SALTA_VIEJOS == 1 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA))
+            || (PARK_ACK_SALTA_BYTES > 0 && Serial2.available() >= PARK_ACK_SALTA_BYTES
+                && estado == ESTACIONANDO && parkFase >= 1 && parkFase <= 43)
+            || (PARK_ACK_SALTA_BYTES > 0 && Serial2.available() >= PARK_ACK_SALTA_BYTES
+                && estado == ESTACIONANDO_PUNTA && puntaFase >= 1))) {
+      return;   // ver ACK_SALTA_VIEJOS / PARK_ACK_SALTA_BYTES
     }
     if (ACK_E_MIN_MS > 0 && (estado == ESTACIONANDO || estado == ESTACIONANDO_PUNTA)) {
       if (millis() - ackEUltimoMs < (unsigned long)ACK_E_MIN_MS) return;   // ver ACK_E_MIN_MS
@@ -5023,7 +5028,7 @@ void procesarLineaPi(String &line) {
 // EXPERIMENTO (apagado): 1 = junta los bytes en un buffer fijo y procesa solo líneas completas, sin esperar
 // en readStringUntil a que llegue el resto de una línea a medias (hasta ~3 ms por V2 a 460800).
 #ifndef FOX_SERIAL_NOBLOQ
-#define FOX_SERIAL_NOBLOQ 0
+#define FOX_SERIAL_NOBLOQ 0   // 1 en carro si la cola UART bloquea; en SIL rompe n1/s36
 #endif
 
 void readPiSerial() {
