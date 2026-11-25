@@ -53,7 +53,10 @@ _GHOST_LOCK = threading.Lock()
 
 
 def ghost(videos: Path, name: str) -> dict:
-    """{name, splits[1..tpr] (s desde el botón, None si no llegó), tpr, done, dur, path[[t,x,y,h,tc]]}."""
+    """{name, splits[1..tpr] (s desde el botón, None si no llegó), tpr, done, fin, dur, path[[t,x,y,h,tc]]}.
+
+    fin = s desde el botón hasta que la ESP terminó de estacionar (pkf=7, finalizarPark); None si no.
+    """
     video = videos / Path(name).name
     tp = tele_path(video)
     if not tp.exists():
@@ -66,7 +69,7 @@ def ghost(videos: Path, name: str) -> dict:
     a0, prev, tpr, src = None, None, 12, "runtime"
     rdir, signs = None, None
     splits: dict[int, float] = {}
-    path, t_last = [], None
+    path, t_last, fin = [], None, None
     with open(tp, encoding="utf-8") as fh:
         for line in fh:
             try:
@@ -93,6 +96,8 @@ def ghost(videos: Path, name: str) -> dict:
             conf = (s.get("map") or {}).get("confirmed")
             if conf:
                 signs = sorted("/".join(map(str, c[:3])) for c in conf)
+            if fin is None and a.get("pkf") == 7:
+                fin = rel
             if isinstance(tc, (int, float)):
                 tc = int(tc)
                 if prev is not None and tc > prev and tc not in splits:
@@ -102,7 +107,7 @@ def ghost(videos: Path, name: str) -> dict:
             if pose and len(pose) >= 3:
                 if not path or rel - path[-1][0] >= 0.08:
                     path.append([rel, round(pose[0]), round(pose[1]), round(pose[2], 1), prev])
-    out = {"name": video.name, "src": src, "tpr": tpr, "dur": t_last, "dir": rdir, "signs": signs or [],
+    out = {"name": video.name, "src": src, "tpr": tpr, "fin": fin, "dur": t_last, "dir": rdir, "signs": signs or [],
            "splits": [splits.get(n) for n in range(1, tpr + 1)], "path": path}
     out["done"] = out["splits"][-1] is not None if out["splits"] else False
     with _GHOST_LOCK:
@@ -121,7 +126,7 @@ def ghost_list(videos: Path, n: int = 40) -> list[dict]:
         except Exception:
             continue
         out.append({"name": f["name"], "t": f["t"], "src": g["src"], "tpr": g["tpr"], "done": g["done"],
-                    "splits": g["splits"], "has_pose": bool(g["path"]), "dir": g["dir"],
+                    "fin": g.get("fin"), "splits": g["splits"], "has_pose": bool(g["path"]), "dir": g["dir"],
                     "signs": g["signs"]})
     return out
 

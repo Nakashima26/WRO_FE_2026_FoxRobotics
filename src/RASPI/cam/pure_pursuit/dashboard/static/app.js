@@ -1143,6 +1143,9 @@ $("#rep-chart").onclick = (ev) => {
 const GHOST = { choice: "@best", name: "", g: null, list: [], best: "", key: "" };
 const runShort = (n) => n.replace(".avi", "").replace("orillas", "#");
 const lastSplit = (r) => r.splits[r.splits.length - 1];
+// Tiempo de la corrida: hasta que la ESP terminó de estacionar (pkf=7); si no hay, la última esquina.
+const runTime = (r) => r.fin ?? lastSplit(r);
+const fmtRun = (r) => r.fin != null ? `${fmt(r.fin, 1)} s` : `${fmt(lastSplit(r), 1)} s (esq. 12)`;
 function repA0() {
   if (REP.a0 === undefined) { const s = REP.st.find((x) => x.armed); REP.a0 = s ? s.t : REP.t0; }
   return REP.a0;
@@ -1158,6 +1161,8 @@ function repSplits() {
     if (typeof tc === "number") { if (prev !== null && tc > prev && !(tc in sp)) sp[tc] = s.t - a0; prev = tc; }
   }
   REP.splits = Array.from({ length: tpr }, (_, k) => sp[k + 1] ?? null);
+  const f = REP.st.find((x) => x.t >= a0 && (x.ack || {}).pkf === 7);
+  REP.fin = f ? f.t - a0 : null;
   return REP.splits;
 }
 // Sentido y señales confirmadas de la corrida actual (para que "la mejor" sea del mismo mapa).
@@ -1178,12 +1183,14 @@ async function ghostLoadList() {
   for (const r of others) { r.sameDir = !mk.dir || !r.dir || r.dir === mk.dir; r.sameMap = r.sameDir && !!mk.signs && r.signs.join(" ") === mk.signs; }
   // la mejor: terminada, mismo sentido; si alguna tiene las mismas señales, solo entre esas
   const pool = others.filter((r) => r.done && r.sameDir), same = pool.filter((r) => r.sameMap);
-  const best = (same.length ? same : pool).sort((a, b) => lastSplit(a) - lastSplit(b))[0];
+  // con fin (estacionó) primero; las viejas sin pkf se comparan por la última esquina
+  const key = (r) => r.fin != null ? r.fin : 1e4 + lastSplit(r);
+  const best = (same.length ? same : pool).sort((a, b) => key(a) - key(b))[0];
   GHOST.best = best ? best.name : "";
   const sel = $("#rep-ghost");
   sel.innerHTML = '<option value="">👻 sin fantasma</option>' +
-    (best ? `<option value="@best">👻 la mejor (${runShort(best.name)}, ${fmt(lastSplit(best), 1)} s${best.sameMap ? ", mismo mapa" : ""})</option>` : "") +
-    others.map((r) => `<option value="${r.name}">👻 ${runShort(r.name)} · ${r.t} · ${r.done ? fmt(lastSplit(r), 1) + " s" :
+    (best ? `<option value="@best">👻 la mejor (${runShort(best.name)}, ${fmtRun(best)}${best.sameMap ? ", mismo mapa" : ""})</option>` : "") +
+    others.map((r) => `<option value="${r.name}">👻 ${runShort(r.name)} · ${r.t} · ${r.done ? fmtRun(r) :
       `${r.splits.filter((x) => x !== null).length}/${r.tpr} esq.`}${r.sameMap ? " · mismo mapa" : r.sameDir ? "" : " · otro sentido"}</option>`).join("");
   sel.value = [...sel.options].some((o) => o.value === GHOST.choice) ? GHOST.choice : "";
 }
@@ -1250,6 +1257,14 @@ function ghostUI() {
     const tr = m !== null && q !== null && mp !== null && qp !== null ? (m - mp) - (q - qp) : null;
     rows.push(`<tr class="${k + 1 === n ? "cur" : ""}"><td>${k + 1}${k + 1 === me.length ? " (vuelta 3)" : k === 3 || k === 7 ? ` (vuelta ${(k + 1) / 4})` : ""}</td>` +
       `<td>${m === null ? "—" : m.toFixed(2)}</td><td>${q === null ? "—" : q.toFixed(2)}</td>` +
+      `<td class="${cls(tr)}">${sg(tr)}</td><td class="${cls(tot)}">${sg(tot)}</td></tr>`);
+  }
+  const mf = REP.fin ?? null, gf = GHOST.g ? GHOST.g.fin ?? null : null;
+  if (mf !== null || gf !== null) {
+    const ml = me[me.length - 1], gl = gh ? gh[gh.length - 1] ?? null : null;
+    const tot = mf !== null && gf !== null ? mf - gf : null;
+    const tr = tot !== null && ml !== null && gl !== null ? (mf - ml) - (gf - gl) : null;
+    rows.push(`<tr><td>🅿 estacionado</td><td>${mf === null ? "—" : mf.toFixed(2)}</td><td>${gf === null ? "—" : gf.toFixed(2)}</td>` +
       `<td class="${cls(tr)}">${sg(tr)}</td><td class="${cls(tot)}">${sg(tot)}</td></tr>`);
   }
   tbl.innerHTML = rows.join("");

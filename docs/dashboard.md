@@ -125,9 +125,9 @@ The lateral ToF read short at long range, and the error changes with the wall pa
 *Run `orillas242` 13 s after the button, racing the ghost of `orillas241` (same direction and same signs). The ghost is the translucent car with its dashed path. It is 0.35 s ahead at corner 4, and 242 wins that back on lap 2.*
 
 The **👻** selector in the bottom bar overlays another recorded run on the replay map, like the ghost in a racing game. Both runs are aligned at the start button (first armed state).
-- **la mejor** (default) picks the fastest finished run with the same direction, and among those only runs with the same confirmed signs when there are any. You can also pick any run from the list. Each entry is marked *mismo mapa* or *otro sentido*.
+- **la mejor** (default) picks the fastest finished run (time from the button until the ESP reports it is parked, `pkf=7`; older runs without it use corner 12) with the same direction, and among those only runs with the same confirmed signs when there are any. You can also pick any run from the list. Each entry is marked *mismo mapa* or *otro sentido*.
 - The bottom bar shows the delta at the last corner both runs counted: green when this run is ahead, red when it is behind.
-- The **Fantasma** card has one row per corner (the ESP's `tc`): time from the button for this run and for the ghost, the **Δ tramo** for that corner-to-corner segment, and the running **Δ total**. This is the quickest way to see where a run loses time.
+- The **Fantasma** card has one row per corner (the ESP's `tc`): time from the button for this run and for the ghost, the **Δ tramo** for that corner-to-corner segment, and the running **Δ total**. A last **🅿 estacionado** row compares the parked time, which is the real race time; the run's `dur` and the video keep recording a few seconds after that. This is the quickest way to see where a run loses time.
 - It costs the Pi nothing: the Pi sends the ghost's splits and pose path (~10 poses per second, a few KB) once, cached by file time. The browser does all the drawing.
 
 ### ESP
