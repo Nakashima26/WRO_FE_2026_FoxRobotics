@@ -1470,6 +1470,7 @@ ROUTE_UPLOAD_PWM = None  # tope mientras sube la ruta al ESP (None = ROUTE_SLOW_
 ROUTE_LAP1_PWM = 120
 # Aplica las reglas de la recta también con el color provisional: un replan por señal en vez de dos.
 ROUTE_PROV_RULES = False
+ROUTE_SEAT_POSTERIOR = False  # Filtra asientos por el sorteo completo de cartas.
 # Señal medio vista (color provisional, sin confirmar): la ruta esquiva también la otra fila de su
 # columna con el mismo color, descarta por regla la X de en medio, y esos asientos ya no frenan.
 ROUTE_HALF_SEEN = True
