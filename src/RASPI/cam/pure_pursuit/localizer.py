@@ -205,7 +205,12 @@ class Localizer:
             return
         K = self.P @ H / S
         if getattr(C, "LOC_SIGN_CORNER_NO_YAW", None) and self._sign_corner_active(ack):
-            K[2] = 0.0
+            keys = getattr(C, "LOC_SIGN_CORNER_KEYS", None)
+            key_ok = keys is None or key in keys
+            nu_min = getattr(C, "LOC_SIGN_CORNER_YAW_NU_MIN", None)
+            nu_ok = nu_min is None or abs(nu) > float(nu_min)
+            if key_ok and nu_ok:
+                K[2] = 0.0
         dx = K * nu
         self.x = self.x + dx
         self.P = (np.eye(3) - np.outer(K, H)) @ self.P

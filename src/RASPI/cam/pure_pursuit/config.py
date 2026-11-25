@@ -165,6 +165,8 @@ LOC_TOF_SIGN_SIGMA_MM = 15.0   # + 2% de la lectura; la señal mide 50 mm y el c
 LOC_SIGN_CORNER_TC_MAX = None       # tc del plan <= este valor cuenta como esquina temprana (típ. 2)
 LOC_SIGN_CORNER_MAX_INNOV_MM = None # |nu| mayor se rechaza en esquina o giro rápido
 LOC_SIGN_CORNER_NO_YAW = None       # True: K[2]=0 en esquina/giro (no corregir dh con un ToF lateral)
+LOC_SIGN_CORNER_YAW_NU_MIN = None   # con NO_YAW: solo anula rumbo si |nu| supera este mm (None = siempre)
+LOC_SIGN_CORNER_KEYS = None         # p. ej. ("tL",): gate solo en esos ToF; None = todos los sign/bloque
 LOC_SIGN_TURN_YAW_DEG = None        # |Δyaw| por ACK que cuenta como giro (típ. 0.5–1°)
 LOC_TOF_MAX_MM = {"tL": 650.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
 # orillas159 (tL 650): con la pared a >700 el izquierdo se satura y lee 600-645 (esperado 768/793/733 -> 645/622/607),
