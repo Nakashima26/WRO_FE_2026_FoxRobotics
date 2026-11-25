@@ -1,11 +1,12 @@
 # Respuesta: l1v_corredor_288
 
-_2026-11-25 12:31 PST (Tijuana)_
+_2026-11-25 14:13 PST (Tijuana)_
 
-Recibida. La tanda `l1v_corredor_288` (origin/grok/t/l1v_corredor_288 @ bdf36eca, n1-6 x s1-48 = 288 carreras, -P 7, banco NUEVO con latencia, FF 2.8 / FD 3.8, TWIN_PI_EXTRA {"ROUTE_L1_PATH_SPEED":true}, TWIN_FW_OVER {}, COST_FIRST 1.95, resto de variables tal cual) quedó **en cola bajo twin.lock**. Ahora corre cal2_288_base y van por delante varias tandas (tw1_*, l1v_*, pk2_*, ab_*), así que calcula bastante espera; la tanda en sí debería tardar ~300-330 s sin carga.
+Hecho: corrí la tanda en origin/grok/t/l1v_corredor_288 (bdf36eca) con el comando que mandaste, corregido a FF 4.28 / FD 5.8 exactos (l1v_corredor_ajuste): n1-6 x s1-48 (288 carreras), -P 7, bajo twin.lock.
 
-**Aviso importante:** el disco de la máquina se llenó (100 %, 405 MB libres) por acumulación de worktrees. El primer intento de preparar el worktree de esta tanda falló con "No space left on device". Borré 61 worktrees de tandas ya terminadas (DONE/OMITIDA/CANCELADA/ABORTADA; se pueden recrear desde git, 45 GB liberados) y la relancé; ya está en cola con su worktree listo. **cal2_288_base, que estaba corriendo en ese momento, tiene al menos 8 carreras (n1: s8-s13, s15, s19) con `OSError: [Errno 28] No space left on device`**: sus resultados no van a ser válidos y habrá que repetirla.
+- resumen.py: `l1v_corredor_288: 270/288 ok  media 35.84  mediana 35.37  mejor 31.89  fallas: n1/s23 n1/s32 n1/s47 n2/s13 n2/s23 n2/s36 n3/s12 n3/s27 n3/s48 n4/s15 n4/s16 n5/s`
+- Paradas: collision 7, race_finished 278, stuck 3
+- Reloj total: 359.5 s. VÁLIDA: corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 359.5 s para 288 carreras (referencia ~300-330 s sin carga, 3x la de 96), carga máx 7.48, mem máx 4658 MB, OOM/Killed/MemoryError: 0, mean_pi_frame_ms 3.10-7.08 (media 3.74).
+- Tipo de prueba: carrera completa con ROUTE_L1_PATH_SPEED=true, FF 4.28 / FD 5.8, 288 carreras (n1-6 x s1-48); solo comparable con tandas de ese mismo tipo y mismo set de semillas/ruidos.
 
-Al terminar subo `resultados/l1v_corredor_288.md` a grok/resultados (línea de resumen.py, STOP y COSTO por carrera ordenados, reloj total, tipo de prueba y validez de carga) y actualizo esta respuesta.
-
-Tipo de prueba: carrera completa, banco NUEVO con latencia, variante l1v con ROUTE_L1_PATH_SPEED, FF 2.8 / FD 3.8; solo la comparo con tandas del mismo tipo/banco y mismas semillas (no con l1v_cartas_288, que usa FF 4.28 / FD 5.8).
+Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/l1v_corredor_288.md`.
