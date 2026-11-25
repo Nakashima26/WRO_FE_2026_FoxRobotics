@@ -58,3 +58,23 @@ def test_rampa_monotona_no_decreciente_con_la_distancia(monkeypatch):
     vals = [_speed_at(d) for d in range(800, 1301, 25)]
     assert all(b >= a for a, b in zip(vals, vals[1:])), vals
     assert vals[0] == 155 and vals[-1] <= 255
+
+
+def test_distancia_visual_fuera_del_corredor_solo_con_ruta_instalada(monkeypatch):
+    _set(monkeypatch, ROUTE_L1_PATH_SPEED=True, ROUTE_UNSEEN_RAMP_MM=None,
+         ROUTE_UNSEEN_PWM=155, ROUTE_LAP1_PWM=255, ROUTE_LAP1_OPEN=True)
+    m = _mode()
+    m.route.report = {"feasible": True}
+    m.esp_route = m.route
+    m.follower.cte = 0.0
+    m.upload = []
+    m._job = m._delay_left = m._rte_n = None
+    pose = (SX, SY - 600.0 - C.CAMERA_FWD_MM, 0.0)
+    assert m._speed({(SEC, "X1")}, pose) is None
+
+    m._rte_n = 123
+    assert m._speed({(SEC, "X1")}, pose) == 155
+    m._rte_n = None
+    m.route.y[:] = SY - 220
+    m.follower.i = 180
+    assert m._speed({(SEC, "X1")}, pose) == 155
