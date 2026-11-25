@@ -128,6 +128,7 @@ class Localizer:
         self.n_reanchor = 0
         self._rej = {}
         self._prev_z = {}
+        self._prev_ack_yaw = None
         self.anchor_segs = None          # señales reales (DigitalMap.confirmed) como referencia del ToF lateral
         self._anchor_key = None
         self.n_sign = 0
@@ -168,9 +169,27 @@ class Localizer:
         d, _k, _c = raycast(np.broadcast_to(origin, dirs.shape), dirs, self.anchor_segs)
         return float(np.min(d))
 
+    def _sign_corner_active(self, ack: str) -> bool:
+        """Esquina temprana o giro rápido: un ToF lateral contra bloque observa mal el rumbo."""
+        tc_lim = getattr(C, "LOC_SIGN_CORNER_TC_MAX", None)
+        tc = _ack_num(ack, "tc")
+        corner = tc_lim is not None and tc is not None and int(tc) <= int(tc_lim)
+        ystep = getattr(C, "LOC_SIGN_TURN_YAW_DEG", None)
+        yaw = _ack_num(ack, "yaw")
+        fast = False
+        if ystep is not None and yaw is not None and self._prev_ack_yaw is not None:
+            fast = abs(yaw - self._prev_ack_yaw) > float(ystep)
+        return corner or fast
+
     def _sign_update(self, key, mount, z, zs, ack) -> None:
         """Corrección EKF con el eco de una señal conocida (orillas162: 369 ecos cortos con señal en el cono,
         residuo mediano 11 mm; donde la pose decía 267 mm al bloque el ToF lo tenía a 30)."""
+        nu = z - zs
+        if self._sign_corner_active(ack):
+            cap = getattr(C, "LOC_SIGN_CORNER_MAX_INNOV_MM", None)
+            if cap is not None and abs(nu) > float(cap):
+                self.n_rej += 1
+                return
         H = np.zeros(3)
         for j, eps in ((0, 2.0), (1, 2.0), (2, math.radians(0.5))):
             s2 = self.x.copy()
@@ -180,12 +199,13 @@ class Localizer:
                 return
             H[j] = (z2 - zs) / eps
         sig = float(getattr(C, "LOC_TOF_SIGN_SIGMA_MM", 15.0)) + 0.02 * z
-        nu = z - zs
         S = float(H @ self.P @ H + sig * sig)
         if nu * nu / S > 9.0:
             self.n_rej += 1
             return
         K = self.P @ H / S
+        if getattr(C, "LOC_SIGN_CORNER_NO_YAW", None) and self._sign_corner_active(ack):
+            K[2] = 0.0
         dx = K * nu
         self.x = self.x + dx
         self.P = (np.eye(3) - np.outer(K, H)) @ self.P
@@ -384,6 +404,8 @@ class Localizer:
         if self.odom is not None and (px, py, yaw) == self.odom:
             return                      # ACK repetido: nada nuevo
         self._predict(px, py, yaw)
+        if yaw is not None:
+            self._prev_ack_yaw = yaw
         if not correct:
             return
         sin_us = getattr(C, "US_DESDE_TOF", False)

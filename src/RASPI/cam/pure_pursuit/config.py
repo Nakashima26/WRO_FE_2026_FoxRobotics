@@ -160,6 +160,12 @@ LOC_TOF_SIGN_MAX_MM = 300.0
 LOC_TOF_MAX_INC_DEG = 30.0   # twin (ToF sin sesgo oblicuo): 35° 44/48, 30° 43/48, 25° 42/48. orillas166 (30°) limpia; orillas167 (27°) chocó S/X2R en vuelta 1 (pose 14 cm corrida tras la primera curva)
 LOC_TOF_SIGN_HALF_DEG = 7.0    # medio cono del ToF (ROI 8); 13.5 era el de ROI 16. Ecos de bloque 162+164: ±7° -> mediana -0 mm, ±13.5° -> +4
 LOC_TOF_SIGN_SIGMA_MM = 15.0   # + 2% de la lectura; la señal mide 50 mm y el cono 27°
+# Opt-in (orillas247): en la esquina vuelta 1 el ToF lateral contra señal/bloque no debe girar la pose ni
+# aceptar innovaciones grandes con un solo eco oblicuo. None = sin cambio.
+LOC_SIGN_CORNER_TC_MAX = None       # tc del plan <= este valor cuenta como esquina temprana (típ. 2)
+LOC_SIGN_CORNER_MAX_INNOV_MM = None # |nu| mayor se rechaza en esquina o giro rápido
+LOC_SIGN_CORNER_NO_YAW = None       # True: K[2]=0 en esquina/giro (no corregir dh con un ToF lateral)
+LOC_SIGN_TURN_YAW_DEG = None        # |Δyaw| por ACK que cuenta como giro (típ. 0.5–1°)
 LOC_TOF_MAX_MM = {"tL": 650.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
 # orillas159 (tL 650): con la pared a >700 el izquierdo se satura y lee 600-645 (esperado 768/793/733 -> 645/622/607),
 # salto falso de 121 mm. orillas160 (tL 600 y esperado <= 600): sin esos saltos pero la recta 3 (pared a 573-690)
