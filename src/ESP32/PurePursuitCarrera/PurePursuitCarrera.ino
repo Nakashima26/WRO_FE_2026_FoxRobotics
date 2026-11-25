@@ -303,7 +303,7 @@ const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 
 // Con RUTA_LOOK_ADAPT: L = clamp(RUTA_LOOK_T_S x v_plan, fijo, RUTA_LOOK_MAX_MM), v_plan = vMando(rv) (el tope que la Pi
 // ya baja antes de las curvas; sin rv, el encoder). Y nunca más que RUTA_LOOK_R_K x radio mínimo de la ruta en los
 // próximos RUTA_LOOK_CURV_WIN_MM (solo muerde en curvas cerradas, no en el slalom suave). false = lookahead fijo.
-const bool  RUTA_LOOK_ADAPT        = true;   // 2026-11-25: activado para prueba en pista (sin gemelo)
+const bool  RUTA_LOOK_ADAPT        = false;  // 2026-11-25: probado en pista 262-267; 262 y 267 chocaron con la isla en la esquina NW. Apagado hasta probarlo en el gemelo
 const float RUTA_LOOK_T_S          = 0.30f;   // s de anticipación a la velocidad planeada (0.40/550 + amort 0.4 en orillas266: cte ±100 mm, flojo)
 const float RUTA_LOOK_MAX_MM       = 450.0f;
 const float RUTA_LOOK_R_K          = 1.2f;    // L <= k x R_min adelante
@@ -312,7 +312,7 @@ const float RUTA_LOOK_CURV_WIN_MM  = 400.0f;
 // Pure pursuit solo mira la posición: si el carro ya gira más de lo que pide la ruta, sigue metiendo volante hasta que el
 // error cambia de signo. Aquí: rueda -= K x (rueda equivalente al giro MEDIDO por el gyro - rueda que pide la curvatura de
 // la ruta entre el carro y el punto objetivo). En recta = frena el giro; en curva = solo la diferencia. 0 = apagado.
-const float RUTA_AMORT_K           = 0.20f;   // 0.40 (+ lookahead 0.40/550) en orillas266: flojo, cte ±100 mm
+const float RUTA_AMORT_K           = 0.0f;    // 0.40 (orillas266: conos rozados) y 0.20 (267: isla) en pista; apagado hasta el gemelo
 const float RUTA_AMORT_MAX_DEG     = 15.0f;   // tope de la corrección (° de rueda)
 const float RUTA_AMORT_V_MIN       = 300.0f;  // mm/s: abajo de esto no (giro/v se dispara)
 float rutaLookMm = 0.0f;                      // último lookahead usado (diagnóstico)
