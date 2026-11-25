@@ -1,5 +1,6 @@
 {
   "pi": {
+    "DIGITAL_MAP_RECHECK_COLOR": true,
     "PARK_FORCE_INICIO": true,
     "ROUTE_PROFILE_BASE_PWM": 458,
     "ROUTE_TIME_COST": true,

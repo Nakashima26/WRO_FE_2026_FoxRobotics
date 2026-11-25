@@ -514,6 +514,8 @@ class DigitalMap:
             for sid, x, y in _seat_world(sec):
                 along, right = self._section_frame(x, y, sec)
                 catalog.append((sec, sid, along, right))
+        protect_color = C.DIGITAL_MAP_RECHECK_COLOR
+        rechecked = set()
         for bx, by, color in feet:
             if color not in ("Red", "Green"):
                 continue
@@ -591,6 +593,21 @@ class DigitalMap:
                 self._live.append((sec, sa, side))
             self._pull_known(wx, wy, color)
             key = (sec, sid)
+            incumbent = self.confirmed.get(key)
+            if protect_color and incumbent is not None and incumbent != color:
+                # La cinta, las cartas y el pegado por color pueden ocultar
+                # un asiento rival. Compara la geometría sin esos filtros.
+                if (weak or key in rechecked or sec != self.section or self.in_stall
+                        or abs(self._yaw_step) > 3.0 or dist > 100.0
+                        or ray > 700.0 or abs(lat) > fwd * math.tan(math.radians(20.0))
+                        or abs((self._view_heading - _heading(sec, self.direction) + 180.0)
+                               % 360.0 - 180.0) > _VOTE_MISALIGN_DEG):
+                    continue
+                if any((sc, seat) != key
+                       and math.hypot(wx - x, wy - y) < dist + 80.0
+                       for sc in sections for seat, x, y in _seat_world(sc)):
+                    continue
+                rechecked.add(key)
             if not weak:
                 self._best[key] = min(self._best.get(key, 9999.0), dist)
             bucket = self._votes.setdefault(key, {"Red": 0, "Green": 0})
@@ -681,6 +698,11 @@ class DigitalMap:
         key = (sec, sid)
         if self.confirmed.get(key) != color:
             self.confirmed[key] = color
+            if C.DIGITAL_MAP_RECHECK_COLOR:
+                # Una rectificación junta sus propios votos desde que quedó
+                # resuelto el color anterior.
+                other = "Red" if color == "Green" else "Green"
+                self._votes[key][other] = 0
             print(f"[DMAP] {sec}/{sid} {color}", flush=True)
 
     def _seat_xy(self, sec: str, sid: str) -> tuple[float, float]:
@@ -721,14 +743,19 @@ class DigitalMap:
             return
         if self._frozen() and old in self.confirmed:
             return
+        was = self.confirmed.pop(old, None)
+        previous_votes = self._votes.get(old, {}).get(color, 0)
         for store in (self._votes, self._best):
             if old in store and new not in store:
                 store[new] = store.pop(old)
             else:
                 store.pop(old, None)
-        was = self.confirmed.pop(old, None)
         if was is not None:
             self.confirmed[new] = color
+            if C.DIGITAL_MAP_RECHECK_COLOR:
+                bucket = self._votes.setdefault(new, {"Red": 0, "Green": 0})
+                bucket[color] = max(bucket[color], previous_votes)
+                bucket["Red" if color == "Green" else "Green"] = 0
             print(f"[DMAP] {old[0]}/{old[1]} -> {new[0]}/{new[1]} {color}", flush=True)
 
     def _allows(self, sec: str, seats: set[str]) -> bool:
