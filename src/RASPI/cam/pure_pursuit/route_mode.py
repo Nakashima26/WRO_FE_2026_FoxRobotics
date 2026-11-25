@@ -317,6 +317,11 @@ def pix_line_delta(pix, pose, axis, direction, fwd_add: float = 0.0):
 
 class RouteMode:
     def __init__(self) -> None:
+        if getattr(C, "ROUTE_SEAT_POSTERIOR", False):
+            from .seat_posterior import prepare
+            for direction in ("CW", "CCW"):
+                prepare(direction)
+        self._posterior_seen = set()
         if getattr(C, "ROUTE_WARM", False):
             warm_caches()
         self.route = None
@@ -887,7 +892,18 @@ class RouteMode:
             conf, empty = self._resolved(dm)
         if lap1 and self._seat_roi(conf, empty, pose):
             conf, empty = self._resolved(dm)
-        unknown = [k for k in self._all_seats() if k not in conf and k not in empty]
+        inferred = {}
+        if lap1 and self.fixed and getattr(C, "ROUTE_SEAT_POSTERIOR", False):
+            from .seat_posterior import posterior
+            inferred = posterior(dm.direction, dm.parking, conf, empty) or {}
+        ruled_out = {key for key, (p, _, _) in inferred.items() if p == 0}
+        unknown = [k for k in self._all_seats() if k not in conf and k not in empty and k not in ruled_out]
+        if ruled_out and (tc if tc is not None else getattr(self, "_tc_max", 0)) < 4:
+            new = ruled_out - self._posterior_seen
+            if new:
+                self._posterior_seen.update(new)
+                if os.environ.get("ROUTE_SEAT_POSTERIOR_LOG") == "1":
+                    print(f"[SEAT_POSTERIOR] early_empty={len(self._posterior_seen)}", flush=True)
         # Color provisional: el mapa confirma ya cerca (la detección tiene que
         # caer a <=160 mm del asiento); los votos de color llegan antes. Con
         # >=2 votos y ventaja, la ruta ya toma el lado de ese color (semilla 87:
@@ -906,6 +922,9 @@ class RouteMode:
             if rc is not None:
                 roi_seats.add(k)
                 prov.setdefault(k, rc)
+            p, red, green = inferred.get(k, (0, 0, 0))
+            if p and (red == 0 or green == 0):
+                prov.setdefault(k, "Red" if red else "Green")
         plan_seats = {**conf, **prov}
         plan_unknown = [k for k in unknown if k not in prov]
         if getattr(C, "ROUTE_PROV_RULES", False) and prov:
