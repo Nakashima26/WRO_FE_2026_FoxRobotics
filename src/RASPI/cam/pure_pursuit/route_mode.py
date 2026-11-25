@@ -39,6 +39,7 @@ from .digital_map import feet_world
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .park_refine import ParkRefine
+from .park_vision import ParkLandmark, ParkVision
 from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
                         SECTIONS_CW, SIGN_MM, blue_segments, orange_segments, section_to_world, world_to_section)
 
@@ -363,6 +364,9 @@ class RouteMode:
         self.axis = (0.0, 0.0)
         self.maneuver_loc = None     # pose del visor durante E/G
         self._park_refine = None
+        self._park_vision = ParkVision() if C.ROUTE_PARK_VISION_REF else None
+        self._park_landmark = ParkLandmark() if C.ROUTE_PARK_LANDMARK_REF else None
+        self._park_landmark_delta = None
         self._park_refined_w = None
         self.park_w = None           # w0 del cajón en uso (supuesto o medido)
         _pf = getattr(C, "ROUTE_PRUEBA_CAJON_FILE", None)
@@ -1296,6 +1300,12 @@ class RouteMode:
         if self.fixed and self.park_w is not None:
             park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
             self.pka = _stall_far_along(dm.parking, dm.direction, park_w)
+            if self._park_vision is not None and tc is not None and tc >= 3:
+                mask = getattr(self, "park_mask", None)
+                self._park_vision.update(mask, self.bev, dm.parking, dm.direction, pose, self.pka)
+            if self._park_landmark is not None and tc is not None and tc >= 11:
+                self._park_landmark_delta = self._park_landmark.update(
+                    getattr(self, "park_feet", ()), conf, dm.parking, dm.direction, pose)
             self.pge = _park_geom_flag(dm, getattr(self, "_tc_max", 0), pose, self.pka)
             self.pgf = _park_far_signal_along(dm)
         suffix = self._suffix() if getattr(C, "ROUTE_ON_ESP", False) else ""
@@ -2464,6 +2474,10 @@ class RouteMode:
             s += f",ps=1,pw={self.pi_wheel:.2f}"
         if self.fixed and getattr(self, "pka", None) is not None:
             s += f",pka={self.pka:.0f}"
+            if self._park_vision is not None and self._park_vision.estimate is not None:
+                s += f",pkr={self._park_vision.estimate:.0f}"
+            if self._park_landmark_delta is not None:
+                s += f",pkl={self._park_landmark_delta:.0f}"
             if getattr(self, "pge", 0):
                 s += ",pge=1"
             pgf = getattr(self, "pgf", None)

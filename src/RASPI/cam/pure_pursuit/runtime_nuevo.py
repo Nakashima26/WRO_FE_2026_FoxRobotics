@@ -581,7 +581,7 @@ class PPRuntime:
                 st["route"] = [[round(float(px)), round(float(py))] for px, py in pts[::step]]
         return st
 
-    def _route_step(self, armed: bool, frame=None, orange=None):
+    def _route_step(self, armed: bool, frame=None, orange=None, feet=()):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
         if not getattr(C, "ROUTE_FOLLOW", False):
             return None, "", None
@@ -592,6 +592,10 @@ class PPRuntime:
         self._rmode.frame = frame
         self._rmode.color_ranges = getattr(self.vision, "color_ranges", None)
         self._rmode.bev = self.bev
+        if C.ROUTE_PARK_VISION_REF and armed and self._tc >= 3:
+            self._rmode.park_mask = _park_pink(frame)[1]
+        if C.ROUTE_PARK_LANDMARK_REF:
+            self._rmode.park_feet = feet
         self._rmode.orange = orange
         self._rmode.bev_hsv = getattr(self, "_bev_hsv_route", None)
         self._bev_hsv_route = None
@@ -608,10 +612,13 @@ class PPRuntime:
         # bloqueado detectarEsquina() unos frames más.
         has_obstacle = (n_mem_obs > 0) or turn_block
         mem_out = max(n_mem_obs, 1) if turn_block else n_mem_obs
+        inicio = int(bool(self._inicio_estacionamiento))
+        if inicio and C.ROUTE_PARK_FRONT_REF:
+            inicio = 2
         return (f"V2,obs={obs_norm:+.3f},turn=0,"
                 f"state={state},prio={int(has_obstacle)},mem={mem_out},pp=1,"
                 f"pasado={int(pasado)},intr={int(interior)},"
-                f"inicio={int(bool(self._inicio_estacionamiento))},"
+                f"inicio={inicio},"
                 f"park={self._park_state},pd={self._park_dist_cm}")
 
     # ── Mapa de pista ─────────────────────────────────────────────────────────
@@ -2379,8 +2386,10 @@ class PPRuntime:
         # no de la imagen. prio=1: el ESP aplica el steer tal cual.
         # Frame sin anotar (detect_on dibuja sobre una copia), solo si se usa la ROI
         _roi_frame = (frame if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
-                      or getattr(C, "SEAT_ROI_LOG", False)) else None)
-        _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame, line_info["Orange"])
+                      or getattr(C, "SEAT_ROI_LOG", False)
+                      or (C.ROUTE_PARK_VISION_REF and armed and self._tc >= 3))
+                      else None)
+        _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame, line_info["Orange"], new_obstacles)
         self._route_steering = _route_steer is not None
         self._sin_naranja = (self._route_steering and getattr(self._rmode, "fixed", False)
                              and len({sec for (sec, _s) in self.digital.confirmed}) >= 4)
