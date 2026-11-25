@@ -61,7 +61,7 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 | 2 | Steering: knuckles, rack, tie rods, SG90 servo and `ServoGearDirection_V2` |
 | 3 | LEGO axles (4 studs, 32 mm) in the knuckles, front wheels |
 | 4 | Drivetrain: motor mount, N20 motor, 15T pinion, differential |
-| 5 | LEGO axle (16 studs, 128 mm) through the differential, rear wheels |
+| 5 | One LEGO axle per rear wheel (8 studs, 64 mm) into each side of the differential, rear wheels |
 | 6 | Battery supports, battery in the center tunnel, bottom cover |
 | 7 | Ultrasonic supports and 3 HC-SR04 |
 | 8 | Top plate `TapaChasis_V2` |
@@ -72,7 +72,7 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 
 The printed parts get one color per subsystem (the CAD leaves them gray); bought boards keep their own colors. Three things are not in `Vehicle_V2.SLDASM`, so the scripts add them:
 - **SG90 servo and its gear:** lying on the rack, shaft pointing back, tabs on the two chassis posts, gear on the rack teeth (which face up).
-- **LEGO axles:** a 16-stud axle through the differential and a 4-stud axle per knuckle, centered on the wheels.
+- **LEGO axles:** one 8-stud axle per rear wheel into each side of the differential, and a 4-stud axle per knuckle, centered on the wheels.
 - **28 M3×12 screws:** [`tools/agujeros_fc.py`](tools/agujeros_fc.py) (run in FreeCAD) lists the M3 holes of every printed part from its STEP. [`tools/tornillos.py`](tools/tornillos.py) moves them into the assembly with each part's transform from the `.glb`, and holes that line up across two or more parts become one screw, written to [`tools/tornillos.json`](tools/tornillos.json). Vertical screws go head up; horizontal ones go in from the part mounted last. Holes in a single part are skipped because it is not known what they hold. The SG90's own screws come with its model.
 
 To regenerate it (about 2 min on a laptop GPU), export the assembly from SolidWorks to binary glTF (`Vehicle_V2.glb`) and convert the SG90 STEP to STL, then:

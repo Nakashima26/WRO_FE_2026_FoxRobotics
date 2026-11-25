@@ -7,7 +7,7 @@ Archivo > Guardar como > glTF binario desde cad/Vehicle_V2.SLDASM).
   python models/v2/tools/armado.py Vehicle_V2.glb models/v2/renders/armado.mp4 [--fast]
       [--servo=sg90.stl --gear=ServoGearDirection_V2.STL]
 --fast: 4x más rápido, para revisar.
-Tornillos M3x12: tornillos.json (tornillos.py). Ejes LEGO de las ruedas: se generan aquí (trasero de 16, delanteros de 4).
+Tornillos M3x12: tornillos.json (tornillos.py). Ejes LEGO de las ruedas: se generan aquí (atrás uno de 8 por llanta, adelante uno de 4 por mangueta).
 El servo SG90 y su engrane no están en Vehicle_V2.SLDASM: con --servo/--gear se agregan en su lugar
 (acostado sobre la cremallera, eje hacia atrás, orejas en los dos postes; engrane sobre los dientes, que miran
 arriba). sg90.stl = el STEP del SG90 pasado a STL (FreeCAD: MeshPart.meshFromShape). Render en una GPU de laptop: ~1.5 min. Arriba = +Y, adelante = -Z.
@@ -86,12 +86,14 @@ def lego_axle(x0, x1, y, z):
     return m
 
 
-# Ejes LEGO de las ruedas (no están en el CAD): trasero de 16 (128 mm) por el diferencial, uno de 4 (32 mm) por mangueta.
+# Ejes LEGO de las ruedas (no están en el CAD): atrás uno de 8 (64 mm) por llanta, entrando al diferencial por cada lado;
+# adelante uno de 4 (32 mm) por mangueta.
 _b = {n: P[n]["mesh"].bounds * 1000 for n in ("RuedaAtras-1", "RuedaAtras-2", "RuedaEnfrente-1", "RuedaEnfrente-2")}
 _c = lambda b: ((b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2)
 _xl, _xr = _b["RuedaAtras-1"][0][0], _b["RuedaAtras-2"][1][0]
 _xm = (_xl + _xr) / 2
-for n, m in (("EjeTrasero", lego_axle(_xm - 64, _xm + 64, *_c(_b["RuedaAtras-1"]))),
+for n, m in (("EjeTrasero-1", lego_axle(_xm - 65, _xm - 1, *_c(_b["RuedaAtras-1"]))),
+             ("EjeTrasero-2", lego_axle(_xm + 1, _xm + 65, *_c(_b["RuedaAtras-2"]))),
              ("EjeDelantero-1", lego_axle(_b["RuedaEnfrente-1"][0][0] + 2, _b["RuedaEnfrente-1"][0][0] + 34, *_c(_b["RuedaEnfrente-1"]))),
              ("EjeDelantero-2", lego_axle(_b["RuedaEnfrente-2"][1][0] - 34, _b["RuedaEnfrente-2"][1][0] - 2, *_c(_b["RuedaEnfrente-2"])))):
     P[n] = dict(mesh=m, sub=[(m, None)])
@@ -128,7 +130,8 @@ STEPS = [
         ("RuedaEnfrente-1", "S"), ("RuedaEnfrente-2", "S")]),
     ("Tracción", "soporte del motor, N20, piñón 15T y diferencial", [("DCsupport_V2-1", DN), ("N20 Mini Micro Metall Gear Motor.step-1", BK),
         ("Pinion.15_V2-1", BK), ("Differential_V2-1", BK)]),
-    ("Ruedas traseras", "eje LEGO de 16 por el diferencial y RuedaAtras ×2", [("EjeTrasero", R), ("RuedaAtras-1", "S"), ("RuedaAtras-2", "S")]),
+    ("Ruedas traseras", "un eje LEGO de 8 por llanta, al diferencial, y RuedaAtras ×2", [("EjeTrasero-1", "S"), ("EjeTrasero-2", "S"),
+        ("RuedaAtras-1", "S"), ("RuedaAtras-2", "S")]),
     ("Batería", "soportes, pila en el túnel central y tapa inferior", [("BatterySupport-1", "S"), ("BatterySupport-2", "S"),
         ("pila-1", DN), ("TapaBaseChasis-1", DN)]),
     ("Ultrasónicos", "soportes y 3 HC-SR04 (verificación cruzada de los ToF)", [("UltrasonicSupportFront-1", FW), ("HC-SR04-UltrasonicSensor v7.step-2", FW),
@@ -169,7 +172,7 @@ COLOR = {
     "ToFSupport-1": "00bbf9", "ToFBack-1": "00bbf9",
     "CameraBase-1": "00f5d4", "CameraFrnt-1": "00f5d4",
     "SG90": "2f6fd6", "ServoGearDirection_V2": "ffd23f",
-    "EjeTrasero": "3a3a3d", "EjeDelantero-1": "3a3a3d", "EjeDelantero-2": "3a3a3d",
+    "EjeTrasero-1": "3a3a3d", "EjeTrasero-2": "3a3a3d", "EjeDelantero-1": "3a3a3d", "EjeDelantero-2": "3a3a3d",
 }
 # ── escena ──
 scene = pyrender.Scene(bg_color=[0.06, 0.07, 0.09, 1], ambient_light=[0.3, 0.3, 0.32])
