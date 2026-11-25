@@ -89,7 +89,11 @@ def fuera_mm(sd):
     r = rows[-1]; X, Y, H = float(r['x']), float(r['y']), math.radians(float(r['heading']))
     fx, fy = math.sin(H), math.cos(H); rx, ry = math.cos(H), -math.sin(H)
     cs = [(X + fx*a + rx*b, Y + fy*a + ry*b) for a in (-33.5, 146.5) for b in (-65, 65)]
-    b1, b2 = _barrier_corners(pk, pw)
+    gap = re.search(r"\bparkgap=([^ ]+)", fl)
+    if gap:
+        b1, b2 = _barrier_corners(pk, pw, gap_mm=float(gap.group(1)))
+    else:
+        b1, b2 = _barrier_corners(pk, pw)
     xs = [p[0] for p in b1 + b2]; ys = [p[1] for p in b1 + b2]
     if pk in ('E', 'W'):
         lo = min(max(p[1] for p in b1), max(p[1] for p in b2)); hi = max(min(p[1] for p in b1), min(p[1] for p in b2)); box = (min(xs), max(xs), lo, hi)
