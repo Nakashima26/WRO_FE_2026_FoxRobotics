@@ -36,6 +36,7 @@ import numpy as np
 from . import config as C
 from . import ring_route as RR
 from .digital_map import feet_world
+from .motor_curve import forward_curve
 from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .park_refine import ParkRefine
@@ -1504,6 +1505,14 @@ class RouteMode:
             top = int(C.ROUTE_L23_MAX_PWM)   # vueltas 2-3: techo propio en recta (None = el de la ruta)
         v_base = K * (base - pwm0)
         v_max = K * (top - pwm0)
+        v_lead = v_max  # Conserva la distancia de anticipación al recortar el techo por batería.
+        voltage = C.ROUTE_MOTOR_CURVE_VBAT
+        if voltage is not None and voltage > 0:
+            # Los PWM del perfil son perillas en escala virtual. El ESP
+            # consigue esas velocidades invirtiendo la curva del motor.
+            # Por encima de PWM físico 255 el pedido no es alcanzable.
+            v_max = min(v_max, forward_curve(float(voltage))[-1][1])
+            v_base = min(v_base, v_max)
         # Perfil v3: piso real del perfil (MIN_PWM, sin pasar de la base). None: la base.
         mn = getattr(C, "ROUTE_PROFILE_MIN_PWM", None)
         if l23 and getattr(C, "ROUTE_L23_MIN_PWM", None) is not None:
@@ -1512,6 +1521,10 @@ class RouteMode:
             mn = C.ROUTE_L1_MIN_PWM         # vuelta 1 (1<=tc<4): piso propio; salida, U y parking no cambian
         floor = base if mn is None else min(int(mn), base)
         v_min = K * (floor - pwm0)
+        if voltage is not None and voltage > 0:
+            v_min = min(v_min, v_max)
+            top = min(top, int(v_max / K + pwm0 + 1e-9))
+            floor = min(floor, top)
         tight_on = False
         corner_floor = None
         a_lat = float(C.ROUTE_PROFILE_A_LAT_MM_S2)
@@ -1539,7 +1552,7 @@ class RouteMode:
                 lat_s = float(C.ROUTE_LAP2_L23_LATENCY_S)
             elif lap_cut <= tc_l < 11 and getattr(C, "ROUTE_LAP3_L23_LATENCY_S", None) is not None:
                 lat_s = float(C.ROUTE_LAP3_L23_LATENCY_S)
-        lead = v_max * lat_s
+        lead = v_lead * lat_s
         span = float(C.ROUTE_PROFILE_HORIZON_MM) + lead
         step = r.length_mm / n
         m = int(span / step) + 1

@@ -11,6 +11,7 @@ import numpy as np
 
 # Fuente única de dimensiones del carro: config.py (la Pi no puede importar twin/).
 from .. import config as C
+from ..motor_curve import forward_curve
 
 Provenance = tuple[Literal["medido", "supuesto"], str]
 
@@ -96,20 +97,6 @@ class SteeringParams:
         (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (71.5, 53.0))
 
     def __post_init__(self) -> None:
-        if os.environ.get("TWIN_RADIO_REAL") == "1":
-            # Arcos de Erick (24 oct) + tapete a PWM 150 (22 oct). La tabla
-            # recibe el desplazamiento efectivo después del juego del servo.
-            for side, samples in (
-                ("right", ((60, 738), (45, 344), (16, 166), (8, 142), (4, 130), (1, 123))),
-                ("left", ((90, 882), (105, 422), (140, 153), (144, 140), (148, 135))),
-            ):
-                table = ((0.0, 0.0),) + tuple(
-                    (abs(command - self.servo_center_deg) - self.backlash_deg,
-                     math.degrees(math.atan(113.0 / radius)))
-                    for command, radius in samples
-                )
-                setattr(self, f"table_{side}", table)
-                setattr(self, f"wheel_max_{side}_deg", table[-1][1])
         _prov("steering.gain_left/right", "supuesto", "pendiente lineal solo para herramientas; el modelo usa las tablas")
         _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
         _prov("steering.servo_center_deg", "medido", "2026-10-24: 75 ±0.3 en rectas; 74.5 del ajuste a 4 vueltas (antihorario y horario)")
@@ -225,23 +212,7 @@ class MotorParams:
             _prov("motor.v_batt", "medido", f"TWIN_VBAT={vb} V: k x{f:.3f}, pwm0 /{f:.3f}")
 
         if os.environ.get("TWIN_MOTOR_CURVA_REAL") == "1":
-            # N30, medidas_20261117. La sesión de carga plena no anotó
-            # voltaje: 12.5 V es la referencia del perfil de pista.
-            low_v, full_v = 11.88, 12.5
-            low = ((11, 0), (60, 265 * low_v / full_v), (100, 503),
-                   (150, 798), (180, 1062), (255, 1501))
-            full = ((11 * low_v / full_v, 0), (60, 265), (100, 593),
-                    (140, 809), (180, 1077), (220, 1366), (255, 1556))
-            voltage = float(vb) if vb else 12.0
-            weight = max(0.0, min(1.0, (voltage - low_v) / (full_v - low_v)))
-            reference = low_v + weight * (full_v - low_v)
-            scale = voltage / reference
-            knots = sorted({pwm for curve in (low, full) for pwm, _ in curve})
-            self.forward_curve = tuple(
-                (pwm, scale * ((1.0 - weight) * table_wheel_deg(pwm, low)
-                               + weight * table_wheel_deg(pwm, full)))
-                for pwm in knots if pwm >= 11
-            )
+            self.forward_curve = forward_curve(float(vb) if vb else 12.0)
             _prov("motor.forward_curve", "medido", "N30 2026-11-17, PWM en piso a 11.88 V y carga plena")
 
 

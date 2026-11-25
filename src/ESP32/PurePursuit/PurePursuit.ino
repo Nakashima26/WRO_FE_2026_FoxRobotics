@@ -2258,10 +2258,48 @@ float vMando(float pwm, int dir) {
   return k * (pwm - p0);
 }
 
+// N30, medidas_20261117. 0 = feedforward anterior. Configurar el mismo
+// voltaje medido en ROUTE_MOTOR_CURVE_VBAT (la Pi no recibe voltaje por ACK).
+const float MOTOR_CURVE_VBAT = 0.0f;
+static const float motorCurvePwm[] = {11, 60, 100, 140, 150, 180, 220, 255};
+static const float motorCurveLow[] = {0, 251.856f, 503, 739, 798, 1062, 1296.1333f, 1501};
+static const float motorCurveFull[] = {2.91820061f, 265, 593, 809, 876, 1077, 1366, 1556};
+
+static constexpr unsigned MOTOR_CURVE_N = sizeof(motorCurvePwm) / sizeof(motorCurvePwm[0]);
+
+static float motorCurveSpeed(unsigned i) {
+  const float blend = constrain((MOTOR_CURVE_VBAT - 11.88f) / (12.5f - 11.88f), 0.0f, 1.0f);
+  const float ref = 11.88f + blend * (12.5f - 11.88f);
+  return (motorCurveLow[i] + blend * (motorCurveFull[i] - motorCurveLow[i]))
+      * (MOTOR_CURVE_VBAT / ref);
+}
+
+static float motorCurvePwmFor(float speed) {
+  float prev = motorCurveSpeed(0);
+  if (speed <= prev) return motorCurvePwm[0];
+  for (unsigned i = 1; i < MOTOR_CURVE_N; ++i) {
+    const float next = motorCurveSpeed(i);
+    if (speed <= next)
+      return motorCurvePwm[i-1] + (motorCurvePwm[i] - motorCurvePwm[i-1]) * (speed - prev) / (next - prev);
+    prev = next;
+  }
+  return 255.0f;
+}
+
+// El plan f40 conserva el control de sus pulsos de arranque a baja velocidad.
+static bool motorCurveClosedLoop(int dir) {
+  return dir > 0 && MOTOR_CURVE_VBAT > 0.0f &&
+      !(estado == ESTACIONANDO && parkFase == 40);
+}
+
 float pwmMotorEquiv(float pwm, int dir) {
   float p0 = dir > 0 ? LAZO_PWM0_FWD : LAZO_PWM0_REV;
   float km = dir > 0 ? MOTOR_K_FWD : MOTOR_K_REV;
   float pm = dir > 0 ? MOTOR_PWM0_FWD : MOTOR_PWM0_REV;
+  if (motorCurveClosedLoop(dir)) {
+    if (pwm <= p0) return pwm * motorCurvePwm[0] / p0;
+    return motorCurvePwmFor(vMando(pwm, dir));
+  }
   if (pwm <= p0) return pwm * pm / p0;
   return pm + vMando(pwm, dir) / km;
 }
@@ -2291,7 +2329,8 @@ int lazoVelocidad(int pwm) {
   bool sinTope = (turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE);
   float vTope = (LAZO_V_MAX_L1 > 0.0f && turnsCompleted < 4 && estado != INICIO) ? LAZO_V_MAX_L1 : LAZO_V_MAX;   // vuelta 1 propia; 0 = como LAZO_V_MAX
   if (!sinTope && vTope > 0.0f && vObj > vTope) vObj = vTope;
-  float ff = vObj / km + pm;                        // feedforward con el motor real
+  if (motorCurveClosedLoop(dir)) vObj = min(vObj, motorCurveSpeed(MOTOR_CURVE_N - 1));
+  float ff = motorCurveClosedLoop(dir) ? motorCurvePwmFor(vObj) : vObj / km + pm;
   float g  = LAZO_K_FWD / km;                       // KP/KI afinados con el N20: misma ganancia en mm/s
   float e = vObj - v;
 #if LAZO_FRENO_ACTIVO
@@ -4250,7 +4289,9 @@ static bool parkUPruebaArcoLargo(float rueda, float &tiempo) {
     const int pwm = min(pwmMax, rampaPWM((unsigned long)(i * dt * 1000.0f),
                                         PARK_RETORNO_RAMP_MS, PARK_RETORNO_PWM_MIN, pwmArco));
     const float ruedaRel = actual / (RUEDA_TOPE_DEG * DEG_TO_RAD);
-    const float vObj = vMando(pwm, 1) * (1.0f - 0.12f * ruedaRel * ruedaRel);
+    float vObj = vMando(pwm, 1);
+    if (MOTOR_CURVE_VBAT > 0.0f) vObj = min(vObj, motorCurveSpeed(MOTOR_CURVE_N - 1));
+    vObj *= 1.0f - 0.12f * ruedaRel * ruedaRel;
     v += (vObj - v) * alphaMotor;
     const float k = constrain(tanf(actual) / RUTA_BATALLA_MM, -agarre / (v * v), agarre / (v * v));
     const float dAng = v * dt * k;

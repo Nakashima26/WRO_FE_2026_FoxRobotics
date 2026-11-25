@@ -1537,6 +1537,7 @@ ROUTE_CORNER_EXIT_INSIDE_EXTRA_MM = 0.0  # reserva adicional si se pasa del lado
 ROUTE_L1_SOFT_CLEAR_MM = None  # margen blando de la ruta en vuelta 1 desde tc>=1 (con asientos sin ver). None = ROUTE_SOFT_CLEAR_MM
 ROUTE_L1_MIN_PWM = None    # piso del perfil en vuelta 1 (1<=tc<4). None = ROUTE_PROFILE_MIN_PWM
 ROUTE_L1_UPLOAD_PWM = None # tope en vuelta 1 (1<=tc<4) mientras sube la ruta al ESP. None = ROUTE_UPLOAD_PWM
+ROUTE_MOTOR_CURVE_VBAT = None  # Opt-in N30: voltaje medido de la batería (mismo valor que MOTOR_CURVE_VBAT en el ESP).
 ROUTE_MANDO_V_255 = None     # N30 (a3647f6): mm/s del ESP a PWM 255 (LAZO_V_255). None = rv tal cual (N20)
 ROUTE_MANDO_CODO_PWM = 155   # LAZO_CODO_PWM del ESP
 ROUTE_MANDO_K = 3.82         # LAZO_K_FWD / LAZO_PWM0_FWD: escala con que el ESP lee el rv hasta el codo
