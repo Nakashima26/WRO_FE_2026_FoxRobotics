@@ -79,6 +79,13 @@ def _grip_pwm(steer_deg: float) -> int:
     return max(lo, min(hi, pwm))
 
 
+def _l1_speculative_hedge(seat: str) -> bool:
+    """Carril central viable: filas T (no X) dejan margen si la señal cae en interior o exterior."""
+    return seat[0] == "T"
+
+
+
+
 def _rv_mando(rv) -> int:
     """PWM de la Pi (escala del N20, puede pasar de 255) -> PWM del ESP con la escala de mando N30
     (vMando: igual hasta ROUTE_MANDO_CODO_PWM, recto hasta ROUTE_MANDO_V_255 a 255). None = sin traducir."""
@@ -1007,6 +1014,22 @@ class RouteMode:
                 plan_seats = {**plan_seats, **ghosts3}
                 plan_unknown = [k for k in plan_unknown if k not in ghosts3]
             self._col_ghosts_prev = ghosts3
+        spec_hedge: set = set()
+        if (getattr(C, "ROUTE_L1_SPECULATIVE", False) and lap1 and self.fixed
+                and float(getattr(self, "_tc_max", 0) or 0) >= 1
+                and float(getattr(self, "_tc_max", 0) or 0) < 4):
+            for k in list(plan_unknown):
+                if not _l1_speculative_hedge(k[1]):
+                    continue
+                spec_hedge.add(k)
+            if spec_hedge and getattr(C, "ROUTE_L1_SPEC_PLAN", True):
+                plan_unknown = [k for k in plan_unknown if k not in spec_hedge]
+                if spec_hedge != getattr(self, "_spec_hedge_prev", None):
+                    print("[L1SPEC] hedged: " + " ".join(f"{a}/{b}" for a, b in sorted(spec_hedge)), flush=True)
+                self._spec_hedge_prev = set(spec_hedge)
+            else:
+                self._spec_hedge_prev = set()
+        self._spec_hedge = spec_hedge
         extra, extra_key, anchor_replan = None, None, False
         if not self.fixed:
             # Recta del cajón sin el avance: sus asientos no se pueden ubicar;
@@ -1116,7 +1139,8 @@ class RouteMode:
         slow = int(getattr(C, "ROUTE_SLOW_PWM", 100))
         if self.fixed:
             # Los asientos con color por ROI ya tienen lado: no frenan (ni cuentan para la parada).
-            speed_unknown = [k for k in unknown if k not in roi_seats and k not in half_seats]
+            spec_h = getattr(self, "_spec_hedge", set())
+            speed_unknown = [k for k in unknown if k not in roi_seats and k not in half_seats and k not in spec_h]
             # Después de la vuelta 1 (tc >= ROUTE_UNSEEN_MAX_TC) lo que falta no frena: la ruta ya lo
             # esquiva como obstáculo (orillas48: N/T3 sin confirmar hasta la vuelta 3, PWM 130 en cada pasada).
             _max_tc = getattr(C, "ROUTE_UNSEEN_MAX_TC", None)
@@ -1199,9 +1223,12 @@ class RouteMode:
                        and self.route.report.get("feasible") and not self.upload and self._rte_n is None
                        and not plan_unknown and self.key == key)
         corner_points = []
+        spec_h = getattr(self, "_spec_hedge", set())
         for sec, seat in unknown:
-            xy = section_to_world(sec, *SEATS[seat])
             seat_key = (sec, seat)
+            if seat_key in spec_h or seat_key in empty:
+                continue
+            xy = section_to_world(sec, *SEATS[seat])
             if can_release and seat_key in prov and self._conf_prev.get(seat_key) == prov[seat_key]:
                 # El plan activo ya respeta el color provisional. Conservar el
                 # freno si el error de seguimiento puede consumir su holgura.

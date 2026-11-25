@@ -1911,3 +1911,7 @@ LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas q
 # N20: freno selectivo en curva de vuelta 1 junto a una señal. Opt-in.
 # selective: conservar el freno cerca del cajon o de la fila X al salir de curva; fuera rigen other_mm y other_pwm.
 ROUTE_L1_CORNER_SIGN = None   # {pwm, mm, radius_mm, unk_only}: tope en curvas cerradas cerca de señales (unk_only: solo asientos sin resolver)
+# Vuelta 1: ante asientos T sin ver, comprometer carril central (válido rojo/verde) y no frena hasta confirmar.
+# SPEC_PLAN: quitar asientos T hedged de plan_unknown en la DP. False: solo suelta frenos de esquina / unseen.
+ROUTE_L1_SPECULATIVE = False
+ROUTE_L1_SPEC_PLAN = True
