@@ -3215,6 +3215,7 @@ void finalizarPark(const char *motivo) {
 }
 
 // Cierre del plan con centrado longitudinal (fase 43); si no aplica, cierra ya.
+PARK_AJ bool PARK_PL_CENTRAR_HOLGURA = true;
 const char *parkCentrarMotivo = ""; int parkCentrarDir = 0; float parkCentrarMm = 0.0f;
 void parkCerrarCentrando(const char *motivo, float th) {
   if (!PARK_PL_CENTRAR || fabsf(th) > PARK_PL_CENTRAR_TH_MAX) { finalizarPark(motivo); return; }
@@ -8489,6 +8490,36 @@ void loop() {
           float dF = (tofMm[3] > 0 && tofMm[3] < 300) ? tofMm[3] / 10.0f : distF_filtrada;
           float dB = distB_filtrada, err = dF - dB - PARK_PL_CENTRAR_OFF_CM;   // >0: sobra adelante
           Serial.print("PARK centrar dF="); Serial.print(dF, 1); Serial.print(" dB="); Serial.print(dB, 1);
+#if FOX_TOF
+          if (PARK_PL_CENTRAR_HOLGURA && parkDirecto && tofMm[3] > 0 && tofMm[3] < 300
+              && fabsf(err) > PARK_PL_CENTRAR_TOL_CM && dF + dB >= 11.0f && dF + dB <= 16.0f) {
+            const int lado = parkParedEsIzquierda ? 0 : 1;
+            const float th = parkThCarril();
+            const int lateral = tofMm[lado], trasero = tofMm[2];
+            bool ecosFrescos = true;
+#if !defined(FOX_SIL)
+            const unsigned long ahora = millis();
+            ecosFrescos = ahora - tofUltimoMs[lado] <= 70UL
+                && ahora - tofUltimoMs[2] <= 70UL && ahora - tofUltimoMs[3] <= 70UL;
+#endif
+            if (ecosFrescos && fabsf(th) <= PARK_PL_TOK && lateral > 0 && lateral < 200
+                && trasero > 0 && trasero < 160) {
+              const float rad = th * DEG_TO_RAD;
+              const float c = cosf(rad), s = sinf(rad);
+              // Proyecta la medida lateral del ToF al eje trasero y verifica toda la huella.
+              const float h = (lateral + 35.2f) * c - 110.6f * s;
+              const float hMin = h + min(-34.0f * s, 155.0f * s) - 65.0f * c;
+              const float hMax = h + max(-34.0f * s, 155.0f * s) + 65.0f * c;
+              const float esquinaCm = 6.5f * fabsf(s);
+              const float dBConservador = min(dB, trasero / 10.0f);
+              const float margenCm = min(dF * c - 0.7f, dBConservador * c - PARK_TOF_COLA_CM) - esquinaCm;
+              if (hMin >= 10.0f && hMax <= 190.0f && margenCm >= 4.0f) {
+                Serial.println(" -> holgura ToF");
+                finalizarPark(parkCentrarMotivo); break;
+              }
+            }
+          }
+#endif
           if (dF <= 0.0f || dF > 20.0f || dB <= 0.0f || dB > 20.0f || fabsf(err) <= PARK_PL_CENTRAR_TOL_CM) {
             Serial.println(" -> ya");
             finalizarPark(parkCentrarMotivo); break;
