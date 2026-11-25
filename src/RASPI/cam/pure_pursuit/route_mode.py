@@ -27,6 +27,8 @@ transformación del marco viejo hasta tener la ruta nueva completa.
 from __future__ import annotations
 
 from copy import copy
+from functools import lru_cache
+from itertools import product
 import math
 import os
 import time
@@ -42,8 +44,40 @@ from .localizer import Localizer, _ack_num
 from .start_fix import StartFix
 from .park_refine import ParkRefine
 from .park_vision import ParkLandmark, ParkVision
-from .wro_field import (INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
+from .wro_field import (CARDS, CARD_SINGLE_GREEN, CARD_SINGLE_RED, REQUIRED_CARDS, INNER_HALF_MM, OUTER_HALF_MM, PARK_W_MAX, PARK_W_MIN, PARKING_FORBIDDEN_SEATS, SEATS,
                         SECTIONS_CW, SIGN_MM, blue_segments, orange_segments, section_to_world, world_to_section)
+
+# Las observaciones provisionales y los vacíos por cámara no son pruebas
+# para eliminar cartas: un falso negativo quitaría también otros asientos.
+_L1_CARDS = tuple(frozenset(card) for card in CARDS)
+
+
+@lru_cache(maxsize=128)
+def _l1_card_seats(confirmed, parking):
+    """Unión de asientos en repartos compatibles con las señales confirmadas."""
+    candidates = []
+    for sec in SECTIONS_CW:
+        observed = {(seat, color) for sc, seat, color in confirmed if sc == sec}
+        candidates.append([
+            n for n, card in enumerate(_L1_CARDS, 1)
+            if observed <= card
+            and (sec != parking or all(seat not in PARKING_FORBIDDEN_SEATS for seat, _ in card))
+        ])
+    possible = set()
+    for deal in product(*candidates):
+        if len(set(deal)) != len(deal):
+            continue
+        if not ({CARD_SINGLE_GREEN, CARD_SINGLE_RED}.intersection(deal)
+                and set(REQUIRED_CARDS).intersection(deal)):
+            continue
+        cards = [_L1_CARDS[n - 1] for n in deal]
+        colors = [color for card in cards for _, color in card]
+        if len(colors) < 5 or abs(colors.count("Green") - colors.count("Red")) > 1:
+            continue
+        possible.update((sec, seat) for sec, card in zip(SECTIONS_CW, cards) for seat, _ in card)
+    # Un mapa incompatible puede contener un fantasma. Mantener todos los topes.
+    return frozenset(possible) if possible else None
+
 
 _ROW_H = SEATS["T1"][0]          # fila interior (600 mm de la pared exterior)
 _ROW_BAND_MM = 160.0             # detección que cae en la fila interior
@@ -1125,9 +1159,15 @@ class RouteMode:
         servo = wheel * float(C.SERVO_FULL_LOCK_CMD_DEG) / float(C.MAX_WHEEL_STEER_DEG)
         obs = max(-1.0, min(1.0, servo / C.PP_STEER_GAIN))
         slow = int(getattr(C, "ROUTE_SLOW_PWM", 100))
+        speed_seats = unknown
+        if self.fixed and lap1 and len(conf) >= 3 and getattr(C, "ROUTE_L1_CARD_SPEED", False):
+            possible = _l1_card_seats(tuple(sorted((sc, seat, color) for (sc, seat), color in conf.items())),
+                                      dm.parking)
+            if possible is not None:
+                speed_seats = [seat for seat in unknown if seat in possible]
         if self.fixed:
             # Los asientos con color por ROI ya tienen lado: no frenan (ni cuentan para la parada).
-            speed_unknown = [k for k in unknown if k not in roi_seats and k not in half_seats]
+            speed_unknown = [k for k in speed_seats if k not in roi_seats and k not in half_seats]
             # Después de la vuelta 1 (tc >= ROUTE_UNSEEN_MAX_TC) lo que falta no frena: la ruta ya lo
             # esquiva como obstáculo (orillas48: N/T3 sin confirmar hasta la vuelta 3, PWM 130 en cada pasada).
             _max_tc = getattr(C, "ROUTE_UNSEEN_MAX_TC", None)
@@ -1210,7 +1250,7 @@ class RouteMode:
                        and self.route.report.get("feasible") and not self.upload and self._rte_n is None
                        and not plan_unknown and self.key == key)
         corner_points = []
-        for sec, seat in unknown:
+        for sec, seat in speed_seats:
             xy = section_to_world(sec, *SEATS[seat])
             seat_key = (sec, seat)
             if can_release and seat_key in prov and self._conf_prev.get(seat_key) == prov[seat_key]:
@@ -2524,4 +2564,4 @@ class RouteMode:
             lines.append(f"RTP,{i},{pts}")
         lines.append(f"RTE,{n}")
         return lines
-
+

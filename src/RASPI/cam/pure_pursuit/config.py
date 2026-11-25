@@ -1701,6 +1701,7 @@ ROUTE_STOP_MAX_FRAMES = 80
 ROUTE_PROVISIONAL_VOTES = 2
 # Desde esta cuenta de esquinas los asientos sin ver ya no bajan la velocidad (la ruta los esquiva
 # igual). orillas48: N/T3 sin confirmar hasta la vuelta 3 y PWM 130 en cada pasada. None = siempre frenan.
+ROUTE_L1_CARD_SPEED = False  # descarta asientos imposibles por reparto, solo para los topes
 ROUTE_UNSEEN_MAX_TC = 4
 # DigitalMap: confirma un asiento con >= VOTES votos de un color, la detección más cercana a <= DIST_MM
 # del asiento y LEAD votos más que el otro color.
