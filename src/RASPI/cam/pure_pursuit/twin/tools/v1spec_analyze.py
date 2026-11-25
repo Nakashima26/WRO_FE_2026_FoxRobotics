@@ -104,6 +104,60 @@ def main() -> None:
     print("| ALL | " + " | ".join(f"{agg_lim[l] * scale:.2f}" for l in lims) + f" | {tot_all:.2f} |")
     if args.json:
         print(json.dumps({"n": n, "by_lim_mean": {l: agg_lim[l] * scale for l in lims}, "by_tc": agg_tc}, indent=2))
+    print("\n# estrategia sugerida por tc (NOTA 1)")
+    print("| tc | dominante | reactivo | especulativo | mapa |")
+    print("|---|---|---|---|---|")
+    _hint = {
+        0: ("hold+piso (fix)", "—", "—", "ubica cajón"),
+        1: ("corner_sign", "rectas con ROI/prov", "esquinas T ciegas", "confirmados"),
+        2: ("corner_sign+piso", "asiento ya visible", "T sin votos", "half_seats"),
+        3: ("piso_kappa+corner", "señal frontal vista", "últimas T", "freeze próximo"),
+    }
+    for tc in sorted(agg_tc):
+        dom = max(agg_tc[tc], key=agg_tc[tc].get)
+        r, e, m = _hint.get(tc, ("", "", "", ""))[1:]
+        print(f"| {tc} | {dom} | {r} | {e} | {m} |")
+
+
+def audit_visible_brakes(run_dir: Path) -> None:
+    """Cuenta cuadros corner_sign (pwm<=162) en tc 1-3 con asiento ya en self.visible (proxy: prov en log)."""
+    import re
+    wasted = 0
+    corner = 0
+    seeds = sorted(d for d in run_dir.iterdir() if d.is_dir() and d.name.startswith("s"))
+    for sd in seeds:
+        tr = sd / "trace.csv"
+        pl = sd / "pi.log"
+        if not tr.is_file():
+            continue
+        prov_seats: set[str] = set()
+        if pl.is_file():
+            for line in open(pl, encoding="utf-8", errors="replace"):
+                m = re.search(r"\[(?:ROI|PROV)\].*?([NSEW])/([TX]\d+)", line)
+                if m:
+                    prov_seats.add(f"{m.group(1)}/{m.group(2)}")
+        in_corner = False
+        for r in csv.DictReader(open(tr, encoding="utf-8")):
+            if r.get("pi_frame") != "True":
+                continue
+            tc_m = re.search(r"tc=([\d.]+)", r.get("ack") or "")
+            if not tc_m:
+                continue
+            tc = float(tc_m.group(1))
+            if tc >= 4:
+                break
+            if tc < 1:
+                continue
+            pwm = int(float(r.get("motor_pwm") or 0))
+            if pwm <= _CNR_HI and float(r.get("speed_mm_s") or 0) >= 20:
+                corner += 1
+                in_corner = True
+            elif in_corner and pwm > _CNR_HI:
+                in_corner = False
+        # heurística débil sin estado visible en trace: solo reporta prov en log
+        if prov_seats and corner:
+            wasted += 1
+    print(f"\n# audit esquinas (semillas con prov en log y corner_sign): {wasted}/{len(seeds)}")
 
 
 if __name__ == "__main__":

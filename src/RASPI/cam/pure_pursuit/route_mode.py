@@ -1224,9 +1224,14 @@ class RouteMode:
                        and not plan_unknown and self.key == key)
         corner_points = []
         spec_h = getattr(self, "_spec_hedge", set())
+        l1_react = (getattr(C, "ROUTE_L1_REACTIVE", False) and self.fixed
+                    and tcf is not None and 1 <= tcf < 4)
         for sec, seat in unknown:
             seat_key = (sec, seat)
             if seat_key in spec_h or seat_key in empty:
+                continue
+            if l1_react and (seat_key in prov or seat_key in roi_seats or seat_key in half_seats
+                             or seat_key in self.visible):
                 continue
             xy = section_to_world(sec, *SEATS[seat])
             if can_release and seat_key in prov and self._conf_prev.get(seat_key) == prov[seat_key]:

@@ -1915,3 +1915,6 @@ ROUTE_L1_CORNER_SIGN = None   # {pwm, mm, radius_mm, unk_only}: tope en curvas c
 # SPEC_PLAN: quitar asientos T hedged de plan_unknown en la DP. False: solo suelta frenos de esquina / unseen.
 ROUTE_L1_SPECULATIVE = False
 ROUTE_L1_SPEC_PLAN = True
+# Vuelta 1: si la cámara ya ve el asiento (visible) o hay provisional/ROI, no aplicar
+# corner_sign unk_only en esa esquina — esquiva reactiva a velocidad del perfil.
+ROUTE_L1_REACTIVE = False
