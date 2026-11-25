@@ -223,7 +223,8 @@ def frame(state, az, dist, title="", sub="", step=None):
     d.text((40, H - 38), "Fox Robotics · WRO 2026 Future Engineers · v2 car (models/v2)", font=fx, fill=(110, 118, 130))
     return np.asarray(im)
 
-wr = imageio.get_writer(OUT, fps=FPS, codec="libx264", quality=8, macro_block_size=8)
+wr = imageio.get_writer(OUT, fps=FPS, codec="libx264", quality=None, macro_block_size=8,
+                        output_params=["-crf", "24", "-preset", "slow", "-movflags", "+faststart"])   # ~3 MB: cabe en GitHub
 az0, AZV = math.radians(180 + 40), math.radians(-7)   # giro lento de la cámara (°/s)
 t = 0.0
 def emit(*a, **k):
