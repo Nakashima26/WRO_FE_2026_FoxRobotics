@@ -369,7 +369,7 @@ class RouteMode:
         self._park_vision = ParkVision() if C.ROUTE_PARK_VISION_REF else None
         self._park_landmark = ParkLandmark() if C.ROUTE_PARK_LANDMARK_REF else None
         self._park_landmark_delta = None
-        self._park_refined_w = None
+        self._park_estimate = None
         self.park_w = None           # w0 del cajón en uso (supuesto o medido)
         _pf = getattr(C, "ROUTE_PRUEBA_CAJON_FILE", None)
         self._prueba_cajon = bool(_pf) and os.path.exists(str(_pf))
@@ -866,22 +866,18 @@ class RouteMode:
               and tc is not None and tc <= 0):
             self._post_blue(dm, ack, pose)
             pose = self.loc.pose()
-        if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
+        if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and 3 <= tc <= 12:
             if self._park_refine is None:
                 self._park_refine = ParkRefine(dm.parking, dm.direction, self.park_w)
-            new_return = (_ack_est(ack) in ("S", "C", "R")
+            park_scan = tc == 12 and ack_est == "E" and _ack_num(ack, "pkf") == 0
+            new_return = ((ack_est in ("S", "C", "R") or park_scan)
                           and self._park_refine.update(tc, ack, pose, self.loc))
-            # Use third-pass returns while the ESP is still following the
-            # route at tc=11. The firmware may start parking during this turn.
-            if tc == 11 and (new_return or self._park_refined_w is None):
+            if tc >= 11 and (new_return or self._park_estimate is None):
                 result = self._park_refine.estimate()
-                # The prior's p90 was about 43 mm. Only act on large disagreements.
-                if result is None or abs(result[0] - self.park_w) < 70:
-                    result = (self.park_w, 0)
-                if result[0] != self._park_refined_w:
-                    self._park_refined_w, passes = result
-                    print(f"[PARKREF] w0={self._park_refined_w:.0f} p0={self.park_w:.0f} "
-                          f"passes={passes} tc={tc:.0f}", flush=True)
+                if result is not None and result != self._park_estimate:
+                    self._park_estimate = result
+                    print(f"[PARKREF] w0={result.w:.0f} p0={self.park_w:.0f} "
+                          f"pka={result.far_along:.0f} passes={result.passes} tc={tc:.0f}", flush=True)
         if lap1 and self.fixed:
             self._update_views(conf, empty, pose)
             conf, empty = self._resolved(dm)
@@ -1305,8 +1301,8 @@ class RouteMode:
             self.esp_route = self.route
         line = "\n".join(lines) if lines else None
         if self.fixed and self.park_w is not None:
-            park_w = self.park_w if self._park_refined_w is None else self._park_refined_w
-            self.pka = _stall_far_along(dm.parking, dm.direction, park_w)
+            self.pka = (_stall_far_along(dm.parking, dm.direction, self.park_w)
+                        if self._park_estimate is None else self._park_estimate.far_along)
             if self._park_vision is not None and tc is not None and tc >= 3:
                 mask = getattr(self, "park_mask", None)
                 self._park_vision.update(mask, self.bev, dm.parking, dm.direction, pose, self.pka)
@@ -2496,7 +2492,7 @@ class RouteMode:
         if self.pi_steer:
             s += f",ps=1,pw={self.pi_wheel:.2f}"
         if self.fixed and getattr(self, "pka", None) is not None:
-            s += f",pka={self.pka:.0f}"
+            s += f",pka={self.pka:.0f},pkc={int(self._park_estimate is not None)}"
             if self._park_vision is not None and self._park_vision.estimate is not None:
                 s += f",pkr={self._park_vision.estimate:.0f}"
             if self._park_landmark_delta is not None:
