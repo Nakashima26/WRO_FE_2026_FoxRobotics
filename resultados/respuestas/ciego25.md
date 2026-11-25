@@ -23,6 +23,6 @@ Pregunta: ciego25 y ciego30 dan tiempos idénticos en todas las semillas comunes
 
 ## Siguiente paso sugerido
 
-Si ciego25 no empeora frente a ciego30/la030k08, probar un valor intermedio o repetir la tanda con otra semilla de ruido antes de tocar el valor por defecto (40.0f); si los tiempos son idénticos, primero confirmar que el banco ejercita el estacionamiento.
+ciego25 es idéntico a ciego30 carrera por carrera, así que este banco no distingue PARK_PL_CIEGO_MM: antes de más valores (p. ej. 20/35), confirmar en costo.py que el estacionamiento final con zigzag a ciegas se simula, o usar un banco de estacionamiento (s1-48 con FOX_PARK_POS fijo) y medir ahí. No recomiendo cambiar el valor por defecto (40.0f) con esta evidencia.
 
 Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/ciego25.md`.
