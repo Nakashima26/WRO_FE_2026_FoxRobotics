@@ -42,7 +42,7 @@ v1 at the national final (1st place): [Open Challenge](https://youtu.be/orP-BNSG
 - **Mechanics.** 176 × 125 mm, N30 30:1 motor with a 1.25 : 1 spur stage (top ~1.5 m/s), Ackermann steering with a measured turning radius of 123–134 mm ([§1.2](#12-drivetrain--gear-ratio-chosen-from-measured-speed), [§1.3](#13-steering--ackermann-rack-and-pinion)).
 - **Built with a digital twin** that runs the real firmware and the real Pi code: **126/126** full simulated races without wall contact. On the real car: clean 12-corner route-mode races (runs 41 and 48) ([§3.9](#39-digital-twin--software-in-the-loop-simulator), [§3.10](#310-testing-tuning-and-validation)).
 - **Modeled in MATLAB and Simulink.** Simulink braking and plant-replay models, a Simscape Electrical battery/motor model and motor fits from our bench logs check the twin's physics; all re-run in CI ([§3.11](#311-matlab-and-simulink--modeling-the-twins-physics)).
-- **Honest status:** parallel parking has ended fully inside the lot on the real car once (run 104) but is not yet repeatable, and lap-1 mapping has one open case ([§3.10](#310-testing-tuning-and-validation), [§6](#6-next-steps)).
+- **Honest status:** parallel parking has ended fully inside the lot on the real car once (run 104); the parking rework of 2026-11-22/24 passes 96/96 random lots in the twin but is not yet confirmed as repeatable on the car ([§3.10](#310-testing-tuning-and-validation), [§6](#6-next-steps)).
 
 ## Table of Contents
 
@@ -384,7 +384,7 @@ The camera sits at the front on the centerline, tilted down. We measure its real
 
 <p align="center"><img src="docs/img/v2_printed_parts.png" width="100%" alt="Rendered v2 printed parts grouped by subsystem"></p>
 
-All screws are **M3 × 10 mm**.
+All screws are **M3 × 12 mm**.
 
 ## 1.6 Mechanical stability
 
@@ -736,9 +736,9 @@ The Open Challenge has no pillars, so the camera adds risk without adding inform
 
 Result: **12/12 corners in 29.6–29.9 s** in both directions on our track (runs 133246 and 141103, 2026-10-19). At the national final v1 needed 57.5 s. On 2026-11-21 (runs 143–148, §3.10.3) the same firmware did 12/12 in **~20–24 s**, three runs per direction; it now waits for the Pi's `READY` (start button) and stops 0.3 s after the 12th corner instead of 1 s, which had carried it past the start section.
 
-**Next step — open round with route mode.** `RondaAbierta.ino` is reactive: it decides each corner from what the ToF sees at that moment, so it has to drive the whole round at a speed that is safe for a corner it has not seen yet. In the Open Challenge the inner walls can be placed in different positions, but they do not move during the round. We are adapting the obstacle-round firmware (`PurePursuit.ino`, §3.7) so that lap 1 maps the walls with the ToF and the encoder (the position of each straight's inner wall and where each corner starts), and laps 2–3 follow a planned route with pure pursuit and the speed profile, knowing in advance where to turn and how fast each section can be driven. One code base for both rounds also means one set of parameters to calibrate at the venue. Until this beats 29.6 s reliably on our track, `RondaAbierta.ino` stays as the open-round firmware.
+**Lap-1 map in the open round (2026-11-23/24).** `RondaAbierta.ino` was purely reactive: it decided each corner from what the ToF saw at that moment, so it drove the whole round at a speed safe for a corner it had not seen yet. The inner walls do not move during the round, so instead of moving the open round to the obstacle-round firmware (our first plan) we added a map to `RondaAbierta.ino` itself. In lap 1 it records each straight's corridor width from the side ToF and snaps it to 600 or 1000 mm, the only two widths the 2026 rules allow (`5bbc4a4d`). After four corners, laps 2–3 pick the straight PWM, the front-braking distance and the turn speed per section from that map (`59612601`). On the track a wide-corridor corner reached > 1 m/s, so the map now starts braking at 90 cm and the straight PWM is capped at 220 (`c475385f`, tag `open-ok-2026-11-24`).
 
-Lap-1 wall geometry on the Pi lives in [`open_map.py`](src/RASPI/cam/pure_pursuit/open_map.py) (`OpenWallMap`): each straight accumulates lateral ToF into corridor width; after three corners the fourth inner face is inferred and `inner_box_mm` is ready for the planner. Twin tests: `twin/tests/test_open_map.py`.
+The twin replicates the same map in [`open_map.py`](src/RASPI/cam/pure_pursuit/open_map.py) (`OpenWallMap`): each straight accumulates lateral ToF into a corridor width snapped to 600/1000 mm. Twin tests: `twin/tests/test_open_map.py`.
 
 ## 3.7 Obstacle Management — route mode
 
@@ -1070,12 +1070,12 @@ Runs 143–148 (2026-11-21): started with the Pi button (the Pi sends `READY` ov
 
 ### 3.10.5 Known limitations
 
-- **Lap-1 mapping of the lone pillar right after a corner** (E/X1 vs E/X2) can flip until the car is straight; planned fix: keep both seats as obstacles until confirmed head-on.
+- **Lap-1 mapping of the lone pillar right after a corner** (E/X1 vs E/X2) can flip until the car is straight. Fix implemented 2026-11-23: during lap 1 the route also avoids the other seat of a confirmed pillar's column when the lateral reading is ambiguous (`ROUTE_CONF_GHOST_TC` 13 in `carrera.json`, so up to 12 seats are treated as obstacles with 7 real pillars); still to be confirmed in the validation matrix.
 - **Lot position after the start.** Fixed on 2026-11-21 (ERR-31): the start fix now also votes on the blue tape, 3–4 cm along the straight in both directions. Across the lane it still reads ~4 cm too wide in every run (129–131); not yet corrected.
 - **Lateral position on the real car** is 100–250 mm off: the side ToF read short beyond ~45 cm (right sensor −110 mm at 57 cm, −214 mm at 72 cm) and the localizer trusts them up to 45–48 cm. In straights the ToF corridor width reads 900–950 mm instead of 1000 (run 104). The route passes outer-row pillars with ~80 mm clearance, so this error is enough to touch them (runs 103–104). Planned fix: calibrate both side ToF, check the corridor width live, and add the wall seen by the camera as a second lateral reference.
-- **Parking is not yet repeatable.** The v2 car ended fully inside and parallel for the first time in run 104 (2026-11-20). Runs 98–99 on the same layout ended 19–27° off because the lot anchor after the U-turn was behind the real car. We are still tuning the arc–straight–arc maneuver (§3.4) so it parks every time and as fast as possible.
+- **Parking is not yet repeatable on the car.** The v2 car ended fully inside and parallel for the first time in run 104 (2026-11-20). Runs 98–99 ended 19–27° off because the lot anchor after the U-turn was behind the real car. Since then (2026-11-22/24) the lot is re-anchored with the ToF after the U-turn, the U-turn is one continuous move, the reverse ends on the car's footprint and a final straight centering puts it between the walls; when the direct entry fails far from the wall a geometric rescue replaces a second U-turn. Twin: 96/96 random lots. Car: not yet measured over several runs.
 - **Consistency of the full round.** Clean 3-lap rounds with a correct map exist (runs 41, 48), but not every run yet completes all 3 laps with every pillar mapped correctly; the open mapping case is the one above. On 2026-11-21 lap 1 steered visibly less smooth than laps 2–3 (about twice as many steering reversals per metre); cause not yet confirmed. The validation matrix above will be filled once this is consistent.
-- **Color depends on the camera exposure.** After the 2026-11-19 remount (automatic exposure) the red pillars appeared at hue 5–7 instead of 170–179 and the old red band missed them; the ratio-based classifier that fixes it is validated offline and still has to be tested on the car (§6).
+- **Color depends on the camera exposure.** After the 2026-11-19 remount (automatic exposure) the red pillars appeared at hue 5–7 instead of 170–179 and the old red band missed them. The camera now runs with fixed exposure and fixed white-balance gains, red is classified by channel ratios on the Pi 5, and the color calibration can be redone at the venue from the offline dashboard ([`docs/dashboard.md`](docs/dashboard.md)); it still has to be checked on the car under a much darker and a much brighter light (§6).
 - **Front ToF** is reliable only to ~80 cm on the black wall; it is never used for the lot fix.
 - **Surprise pillar (§3.7.8)** worked on the real track (2026-11-23, [video](https://youtu.be/haEbG5QQj1Y)) but with few real attempts so far; three twin regressions (parking and one pillar) are still open.
 - **Twin parking** is the least realistic part of the simulator; parking constants are confirmed on the car.
@@ -1509,12 +1509,12 @@ What is still open, in the order we will work on it, and how we will know it is 
 
 | # | Next step | Why (evidence) | Plan | Done when |
 |---|---|---|---|---|
-| 1 | **Parking fully inside the lot** | Parallel parking is worth 15 points; the v2 car ended fully inside and parallel once (run 104) but not repeatably ([§3.10](#310-testing-tuning-and-validation)) | Tune the arc–straight–arc maneuver in the twin (the U-turn distance and the settle passes were the last changes), then confirm the constants on the car | 5 consecutive parks fully inside the lot on the car |
-| 2 | **Consistent 3-lap rounds** | One open lap-1 mapping case: the lone pillar after a corner (E/X1 ↔ E/X2) (the lot position, ERR-31, was fixed on 2026-11-21); lap 1 steers less smoothly than laps 2–3 | Keep both seats as obstacles until the pillar is seen head-on; find the cause of the lap-1 steering reversals | The obstacle validation matrix OBS-01…06 passes with random layouts and lot positions |
-| 3 | **Colors that do not depend on the light** | After the camera remount (2026-11-19) the red pillars looked orange-red (hue 5–7) instead of magenta-red (175–179), outside the old red band; the cause is the camera exposure, not the room light (the floor color was identical) | Classify red by channel ratios inside a wide hue band; correct white balance against the floor; set the exposure from the floor brightness; a 30-second color calibration at the venue. First step validated offline on 11 recorded runs × 6 simulated lights: frames with a red pillar 131 → 181, none of the old detections lost, no orange tape taken as red | The same detections on the car under the workshop light and a much darker and brighter light |
+| 1 | **Parking fully inside the lot** | Parallel parking is worth 15 points; the v2 car ended fully inside and parallel once (run 104) but not repeatably ([§3.10](#310-testing-tuning-and-validation)) | Done in the twin (2026-11-22/24): ToF re-anchoring after the U-turn, continuous U-turn, footprint-based close, final centering, geometric rescue; 96/96 random lots. Left: confirm on the car and fine-tune the constants there | 5 consecutive parks fully inside the lot on the car |
+| 2 | **Consistent 3-lap rounds** | Lap-1 mapping of the lone pillar after a corner (E/X1 ↔ E/X2) could flip; lap 1 steers less smoothly than laps 2–3 | Done: in lap 1 the route also avoids the other seat of an ambiguous column (`ROUTE_CONF_GHOST_TC` 13, 2026-11-23). Left: find the cause of the lap-1 steering reversals | The obstacle validation matrix OBS-01…06 passes with random layouts and lot positions |
+| 3 | **Colors that do not depend on the light** | After the camera remount (2026-11-19) the red pillars looked orange-red (hue 5–7) instead of magenta-red (175–179); the cause was the camera exposure, not the room light | Done: fixed exposure and white-balance gains, red classified by channel ratios, color calibration at the venue from the offline dashboard (2026-11-24). Left: check on the car under other light | The same detections on the car under the workshop light and a much darker and brighter light |
 | 4 | **Validation matrices and the release** | Formal evidence for the final code | Fill the open (3 CW + 3 CCW) and obstacle (OBS-01…06) matrices with the final firmware, then tag `v2.0-internacional` | Matrices filled and tagged |
 | 5 | **Ultrasonic cross-check of the ToF** | The ToF's weak spot (far black wall) is where sound works ([§2.4](#24-sensors--selection-placement-and-calibration)) | Static test on black and white walls, then let the EKF drop a ToF reading that disagrees | Measured disagreement threshold and a twin bench with no new failures |
-| 6 | **Open round in route mode** | `RondaAbierta.ino` drives every corner at a speed safe for an unseen corner ([§3.6](#36-open-challenge-esp32-only)) | Lap 1 maps the inner walls with the ToF and the encoder; laps 2–3 follow a planned route | Beats 29.6 s reliably on our track |
+| 6 | **Faster open round with the lap-1 map** | The reactive open round drives every corner at a speed safe for an unseen corner ([§3.6](#36-open-challenge-esp32-only)) | Done (2026-11-23/24): lap 1 maps each corridor as 600 or 1000 mm, laps 2–3 set speed and braking per section (tag `open-ok-2026-11-24`). Left: time it against the reactive firmware in both directions | 12/12 corners in both directions, faster than the reactive ~20–24 s of 2026-11-21 |
 | 7 | **Surprise pillar (2026 extra task)** | Worked on the real track 2026-11-23 ([§3.7.8](#378-2026-extra-task--the-surprise-pillar)), few real attempts | More real attempts with both heights; fix the three twin regressions | The twin regressions pass and a measured real success rate with 50 / 150 mm pillars |
 | 8 | **PCB RevC** | A rotated board killed a Pi 5; a large output capacitor stopped the Pi from booting ([§4.5](#45-risks-failure-modes-and-mitigations)) | Keyed stacking headers, PTC fuse and 5 V TVS diode on the Pi rail, input capacitor ≥ 25 V, latching JST-ZH connectors for the BNO085 and the servo (Dupont today) | Board ordered and the power-up checklist passes |
 
@@ -1541,7 +1541,7 @@ Prices in USD, as paid (including shipping where it applied).
 | 3S LiPo 2200 mAh | 1 | 13 | 13 | |
 | LEGO wheels, tires, axles, bushings | — | — | 12 | |
 | PLA filament (~200 g) | — | — | 5 | |
-| Screws (all M3 × 10 mm), nuts, standoffs | — | — | 2 | |
+| Screws (all M3 × 12 mm), nuts, standoffs | — | — | 2 | |
 | **Total** | | | **326** | Parts in the car; spare boards, test prints and the lost Pi 5 not included |
 
 ---
