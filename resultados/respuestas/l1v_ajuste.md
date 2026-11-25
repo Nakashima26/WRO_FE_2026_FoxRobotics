@@ -12,3 +12,7 @@ Hecho:
 Ojo: la base 288 sale de la sonda (l1v_diag.py en lugar de costo.py). Si l1v_diag.py cambia la simulación además de registrar, avísame y corro la0g normal.
 
 Iré agregando secciones a este archivo (la0g publicado, rep78 terminado). Se publican todos los STOP/COSTO en resultados/ como siempre.
+
+## 2026-11-25 13:20 PST — FALLO
+
+l1v_diag288 terminó con estado `ABORTA_WT`; no seguí con la0g/rep78. Revisa y reenvía.
