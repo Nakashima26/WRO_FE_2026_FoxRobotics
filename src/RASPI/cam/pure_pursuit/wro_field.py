@@ -44,6 +44,7 @@ Cintas, figura 11 del reglamento 2026 (no están en las rectas):
 from __future__ import annotations
 
 import math
+import os
 import random
 from dataclasses import dataclass, field
 
@@ -59,7 +60,7 @@ SIGN_MM = 50.0                        # 13.19
 LINE_MM = 20.0                        # 13.9
 PARK_BARRIER_THICK_MM = 20.0
 PARK_BARRIER_INTO_MM = 200.0          # los 20 cm de la madera, hacia el pasillo
-PARK_GAP_MM = 1.5 * _C.ROBOT_LENGTH_MM  # reglamento: 1.5 × largo del robot (176 → 264); el programa oficial dibuja 300
+PARK_GAP_MM = float(os.environ.get("TWIN_PARK_GAP_MM") or 1.5 * _C.ROBOT_LENGTH_MM)  # TWIN_PARK_GAP_MM: real 11-25 ~291 (tF+tB al arranque 157 vs 130); reglamento: 1.5 × largo del robot (176 → 264); el programa oficial dibuja 300
 # El programa oficial pone el cajón al inicio de la recta (w = 1000), pero los
 # jueces lo pueden mover a lo largo de la recta, pegado a la pared exterior
 # (pasó en el nacional 2026). w0 = cara de atrás de la primera madera.
@@ -274,7 +275,7 @@ def _rear_axle_at_center(section: str, direction: str, h: float, w: float) -> tu
 # donde sale), 2 mm adentro; la cola a 5 mm de la madera de atrás. Antes iba a
 # 12 mm de la pared exterior.
 STALL_SIDE_GAP_MM = 2.0
-STALL_TAIL_GAP_MM = 5.0
+STALL_TAIL_GAP_MM = float(os.environ.get("TWIN_STALL_TAIL_MM") or 5.0)  # real 11-25: tB 33-37 al arranque
 
 
 def stall_start_xy(section: str, direction: str, w0: float = _LEFT) -> tuple[float, float]:
@@ -405,6 +406,8 @@ def randomize(seed: int | None = None, start: str = "centro", park_pos=None) -> 
 
     while True:
         direction = rng.choice(("CW", "CCW"))
+        # shortcut: TWIN_FIELD_DIR fuerza el sentido sin mover el sorteo (s20 = campo real pero CW; el real corre CCW).
+        direction = os.environ.get("TWIN_FIELD_DIR") or direction
         single_color = rng.choice((_G, _R))
         single_card = CARD_SINGLE_GREEN if single_color == _G else CARD_SINGLE_RED
         required = rng.choice(REQUIRED_CARDS)
