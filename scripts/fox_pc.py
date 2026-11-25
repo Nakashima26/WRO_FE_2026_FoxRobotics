@@ -42,6 +42,7 @@ FQBN = "esp32:esp32:esp32"
 CLI_CANDIDATOS = [
     os.environ.get("FOX_ARDUINO_CLI", ""),
     str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe"),
+    "/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli",   # Mac
     shutil.which("arduino-cli") or "",
 ]
 PIS = ["10.43.0.1", "10.42.0.1", "100.79.110.111"]   # cable, hotspot FoxCar, Tailscale
