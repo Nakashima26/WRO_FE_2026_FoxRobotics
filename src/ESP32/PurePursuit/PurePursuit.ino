@@ -283,6 +283,10 @@ float piWheelDeg  = 0.0f;    // pw=: rueda de la Pi con la ruta nueva (+ = derec
 bool  rutaTfOk    = false;
 float rutaTx = 0.0f, rutaTy = 0.0f, rutaTh = 0.0f;
 int   rutaSecSalida = -1;    // sección del tapete de la pose de salida (odometría 0,0); -1 = sin transformación aún
+float rutaPkl = NAN;  // corrección longitudinal observada con señal
+unsigned long rutaPklMs = 0;
+bool rutaPfr = false;
+float rutaPkr = NAN;  // BEV: cara exterior de la madera lejana en el marco de pka
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 bool  rutaPge       = false; // pge=1 : la Pi permite cambiar la U por la pared exterior + busqueda del cajon en reversa (PARK_GEOM_EXT)
 float rutaPgf       = NAN;   // pgf= : along (mm) de senal ocupada en la salida lejana del cajon (recta interior)
@@ -4333,6 +4337,132 @@ void parkPlanPose(float &w, float &h) {
 // Reancla la reversa con el centro de la segunda madera medido en el escaneo final.
 PARK_AJ bool PARK_PL_TOF_ANCLA = false;
 #if FOX_TOF
+// 1: altura, 2: rumbo, 3: ambos. Solo corrige la pose del plan, al entrar a f40.
+PARK_AJ int PARK_PL_REF_PARED = 0;
+struct ParkWallSample {
+  float along, h, theta;
+  unsigned long ms;
+};
+static ParkWallSample parkWallFirst{}, parkWallLast{};
+static unsigned long parkWallSensorMs;
+
+static void parkPlMidePared(float sign) {
+  if (parkFase != 1 && parkFase != 2) {
+    parkWallFirst = {}; parkWallLast = {}; parkWallSensorMs = 0;
+    return;
+  }
+  if (!piRuta || !rutaTfOk || rutaSecSalida < 0 || parkRevModo || parkGeomModo) return;
+  const unsigned long now = millis();
+  if (parkWallLast.ms && now - parkWallLast.ms < 25) return;
+  const int side = parkParedEsIzquierda ? 0 : 1;
+#if !defined(FOX_SIL)
+  if (tofUltimoMs[side] == parkWallSensorMs || now - tofUltimoMs[side] > 70) return;
+  parkWallSensorMs = tofUltimoMs[side];
+#endif
+  const float theta = -sign * (anguloGyro - parkRumboRef);
+  const int range = tofMm[side];
+  if (range < 190 || range > 420 || fabsf(theta) > 8.0f) return;
+  const float rad = theta * DEG_TO_RAD;
+  const float height = (range + 35.2f) * cosf(rad) - 110.6f * sinf(rad);
+  float w, h;
+  parkPlanPose(w, h);
+  // Un eco de la madera o de una señal queda mucho más cerca que el plano de pared.
+  if (fabsf(height - h) > 22.0f) return;
+  const float along = (parkDirecto ? 1.0f : -1.0f) * alongSalidaMm();
+  if (parkWallLast.ms && fabsf(along - parkWallLast.along) < 5.0f) return;
+  const ParkWallSample sample{along, height, theta, now};
+  if (!parkWallFirst.ms || now - parkWallFirst.ms > 800 || along - parkWallFirst.along > 125.0f)
+    parkWallFirst = sample;
+  parkWallLast = sample;
+}
+
+static void parkPlFusionPared(float sign) {
+  if (!parkWallFirst.ms || !parkWallLast.ms || millis() - parkWallLast.ms > 220) return;
+  const float signAlong = parkDirecto ? 1.0f : -1.0f;
+  const float moved = signAlong * alongSalidaMm() - parkWallLast.along;
+  const float span = parkWallLast.along - parkWallFirst.along;
+  const float theta = -sign * (anguloGyro - parkRumboRef);
+  if (span < 42.0f || moved < -4.0f || moved > 25.0f ||
+      fabsf(parkWallLast.theta - parkWallFirst.theta) > 1.5f ||
+      fabsf(theta - parkWallLast.theta) > 1.5f) return;
+  const float slope = (parkWallLast.h - parkWallFirst.h) / span;
+  const float meanTheta = 0.5f * (parkWallFirst.theta + parkWallLast.theta);
+  const float innovationTheta = atanf(slope) / DEG_TO_RAD - meanTheta;
+  float w, h;
+  parkPlanPose(w, h);
+  const float innovationH = parkWallLast.h + moved * slope - h;
+  if (fabsf(innovationH) > 18.0f || fabsf(innovationTheta) > 4.0f) return;
+  // Varianzas relativas conservadoras: las dos lecturas comparten el sesgo del ToF.
+  if (PARK_PL_REF_PARED & 1) {
+    parkDetHSon += innovationH * 0.25f;
+    float newW, newH;
+    parkPlanPose(newW, newH);
+    parkDetAlong += signAlong * (newW - w);  // conserva el ancla longitudinal
+  }
+  if (PARK_PL_REF_PARED & 2) parkRumboRef += sign * innovationTheta * 0.25f;
+  Serial.print("PARK ref pared dh="); Serial.print(innovationH, 1);
+  Serial.print(" dth="); Serial.println(innovationTheta, 2);
+}
+
+PARK_AJ bool PARK_PL_REF_FRENTE = false;
+PARK_AJ float PARK_PL_REF_FRENTE_INNOV_MM = 24.0f;
+
+static bool parkPlFrenteHabilitado() {
+  return PARK_PL_REF_FRENTE || rutaPfr;
+}
+static float parkFrontAlong, parkFrontOffset;
+static unsigned long parkFrontMs;
+static int parkFrontN;
+
+static void parkPlMideFrente(float sign) {
+  if (parkFase != 1 && parkFase != 2 && parkFase != 41) {
+    parkFrontMs = 0; parkFrontN = 0;
+    return;
+  }
+  if (!piRuta || !rutaTfOk || rutaSecSalida < 0 || !isfinite(rutaPka)) return;
+  const int range = tofMm[3];
+  const float theta = -sign * (anguloGyro - parkRumboRef);
+  if (range < 420 || range > 1200 || fabsf(theta) > 6.0f) return;
+  const unsigned long now = millis();
+#if !defined(FOX_SIL)
+  if (now - tofUltimoMs[3] > 70) return;
+#endif
+  const float signAlong = parkDirecto ? 1.0f : -1.0f;
+  const float along = signAlong * alongSalidaMm();
+  if (parkFrontN && now - parkFrontMs <= 650 && along - parkFrontAlong < 12.0f) return;
+  if (now - parkFrontMs > 650) parkFrontN = 0;
+  // Misma calibración del frontal Long que ROUTE_FIX_TOF_CAL en carrera_bench.
+  const float rangeMm = range <= 787 ? 300.0f + (range - 332) * (300.0f / 455.0f)
+                                     : 600.0f + (range - 787) * (400.0f / 430.0f);
+  const float wallAlong = 1500.0f - (rangeMm + 141.4f) * cosf(theta * DEG_TO_RAD);
+  if (fabsf(wallAlong - along) > 75.0f) return;
+  const float woodInner = parkDirecto ? rutaPka - 284.0f : -rutaPka + 20.0f;
+  float w, h;
+  parkPlanPose(w, h);
+  const float innovation = wallAlong - woodInner - w;
+  if (fabsf(innovation) > PARK_PL_REF_FRENTE_INNOV_MM) return;
+  // Corroboración al avanzar: las obstrucciones y cambios de cara rompen la
+  // consistencia entre el desplazamiento del encoder y el cambio de rango.
+  const float offset = wallAlong - woodInner - along;
+  if (parkFrontN && fabsf(offset - parkFrontOffset) > 14.0f) parkFrontN = 0;
+  parkFrontOffset = parkFrontN ? 0.5f * (parkFrontOffset + offset) : offset;
+  ++parkFrontN;
+  parkFrontAlong = along;
+  parkFrontMs = now;
+}
+
+static void parkPlFusionFrente() {
+  if (parkFrontN < 3 || millis() - parkFrontMs > 250) return;
+  const float sign = parkDirecto ? 1.0f : -1.0f;
+  float w, h;
+  parkPlanPose(w, h);
+  const float innovation = sign * alongSalidaMm() + parkFrontOffset - w;
+  if (fabsf(innovation) < 8.0f || fabsf(innovation) > 32.0f) return;
+  // Prior de ~6 mm RMS. El frontal mas el mapa se ponderan a ~20 mm.
+  parkDetAlong -= sign * 0.08f * innovation;
+  Serial.print("PARK ref frente dw="); Serial.println(innovation, 1);
+}
+
 static float parkPlHitMin, parkPlHitMax, parkPlSampleAlong;
 static unsigned long parkPlSampleMs;
 static int parkPlHits;
@@ -4738,7 +4868,12 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     // inicio — la Pi vio rosa MAYORITARIO al arrancar (está en el estacionamiento)
     // -> maniobra de salida (case INICIO). Debe venir ya en el PRIMER V2. SOLO se
     // setea a true (sticky); el one-shot de loop() lo consume una sola vez.
-    if (campoPi(line, "inicio=", v) && campoInt(v) != 0) piInicioEstacionamiento = true;
+    if (campoPi(line, "inicio=", v)) {
+      const long mode = campoInt(v);
+      if (mode != 0) piInicioEstacionamiento = true;
+      // 2 conserva el significado de 1 para el firmware anterior.
+      rutaPfr = mode == 2;
+    }
     // isal — lado de paso de la 1ª señal adelante del cajón (solo durante INICIO)
     if (campoPi(line, ",isal=", v) && campoInt(v) != 0) piSalida = campoInt(v);
     // isen — hay señal a <~1.3 m adelante de la salida: INICIO a INICIO_PWM_SENAL (sticky)
@@ -4762,6 +4897,8 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
       rutaTfOk = true;
       if (rutaSecSalida < 0) rutaSecSalida = seccionTapete(rutaTx, rutaTy);   // odometría (0,0) = pose de salida
     }
+    if (campoPi(line, ",pkr=", v)) rutaPkr = campoFloat(v);
+    if (campoPi(line, ",pkl=", v)) { rutaPkl = campoFloat(v); rutaPklMs = millis(); }
     if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v) + PARK_PKA_OFS_MM; if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0; }  // sticky: pka sin pge no apaga (s16)
     if (campoPi(line, ",pgf=", v)) rutaPgf = campoFloat(v);
 
@@ -6974,6 +7111,8 @@ void loop() {
       parkExtRaw = extRaw;
 #if FOX_TOF
       if (PARK_PL_TOF_ANCLA && (parkFase == 0 || parkFase == 1)) parkPlMideMadera();
+      if (PARK_PL_REF_PARED) parkPlMidePared(haciaPared);
+      if (parkPlFrenteHabilitado()) parkPlMideFrente(haciaPared);
 #endif
       if (piPark >= 1) parkRosaVisto = true;
 
@@ -8190,7 +8329,29 @@ void loop() {
           }
 #if FOX_TOF
           if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
+          if (PARK_PL_REF_PARED) parkPlFusionPared(haciaPared);
+          if (parkPlFrenteHabilitado()) parkPlFusionFrente();
 #endif
+          if (parkGeomModo && parkDirecto && isfinite(rutaPkr) && isfinite(rutaPka)
+              && fabsf(rutaPkr - rutaPka) <= 75.0f) {
+            float w, h;
+            parkPlanPose(w, h);
+            const float delta = alongSalidaMm() - rutaPkr + 284.0f - w;
+            if (fabsf(delta) >= 8.0f && fabsf(delta) <= 55.0f) {
+              parkDetAlong -= 0.25f * delta;
+              Serial.print("PARK ref BEV dw="); Serial.println(delta, 1);
+            }
+          }
+          if (parkDirecto && parkGeomModo && isfinite(rutaPkl) && fabsf(rutaPkl) <= 45.0f
+              && millis() - rutaPklMs <= 5000UL && isfinite(rutaPka)) {
+            float w, h;
+            parkPlanPose(w, h);
+            const float delta = alongSalidaMm() + rutaPkl - rutaPka + 284.0f - w;
+            if (fabsf(delta) >= 8.0f && fabsf(delta) <= 28.0f) {
+              parkDetAlong -= 0.20f * delta;
+              Serial.print("PARK ref señal dw="); Serial.println(delta, 1);
+            }
+          }
           parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;

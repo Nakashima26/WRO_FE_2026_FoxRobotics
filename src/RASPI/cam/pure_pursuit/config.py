@@ -1121,6 +1121,9 @@ PARK_PINK_HSV       = [(np.array([135, 45, 25]), np.array([179, 255, 255])),
 PARK_PINK_RATIO_MIN = 0.15   # fracción del ROI que debe ser magenta
 PARK_PINK_COLS_MIN  = 0.60   # fracción de columnas con >=20% de rosa; si no, ratio=0
 PARK_PINK_ROI_TOP   = 0.12   # se ignora este % superior del frame (fondo del cuarto)
+ROUTE_PARK_FRONT_REF = False  # fusión longitudinal de pared frontal
+ROUTE_PARK_LANDMARK_REF = False  # asiento confirmado visto antes del escaneo
+ROUTE_PARK_VISION_REF = False  # referencia BEV de las dos maderas para f40
 PARK_PINK_SAMPLES   = 15     # frames de warmup a promediar para la decisión
 PARK_FORCE_INICIO   = False  # True = manda inicio=1 SIEMPRE (probar la maniobra sin rosa)
 
