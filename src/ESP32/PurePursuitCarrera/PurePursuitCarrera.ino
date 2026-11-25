@@ -1897,7 +1897,7 @@ PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la es
 PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
 PARK_AJ float        PARK_PL_FRENTE_LIBRE_CM     = 5.0f;   // zigzag adelante: con mas holgura frontal no corte HOLGURA/cierre huella
-PARK_AJ bool         PARK_PL_ZZ_ANCLA             = true;   // carro: reancla lateral en zigzag
+PARK_AJ bool         PARK_PL_ZZ_ANCLA             = false;  // reancla lateral en zigzag; sin probar en el gemelo (apagado igual que el SIL)
 // Centrado final (2026-11-23, 3265): la reversa del zigzag corta en el ToF trasero (~3 cm) y el avance antes,
 // por holgura de la pose; sin objetivo longitudinal quedaba tB 29 / tF 111 mm. Al cerrar, recto hasta dF ~ dB.
 PARK_AJ int          PARK_PL_CENTRAR             = 1;
