@@ -1919,3 +1919,9 @@ ROUTE_L1_SPEC_TC_MAX = 4  # tc>=4: vuelta 2; dentro de v1, último tramo opciona
 # Vuelta 1: si la cámara ya ve el asiento (visible) o hay provisional/ROI, no aplicar
 # corner_sign unk_only en esa esquina — esquiva reactiva a velocidad del perfil.
 ROUTE_L1_REACTIVE = False
+ROUTE_L1_REACT_PROV_VOTES = 2
+ROUTE_L1_REACT_HALF_PROV_VOTES = 3
+ROUTE_L1_REACT_VISIBLE_FRAMES = 5
+ROUTE_L1_REACT_VISIBLE_MAX_MM = 900.0
+ROUTE_L1_REACT_HALF = False
+ROUTE_L1_REACT_TC_MAX = 3

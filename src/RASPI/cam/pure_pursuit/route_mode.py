@@ -479,6 +479,28 @@ class RouteMode:
             if n >= int(getattr(C, "ROUTE_EMPTY_FRAMES", 16)):
                 self.empty.add(key)
 
+    def _l1_react_trusted(self, seat_key, conf, prov, roi_seats, half_seats, pose, dm) -> bool:
+        """Asiento visto de verdad para soltar corner_sign unk (no geometría sola ni half fantasma)."""
+        if seat_key in conf or seat_key in roi_seats:
+            return True
+        if bool(getattr(C, "ROUTE_L1_REACT_HALF", False)) and seat_key in half_seats:
+            return True
+        min_v = int(getattr(C, "ROUTE_L1_REACT_PROV_VOTES", 2))
+        if seat_key in half_seats and seat_key not in roi_seats:
+            min_v = max(min_v, int(getattr(C, "ROUTE_L1_REACT_HALF_PROV_VOTES", 3)))
+        votes = getattr(dm, "_votes", {}).get(seat_key)
+        if seat_key in prov and votes:
+            for col, oth in (("Red", "Green"), ("Green", "Red")):
+                if votes.get(col, 0) >= min_v and votes.get(col, 0) >= votes.get(oth, 0) + 1:
+                    return True
+        nfr = int(getattr(C, "ROUTE_L1_REACT_VISIBLE_FRAMES", 12))
+        max_mm = float(getattr(C, "ROUTE_L1_REACT_VISIBLE_MAX_MM", 750.0))
+        if seat_key in self.visible and self.view_count.get(seat_key, 0) >= nfr:
+            sx, sy = section_to_world(seat_key[0], *SEATS[seat_key[1]])
+            if math.hypot(sx - pose[0], sy - pose[1]) <= max_mm:
+                return True
+        return False
+
     def _roi_yaw(self, pose) -> float:
         """Avanza el contador de frames de ROI; devuelve el yaw (grados/frame) desde el frame anterior."""
         self._roi_t += 1
@@ -1227,14 +1249,14 @@ class RouteMode:
                        and not plan_unknown and self.key == key)
         corner_points = []
         spec_h = getattr(self, "_spec_hedge", set())
+        tc_max_react = float(getattr(C, "ROUTE_L1_REACT_TC_MAX", 4))
         l1_react = (getattr(C, "ROUTE_L1_REACTIVE", False) and self.fixed
-                    and tcf is not None and 1 <= tcf < 4)
+                    and tcf is not None and 1 <= tcf < tc_max_react)
         for sec, seat in unknown:
             seat_key = (sec, seat)
             if seat_key in spec_h or seat_key in empty:
                 continue
-            if l1_react and (seat_key in prov or seat_key in roi_seats or seat_key in half_seats
-                             or seat_key in self.visible):
+            if l1_react and self._l1_react_trusted(seat_key, conf, prov, roi_seats, half_seats, pose, dm):
                 continue
             xy = section_to_world(sec, *SEATS[seat])
             if can_release and seat_key in prov and self._conf_prev.get(seat_key) == prov[seat_key]:
