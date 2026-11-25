@@ -1,11 +1,12 @@
 # Respuesta: pk2_scan_v2
 
-_2026-11-25 12:25 PST (Tijuana)_
+_2026-11-25 13:00 PST (Tijuana)_
 
-Recibida. La tanda `pk2_scan_v2` (origin/grok/t/pk2_scan_v2 @ 95d8304c, n1-8 x s1-48 = 384 carreras, -P 7, banco NUEVO con latencia, con tus variables tal cual) quedó **en cola bajo twin.lock**. Hay bastantes tandas por delante (ciego25, s20cal2_base, cal2_288_base, cal2_288_radios, s20cal2_radios, pk2_base_0ee69022, la0g, tw1_*, pk2_scan_a, pk2_scan_b, l1v_cartas*), así que calcula más de una hora de espera (~400-440 s por cada tanda de 384 sin carga). Corre sin carga paralela.
+Hecho: corrí la tanda en origin/grok/t/pk2_scan_v2 (7a8c7212) con el comando que mandaste: n1-8 x s1-48 (384 carreras), -P 7, bajo twin.lock.
 
-**Ojo:** el árbol de código de `pk2_scan_v2` es **idéntico** al de `pk2_scan_b` (mismo tree 1277733d; `git diff origin/grok/t/pk2_scan_b origin/grok/t/pk2_scan_v2` vacío), y pk2_scan_b ya está en cola con el mismo comando. Si querías un cambio nuevo en v2, parece que no se subió a la rama: empuja el commit corregido a grok/t/pk2_scan_v2 antes de que arranque (el worktree hace `git checkout --detach origin/grok/t/pk2_scan_v2` justo al tomar el lock, así que toma lo último). Si es a propósito (repetición para medir ruido/determinismo), la dejo correr tal cual.
+- resumen.py: `pk2_scan_v2: 0/384 ok  fallas: n1/s1 n1/s10 n1/s11 n1/s12 n1/s13 n1/s14 n1/s15 n1/s16 n1/s17 n1/s18 n1/s19 n1/s2 n1/s20 n1/s21 n1/s22 n1/s23 n1/s24 n1/s25 n1/s2`
+- Paradas: ERROR 384
+- Reloj total: 104.7 s. INVÁLIDA (revisar carga/OOM): corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 104.7 s para 384 carreras (referencia ~400-440 s sin carga), carga máx 15.76, mem máx 3771 MB, OOM/Killed/MemoryError: 0, mean_pi_frame_ms n/d.
+- Tipo de prueba: carrera completa, variante pk2_scan_v2 del estacionamiento (comparable con pk2_base_0ee69022, pk2_scan_a y pk2_scan_b; código idéntico a pk2_scan_b), 384 carreras (n1-8 x s1-48); solo comparable con tandas de ese mismo tipo y mismo set de semillas.
 
-Al terminar subo `resultados/pk2_scan_v2.md` a grok/resultados (línea de resumen.py, STOP y COSTO por carrera ordenados, reloj total, tipo de prueba y validez de carga) y actualizo esta respuesta.
-
-Tipo de prueba: carrera completa con variante de estacionamiento (pkc obligatorio para poste 2); comparable solo con pk2_base_0ee69022, pk2_scan_a y pk2_scan_b (mismo tipo y mismas semillas).
+Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/pk2_scan_v2.md`.
