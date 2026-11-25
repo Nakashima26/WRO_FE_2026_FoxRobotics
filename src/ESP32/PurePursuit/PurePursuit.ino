@@ -287,6 +287,7 @@ float rutaPkl = NAN;  // corrección longitudinal observada con señal
 unsigned long rutaPklMs = 0;
 bool rutaPfr = false;
 float rutaPkr = NAN;  // BEV: cara exterior de la madera lejana en el marco de pka
+bool rutaPkaConfirmada = false;  // la Pi vio un par de maderas con el ToF
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 bool  rutaPge       = false; // pge=1 : la Pi permite cambiar la U por la pared exterior + busqueda del cajon en reversa (PARK_GEOM_EXT)
 float rutaPgf       = NAN;   // pgf= : along (mm) de senal ocupada en la salida lejana del cajon (recta interior)
@@ -3626,6 +3627,36 @@ void vigilarSinU() {
   if (!(parkUturnPendiente || pre)) return;
   const float extCm = rutaExtTapeteCm();
   const float rumboDeg = rutaErrCarrilDeg();
+#if FOX_TOF
+  // Después de la esquina 12, una madera vista en el carril manda sobre
+  // la distancia al prior. Conserva la bajada aunque el ToF pierda el eco.
+  if (turnsCompleted == TURNS_PER_RACE && parkUturnPendiente && parkSinUDec != 2
+      && !PARK_REQUIERE_PI
+      && (PARK_MODO == PARK_PARALELO || PARK_MODO == PARK_PARALELO_REV)
+      && seccionTapete(x, y) == rutaSecSalida && fabsf(along) <= 850.0f
+      && fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_TOL_CM && fabsf(rumboDeg) <= 12.0f) {
+    const int side = direccionIzquierda ? 1 : 0;
+    const int range = tofMm[side];
+    const float yaw = (direccionIzquierda ? 1.0f : -1.0f) * rumboDeg * DEG_TO_RAD;
+    const float depth = 10.0f * extCm + 65.0f
+                      - (35.2f + range) * cosf(yaw) - 110.6f * sinf(yaw);
+    if (range >= 10 && range <= 175 && depth >= 150.0f && depth <= 260.0f
+#if !defined(FOX_SIL)
+        && millis() - tofUltimoMs[side] <= 70
+#endif
+    ) {
+      parkUturnPendiente = false;
+      parkDirecto = true;
+      iniciarEstacionando();
+      anguloGyro = rumboDeg;
+      parkBajadaPre = true;
+      parkBajadaPreMs = millis();
+      parkOdomPoste1 = odomMm;
+      Serial.print("PARK: madera antes del escaneo along="); Serial.println(along, 0);
+      return;
+    }
+  }
+#endif
   if (!isnan(rutaPka) && rutaPka < (float)PARK_SINU_PKA_MIN_MM && parkSinUDec == 0) {
     // Cajon al inicio de la recta: directo solo si la ruta ya lo trae pegado a su pared (la senal de la entrada se paso por afuera).
     if (along < (float)PARK_SINU_DEC_MM) return;
@@ -5120,7 +5151,11 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     if (campoPi(line, ",pkl=", v)) { rutaPkl = campoFloat(v); rutaPklMs = millis(); }
     if (MOTOR_CURVE_LIVE && MOTOR_VBAT_ADC_PIN < 0 && campoPi(line, ",bv=", v))
       motorVbatSample(campoFloat(v) / 1000.0f, millis());
-    if (campoPi(line, ",pka=", v)) { rutaPka = campoFloat(v) + PARK_PKA_OFS_MM; if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0; }  // sticky: pka sin pge no apaga (s16)
+    if (campoPi(line, ",pka=", v)) {
+      rutaPka = campoFloat(v) + PARK_PKA_OFS_MM;
+      rutaPkaConfirmada = campoPi(line, ",pkc=", v) && campoInt(v) != 0;
+      if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0;  // sticky: pka sin pge no apaga (s16)
+    }
     if (campoPi(line, ",pgf=", v)) rutaPgf = campoFloat(v);
 
     piFirstV2Received  = true;   // desde aquí el carro ya puede rodar
@@ -7739,7 +7774,8 @@ void loop() {
         bool armada = poseOk && (tEn >= PARK_ARMADO_MS);
 
         float ventanaPoste2 = parkDirecto ? PARK_D_B2_WIN_MM : PARK_U_B2_WIN_MM;
-        bool validaPoste2 = !PARK_TEST_MANO && rutaTfOk && !isnan(rutaPka) && ventanaPoste2 > 0.0f;
+        bool validaPoste2 = !PARK_TEST_MANO && rutaTfOk && rutaPkaConfirmada
+                         && !isnan(rutaPka) && ventanaPoste2 > 0.0f;
         float offsetPoste2 = parkDirecto ? PARK_D_B2_OFF_MM : PARK_U_B2_OFF_MM;
         float errorPoste2 = validaPoste2 ? alongSalidaMm() - (rutaPka - offsetPoste2) : 0.0f;
         // Con el poste 1 ya visto, la separacion medida desde el (odometria) manda sobre la pose absoluta de la Pi (pka puede venir 90 mm corrido).
@@ -7770,8 +7806,9 @@ void loop() {
         // Con el poste 1 visto por sonar, un poste 2 por pose antes de ~180 mm de odometria es un disparo falso (n2 s34: 49 mm, ancla 109 mm corrida).
         bool sepPoste2Ok = !(parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 < PARK_POSTE2_SEP_POSE_MM);
         if (parkDirecto && enVentanaPoste2 && sepPoste2Ok && parkScanSubFase < 2 && !isnan(rutaPka) && bajada && armada && posteConfirmado
-            && ((scanDirectoInicial && validaPoste2 && !posteSintetico && extRaw <= PARK_POSTE2_EXT_MAX_CM)
-                || fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM)) {
+            && (rutaPkaConfirmada
+                && ((scanDirectoInicial && validaPoste2 && !posteSintetico && extRaw <= PARK_POSTE2_EXT_MAX_CM)
+                    || fabsf(alongSalidaMm() - (rutaPka - (float)PARK_SINU_B2_OFF_MM)) <= (float)PARK_SINU_B2_WIN_MM))) {
           // Una lectura rasante temprana es el borde del haz. Sin poste 1,
           // mantén el escaneo hasta ver la cara o llegar al centro previsto.
           const bool ecoRasante = posteSintetico || extRaw > PARK_POSTE2_EXT_MAX_CM;
@@ -7840,8 +7877,10 @@ void loop() {
               parkGapCnt       = 0;
               parkHuecoEntryMs = millis();
               parkPoste1Ms     = parkBajadaPreMs;
-              parkOdomPoste1   = odomMm;
-              parkP1Sonar      = false;
+              const bool maderaPrevia = parkDirecto && parkOdomPoste1 >= 0
+                                    && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM;
+              if (!maderaPrevia) parkOdomPoste1 = odomMm;
+              parkP1Sonar      = maderaPrevia;
               parkBajadaPre    = false;
               Serial.println("PARK: poste 1 pasó antes del armado — hueco");
             }
@@ -8039,7 +8078,7 @@ void loop() {
             if (d < dFreno) dFreno = d;
           }
           bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0 && !lejosPared
-                        && !isnan(rutaPka)
+                        && rutaPkaConfirmada && !isnan(rutaPka)
                         && (parkDirecto ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno);
           int pwmEsc = PARK_PUNTA_PWM;
           // Sin U: cerca de la madera de adelante, lento, para que el instante en que el sonar la ve fije bien la posicion (error ~ v * 50 ms).
