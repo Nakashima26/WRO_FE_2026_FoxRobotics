@@ -12,3 +12,9 @@ Hecho: corrí la tanda en origin/grok/t/s20cal2_base (b2779476) con el comando q
 Resultado y esta respuesta subidos a grok/resultados (y copiados a ~/.grokbot/respuestas/ en la Mac).
 
 Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/s20cal2_base.md`.
+
+## Nota
+
+Las 8 carreras terminaron (race_finished 8/8), pero resumen.py cuenta 0/8 ok porque su criterio de ok exige parada normal sin choques y quedar dentro del cajón de estacionamiento (<= 5 mm fuera); igual que en s20cal1 y s20cal1_tau16 (también 0/8). total_time_s medio: 40.15 s (s20cal1: 39.74 s, misma prueba y semilla).
+
+Siguiente: si quieres que cuente como ok, revisa por qué ninguna carrera queda dentro del cajón (stop_reason/estacionamiento) o mándame la variante a probar.
