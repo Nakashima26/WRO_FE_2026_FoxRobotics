@@ -4408,6 +4408,10 @@ float parkThCarril() {
   if (!parkDirecto) { e -= 180.0f; if (e < -180.0f) e += 360.0f; }   // tras la U va en sentido contrario y la pared queda al otro lado
   return (direccionIzquierda == parkDirecto) ? e : -e;
 }
+PARK_AJ bool PARK_GEOM_ANCLA_LOCAL = false;
+static float parkGeomAnclaX, parkGeomAnclaY, parkGeomAnclaTh, parkGeomAnclaW;
+static int parkGeomAnclaSec = -1;
+
 float parkDetTh = 0.0f;   // theta al detectar el poste 2
 void parkPlanPose(float &w, float &h) {
   w = (parkDirecto ? PARK_PL_W_DET : PARK_PL_W_DET_U) + (parkDirecto ? 1.0f : -1.0f) * (alongSalidaMm() - parkDetAlong);
@@ -4416,6 +4420,17 @@ void parkPlanPose(float &w, float &h) {
   // El cono del sonar ve la madera antes cuanto mas lejos pasa: W_DET se midio a h~350.
   w -= PARK_PL_CONO * (parkDetHSon - 350.0f);
   h = parkDetHSon + (parkHPoseMm() - parkDetHPose);
+  if (PARK_GEOM_ANCLA_LOCAL && parkGeomModo && parkDirecto && parkFase == 40 && parkGeomAnclaSec >= 0) {
+    // El borde de la madera fija un origen local. Las correcciones del mapa
+    // no deben mover el borde después de haberlo observado.
+    const float c = cosf(parkGeomAnclaTh), s = sinf(parkGeomAnclaTh);
+    const float dx = poseXf - parkGeomAnclaX, dy = poseYf - parkGeomAnclaY;
+    const float x = dx * s - dy * c, y = dx * c + dy * s;
+    const float along = parkGeomAnclaSec == 2 ? x : parkGeomAnclaSec == 1 ? y : parkGeomAnclaSec == 0 ? -x : -y;
+    const float outward = parkGeomAnclaSec == 2 ? -y : parkGeomAnclaSec == 1 ? x : parkGeomAnclaSec == 0 ? y : -x;
+    w = parkGeomAnclaW + (direccionIzquierda ? along : -along);
+    h = parkDetHSon - outward;
+  }
 }
 // Reancla la reversa con el centro de la segunda madera medido en el escaneo final.
 PARK_AJ bool PARK_PL_TOF_ANCLA = true;
@@ -8292,6 +8307,7 @@ void loop() {
         setMotor(PARK_GEOM_FRENO_PWM);
         if (encVelMmS <= PARK_GEOM_V_REV || millis() - parkFaseMs > 1500) {
           Serial.print("PARK GEOM: frenado v="); Serial.print(encVelMmS, 0); Serial.print(" along="); Serial.print(alongSalidaMm(), 0); Serial.println(" -> busco la madera en reversa");
+          parkGeomAnclaSec = -1;
           parkFase = 42; parkFaseMs = millis(); parkOdom0 = odomMm; parkRevBase = 0.0f; parkRevDrop = 0; parkRevEnMadera = false;
         }
         break;
@@ -8383,6 +8399,14 @@ void loop() {
             // se cancelan la inclinacion y el cono que resta parkPlanPose para que w quede en ese valor.
             if (parkGeomModo) wNom = PARK_GEOM_W_REV + PARK_GEOM_W_REV_KH * (parkDetHSon - 300.0f) - (borde == 1 ? 0.0f : 20.0f)
                                      + (PARK_PL_TILT ? (parkDetHSon - 200.0f) * tanf(parkDetTh * 0.0174533f) : 0.0f) + PARK_PL_CONO * (parkDetHSon - 350.0f);
+            if (PARK_GEOM_ANCLA_LOCAL && parkGeomModo && borde == 1 && rutaTfOk) {
+              parkGeomAnclaX = poseXf;
+              parkGeomAnclaY = poseYf;
+              parkGeomAnclaTh = rutaTh * DEG_TO_RAD;
+              parkGeomAnclaSec = rutaSecSalida;
+              // Origen longitudinal del flanco pared -> madera a ~130 mm/s.
+              parkGeomAnclaW = 190.0f - PARK_GEOM_W_REV_KH * (300.0f - parkDetHSon);
+            }
             parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET);
             Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" hp="); Serial.print(parkDetHPose, 0); Serial.print(" v="); Serial.print(encVelMmS, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
             parkRevAnc = true;
@@ -8594,7 +8618,21 @@ void loop() {
         if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
           float yaw = th * 0.0174533f;
           float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - PARK_TOF_COLA_CM - 6.3f * sinf(yaw));
-          if (esqMm <= PARK_PL_MTOF_MM) { cerca = true; cercaTof = true; }
+          if (esqMm <= PARK_PL_MTOF_MM) {
+            // El eco trasero puede apuntar a la punta de la madera en diagonal.
+            // Antes de cortar el arco, proyecta la huella al final del coast
+            // con el origen local. Conserva siempre el corte a corta distancia.
+            bool holguraLocal = false;
+            if (PARK_GEOM_ANCLA_LOCAL && parkGeomModo && parkDirecto && parkGeomAnclaSec >= 0
+                && i == 1 && distB_filtrada >= 4.0f && clr > PARK_PL_M_MM) {
+              const float coast = max(-encVelMmS, 0.0f) * 0.12f;
+              const float finYaw = yaw - coast / rInt;
+              const float finW = pw - rInt * (sinf(yaw) - sinf(finYaw));
+              const float finH = ph - rInt * (cosf(finYaw) - cosf(yaw));
+              holguraLocal = parkPlanHolgura(finW, finH, finYaw * RAD_TO_DEG) > PARK_PL_M_MM;
+            }
+            if (!holguraLocal) { cerca = true; cercaTof = true; }
+          }
         }
         if (i == 0 && PARK_PL_RECTA) {
           if (!parkPlanRectaOn && th >= parkPlanT1) parkPlanRectaOn = true;
