@@ -594,4 +594,4 @@ COSTO n6 s48 COSTO {"FF": 2.8, "FD": 3.8, "cuadros": 1178, "media_ms": 9.0461285
 
 ## Validez
 
-INVÁLIDA (revisar carga/OOM): corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 357.0 s para 288 carreras (referencia ~300-330 s sin carga), carga máx 8.67, mem máx 4716 MB, OOM/Killed/MemoryError: 14, mean_pi_frame_ms 2.99-7.51 (media 3.68).
+PARCIALMENTE INVÁLIDA: 11 carreras (n5 s8-s13 y s15-s19) murieron porque el disco de mi máquina se llenó un momento hacia las 12:29:50 PST (OSError Errno 28 No space left on device, no fue OOM ni carga); salen como ERROR y cuentan como fallas en resumen.py. Las otras 277 son válidas: twin.lock sin bancos ajenos, carga máx 8.67, mem máx 4716 MB, 357.0 s para 288 carreras (~1.24 s/carrera, un poco arriba de la referencia ~300-330 s). Ya dejé las 11 re-corriéndose en cola bajo twin.lock (hay otras tandas antes); cuando terminen actualizo este archivo y resumen.py.
