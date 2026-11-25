@@ -246,6 +246,8 @@ v2 CAD is in [`models/v2/`](models/v2/): SolidWorks parts + assembly in [`cad/`]
 
 <p align="center"><img src="models/v2/renders/turntable.gif" width="420" alt="v2 car, full CAD assembly rotating"></p>
 
+**Assembly video:** [`models/v2/renders/armado.mp4`](models/v2/renders/armado.mp4) (37 s) explodes the assembly and builds the car back in 12 steps: chassis, steering with the SG90 servo, front wheels, drivetrain, rear wheels, battery, ultrasonics, top plate, ToF sensors, Pi 5, PCB stack and camera. See [`models/v2/README.md`](models/v2/README.md#assembly-video).
+
 | Isometric | Top | Bottom |
 |:---:|:---:|:---:|
 | <img src="models/v2/renders/isometric.png" height="230"> | <img src="models/v2/renders/top.png" height="230"> | <img src="models/v2/renders/bottom.png" height="230"> |
