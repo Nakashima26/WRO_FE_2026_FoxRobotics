@@ -122,27 +122,27 @@ def side(n):
 # (título, [(componente, dirección de llegada)])
 UP, DN, FW, BK = U, -U, F, -F
 STEPS = [
-    ("Chasis base", "BaseChasisMain_V2 impreso en PLA", [("BaseChasisMain_V2-1", UP)]),
-    ("Dirección", "manguetas, cremallera, bieletas, servo SG90 y su engrane", [("SteeringKnuckle-1", "S"), ("SteeringKnuckle-2", "S"),
+    ("Chassis base", "BaseChasisMain_V2, printed in PLA", [("BaseChasisMain_V2-1", UP)]),
+    ("Steering", "knuckles, rack, tie rods, SG90 servo and its gear", [("SteeringKnuckle-1", "S"), ("SteeringKnuckle-2", "S"),
         ("NewCremallera_V2-1", FW), ("NewLinkajeL_V2-1", "S"), ("NewLinkajeR_V2-1", "S"),
         ("SG90", UP), ("ServoGearDirection_V2", BK)]),
-    ("Ruedas delanteras", "ejes LEGO de 4 en las manguetas y RuedaEnfrente ×2", [("EjeDelantero-1", "S"), ("EjeDelantero-2", "S"),
+    ("Front wheels", "4-stud LEGO axles in the knuckles, 2 front wheels", [("EjeDelantero-1", "S"), ("EjeDelantero-2", "S"),
         ("RuedaEnfrente-1", "S"), ("RuedaEnfrente-2", "S")]),
-    ("Tracción", "soporte del motor, N20, piñón 15T y diferencial", [("DCsupport_V2-1", DN), ("N20 Mini Micro Metall Gear Motor.step-1", BK),
+    ("Drivetrain", "motor mount, N20 motor, 15T pinion and differential", [("DCsupport_V2-1", DN), ("N20 Mini Micro Metall Gear Motor.step-1", BK),
         ("Pinion.15_V2-1", BK), ("Differential_V2-1", BK)]),
-    ("Ruedas traseras", "un eje LEGO de 8 por llanta, al diferencial, y RuedaAtras ×2", [("EjeTrasero-1", "S"), ("EjeTrasero-2", "S"),
+    ("Rear wheels", "one 8-stud LEGO axle per wheel into the differential, 2 rear wheels", [("EjeTrasero-1", "S"), ("EjeTrasero-2", "S"),
         ("RuedaAtras-1", "S"), ("RuedaAtras-2", "S")]),
-    ("Batería", "soportes, pila en el túnel central y tapa inferior", [("BatterySupport-1", "S"), ("BatterySupport-2", "S"),
+    ("Battery", "supports, battery in the center tunnel, bottom cover", [("BatterySupport-1", "S"), ("BatterySupport-2", "S"),
         ("pila-1", DN), ("TapaBaseChasis-1", DN)]),
-    ("Ultrasónicos", "soportes y 3 HC-SR04 (verificación cruzada de los ToF)", [("UltrasonicSupportFront-1", FW), ("HC-SR04-UltrasonicSensor v7.step-2", FW),
+    ("Ultrasonics", "supports and 3 HC-SR04 (cross-check for the ToF sensors)", [("UltrasonicSupportFront-1", FW), ("HC-SR04-UltrasonicSensor v7.step-2", FW),
         ("UltrasonicSupportHalf_V2-1", "S"), ("HC-SR04-UltrasonicSensor v7.step-1", "S"),
         ("UltrasonicSupport_V2-2", "S"), ("HC-SR04-UltrasonicSensor v7.step-3", "S")]),
-    ("Tapa del chasis", "TapaChasis_V2", [("TapaChasis_V2-1", UP)]),
-    ("Sensores ToF", "soporte y 4 TOF400C (VL53L1X): izquierda, derecha, frente y atrás", [("ToFSupport-1", UP), ("TOF400C.step-1", "S"), ("TOF400C.step-2", "S"),
+    ("Top plate", "TapaChasis_V2", [("TapaChasis_V2-1", UP)]),
+    ("ToF sensors", "support and 4 TOF400C (VL53L1X): left, right, front and rear", [("ToFSupport-1", UP), ("TOF400C.step-1", "S"), ("TOF400C.step-2", "S"),
         ("TOF400C.step-3", FW), ("ToFBack-1", BK), ("TOF400C.step-4", BK)]),
-    ("Raspberry Pi 5", "visión y planificador de ruta", [("RASPBERRY_PI_5.STEP", UP)]),
-    ("PCB RevB", "placa de potencia y placa del ESP32 (stack trasero)", [("WRO_RevB_2.step", UP), ("WRO_RevB_1.step", UP)]),
-    ("Cámara", "base y soporte frontal de la cámara", [("CameraBase-1", UP), ("CameraFrnt-1", FW + 0.6 * UP)]),
+    ("Raspberry Pi 5", "vision and route planner", [("RASPBERRY_PI_5.STEP", UP)]),
+    ("PCB RevB", "power board and ESP32 board (rear stack)", [("WRO_RevB_2.step", UP), ("WRO_RevB_1.step", UP)]),
+    ("Camera", "camera base and front mount", [("CameraBase-1", UP), ("CameraFrnt-1", FW + 0.6 * UP)]),
 ]
 DIST = 0.075
 STEPS = [(t, sub, [(n, d, False) for n, d in l if n in P]) for t, sub, l in STEPS]   # sin --servo no hay SG90
@@ -150,7 +150,7 @@ STEPS = [(t, sub, [(n, d, False) for n, d in l if n in P]) for t, sub, l in STEP
 for n, o, sp in SCREWS:
     k = next(i for i, (_, _, l) in enumerate(STEPS) if any(x[0] == sp for x in l))
     STEPS[k][2].append((n, o, True))
-STEPS = [(t, sub + (f" + {c} tornillo{'s' if c > 1 else ''} M3×12" if (c := sum(b for _, _, b in l)) else ""), l) for t, sub, l in STEPS]
+STEPS = [(t, sub + (f" + {c} M3×12 screw{'s' if c > 1 else ''}" if (c := sum(b for _, _, b in l)) else ""), l) for t, sub, l in STEPS]
 names = [n for _, _, l in STEPS for n, _, _ in l]
 missing = set(P) - set(names); assert not missing, missing
 OFF = {}
@@ -217,10 +217,10 @@ def frame(state, az, dist, title="", sub="", step=None):
     col, _ = rend.render(scene)
     im = Image.fromarray(col); d = ImageDraw.Draw(im)
     if step is not None:
-        d.text((40, 30), f"Paso {step + 1}/{len(STEPS)}", font=fs, fill=(76, 154, 255))
+        d.text((40, 30), f"Step {step + 1}/{len(STEPS)}", font=fs, fill=(76, 154, 255))
     if title: d.text((40, 58), title, font=fb, fill=(235, 238, 242))
     if sub: d.text((42, 108), sub, font=fs, fill=(150, 160, 175))
-    d.text((40, H - 38), "Fox Robotics · WRO 2026 Future Engineers · carro v2 (models/v2)", font=fx, fill=(110, 118, 130))
+    d.text((40, H - 38), "Fox Robotics · WRO 2026 Future Engineers · v2 car (models/v2)", font=fx, fill=(110, 118, 130))
     return np.asarray(im)
 
 wr = imageio.get_writer(OUT, fps=FPS, codec="libx264", quality=8, macro_block_size=8)
@@ -232,14 +232,14 @@ def emit(*a, **k):
 sec = lambda s: range(int((s if not FAST else s / 4) * FPS))
 D0, D1 = 0.37, 0.62
 full = {n: (True, 0.0) for n in names}
-for i in sec(2.5): emit(full, dist=D0, title="Carro v2", sub="cómo se arma, pieza por pieza")
+for i in sec(2.5): emit(full, dist=D0, title="v2 car", sub="how it goes together, part by part")
 N = len(sec(1.8))
 for i in range(N):
-    u = ease(i / (N - 1)); emit({n: (True, 1.0 * u) for n in names}, dist=D0 + (D1 - D0) * u, title="Despiece", sub=f"{len(names)} componentes")
-for i in sec(2.5): emit({n: (True, 1.0) for n in names}, dist=D1, title="Despiece", sub=f"{len(names)} componentes")
+    u = ease(i / (N - 1)); emit({n: (True, 1.0 * u) for n in names}, dist=D0 + (D1 - D0) * u, title="Exploded view", sub=f"{len(names)} components")
+for i in sec(2.5): emit({n: (True, 1.0) for n in names}, dist=D1, title="Exploded view", sub=f"{len(names)} components")
 N = len(sec(0.8))   # se vuelve a juntar y se va: empieza el armado desde cero
 for i in range(N):
-    u = ease(i / (N - 1)); emit({n: (True, 1.0 - u) for n in names}, dist=D1 + (D0 - D1) * u, title="Despiece", sub="ahora, paso por paso")
+    u = ease(i / (N - 1)); emit({n: (True, 1.0 - u) for n in names}, dist=D1 + (D0 - D1) * u, title="Exploded view", sub="now, step by step")
 done = {}
 for si, (title, sub, lst) in enumerate(STEPS):
     stag, mv, hold = 0.25, 0.9, 0.7
@@ -256,6 +256,6 @@ for si, (title, sub, lst) in enumerate(STEPS):
             st[n] = (tt >= s0, (1.6 if b else 2.2) * (1 - u))
         emit(st, dist=D0, title=title, sub=sub, step=si)
     for n, _, _ in lst: done[n] = (True, 0.0)
-for i in sec(4): emit(full, dist=D0, title="Listo", sub=f"12 pasos · {len(SCREWS)} tornillos M3×12 · ver models/v2/README.md")
+for i in sec(4): emit(full, dist=D0, title="Done", sub=f"12 steps · {len(SCREWS)} M3×12 screws · see models/v2/README.md")
 wr.close()
 print("ok", OUT, round(t, 1), "s")
