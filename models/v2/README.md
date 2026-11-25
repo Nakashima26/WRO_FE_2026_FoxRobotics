@@ -53,15 +53,15 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 
 <p align="center"><a href="renders/armado.mp4"><img src="renders/armado_preview.png" width="640" alt="Exploded view of the v2 car, frame from the assembly video"></a></p>
 
-[`renders/armado.mp4`](renders/armado.mp4) (37 s, 1280×720): the assembled car turns, explodes into its 38 components, and is built back step by step, with the step name on screen:
+[`renders/armado.mp4`](renders/armado.mp4) (42 s, 1280×720): the assembled car turns, explodes, and is built back step by step, with the step name on screen. Each step ends with its M3×12 screws (28 in total) going in along their holes.
 
 | Step | Parts |
 |---:|---|
 | 1 | Chassis base `BaseChasisMain_V2` |
 | 2 | Steering: knuckles, rack, tie rods, SG90 servo and `ServoGearDirection_V2` |
-| 3 | Front wheels |
+| 3 | LEGO axles (4 studs, 32 mm) in the knuckles, front wheels |
 | 4 | Drivetrain: motor mount, N20 motor, 15T pinion, differential |
-| 5 | Rear wheels |
+| 5 | LEGO axle (16 studs, 128 mm) through the differential, rear wheels |
 | 6 | Battery supports, battery in the center tunnel, bottom cover |
 | 7 | Ultrasonic supports and 3 HC-SR04 |
 | 8 | Top plate `TapaChasis_V2` |
@@ -70,12 +70,17 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 | 11 | PCB RevB stack (power board + ESP32 board) |
 | 12 | Camera base and front mount |
 
-The printed parts get one color per subsystem (the CAD leaves them gray); bought boards keep their own colors. The SG90 and its gear are not in `Vehicle_V2.SLDASM`, so the script places them: lying on the rack, shaft pointing back, tabs on the two chassis posts, gear on the rack teeth (which face up).
+The printed parts get one color per subsystem (the CAD leaves them gray); bought boards keep their own colors. Three things are not in `Vehicle_V2.SLDASM`, so the scripts add them:
+- **SG90 servo and its gear:** lying on the rack, shaft pointing back, tabs on the two chassis posts, gear on the rack teeth (which face up).
+- **LEGO axles:** a 16-stud axle through the differential and a 4-stud axle per knuckle, centered on the wheels.
+- **28 M3×12 screws:** [`tools/agujeros_fc.py`](tools/agujeros_fc.py) (run in FreeCAD) lists the M3 holes of every printed part from its STEP. [`tools/tornillos.py`](tools/tornillos.py) moves them into the assembly with each part's transform from the `.glb`, and holes that line up across two or more parts become one screw, written to [`tools/tornillos.json`](tools/tornillos.json). Vertical screws go head up; horizontal ones go in from the part mounted last. Holes in a single part are skipped because it is not known what they hold. The SG90's own screws come with its model.
 
-To regenerate it (about 1.5 min on a laptop GPU), export the assembly from SolidWorks to binary glTF (`Vehicle_V2.glb`) and convert the SG90 STEP to STL, then:
+To regenerate it (about 2 min on a laptop GPU), export the assembly from SolidWorks to binary glTF (`Vehicle_V2.glb`) and convert the SG90 STEP to STL, then:
 
 ```
-pip install trimesh pyrender imageio imageio-ffmpeg pillow
+pip install trimesh pyrender imageio imageio-ffmpeg pillow rtree
+freecadcmd models/v2/tools/agujeros_fc.py                 # only if a STEP changed
+python models/v2/tools/tornillos.py Vehicle_V2.glb        # only if a part or its position changed
 python models/v2/tools/armado.py Vehicle_V2.glb models/v2/renders/armado.mp4 --servo=sg90.stl --gear=ServoGearDirection_V2.STL
 ```
 

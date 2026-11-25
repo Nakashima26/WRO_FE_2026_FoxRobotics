@@ -1,0 +1,478 @@
+[
+ {
+  "head": [
+   654.79,
+   910.1,
+   1310.77
+  ],
+  "out": [
+   -0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "BatterySupport-2"
+  ],
+  "step_part": "BatterySupport-2"
+ },
+ {
+  "head": [
+   654.79,
+   910.1,
+   1358.68
+  ],
+  "out": [
+   -0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "BatterySupport-2"
+  ],
+  "step_part": "BatterySupport-2"
+ },
+ {
+  "head": [
+   667.97,
+   943.6,
+   1402.3
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "TapaChasis_V2-1",
+   "ToFBack-1"
+  ],
+  "step_part": "ToFBack-1"
+ },
+ {
+  "head": [
+   677.97,
+   943.6,
+   1402.3
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "TapaChasis_V2-1",
+   "ToFBack-1"
+  ],
+  "step_part": "ToFBack-1"
+ },
+ {
+  "head": [
+   714.72,
+   943.6,
+   1353.25
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "UltrasonicSupport_V2-2",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "TapaChasis_V2-1"
+ },
+ {
+  "head": [
+   714.72,
+   947.45,
+   1320.45
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "UltrasonicSupport_V2-2",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "RASPBERRY_PI_5.STEP"
+ },
+ {
+  "head": [
+   631.21,
+   943.8,
+   1320.45
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "UltrasonicSupportHalf_V2-1",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "TapaChasis_V2-1"
+ },
+ {
+  "head": [
+   631.21,
+   943.8,
+   1348.45
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "UltrasonicSupportHalf_V2-1",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "TapaChasis_V2-1"
+ },
+ {
+  "head": [
+   679.05,
+   943.6,
+   1281.73
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "TapaChasis_V2-1",
+   "ToFSupport-1"
+  ],
+  "step_part": "ToFSupport-1"
+ },
+ {
+  "head": [
+   667.05,
+   943.6,
+   1270.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "TapaChasis_V2-1",
+   "CameraBase-1"
+  ],
+  "step_part": "CameraBase-1"
+ },
+ {
+  "head": [
+   679.05,
+   943.6,
+   1270.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "TapaChasis_V2-1",
+   "CameraBase-1"
+  ],
+  "step_part": "CameraBase-1"
+ },
+ {
+  "head": [
+   667.05,
+   943.6,
+   1281.73
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "TapaChasis_V2-1",
+   "ToFSupport-1"
+  ],
+  "step_part": "ToFSupport-1"
+ },
+ {
+  "head": [
+   652.21,
+   937.6,
+   1273.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "TapaChasis_V2-1"
+ },
+ {
+  "head": [
+   688.89,
+   942.11,
+   1390.87
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "WRO_RevB_2.step"
+ },
+ {
+  "head": [
+   656.89,
+   942.11,
+   1390.87
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "WRO_RevB_2.step"
+ },
+ {
+  "head": [
+   693.57,
+   937.6,
+   1273.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "TapaChasis_V2-1"
+  ],
+  "step_part": "TapaChasis_V2-1"
+ },
+ {
+  "head": [
+   676.05,
+   953.6,
+   1270.02
+  ],
+  "out": [
+   1.0,
+   -0.0,
+   -0.0
+  ],
+  "comps": [
+   "CameraBase-1",
+   "CameraFrnt-1"
+  ],
+  "step_part": "CameraFrnt-1"
+ },
+ {
+  "head": [
+   691.81,
+   910.1,
+   1310.77
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "BatterySupport-1"
+  ],
+  "step_part": "BatterySupport-1"
+ },
+ {
+  "head": [
+   691.81,
+   910.1,
+   1358.68
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "BatterySupport-1"
+  ],
+  "step_part": "BatterySupport-1"
+ },
+ {
+  "head": [
+   672.57,
+   909.8,
+   1357.4
+  ],
+  "out": [
+   -0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "DCsupport_V2-1"
+  ],
+  "step_part": "DCsupport_V2-1"
+ },
+ {
+  "head": [
+   711.69,
+   916.22,
+   1286.88
+  ],
+  "out": [
+   0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "SteeringKnuckle-2",
+   "NewLinkajeR_V2-1"
+  ],
+  "step_part": "NewLinkajeR_V2-1"
+ },
+ {
+  "head": [
+   702.89,
+   916.22,
+   1278.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "SteeringKnuckle-2"
+  ],
+  "step_part": "SteeringKnuckle-2"
+ },
+ {
+  "head": [
+   633.77,
+   916.22,
+   1286.55
+  ],
+  "out": [
+   0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "SteeringKnuckle-1",
+   "NewLinkajeL_V2-1"
+  ],
+  "step_part": "NewLinkajeL_V2-1"
+ },
+ {
+  "head": [
+   642.89,
+   916.22,
+   1278.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "SteeringKnuckle-1"
+  ],
+  "step_part": "SteeringKnuckle-1"
+ },
+ {
+  "head": [
+   666.64,
+   913.0,
+   1268.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "UltrasonicSupportFront-1"
+  ],
+  "step_part": "UltrasonicSupportFront-1"
+ },
+ {
+  "head": [
+   679.14,
+   913.0,
+   1268.02
+  ],
+  "out": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "comps": [
+   "BaseChasisMain_V2-1",
+   "UltrasonicSupportFront-1"
+  ],
+  "step_part": "UltrasonicSupportFront-1"
+ },
+ {
+  "head": [
+   696.13,
+   912.78,
+   1296.18
+  ],
+  "out": [
+   0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "NewCremallera_V2-1",
+   "NewLinkajeR_V2-1"
+  ],
+  "step_part": "NewLinkajeR_V2-1"
+ },
+ {
+  "head": [
+   649.13,
+   912.78,
+   1296.18
+  ],
+  "out": [
+   0.0,
+   1.0,
+   -0.0
+  ],
+  "comps": [
+   "NewCremallera_V2-1",
+   "NewLinkajeL_V2-1"
+  ],
+  "step_part": "NewLinkajeL_V2-1"
+ }
+]

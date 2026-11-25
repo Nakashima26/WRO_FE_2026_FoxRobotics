@@ -7,11 +7,12 @@ Archivo > Guardar como > glTF binario desde cad/Vehicle_V2.SLDASM).
   python models/v2/tools/armado.py Vehicle_V2.glb models/v2/renders/armado.mp4 [--fast]
       [--servo=sg90.stl --gear=ServoGearDirection_V2.STL]
 --fast: 4x más rápido, para revisar.
+Tornillos M3x12: tornillos.json (tornillos.py). Ejes LEGO de las ruedas: se generan aquí (trasero de 16, delanteros de 4).
 El servo SG90 y su engrane no están en Vehicle_V2.SLDASM: con --servo/--gear se agregan en su lugar
 (acostado sobre la cremallera, eje hacia atrás, orejas en los dos postes; engrane sobre los dientes, que miran
 arriba). sg90.stl = el STEP del SG90 pasado a STL (FreeCAD: MeshPart.meshFromShape). Render en una GPU de laptop: ~1.5 min. Arriba = +Y, adelante = -Z.
 """
-import pickle, sys, math, collections, os, numpy as np, pyrender, imageio, trimesh
+import pickle, sys, math, collections, os, json, numpy as np, pyrender, imageio, trimesh
 from PIL import Image, ImageDraw, ImageFont
 W, H, FPS = 1280, 720, 30
 POS = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -77,6 +78,40 @@ if "servo" in OPT and "gear" in OPT:
     _sg, _g = servo_parts(OPT["servo"], OPT["gear"])
     P["SG90"] = dict(mesh=_sg, sub=[(_sg, None)])
     P["ServoGearDirection_V2"] = dict(mesh=_g, sub=[(_g, None)])
+def lego_axle(x0, x1, y, z):
+    """Eje LEGO (perfil en cruz de 4.8 mm) a lo largo de x, en mm del ensamble; regresa metros."""
+    L = x1 - x0
+    m = trimesh.util.concatenate([trimesh.creation.box([L, 4.8, 1.8]), trimesh.creation.box([L, 1.8, 4.8])])
+    m.apply_translation([(x0 + x1) / 2, y, z]); m.apply_scale(0.001)
+    return m
+
+
+# Ejes LEGO de las ruedas (no están en el CAD): trasero de 16 (128 mm) por el diferencial, uno de 4 (32 mm) por mangueta.
+_b = {n: P[n]["mesh"].bounds * 1000 for n in ("RuedaAtras-1", "RuedaAtras-2", "RuedaEnfrente-1", "RuedaEnfrente-2")}
+_c = lambda b: ((b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2)
+_xl, _xr = _b["RuedaAtras-1"][0][0], _b["RuedaAtras-2"][1][0]
+_xm = (_xl + _xr) / 2
+for n, m in (("EjeTrasero", lego_axle(_xm - 64, _xm + 64, *_c(_b["RuedaAtras-1"]))),
+             ("EjeDelantero-1", lego_axle(_b["RuedaEnfrente-1"][0][0] + 2, _b["RuedaEnfrente-1"][0][0] + 34, *_c(_b["RuedaEnfrente-1"]))),
+             ("EjeDelantero-2", lego_axle(_b["RuedaEnfrente-2"][1][0] - 34, _b["RuedaEnfrente-2"][1][0] - 2, *_c(_b["RuedaEnfrente-2"])))):
+    P[n] = dict(mesh=m, sub=[(m, None)])
+
+# Tornillos M3x12 (tornillos.json, de tornillos.py): cabeza Allen 5.5 x 3 mm hacia afuera, cuerpo de 12 mm hacia adentro.
+SCREWS = []
+_tj = OPT.get("tornillos", os.path.join(os.path.dirname(os.path.abspath(__file__)), "tornillos.json"))
+if os.path.exists(_tj):
+    for k, sc_ in enumerate(json.load(open(_tj))):
+        h, o = np.array(sc_["head"]), np.array(sc_["out"])
+        A = trimesh.geometry.align_vectors([0, 0, 1], o)
+        parts_ = []
+        for r, L, c in ((2.75, 3.0, h + o * 1.5), (1.5, 12.0, h - o * 6.0)):
+            T = A.copy(); T[:3, 3] = c
+            parts_.append(trimesh.creation.cylinder(radius=r, height=L, sections=20, transform=T))
+        m = trimesh.util.concatenate(parts_); m.apply_scale(0.001)
+        n = f"M3-{k:02d}"
+        P[n] = dict(mesh=m, sub=[(m, None)])
+        SCREWS.append((n, o, sc_["step_part"]))
+
 allb = np.vstack([p["mesh"].bounds for p in P.values()])
 C = (allb.min(0) + allb.max(0)) / 2
 U, R, F = np.array([0, 1., 0]), np.array([1., 0, 0]), np.array([0, 0, -1.])   # arriba, derecha(x), adelante(-z)
@@ -89,10 +124,11 @@ STEPS = [
     ("Dirección", "manguetas, cremallera, bieletas, servo SG90 y su engrane", [("SteeringKnuckle-1", "S"), ("SteeringKnuckle-2", "S"),
         ("NewCremallera_V2-1", FW), ("NewLinkajeL_V2-1", "S"), ("NewLinkajeR_V2-1", "S"),
         ("SG90", UP), ("ServoGearDirection_V2", BK)]),
-    ("Ruedas delanteras", "RuedaEnfrente ×2", [("RuedaEnfrente-1", "S"), ("RuedaEnfrente-2", "S")]),
+    ("Ruedas delanteras", "ejes LEGO de 4 en las manguetas y RuedaEnfrente ×2", [("EjeDelantero-1", "S"), ("EjeDelantero-2", "S"),
+        ("RuedaEnfrente-1", "S"), ("RuedaEnfrente-2", "S")]),
     ("Tracción", "soporte del motor, N20, piñón 15T y diferencial", [("DCsupport_V2-1", DN), ("N20 Mini Micro Metall Gear Motor.step-1", BK),
         ("Pinion.15_V2-1", BK), ("Differential_V2-1", BK)]),
-    ("Ruedas traseras", "RuedaAtras ×2", [("RuedaAtras-1", "S"), ("RuedaAtras-2", "S")]),
+    ("Ruedas traseras", "eje LEGO de 16 por el diferencial y RuedaAtras ×2", [("EjeTrasero", R), ("RuedaAtras-1", "S"), ("RuedaAtras-2", "S")]),
     ("Batería", "soportes, pila en el túnel central y tapa inferior", [("BatterySupport-1", "S"), ("BatterySupport-2", "S"),
         ("pila-1", DN), ("TapaBaseChasis-1", DN)]),
     ("Ultrasónicos", "soportes y 3 HC-SR04 (verificación cruzada de los ToF)", [("UltrasonicSupportFront-1", FW), ("HC-SR04-UltrasonicSensor v7.step-2", FW),
@@ -106,14 +142,19 @@ STEPS = [
     ("Cámara", "base y soporte frontal de la cámara", [("CameraBase-1", UP), ("CameraFrnt-1", FW + 0.6 * UP)]),
 ]
 DIST = 0.075
-STEPS = [(t, sub, [(n, d) for n, d in l if n in P]) for t, sub, l in STEPS]   # sin --servo no hay SG90
-names = [n for _, _, l in STEPS for n, _ in l]
+STEPS = [(t, sub, [(n, d, False) for n, d in l if n in P]) for t, sub, l in STEPS]   # sin --servo no hay SG90
+# cada tornillo entra en el paso de la última pieza que sujeta; los de un paso llegan juntos, al final del paso
+for n, o, sp in SCREWS:
+    k = next(i for i, (_, _, l) in enumerate(STEPS) if any(x[0] == sp for x in l))
+    STEPS[k][2].append((n, o, True))
+STEPS = [(t, sub + (f" + {c} tornillo{'s' if c > 1 else ''} M3×12" if (c := sum(b for _, _, b in l)) else ""), l) for t, sub, l in STEPS]
+names = [n for _, _, l in STEPS for n, _, _ in l]
 missing = set(P) - set(names); assert not missing, missing
 OFF = {}
 for _, _, l in STEPS:
-    for n, d in l:
-        d = side(n) if isinstance(d, str) else d
-        OFF[n] = d / np.linalg.norm(d) * DIST
+    for n, d, b in l:
+        d = side(n) if isinstance(d, str) else np.asarray(d, float)
+        OFF[n] = d / np.linalg.norm(d) * (0.03 if b else DIST)
 
 # Colores por pieza (el CAD deja casi todo en gris). Las placas compradas conservan los suyos.
 HEX = lambda h: np.array([(int(h[i:i + 2], 16) / 255) ** 2.2 for i in (0, 2, 4)] + [1.0])   # sRGB -> lineal (si no, salen deslavados)
@@ -128,6 +169,7 @@ COLOR = {
     "ToFSupport-1": "00bbf9", "ToFBack-1": "00bbf9",
     "CameraBase-1": "00f5d4", "CameraFrnt-1": "00f5d4",
     "SG90": "2f6fd6", "ServoGearDirection_V2": "ffd23f",
+    "EjeTrasero": "3a3a3d", "EjeDelantero-1": "3a3a3d", "EjeDelantero-2": "3a3a3d",
 }
 # ── escena ──
 scene = pyrender.Scene(bg_color=[0.06, 0.07, 0.09, 1], ambient_light=[0.3, 0.3, 0.32])
@@ -138,9 +180,11 @@ for n, p in P.items():
         col = np.array([0.6, 0.6, 0.6, 1]) if col is None else np.array(col, float)
         if col.max() > 1: col = col / 255
         if n in COLOR: col = HEX(COLOR[n])
+        elif n.startswith("M3-"): col = HEX("c9ccd3")
         elif n.startswith("N20"): col = np.array([0.78, 0.78, 0.8, 1]) if col[:3].mean() < 0.5 else col   # motor metálico
         mm = m.copy(); mm.apply_translation(-C)
-        mat = pyrender.MetallicRoughnessMaterial(baseColorFactor=col, metallicFactor=0.05, roughnessFactor=0.55)
+        mat = pyrender.MetallicRoughnessMaterial(baseColorFactor=col, metallicFactor=0.6 if n.startswith("M3-") else 0.05,
+                                                 roughnessFactor=0.35 if n.startswith("M3-") else 0.55)
         nodes.append(scene.add(pyrender.Mesh.from_trimesh(mm, material=mat, smooth=False)))
     NODES[n] = nodes
 def look(eye, tgt=np.zeros(3)):
@@ -163,7 +207,7 @@ def frame(state, az, dist, title="", sub="", step=None):
             nd.mesh.is_visible = vis; scene.set_pose(nd, T)
     el = math.radians(28)
     eye = dist * np.array([math.sin(az) * math.cos(el), math.sin(el), math.cos(az) * math.cos(el)])
-    tgt = np.array([0, -0.004, 0])
+    tgt = np.array([0, 0.008, 0])   # el carro un poco abajo del centro: arriba va el texto
     scene.set_pose(camn, look(eye + tgt, tgt))
     scene.set_pose(lk, look(eye * 1.0 + 0.25 * U * dist + 0.2 * R * dist, tgt))
     scene.set_pose(lf, look(-eye + 0.3 * U * dist, tgt))
@@ -183,7 +227,7 @@ def emit(*a, **k):
     global t
     wr.append_data(frame(*a, az=az0 + AZV * t, **k)); t += 1 / FPS
 sec = lambda s: range(int((s if not FAST else s / 4) * FPS))
-D0, D1 = 0.42, 0.62
+D0, D1 = 0.37, 0.62
 full = {n: (True, 0.0) for n in names}
 for i in sec(2.5): emit(full, dist=D0, title="Carro v2", sub="cómo se arma, pieza por pieza")
 N = len(sec(1.8))
@@ -196,17 +240,19 @@ for i in range(N):
 done = {}
 for si, (title, sub, lst) in enumerate(STEPS):
     stag, mv, hold = 0.25, 0.9, 0.7
-    T = stag * (len(lst) - 1) + mv + hold
+    npart = sum(not b for _, _, b in lst)
+    slots = [j if not b else npart + 0.6 for j, (_, _, b) in enumerate(lst)]   # tornillos: una tanda al final
+    T = stag * max(slots) + mv + hold
     N = len(sec(T)); TT = T if not FAST else T / 4
     for i in range(N):
         tt = i / FPS * (TT / (N / FPS))
         st = dict(done)
-        for j, (n, _) in enumerate(lst):
-            s0 = j * stag * (TT / T)
+        for (n, _, b), sl in zip(lst, slots):
+            s0 = sl * stag * (TT / T)
             u = ease((tt - s0) / (mv * TT / T))
-            st[n] = (tt >= s0, 2.2 * (1 - u))
+            st[n] = (tt >= s0, (1.6 if b else 2.2) * (1 - u))
         emit(st, dist=D0, title=title, sub=sub, step=si)
-    for n, _ in lst: done[n] = (True, 0.0)
-for i in sec(4): emit(full, dist=D0, title="Listo", sub="12 pasos · ver models/v2/README.md para la lista de piezas")
+    for n, _, _ in lst: done[n] = (True, 0.0)
+for i in sec(4): emit(full, dist=D0, title="Listo", sub=f"12 pasos · {len(SCREWS)} tornillos M3×12 · ver models/v2/README.md")
 wr.close()
 print("ok", OUT, round(t, 1), "s")
