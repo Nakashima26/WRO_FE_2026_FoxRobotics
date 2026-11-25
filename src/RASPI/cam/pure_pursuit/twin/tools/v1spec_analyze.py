@@ -69,13 +69,26 @@ def _analyze(seed_dir: Path) -> dict | None:
     return {"by_tc": {k: dict(v) for k, v in sorted(by_tc.items())}, "by_lim": dict(by_lim), "total_s": sum(by_lim.values())}
 
 
+def _seed_dirs(run: Path) -> list[Path]:
+    out: list[Path] = []
+    for p in sorted(run.iterdir()):
+        if not p.is_dir():
+            continue
+        if p.name.startswith("s"):
+            out.append(p)
+        elif p.name.startswith("n"):
+            out.extend(sorted(d for d in p.iterdir() if d.is_dir() and d.name.startswith("s")))
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--audit", action="store_true", help="esquinas con corner_sign y prov temprano en log")
     args = ap.parse_args()
     run = Path(args.run_dir)
-    seeds = sorted(d for d in run.iterdir() if d.is_dir() and d.name.startswith("s"))
+    seeds = _seed_dirs(run)
     agg_tc: dict[int, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     agg_lim: dict[str, float] = defaultdict(float)
     n = 0
@@ -117,6 +130,8 @@ def main() -> None:
         dom = max(agg_tc[tc], key=agg_tc[tc].get)
         r, e, m = _hint.get(tc, ("", "", "", ""))[1:]
         print(f"| {tc} | {dom} | {r} | {e} | {m} |")
+    if args.audit:
+        audit_visible_brakes(run)
 
 
 def audit_visible_brakes(run_dir: Path) -> None:
@@ -124,7 +139,7 @@ def audit_visible_brakes(run_dir: Path) -> None:
     import re
     wasted = 0
     corner = 0
-    seeds = sorted(d for d in run_dir.iterdir() if d.is_dir() and d.name.startswith("s"))
+    seeds = _seed_dirs(run_dir)
     for sd in seeds:
         tr = sd / "trace.csv"
         pl = sd / "pi.log"

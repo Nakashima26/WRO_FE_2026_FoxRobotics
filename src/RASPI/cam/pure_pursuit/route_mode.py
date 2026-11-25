@@ -1017,9 +1017,12 @@ class RouteMode:
         spec_hedge: set = set()
         if (getattr(C, "ROUTE_L1_SPECULATIVE", False) and lap1 and self.fixed
                 and float(getattr(self, "_tc_max", 0) or 0) >= 1
-                and float(getattr(self, "_tc_max", 0) or 0) < 4):
+                and float(getattr(self, "_tc_max", 0) or 0) < float(getattr(C, "ROUTE_L1_SPEC_TC_MAX", 4))):
             for k in list(plan_unknown):
                 if not _l1_speculative_hedge(k[1]):
+                    continue
+                # NOTA 1: especulativo solo ciego; si la cámara ya ve el asiento, mantener plan/frenos normales.
+                if (k in prov or k in roi_seats or k in half_seats or k in self.visible):
                     continue
                 spec_hedge.add(k)
             if spec_hedge and getattr(C, "ROUTE_L1_SPEC_PLAN", True):
