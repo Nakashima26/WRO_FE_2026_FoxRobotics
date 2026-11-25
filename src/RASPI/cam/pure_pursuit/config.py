@@ -158,6 +158,13 @@ LOC_TOF_SIGN_MAX_MM = 300.0
 # 32° de incidencia y el EKF saltó la pose 100 mm (igual en orillas162: -123/103 mm). Con el cono ancho del VL53 la
 # lectura oblicua sale corta: real - rayo central = -1/-4/-20/-71 mm a 0-20/20-30/30-40/40-60°. Antes 35° fijo.
 LOC_TOF_MAX_INC_DEG = 30.0   # twin (ToF sin sesgo oblicuo): 35° 44/48, 30° 43/48, 25° 42/48. orillas166 (30°) limpia; orillas167 (27°) chocó S/X2R en vuelta 1 (pose 14 cm corrida tras la primera curva)
+# 2026-11-25 (orillas243 + orillas252, choque en la vuelta 1 al salir de la esquina 2 hacia la recta N): con ~29°
+# de incidencia el tL leyó la isla a 437 cuando se esperaban 580 (nu -148/-139) y el EKF movió la pose -120 mm en y.
+# Con más de LOC_TOF_OBLIQUE_DEG de incidencia, una lectura más corta que lo esperado por más de
+# LOC_TOF_OBLIQUE_MAX_NU_MM no se usa en pared/isla (el sesgo oblicuo es corto; las largas sí se usan).
+# Sobre 235-253 rechaza 7 ecos (-98..-148), entre ellos los dos de los choques. None = apagado.
+LOC_TOF_OBLIQUE_DEG = None
+LOC_TOF_OBLIQUE_MAX_NU_MM = None
 LOC_TOF_SIGN_HALF_DEG = 7.0    # medio cono del ToF (ROI 8); 13.5 era el de ROI 16. Ecos de bloque 162+164: ±7° -> mediana -0 mm, ±13.5° -> +4
 LOC_TOF_SIGN_SIGMA_MM = 15.0   # + 2% de la lectura; la señal mide 50 mm y el cono 27°
 # Opt-in (orillas247): en la esquina vuelta 1 el ToF lateral contra señal/bloque no debe girar la pose ni

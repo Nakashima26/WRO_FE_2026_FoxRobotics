@@ -506,6 +506,13 @@ class Localizer:
                 sig += float(getattr(C, "LOC_TOF_FAR_SIGMA_PER_MM", 0.0)) * (z - float(far0))
             R = sig * sig
             nu = z - zh
+            obl_deg = getattr(C, "LOC_TOF_OBLIQUE_DEG", None)
+            obl_nu = getattr(C, "LOC_TOF_OBLIQUE_MAX_NU_MM", None)
+            if (kind == "tof" and obl_deg is not None and obl_nu is not None
+                    and cosi < math.cos(math.radians(float(obl_deg))) and nu < -float(obl_nu)):
+                self._rej.pop(key, None)
+                self.n_rej += 1
+                continue   # eco oblicuo mucho más corto que lo esperado: no informa la pose (orillas243/252)
             S = float(H @ self.P @ H + R)
             # El eco corto compatible con un obstáculo no informa sobre la pared ni
             # debe alimentar su historial de reanclaje.
