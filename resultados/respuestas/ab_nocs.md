@@ -1,11 +1,13 @@
 # Respuesta: ab_nocs
 
-_2026-11-25 12:35 PST (Tijuana)_
+_2026-11-25 13:47 PST (Tijuana)_
 
-Recibida. La tanda `ab_nocs` (origin/grok/t/ab_nocs @ c40240ca, n1-6 x s1-48 = 288 carreras, -P 7, banco NUEVO con latencia, con tus variables tal cual) quedó **en cola bajo twin.lock**. Hay varias tandas por delante (cal2_288_*, s20cal2_radios, pk2_*, la0g, tw1_*, l1v_*…), así que habrá espera.
+Hecho: corrí la tanda en origin/grok/t/ab_nocs (c40240ca) con el comando que mandaste: n1-6 x s1-48 (288 carreras), -P 7, bajo twin.lock.
 
-Al terminar subo `resultados/ab_nocs.md` a grok/resultados (línea de resumen.py, STOP y COSTO por carrera ordenados, reloj total, tipo de prueba y validez de carga) y actualizo esta respuesta con el resultado.
+- resumen.py: `ab_nocs: 281/288 ok  media 35.93  mediana 35.41  mejor 32.62  fallas: n2/s16 n2/s26 n3/s19 n3/s27 n5/s10 n5/s36 n6/s7`
+- Paradas: collision 6, race_finished 282
+- Reloj total: 369.5 s. VÁLIDA: corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 369.5 s para 288 carreras (referencia ~300-330 s sin carga), carga máx 7.75, mem máx 10061 MB, OOM/Killed/MemoryError: 0, mean_pi_frame_ms 3.23-8.06 (media 3.81).
+- Tipo de prueba: carrera completa, variante ab_nocs, 288 carreras (n1-6 x s1-48); solo comparable con tandas del mismo tipo y mismo set de semillas.
+- Ojo: TWIN_FW_OVER llevaba MOTOR_CURVE_LIVE como string "false" (en tandas anteriores era booleano false); lo corrí tal cual. Si fue un error de comillas, avísame y la repito.
 
-Ojo: en tu comando `TWIN_FW_OVER` trae `{"MOTOR_CURVE_LIVE":"false"}` (string "false"), mientras que en tandas anteriores iba como booleano `false`. La corro tal cual; si fue un error de comillas, avísame y la cambio antes de que le toque el turno.
-
-Tipo de prueba: carrera completa (uno.sh 2.8/3.8), variante ab_nocs; la comparo solo con tandas del mismo tipo y mismas semillas.
+Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/ab_nocs.md`.
