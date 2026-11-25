@@ -8359,7 +8359,7 @@ void loop() {
         // Reversa del zigzag: solo el ToF trasero (orillas177: la pose cortaba con 15 cm libres). Adelante sí
         // corta la pose: la esquina de la nariz toca la madera antes de que el ToF frontal la vea (gemelo
         // 34/48 sin este corte vs 44/48).
-        if (!fin && i >= 1 && cerca && (!zz || cercaTof || (parkPlanDir > 0 && !(distF_filtrada > PARK_PL_FRENTE_LIBRE_CM)))) { fin = true; why = "HOLGURA"; }
+        if (!fin && i >= 1 && cerca && (!zz || cercaTof || parkPlanDir > 0)) { fin = true; why = "HOLGURA"; }
         if (!fin && zz && parkPlanDir > 0 && (distF_filtrada <= 0 || distF_filtrada >= 100) && mm >= PARK_PL_CIEGO_MM) { fin = true; why = "CIEGO"; }
         {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
             // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
