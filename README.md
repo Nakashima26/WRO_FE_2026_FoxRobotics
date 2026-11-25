@@ -248,6 +248,8 @@ v2 CAD is in [`models/v2/`](models/v2/): SolidWorks parts + assembly in [`cad/`]
 
 **Assembly video:** [`models/v2/renders/armado.mp4`](models/v2/renders/armado.mp4) (42 s) explodes the assembly and builds the car back in 12 steps, with the LEGO axles and the 28 M3×12 screws: chassis, steering with the SG90 servo, front wheels, drivetrain, rear wheels, battery, ultrasonics, top plate, ToF sensors, Pi 5, PCB stack and camera. See [`models/v2/README.md`](models/v2/README.md#assembly-video).
 
+https://github.com/user-attachments/assets/03e605ff-0109-4d8e-a63a-2a929a3fefe4
+
 | Isometric | Top | Bottom |
 |:---:|:---:|:---:|
 | <img src="models/v2/renders/isometric.png" height="230"> | <img src="models/v2/renders/top.png" height="230"> | <img src="models/v2/renders/bottom.png" height="230"> |

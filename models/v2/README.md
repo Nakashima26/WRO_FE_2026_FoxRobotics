@@ -51,6 +51,8 @@ The v1 (national final) models are in [`../CAD`](../CAD), [`../STL`](../STL) and
 
 ## Assembly video
 
+https://github.com/user-attachments/assets/03e605ff-0109-4d8e-a63a-2a929a3fefe4
+
 <p align="center"><a href="renders/armado.mp4"><img src="renders/armado_preview.png" width="640" alt="Exploded view of the v2 car, frame from the assembly video"></a></p>
 
 [`renders/armado.mp4`](renders/armado.mp4) (42 s, 1280×720): the assembled car turns, explodes, and is built back step by step, with the step name on screen. Each step ends with its M3×12 screws (28 in total) going in along their holes.
