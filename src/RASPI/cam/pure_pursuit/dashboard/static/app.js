@@ -1038,7 +1038,8 @@ function repSummary() {
   const ests = Object.entries(s.est_count || {}).map(([k, v]) => `${k}×${v}`).join(" ");
   const rows = [
     ["Datos", s.src === "journal" ? "reconstruida del journal (pose aproximada, sin ruta)" : `telemetría completa (${s.n} estados)`],
-    ["Duración", s.armed_s !== undefined ? `${fmt(s.armed_s, 1)} s` : "—"],
+    ["Duración", s.fin_s !== undefined ? `${fmt(s.fin_s, 1)} s hasta estacionado <span class="muted">(grabó ${fmt(s.armed_s, 1)} s)</span>` :
+      s.armed_s !== undefined ? `${fmt(s.armed_s, 1)} s <span class="muted">(no estacionó)</span>` : "—"],
     ["Firmware / sentido", `${s.fw === "open" ? "Open" : "Obstáculos"}${REP.d.hdr && REP.d.hdr.surprise ? " + sorpresa" : ""} · ${s.dir === "L" ? "CCW" : s.dir === "R" ? "CW" : "—"}`],
     ["Esquinas", `${fmt(s.tc_max)}/${fmt(s.tpr)}`],
     ["Estado final", `${s.est_end ?? "—"} <span class="muted">(estados: ${ests || "—"})</span>`],

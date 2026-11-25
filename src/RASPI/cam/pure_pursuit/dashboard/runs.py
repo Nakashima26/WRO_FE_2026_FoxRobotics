@@ -173,6 +173,10 @@ def summary(hdr: dict, states: list, events: list) -> dict:
         out["t0"], out["t1"] = states[0].get("t"), states[-1].get("t")
     if armed:
         out["armed_s"] = round(armed[-1] - armed[0], 1)
+        # hasta que la ESP terminó de estacionar (pkf=7); la grabación sigue unos s más
+        fin = next((t for t, x in acks if t is not None and t >= armed[0] and x.get("pkf") == 7), None)
+        if fin is not None:
+            out["fin_s"] = round(fin - armed[0], 1)
     if acks:
         a = [x for _t, x in acks]
         out["fw"] = next((x["fw"] for x in a if x.get("fw")), "obs")
