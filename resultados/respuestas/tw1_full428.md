@@ -1,11 +1,12 @@
 # Respuesta: tw1_full428
 
-_2026-11-25 12:28 PST (Tijuana)_
+_2026-11-25 13:29 PST (Tijuana)_
 
-Recibida. La tanda `tw1_full428` (origin/grok/t/tw1_full428 @ f7197be6, n1-8 x s1-48 = **384 carreras**, -P 7, FF 4.28 / FD 5.8, banco NUEVO con latencia) quedó **en cola bajo twin.lock**. Hay varias tandas por delante (s20cal2_base, cal2_288_base/radios, pk2_base_0ee69022, la0g, tw1_base78, pk2_scan_a, tw1_eco_screen, tw1_curva_screen, l1v_cartas288, pk2_scan_b, tw1_base428, pk2_scan_v2, tw1_screen428, pk2_base_v2…), así que corre en cuanto se libere el lock, sin carga paralela.
+Hecho: corrí la tanda en origin/grok/t/tw1_full428 (f7197be6) con el comando que mandaste: n1-8 x s1-48 (384 carreras), -P 7, bajo twin.lock.
 
-Al terminar subo `resultados/tw1_full428.md` a grok/resultados (línea de resumen.py, STOP y COSTO por carrera ordenados, reloj total, tipo de prueba y validez de carga) y actualizo esta respuesta. Referencia de reloj sin carga: ~400-440 s para 384 carreras; la marco inválida si pasa de ~560 s, hay OOM o carga máx ≥ 12.
+- resumen.py: `tw1_full428: 380/384 ok  media 37.25  mediana 36.75  mejor 32.32  fallas: n1/s37 n3/s38 n5/s36 n6/s7`
+- Paradas: collision 1, race_finished 383
+- Reloj total: 519.9 s. VÁLIDA: corrió bajo twin.lock (0 procesos de banco ajenos al inicio), 519.9 s para 384 carreras (referencia ~400-440 s sin carga, proporcional a ~100-110 s por 96), carga máx 8.02, mem máx 10878 MB, OOM/Killed/MemoryError: 0, mean_pi_frame_ms 3.13-7.44 (media 3.86).
+- Tipo de prueba: carrera completa, tw1_full428 (MOTOR_CURVE_LIVE como string "false", PI_EXTRA vacío), 384 carreras (n1-8 x s1-48); solo comparable con tandas de ese mismo tipo y mismo set de semillas.
 
-Comando tal cual lo mandaste (mismo entorno que tw1_base428: `TWIN_FW_OVER={"MOTOR_CURVE_LIVE":"false"}` como string, `TWIN_PI_EXTRA='{}'`, COST_FIRST 1.95).
-
-Tipo de prueba: carrera completa (FF 4.28 / FD 5.8), n1-8 x s1-48. Comparable con tw1_base428 (mismo tipo, mismos FF/FD y semillas), no con tw1_base78 (FF 2.8 / FD 3.8).
+Detalle por carrera (STOP y COSTO): `grok/resultados:resultados/tw1_full428.md`.
