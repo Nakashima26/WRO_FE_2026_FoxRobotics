@@ -1035,6 +1035,11 @@ const float INICIO_R_CONTRA_MM         = 130.0f; // radio efectivo de la contrav
 const float INICIO_RECTO_MAX_MM        = 700.0f; // fase 2: tope de avance recto (red de seguridad)
 const unsigned long INICIO_RECTO_TIMEOUT_MS = 3000; // fase 2: ídem por tiempo
 const int  INICIO_RECTO_DF_MIN_CM      = 15;   // fase 2: corta si el frontal ya ve la isla así de cerca
+// 2026-11-25 (orillas243-254): con isal=2 la inercia deja el swing en 74-88° en vez de 90° y la fase 2 iba con el
+// servo al centro: a ~78° (254) el carro avanza ~0.2 mm a lo largo por mm de lateral y se arrima a la señal de la
+// fila (rozó el verde W/T2). Con KP > 0, la fase 2 adentro sostiene INICIO_ANG_ADENTRO_DEG con el gyro.
+const float INICIO_RECTO_HOLD_KP       = 4.0f;  // servo° por grado de error de rumbo (0 = servo al centro, como antes)
+const float INICIO_RECTO_HOLD_MAX      = 45.0f; // tope de |servo-centro|
 const int  INICIO_TARDE_MIN_DEG    = 25;   // isal=2 llega en la contravuelta (fase 3) con |ang| >= esto: vuelve al recto (0 = no)
 const int  INICIO_RECTO_PWM            = 0;    // fase 2 (recta perpendicular): PWM; 0 = inicioPwm(). Es el tramo sin curva: puede ir más rápido que los arcos
 const float INICIO_RECTO_LEAD_S        = 0.0f; // fase 2: adelanta el fin esta cantidad de s x velocidad (odometría), para frenar antes de la contravuelta
@@ -6252,7 +6257,13 @@ void loop() {
       //   falta el tramo fijo de antes (INICIO_MID_MS queda solo para INICIO_REVERSA).
       if (inicioFase == 2) {
         motorAdelante();
-        escribirServo(centroServo);
+        if (inicioAdentro && INICIO_RECTO_HOLD_KP > 0.0f) {
+          float corr = constrain(INICIO_RECTO_HOLD_KP * ((float)INICIO_ANG_ADENTRO_DEG - deltaIni),
+                                 -INICIO_RECTO_HOLD_MAX, INICIO_RECTO_HOLD_MAX);   // >0: falta girar hacia el lado de salida
+          escribirServo((int)lroundf(centroServo + (inicioGirarDer ? -corr : corr)));
+        } else {
+          escribirServo(centroServo);
+        }
         inicioMotor(INICIO_RECTO_PWM > 0 ? INICIO_RECTO_PWM : inicioPwm());
         // Velocidad por odometría (EMA) para el adelanto de frenado.
         static float odomPrev = 0.0f; static unsigned long msPrev = 0; static float vMmS = 0.0f;
