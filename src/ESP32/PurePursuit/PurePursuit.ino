@@ -290,6 +290,7 @@ float rutaPkr = NAN;  // BEV: cara exterior de la madera lejana en el marco de p
 float rutaPka       = NAN;   // pka= : along (alongSalidaMm) de la madera del cajón más adelante en la carrera; NAN = sin dato
 bool  rutaPge       = false; // pge=1 : la Pi permite cambiar la U por la pared exterior + busqueda del cajon en reversa (PARK_GEOM_EXT)
 float rutaPgf       = NAN;   // pgf= : along (mm) de senal ocupada en la salida lejana del cajon (recta interior)
+const bool RUTA_SALIDA_ANCLA_PARED = true;  // ToF lateral corrige el seguimiento hacia la primera pared
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
 const float RUTA_LOOKAHEAD_L23_MM = 0.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
@@ -4731,6 +4732,60 @@ void rutaSubvirajeActualiza(float x, float y) {
 
 }
 
+#if FOX_TOF
+static void rutaAnclaParedSalida(float &x, float &y, float h) {
+  static unsigned long muestreo = 0;
+  static float anterior = 0.0f, ajuste = 0.0f;
+  static int lecturas = 0;
+  if (turnsCompleted != 0 || estado == INICIO || rutaSecSalida < 0) {
+    lecturas = 0;
+    ajuste = 0.0f;
+    return;
+  }
+  // En la primera curva la pared que cierra la sección de salida es
+  // perpendicular al carril de salida. Corrige solo su coordenada normal.
+  const bool paredX = rutaSecSalida == 0 || rutaSecSalida == 2;
+  const bool positivoCCW = rutaSecSalida == 1 || rutaSecSalida == 2;
+  const float sentido = positivoCCW == direccionIzquierda ? 1.0f : -1.0f;
+  const int lateral = direccionIzquierda ? 1 : 0;
+  const float sh = sinf(h), ch = cosf(h);
+  const float avance = sentido * (paredX ? sh : ch);
+  const float cosInc = sentido * (lateral == 1 ? 1.0f : -1.0f) * (paredX ? ch : -sh);
+  const float coord = sentido * (paredX ? x : y);
+  const float origen = coord + 110.6f * avance + 35.2f * cosInc;
+  const float rango = tofMm[lateral];
+  const unsigned long ahora = millis();
+  bool nuevaLectura = ahora - muestreo >= 24;
+#if !defined(FOX_SIL)
+  static unsigned long sensorMs = 0;
+  const unsigned long lecturaMs = tofUltimoMs[lateral];
+  if (ahora - lecturaMs > 70) {
+    lecturas = 0;
+    ajuste = 0.0f;
+    return;
+  }
+  nuevaLectura = nuevaLectura && lecturaMs != sensorMs;
+  if (nuevaLectura) sensorMs = lecturaMs;
+#endif
+  if (nuevaLectura) {
+    muestreo = ahora;
+    const float innov = 1500.0f - origen - rango * cosInc;
+    // El rayo sale más allá del carril de señales, apunta a la pared
+    // y necesita dos medidas coherentes antes de mover el control.
+    if (origen > 1135.0f && avance > 0.2f && cosInc > 0.48f &&
+        rango > 55.0f && rango < 540.0f && innov > 18.0f && innov < 140.0f) {
+      lecturas = fabsf(innov - anterior) < 28.0f ? lecturas + 1 : 1;
+      anterior = innov;
+      if (lecturas >= 2) ajuste += (0.80f * (innov - 18.0f) - ajuste) * 0.65f;
+    } else {
+      lecturas = 0;
+      ajuste *= 0.5f;
+    }
+  }
+  (paredX ? x : y) += sentido * ajuste;
+}
+#endif
+
 // Pure pursuit sobre la ruta (modo RUTA) con la pose del eje trasero.
 // Devuelve false si no aplica. ruedaDeg: + = derecha.
 bool rutaSteer(float &ruedaDeg) {
@@ -4768,6 +4823,9 @@ bool rutaSteer(float &ruedaDeg) {
     y = sTy + poseXf * cosf(th) + poseYf * sinf(th);
     h = (sTh - anguloTotal) * DEG_TO_RAD;
   }
+#if FOX_TOF
+  if (RUTA_SALIDA_ANCLA_PARED) rutaAnclaParedSalida(x, y, h);
+#endif
   const float x0 = x, y0 = y;
   if (RUTA_LAG_S > 0.0f) {
     // La rueda tarda RUTA_LAG_S en seguir al servo (medido 0.10 s): se apunta desde la pose donde el
