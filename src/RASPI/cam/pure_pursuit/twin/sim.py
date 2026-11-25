@@ -26,7 +26,7 @@ from pure_pursuit.twin.pi_link import SimSerialLink
 from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, Ultrasonic
 from pure_pursuit.twin.battery import BatteryDrive
 from pure_pursuit.twin.vehicle import Vehicle
-from pure_pursuit.twin.world import OUTER_HALF_MM, World, body_corners, collision
+from pure_pursuit.twin.world import OUTER_HALF_MM, World, body_corners, collision, fox_v2_footprint
 from pure_pursuit.wro_field import randomize
 from vision import Vision
 
@@ -678,6 +678,12 @@ class Sim:
                     last_coll_check = t
                     check_collision(t)
 
+        footprint = None
+        if os.environ.get("TWIN_FOX_V2_FOOTPRINT") == "1":
+            body = self.params.vehicle
+            footprint = fox_v2_footprint(body.length_mm, body.width_mm,
+                                         body.rear_overhang_mm, body.wheelbase_mm)
+
         def check_collision(t):
             nonlocal collision_cause, collision_t, stop_reason, world
             hit = collision(
@@ -688,7 +694,7 @@ class Sim:
                 self.params.vehicle.length_mm,
                 self.params.vehicle.width_mm,
                 self.params.vehicle.rear_overhang_mm,
-                ignore=self.ignore_collisions,
+                ignore=self.ignore_collisions, footprint=footprint,
             )
             if self.ignore_collisions and collision_cause is None:
                 for cause in self.ignore_collisions:
@@ -697,12 +703,14 @@ class Sim:
                             self.params.vehicle.length_mm, self.params.vehicle.width_mm,
                             self.params.vehicle.rear_overhang_mm,
                             ignore=tuple(c for c in self.ignore_collisions if c != cause),
+                            footprint=footprint,
                     ) == cause:
                         ignored_contacts[cause] = {"t": round(t, 3), "cause": cause}
                 if "pared exterior" in ignored_contacts:
                     pen = max(max(abs(cx), abs(cy)) - OUTER_HALF_MM for cx, cy in body_corners(
                         veh.x, veh.y, veh.heading_deg, self.params.vehicle.length_mm,
-                        self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm))
+                        self.params.vehicle.width_mm, self.params.vehicle.rear_overhang_mm,
+                        footprint=footprint))
                     c = ignored_contacts["pared exterior"]
                     c["max_mm"] = round(max(c.get("max_mm", 0.0), pen), 1)
             if hit and collision_cause is None:

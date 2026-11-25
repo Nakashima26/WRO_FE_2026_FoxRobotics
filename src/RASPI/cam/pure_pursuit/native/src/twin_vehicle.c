@@ -6,11 +6,12 @@
  * 11..16: pwm0, brake lock speed, slide decel, brake decel, wheel tau, coast decel
  * 17..22: reverse curve enabled, reverse k/pwm0, forward k, max wheel, scrub
  * 23..29: coast/drive tau, reverse/forward acceleration, reverse slip enabled,
- *         reverse spin tau, reverse steering scale
+ *         reverse spin tau, right reverse steering scale
  * 30..34: wheelbase, lateral acceleration L/R, right/left table lengths
  * 35..: interleaved servo units / wheel degrees, right table then left table,
  *       followed by breakaway base/turn PWM, forward acceleration tau/limit,
- *       high PWM knee/gain, and the length and pairs of the PWM/speed table.
+ *       high PWM knee/gain, the length and pairs of the PWM/speed table,
+ *       and the left reverse steering scale.
  */
 static double (*volatile py_sin)(double)=sin;
 static double (*volatile py_cos)(double)=cos;
@@ -59,7 +60,7 @@ FOX_API void fox_twin_vehicle(double *s,const double *p){
   vel=s[3]+dv;s[3]=vel;
   if(spinning){s[6]+=(vt-s[6])*fmin(1.0,dt/p[28]);if(fabs(s[6])<fabs(vel))s[6]=vel;}else s[6]=vel;s[7]=0;
  }
- if(vel<0)wheel*=p[29];
+ if(vel<0)wheel*=wheel>=0?p[29]:motor_load[7+2*(int)motor_load[6]];
  double wh=wheel*(3.14159265358979323846/180.0);
  if(fabs(wh)>1e-9&&fabs(p[30])>1e-6){double yaw=vel/p[30]*tan(wh),alat=yaw>0?p[32]:p[31];
   if(alat&&fabs(vel)>1e-3&&fabs(yaw*vel)>alat)yaw=copysign(alat/fabs(vel),yaw);
