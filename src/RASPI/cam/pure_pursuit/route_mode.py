@@ -493,12 +493,8 @@ class RouteMode:
             for col, oth in (("Red", "Green"), ("Green", "Red")):
                 if votes.get(col, 0) >= min_v and votes.get(col, 0) >= votes.get(oth, 0) + 1:
                     return True
-        nfr = int(getattr(C, "ROUTE_L1_REACT_VISIBLE_FRAMES", 12))
-        max_mm = float(getattr(C, "ROUTE_L1_REACT_VISIBLE_MAX_MM", 750.0))
-        if seat_key in self.visible and self.view_count.get(seat_key, 0) >= nfr:
-            sx, sy = section_to_world(seat_key[0], *SEATS[seat_key[1]])
-            if math.hypot(sx - pose[0], sy - pose[1]) <= max_mm:
-                return True
+        # Solo color confirmado o provisional con votos; visible geométrico sin color
+        # libera corner_sign y rompe el lado de paso (p. ej. Red S/T2 en n8/s42).
         return False
 
     def _roi_yaw(self, pose) -> float:
