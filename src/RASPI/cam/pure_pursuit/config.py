@@ -1695,6 +1695,7 @@ ROUTE_UNSEEN_MAX_TC = 4
 DIGITAL_MAP_CONFIRM_VOTES = 3
 DIGITAL_MAP_CONFIRM_DIST_MM = 160.0
 DIGITAL_MAP_CONFIRM_LEAD = 2
+DIGITAL_MAP_RECHECK_COLOR = False  # exigir evidencia cercana y unívoca para rectificar un asiento
 # Arranque ciego (start_fix.py): el cajón puede estar en cualquier punto de la
 # recta de salida (pegado a la pared exterior). Se arranca suponiéndolo lo más
 # atrás posible y el avance se fija con los sonares (pared del fondo a ≤119 cm).
