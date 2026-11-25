@@ -4408,7 +4408,7 @@ float parkThCarril() {
   if (!parkDirecto) { e -= 180.0f; if (e < -180.0f) e += 360.0f; }   // tras la U va en sentido contrario y la pared queda al otro lado
   return (direccionIzquierda == parkDirecto) ? e : -e;
 }
-PARK_AJ bool PARK_GEOM_ANCLA_LOCAL = false;
+PARK_AJ bool PARK_GEOM_ANCLA_LOCAL = true;
 static float parkGeomAnclaX, parkGeomAnclaY, parkGeomAnclaTh, parkGeomAnclaW;
 static int parkGeomAnclaSec = -1;
 
