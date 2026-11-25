@@ -304,10 +304,17 @@ const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 
 // ya baja antes de las curvas; sin rv, el encoder). Y nunca más que RUTA_LOOK_R_K x radio mínimo de la ruta en los
 // próximos RUTA_LOOK_CURV_WIN_MM (solo muerde en curvas cerradas, no en el slalom suave). false = lookahead fijo.
 const bool  RUTA_LOOK_ADAPT        = true;   // 2026-11-25: activado para prueba en pista (sin gemelo)
-const float RUTA_LOOK_T_S          = 0.30f;   // s de anticipación a la velocidad planeada
-const float RUTA_LOOK_MAX_MM       = 450.0f;
+const float RUTA_LOOK_T_S          = 0.40f;   // s de anticipación a la velocidad planeada (0.30 en 263-265: rectas aún oscilan)
+const float RUTA_LOOK_MAX_MM       = 550.0f;   // 450 en 263-265
 const float RUTA_LOOK_R_K          = 1.2f;    // L <= k x R_min adelante
 const float RUTA_LOOK_CURV_WIN_MM  = 400.0f;
+// Amortiguamiento de giro (2026-11-25, orillas263-265: rumbo rebota ~0.75 s en rectas, roza pared al salir de la esquina).
+// Pure pursuit solo mira la posición: si el carro ya gira más de lo que pide la ruta, sigue metiendo volante hasta que el
+// error cambia de signo. Aquí: rueda -= K x (rueda equivalente al giro MEDIDO por el gyro - rueda que pide la curvatura de
+// la ruta entre el carro y el punto objetivo). En recta = frena el giro; en curva = solo la diferencia. 0 = apagado.
+const float RUTA_AMORT_K           = 0.40f;
+const float RUTA_AMORT_MAX_DEG     = 15.0f;   // tope de la corrección (° de rueda)
+const float RUTA_AMORT_V_MIN       = 300.0f;  // mm/s: abajo de esto no (giro/v se dispara)
 float rutaLookMm = 0.0f;                      // último lookahead usado (diagnóstico)
 const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
@@ -4954,6 +4961,30 @@ bool rutaSteer(float &ruedaDeg) {
   float ld2 = fwd * fwd + right * right;
   if (ld2 < 1.0f) ld2 = 1.0f;
   ruedaDeg = atanf(RUTA_BATALLA_MM * 2.0f * right / ld2) * RAD_TO_DEG;
+  if (RUTA_AMORT_K > 0.0f) {
+    // Giro medido (rumbo del tapete = rutaTh - anguloTotal: + = derecha), filtrado ~50 ms.
+    static unsigned long amMs = 0;
+    static float amYaw = 0.0f, amW = 0.0f;
+    unsigned long nowMs = millis();
+    float dtS = (nowMs - amMs) / 1000.0f;
+    if (amMs != 0 && dtS > 0.002f && dtS < 0.2f) {
+      float w = -(anguloTotal - amYaw) / dtS;                 // °/s, + = derecha
+      amW += (w - amW) * (1.0f - expf(-dtS / 0.05f));
+    } else if (amMs == 0 || dtS >= 0.2f) {
+      amW = 0.0f;
+    }
+    amMs = nowMs; amYaw = anguloTotal;
+    float v = fabsf(encVelMmS);
+    if (v > RUTA_AMORT_V_MIN && estado != INICIO && estado != ESTACIONANDO) {
+      int a = rutaI, b = (rutaI + 1) % rutaN, c = (j + rutaN - 1) % rutaN;
+      float h1 = atan2f(rutaX[b] - rutaX[a], rutaY[b] - rutaY[a]);
+      float h2 = atan2f(rutaX[j] - rutaX[c], rutaY[j] - rutaY[c]);
+      float kRuta = remainderf(h2 - h1, 2.0f * PI) / max(lookMm, rutaPaso);   // 1/mm, + = derecha
+      float ruedaRuta = atanf(RUTA_BATALLA_MM * kRuta) * RAD_TO_DEG;
+      float ruedaReal = atanf(RUTA_BATALLA_MM * (amW * DEG_TO_RAD) / v) * RAD_TO_DEG;
+      ruedaDeg -= constrain(RUTA_AMORT_K * (ruedaReal - ruedaRuta), -RUTA_AMORT_MAX_DEG, RUTA_AMORT_MAX_DEG);
+    }
+  }
   rutaSubWheelDeg = constrain(ruedaDeg, -RUEDA_TOPE_DEG, RUEDA_TOPE_DEG);
   return true;
 }
