@@ -293,6 +293,11 @@ float rutaPgf       = NAN;   // pgf= : along (mm) de senal ocupada en la salida 
 const bool RUTA_SALIDA_ANCLA_PARED = true;  // ToF lateral corrige el seguimiento hacia la primera pared
 const float RUTA_LOOKAHEAD_MM   = 200.0f;
 const float RUTA_LOOKAHEAD_L1_MM = 0.0f;   // opt-in: seguir la curva de vuelta 1 más cerca, sin tocar INICIO ni parking
+// 2026-11-25 (orillas240-261): con lookahead fijo el volante cambia de lado ~15 veces por 100 ACK y el rumbo oscila
+// ±20° (~0.9 s) en rectas rápidas (261 recta E). Opt-in: lookahead >= RUTA_LOOKAHEAD_V_S x velocidad del encoder,
+// con tope RUTA_LOOKAHEAD_V_MAX_MM. 0 = apagado (lookahead fijo como antes). Para probar en el gemelo (Jesse).
+const float RUTA_LOOKAHEAD_V_S      = 0.0f;   // s (típ. 0.25-0.35)
+const float RUTA_LOOKAHEAD_V_MAX_MM = 450.0f;
 const float RUTA_LOOKAHEAD_L23_MM = 0.0f;   // >0: lookahead propio en vueltas 2-3 (tc 4..11); 0 = RUTA_LOOKAHEAD_MM
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
 // RUTA_SUB_CTE_MM y sigue creciendo -> tope de PWM RUTA_SUB_PWM hasta que deja de crecer. 0 = apagado.
@@ -4908,6 +4913,8 @@ bool rutaSteer(float &ruedaDeg) {
   if (RUTA_SUB_CTE_MM > 0.0f) rutaSubvirajeActualiza(x0, y0);
   float lookMm = (RUTA_LOOKAHEAD_L23_MM > 0.0f && turnsCompleted >= 4 && turnsCompleted < TURNS_PER_RACE) ? RUTA_LOOKAHEAD_L23_MM : RUTA_LOOKAHEAD_MM;
   if (RUTA_LOOKAHEAD_L1_MM > 0.0f && turnsCompleted < 4 && estado != INICIO) lookMm = RUTA_LOOKAHEAD_L1_MM;
+  if (RUTA_LOOKAHEAD_V_S > 0.0f && estado != INICIO)
+    lookMm = max(lookMm, min(RUTA_LOOKAHEAD_V_MAX_MM, RUTA_LOOKAHEAD_V_S * fabsf(encVelMmS)));
   int j = (rutaI + (int)(lookMm / rutaPaso + 0.5f)) % rutaN;
   float dx = rutaX[j] - x, dy = rutaY[j] - y;
   float fwd = dx * sh + dy * ch;
