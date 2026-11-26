@@ -497,6 +497,9 @@ class Sim:
         cam_jit_tau = float(os.environ.get("TWIN_CAM_JITTER_TAU_S", self.params.camera.jitter_tau_s))
         cam_jit = np.zeros(2)
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
+        if os.environ.get("FOX_LAYOUT"):  # señales de una corrida real: "W/T2G S/T3R ..." (cajón en W, CCW)
+            from ..wro_field import layout_field
+            field = layout_field(os.environ["FOX_LAYOUT"], start=self.start, park_w=float(os.environ.get("FOX_LAYOUT_PARKW", 1000)))
         try:
             if self.surprise is not None:
                 from ..wro_field import with_surprise

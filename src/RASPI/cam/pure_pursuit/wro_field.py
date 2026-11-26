@@ -516,3 +516,22 @@ def with_surprise(field: Field, index: int, height_mm: int) -> Field:
     signs[index] = replace(sign, color="Green" if sign.color == "Red" else "Red",
                            original_color=sign.color, height_mm=float(height_mm))
     return replace(field, signs=signs)
+
+
+def layout_field(spec: str, start: str = "cajon", park_w: float = PARK_W_MIN, parking: str = "W", direction: str = "CCW", seed: int = 0) -> Field:
+    """Campo con las señales de una corrida real. spec = "W/T2G S/T3R ..." (sección/asiento+color)."""
+    signs = []
+    for tok in spec.replace(",", " ").split():
+        tok, *off = tok.split(":")  # "E/T3R:dh:dw" mueve la señal dh mm hacia el interior, dw en w
+        sec, rest = tok.split("/")
+        seat, color = rest[:-1], {"G": _G, "R": _R}[rest[-1]]
+        h, w = SEATS[seat]
+        if off:
+            h, w = h + float(off[0]), w + float(off[1])
+        x, y = section_to_world(sec, h, w)
+        signs.append(Sign(x, y, color, sec, seat))
+    sx, sy = stall_start_xy(parking, direction, park_w) if start == "cajon" else _start_of(parking)
+    return Field(seed=seed, direction=direction, single_section=parking, parking_section=parking, cards={},
+                 signs=signs, barriers=_barrier_corners(parking, park_w), start_x=sx, start_y=sy,
+                 start_heading=_heading(parking, direction), start_mode="cajon" if start == "cajon" else "centro",
+                 parking_w=park_w)
