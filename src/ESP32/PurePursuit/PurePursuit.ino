@@ -2215,6 +2215,14 @@ const int   WALL_PANIC_CM   = 18;
 // 4/8/12) — ver el bloque de wallPanic. Ponlo igual a WALL_PANIC_CM para
 // desactivar la guardia sin borrar nada.
 const int   WALL_PANIC_EXT_CM = 30;
+// Recta del cajón al final (giro 12), solo pared exterior: empujón suave para
+// llegar derecho al escaneo (~28 cm). orillas300/310/312: sale del giro a 14 cm,
+// el panic a 30 entraba topado de golpe y peleaba con el pegado de la ruta ->
+// S de +-40 grados -> aborto chueco. Umbral bajo el objetivo, ganancia baja,
+// sube en rampa y afloja a la mitad si ya se aleja.
+const int   WALL_PANIC_FINAL_CM       = 22;
+const float WALL_PANIC_FINAL_GAIN     = 1.0f;
+const float WALL_PANIC_FINAL_RAMPA_DS = 60.0f;   // grados de servo por segundo al subir
 const float WALL_PANIC_GAIN = 2.4f;
 const int   WALL_PANIC_DEB  = 2;
 int contadorPanicL = 0, contadorPanicR = 0;
@@ -5606,8 +5614,12 @@ void controlPID(long distL, long distR) {
     // propósito: ahí el carro acaba de salir del cajón y estar cerca es normal.
     bool rectaCajon = (turnsCompleted == 4 || turnsCompleted == 8 || turnsCompleted == 12);
     bool extEsIzq   = !direccionIzquierda;   // giro a la DER => exterior a la IZQ
-    int panicL = (rectaCajon &&  extEsIzq) ? WALL_PANIC_EXT_CM : WALL_PANIC_CM;
-    int panicR = (rectaCajon && !extEsIzq) ? WALL_PANIC_EXT_CM : WALL_PANIC_CM;
+    bool finalExt   = (turnsCompleted == 12);
+    int panicExt    = finalExt ? WALL_PANIC_FINAL_CM : WALL_PANIC_EXT_CM;
+    int panicL = (rectaCajon &&  extEsIzq) ? panicExt : WALL_PANIC_CM;
+    int panicR = (rectaCajon && !extEsIzq) ? panicExt : WALL_PANIC_CM;
+    float gainL = (finalExt &&  extEsIzq) ? WALL_PANIC_FINAL_GAIN : WALL_PANIC_GAIN;
+    float gainR = (finalExt && !extEsIzq) ? WALL_PANIC_FINAL_GAIN : WALL_PANIC_GAIN;
     contadorPanicL = (distL > 0 && distL < panicL) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
     contadorPanicR = (distR > 0 && distR < panicR) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
     // No dejes que wallPanic pelee contra un esquive ACTIVO de la Pi: el lateral
@@ -5618,9 +5630,27 @@ void controlPID(long distL, long distR) {
     bool piEsquivando = piPriority || piMemoryFrames > 0;
     bool dodgeIzq = piEsquivando && obsBiasNorm < -0.15f;   // Pi vira izquierda (p.ej. verde)
     bool dodgeDer = piEsquivando && obsBiasNorm >  0.15f;   // Pi vira derecha  (p.ej. rojo)
-    if (contadorPanicR >= WALL_PANIC_DEB && !dodgeDer) wallPanic += (panicR - distR) * WALL_PANIC_GAIN;  // cerca DER -> izq
-    if (contadorPanicL >= WALL_PANIC_DEB && !dodgeIzq) wallPanic -= (panicL - distL) * WALL_PANIC_GAIN;  // cerca IZQ -> der
+    if (contadorPanicR >= WALL_PANIC_DEB && !dodgeDer) wallPanic += (panicR - distR) * gainR;  // cerca DER -> izq
+    if (contadorPanicL >= WALL_PANIC_DEB && !dodgeIzq) wallPanic -= (panicL - distL) * gainL;  // cerca IZQ -> der
     wallPanic = constrain(wallPanic, -30.0f, 30.0f);
+    static float panicFinalPrev = 0.0f;
+    static int   distExtPrev = 0;
+    static bool  extAlejando = false;
+    if (finalExt) {
+      int distExt = extEsIzq ? distL : distR;
+      if (distExt > 0 && distExtPrev > 0) {
+        if (distExt >= distExtPrev + 1) extAlejando = true;
+        else if (distExt <= distExtPrev - 1) extAlejando = false;
+      }
+      if (distExt > 0) distExtPrev = distExt;
+      if (extAlejando) wallPanic *= 0.5f;
+      float paso = WALL_PANIC_FINAL_RAMPA_DS * dt;
+      if (fabsf(wallPanic) > fabsf(panicFinalPrev))   // solo la subida va en rampa; soltar es inmediato
+        wallPanic = panicFinalPrev + constrain(wallPanic - panicFinalPrev, -paso, paso);
+      panicFinalPrev = wallPanic;
+    } else {
+      panicFinalPrev = 0.0f; distExtPrev = 0; extAlejando = false;
+    }
   }
 
   // ── Decisión según modo ───────────────────────────────────────────────────
