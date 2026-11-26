@@ -162,6 +162,7 @@
  "ROUTE_FIX_PIX_BLIND_MAX_HEADING_ALIGNED_DEG": 48,
  "ROUTE_FIX_PIX_BLIND_ALIGNED_MAX_D_MM": 150,
  "ROUTE_FIX_FORCE_MAX_NO_LINE_MM": 120,
+ "VISION_GREEN_V_MIN_MED": 60,
  "_fuente": "carrera_bench.json",
  "_preset": "ruta_perfil"
 }
