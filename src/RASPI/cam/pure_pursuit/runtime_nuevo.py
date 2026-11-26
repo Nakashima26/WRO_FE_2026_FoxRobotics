@@ -2428,7 +2428,8 @@ class PPRuntime:
             serial_msg += f",isal={self.salida.side}"
         if (self.salida.near or self.salida.side) and self._esp_inicio:
             serial_msg += ",isen=1"
-        serial_msg += _route_suffix
+        if _route_steer is not None:
+            serial_msg += _route_suffix
         if armed:
             # Subida de la ruta al ESP: una línea por frame (el UART a 115200
             # no da para más junto con el V2).
