@@ -7780,6 +7780,18 @@ void loop() {
         }
         // Poste confirmado: PARK_CAIDA_N lecturas bajas (mismo criterio para los dos postes).
         bool posteConfirmado = (parkCaidaCnt >= PARK_CAIDA_N);
+        {   // log del escaneo cada 100 ms (va al _tele.jsonl): por que una madera vista no cuenta
+          static unsigned long parkDbgMs = 0;
+          if (millis() - parkDbgMs >= 100UL) {
+            parkDbgMs = millis();
+            logPi.print("PARK scan sub="); logPi.print(parkScanSubFase); logPi.print(" ext="); logPi.print(extRaw);
+            logPi.print(" base="); logPi.print(parkBase, 1); logPi.print(" n="); logPi.print(parkBaseN);
+            logPi.print(" caida="); logPi.print(parkCaidaCnt); logPi.print(" alta="); logPi.print(lecturaAlta ? 1 : 0);
+            logPi.print(" sint="); logPi.print(posteSintetico ? 1 : 0); logPi.print(" ang="); logPi.print(anguloGyro, 1);
+            logPi.print(" along="); logPi.print(alongSalidaMm(), 0); logPi.print(" pka="); logPi.print(rutaPka, 0);
+            logPi.print(" tEn="); logPi.println(tEn);
+          }
+        }
         if (bajada && posteConfirmado && parkScanSubFase < 2) parkOdomLastBajada = odomMm;
 
         {
