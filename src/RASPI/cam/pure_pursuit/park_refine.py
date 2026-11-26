@@ -21,7 +21,7 @@ class ParkingEstimate(NamedTuple):
     final_echo: bool
 
 
-class ParkRefine:
+class ParkRefineCorroborated:
     def __init__(self, section, direction, prior):
         self.section = section
         self.direction = direction
@@ -116,7 +116,7 @@ class ParkRefine:
         return ParkingEstimate(round(w), round(far), len(votes), final_echo)
 
 
-class ParkRefinePrior:
+class ParkRefine:
     """Conservative correction of the start-fix prior during the race."""
 
     def __init__(self, section, direction, prior):
