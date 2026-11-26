@@ -1,5 +1,6 @@
 {
   "pi": {
+    "VISION_GREEN_V_MIN_MED": 60,
     "ROUTE_PARK_OBS_PRIOR": true,
     "ROUTE_L1_COALESCE_UPLOAD": true,
     "DIGITAL_MAP_RECHECK_COLOR": true,
