@@ -79,6 +79,56 @@ def init(self):
     _init(self); _LAST["dm"] = self
 DM.DigitalMap.__init__ = init
 import os
+if os.environ.get("TWIN_MAP_TRACE") == "1":
+    from pure_pursuit.twin.camera import CameraModel
+
+    _render = CameraModel.render_camera
+    _vote = DM.DigitalMap._vote
+    capture = None
+    deferred_captures = {}
+
+    def render(self, field, x, y, heading):
+        global capture
+        capture = (field, x, y, heading)
+        return _render(self, field, x, y, heading)
+
+    def traced_vote(self, feet):
+        if not feet or capture is None:
+            return _vote(self, feet)
+        if self._deferred is not None:
+            deferred_captures[id(feet[0])] = capture
+            return _vote(self, feet)
+        field, x, y, heading = deferred_captures.pop(id(feet[0]), capture)
+        before = dict(self.confirmed)
+
+        def observe(bx, by, color, sec, sid):
+            # Inferir el origen por rumbo de cámara, independiente de la
+            # pose estimada del mapa y menos sensible al error de rango.
+            [(wx, wy, *_)] = DM.feet_world([(bx, by, color)], (x, y), heading)
+            bearing = math.atan2(wx - x, wy - y)
+            candidates = sorted(
+                (abs(math.remainder(bearing - math.atan2(s.x - x, s.y - y), math.tau)),
+                 s.section, s.seat)
+                for s in field.signs if s.driving_color == color
+            )
+            source = None
+            if candidates and candidates[0][0] <= math.radians(4):
+                if len(candidates) == 1 or candidates[1][0] - candidates[0][0] > math.radians(2):
+                    source = "/".join(candidates[0][1:])
+            print(f"[MAPVOTE] tc={self._tc} source={source} seat={sec}/{sid} color={color}")
+
+        self._vote_observer = observe
+        try:
+            _vote(self, feet)
+        finally:
+            self._vote_observer = None
+        for (sec, sid), color in self.confirmed.items():
+            if before.get((sec, sid)) != color:
+                print(f"[MAPCONF] tc={self._tc} pose=({x:.1f},{y:.1f}) seat={sec}/{sid} color={color}")
+
+    CameraModel.render_camera = render
+    DM.DigitalMap._vote = traced_vote
+
 if os.environ.get("NO_OUTSIDE_RELEASE"):
     def _bt_nr(self):
         ahead = self._green_ahead()

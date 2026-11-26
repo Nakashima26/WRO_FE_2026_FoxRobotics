@@ -1713,6 +1713,11 @@ ROUTE_PROVISIONAL_VOTES = 2
 ROUTE_UNSEEN_MAX_TC = 4
 # DigitalMap: confirma un asiento con >= VOTES votos de un color, la detección más cercana a <= DIST_MM
 # del asiento y LEAD votos más que el otro color.
+# Evidencia reciente por asiento. Las vistas lejanas solo proponen.
+DIGITAL_MAP_RANGE_VOTES = False
+DIGITAL_MAP_RANGE_NEAR_MM = 1000.0
+# Evita reasignar una detección entre rectas o acumular votos de otro asiento.
+DIGITAL_MAP_SECTION_ASSOC = False
 DIGITAL_MAP_CONFIRM_VOTES = 3
 DIGITAL_MAP_CONFIRM_DIST_MM = 160.0
 DIGITAL_MAP_CONFIRM_LEAD = 2
