@@ -1936,6 +1936,7 @@ PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: cort
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+PARK_AJ float        PARK_PL_COAST_VMIN          = 90.0f;    // mm/s: piso del tope de velocidad del tramo adelante del zigzag (v_max = (holgura-M)/LAG); abajo de esto se corta
 PARK_AJ float        PARK_PL_FRENTE_LIBRE_CM     = 5.0f;   // zigzag adelante: con mas holgura frontal no corte HOLGURA/cierre huella
 PARK_AJ bool         PARK_PL_ZZ_ANCLA             = false;  // reancla lateral en zigzag; sin probar en el gemelo (apagado igual que el SIL)
 // Centrado final (2026-11-23, 3265): la reversa del zigzag corta en el ToF trasero (~3 cm) y el avance antes,
@@ -8793,6 +8794,10 @@ void loop() {
           }
           pwm = min(pwm + extra, 255);
         }
+        if (PARK_PL_ZZ && parkPlanDir > 0 && parkPlanI >= 2 && parkPlanClrPrev < 1e8f) {   // tope de velocidad: la inercia (v*LAG) cabe en la holgura que queda
+          const float vcap = max(PARK_PL_COAST_VMIN, (parkPlanClrPrev - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S);
+          while (pwm > LAZO_PWM0_FWD + 2 && vMando((float)pwm, 1) > vcap) pwm--;
+        }
         parkArranquePwm = PARK_PL_ARRANQUE_PWM;
         {
           int s = parkPlanRectaOn ? centroServo : parkPlanSrv;
@@ -8887,10 +8892,11 @@ void loop() {
         // 34/48 sin este corte vs 44/48).
         if (!fin && i >= 1 && cerca && (!zz || cercaTof || parkPlanDir > 0)) { fin = true; why = "HOLGURA"; }
         if (!fin && zz && parkPlanDir > 0 && encVelMmS > 0.0f && clr > PARK_PL_M_MM) {
-          // Al cortar potencia, la nariz todavía barre un arco hacia la madera.
+          // Al cortar potencia, la nariz todavía barre un arco hacia la madera. El tramo ya va topado a vcap
+          // (ver pwm del plan): solo se corta si ni a esa velocidad cabe la inercia.
           const float yaw = th * DEG_TO_RAD;
           const float radius = parkPlanSgn * PARK_PL_RI;
-          const float coast = encVelMmS * PARK_PL_FRENTE_LAG_S;
+          const float coast = min(encVelMmS, max(PARK_PL_COAST_VMIN, (clr - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S)) * PARK_PL_FRENTE_LAG_S;
           const float finYaw = yaw - coast / radius;
           const float finW = pw + radius * (sinf(yaw) - sinf(finYaw));
           const float finH = ph + radius * (cosf(finYaw) - cosf(yaw));
