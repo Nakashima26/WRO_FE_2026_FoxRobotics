@@ -183,7 +183,10 @@ class DigitalMap:
         self.in_stall = True
         self._od: float | None = None
         self._tc = 0
-        self._votes: dict[tuple[str, str], dict[str, int]] = {}
+        self._votes: dict[tuple[str, str], dict[str, float]] = {}
+        self._vote_frame = 0
+        self._close_views: dict[tuple[str, str, str], set[int]] = {}
+        self._vote_observer = None  # diagnóstico del banco, opcional
         self._row_obs: dict[tuple[str, str, str], list[float]] = {}
         # (recta, color) -> [(along, lateral)] de cada detección: col_candidates (columna medio vista).
         self._col_obs: dict[tuple[str, str], list[tuple[float, float]]] = {}
@@ -498,11 +501,14 @@ class DigitalMap:
         if getattr(C, "DIGITAL_MAP_SEED_CONFIRMED", False):
             return
         self._live = []
-        if not feet:
-            return
-        if self._deferred is not None:
+        if self._deferred is not None and (feet or C.DIGITAL_MAP_RANGE_VOTES):
             self._deferred.append((list(feet), self.pose_xy, self._view_heading, self._orange_y,
                                    self.section, self._tc, self.in_stall))
+            return
+        range_votes = C.DIGITAL_MAP_RANGE_VOTES
+        if range_votes:
+            self._vote_frame += 1
+        if not feet:
             return
         px, py = self.pose_xy
         h = math.radians(self._view_heading)
@@ -556,6 +562,13 @@ class DigitalMap:
             ]
             if not near:
                 continue
+            if C.DIGITAL_MAP_SECTION_ASSOC:
+                # La carta puede vetar un asiento, pero no convertir la
+                # detección en una señal del mismo color en otra recta.
+                raw_dist, raw_sec, *_ = ranked[0]
+                near = [c for c in near if c[1] == raw_sec]
+                if raw_dist > 320.0 or not near:
+                    continue
             dist, sec, sid, fr, sr, fa, sa = near[0]
             if len(near) > 1 and near[1][0] - dist < 80.0:
                 a, b = near[0], near[1]
@@ -580,7 +593,7 @@ class DigitalMap:
             cobs = self._col_obs.setdefault((sec, color), [])
             cobs.append((fa, fr))
             del cobs[:-200]
-            stuck =self._stick_seat(sec, sid, color, wx, wy)
+            stuck = sid if (range_votes or C.DIGITAL_MAP_SECTION_ASSOC) else self._stick_seat(sec, sid, color, wx, wy)
             if stuck != sid:
                 sid = stuck
                 sx, sy = self._seat_xy(sec, sid)
@@ -591,8 +604,11 @@ class DigitalMap:
                 side = sr + 200.0 if color == "Red" else sr - 200.0
                 side = max(-260.0, min(260.0, side))
                 self._live.append((sec, sa, side))
-            self._pull_known(wx, wy, color)
+            close = not weak and ray <= C.DIGITAL_MAP_RANGE_NEAR_MM
             key = (sec, sid)
+            if ((not range_votes or close)
+                    and (not C.DIGITAL_MAP_SECTION_ASSOC or sec == self.section)):
+                self._pull_known(wx, wy, color)
             incumbent = self.confirmed.get(key)
             if protect_color and incumbent is not None and incumbent != color:
                 # La cinta, las cartas y el pegado por color pueden ocultar
@@ -608,15 +624,29 @@ class DigitalMap:
                        for sc in sections for seat, x, y in _seat_world(sc)):
                     continue
                 rechecked.add(key)
-            if not weak:
-                self._best[key] = min(self._best.get(key, 9999.0), dist)
             bucket = self._votes.setdefault(key, {"Red": 0, "Green": 0})
-            bucket[color] += 1
+            if self._vote_observer is not None:
+                self._vote_observer(bx, by, color, sec, sid)
             other = "Red" if color == "Green" else "Green"
-            if (not weak and bucket[color] >= int(getattr(C, "DIGITAL_MAP_CONFIRM_VOTES", 3))
-                    and self._best[key] <= float(getattr(C, "DIGITAL_MAP_CONFIRM_DIST_MM", 160.0))
-                    and bucket[color] >= bucket[other] + int(getattr(C, "DIGITAL_MAP_CONFIRM_LEAD", 2))
+            votes_required = C.DIGITAL_MAP_CONFIRM_VOTES
+            lead = C.DIGITAL_MAP_CONFIRM_LEAD
+            if range_votes:
+                # Dos detecciones de un asiento en el mismo cuadro aportan
+                # una sola vista. Lejos, los votos acumulados solo orientan el plan.
+                weight = min(1.0, C.DIGITAL_MAP_RANGE_NEAR_MM / ray) if ray else 1.0
+                bucket[color] += weight
+                votes, rival_votes = self._recent_close_votes(key, color, other, close, dist)
+                eligible = close and dist <= C.DIGITAL_MAP_CONFIRM_DIST_MM
+            else:
+                if not weak:
+                    self._best[key] = min(self._best.get(key, 9999.0), dist)
+                bucket[color] += 1
+                votes, rival_votes = bucket[color], bucket[other]
+                eligible = not weak and self._best[key] <= C.DIGITAL_MAP_CONFIRM_DIST_MM
+            if (eligible and votes >= votes_required and votes >= rival_votes + lead
                     and self._seat_ok(sec, sid, color, wx, wy)):
+                if range_votes:
+                    self._best[key] = dist
                 self._keep_closer_row(sec, sid, color)
         for sec, sa, side in self._live:
             if side >= -40.0:
@@ -626,6 +656,16 @@ class DigitalMap:
                 self._latched[sec] = (sa, side)
             elif side < prev[1]:
                 self._latched[sec] = (prev[0], side)
+
+    def _recent_close_votes(self, key, color, other, close, dist):
+        counts = []
+        for candidate in (color, other):
+            views = self._close_views.setdefault((*key, candidate), set())
+            views.intersection_update(range(self._vote_frame - 4, self._vote_frame + 1))
+            if candidate == color and close and dist <= C.DIGITAL_MAP_CONFIRM_DIST_MM:
+                views.add(self._vote_frame)
+            counts.append(len(views))
+        return counts
 
     def row_candidates(self, sec: str, sid: str, color: str, tol_mm: float) -> list[str]:
         """Asientos de la columna de sid cuya fila queda a <= tol_mm de la mediana lateral observada
