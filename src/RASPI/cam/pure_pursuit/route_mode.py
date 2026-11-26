@@ -506,7 +506,11 @@ class RouteMode:
             if hidden:
                 continue
             self.visible.add(key)
-            n = self.view_count.get(key, 0) + 1
+            # Frame lejano pesa menos (s42: S/T2 a 800 mm y 50° llenó los 16 frames antes de poder votarse)
+            full = getattr(C, "ROUTE_VIEW_FULL_MM", None)
+            dd = math.hypot(fwd, lat)
+            w = 1.0 if (full is None or dd <= float(full)) else (float(full) / dd) ** 2
+            n = self.view_count.get(key, 0) + w
             self.view_count[key] = n
             if n >= int(getattr(C, "ROUTE_EMPTY_FRAMES", 16)):
                 self.empty.add(key)

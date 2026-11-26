@@ -1380,6 +1380,8 @@ ROUTE_VIEW_MAX_MM = 550.0
 # Vacío solo con el asiento a la vista de verdad (idea Carltron): la isla tapa y girando rápido no cuenta (grados/frame; None = siempre)
 ROUTE_VIEW_ISLAND = False
 ROUTE_VIEW_YAW_MAX_DEG = None
+# Un frame de vacío a más de esta distancia pesa (FULL/d)^2 en la cuenta ROUTE_EMPTY_FRAMES (None = todos pesan 1)
+ROUTE_VIEW_FULL_MM = None
 # Planificador (ring_route.RouteParams): premio por estación que ve un asiento sin ver y castigo por pasar lejos de él
 ROUTE_W_VISIBLE = 60.0
 ROUTE_W_UNKNOWN_NEAR = 1.5
