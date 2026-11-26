@@ -312,6 +312,7 @@ class PPRuntime:
         # Visión
         self.vision     = vision if vision is not None else Vision(cfg.cam_index)
         self.vision.use_lut = bool(getattr(C, "VISION_LUT", True))
+        self.vision.GREEN_V_MIN_MED = float(getattr(C, "VISION_GREEN_V_MIN_MED", 0))
         self.vision.min_contour_area = (C.SURPRISE_MIN_CONTOUR_AREA if C.SURPRISE_RULE else 1000.0)
         self.surprise = SurpriseInterpreter() if C.SURPRISE_RULE else None
         self.bev        = bev if bev is not None else BEVTransformer(cfg.calib_path)

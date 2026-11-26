@@ -1024,6 +1024,12 @@ CAM_CENTER_X         = 320     # centro horizontal del frame de cámara (640/2)
 # ~7 % menos en el Mac. False vuelve a cv2.inRange (si en la Pi resulta más lenta).
 VISION_LUT = True
 
+# r276 (orillas276): con la cámara tapada por la señal (imagen casi negra, V~20-35) el ruido de
+# cuantización se clasificaba Green (H~30, S>70, V~28) y creaba conos verdes c=1.0 sobre el rojo.
+# Un blob Green con V mediana < este valor se descarta. 0 = apagado (comportamiento anterior).
+# El cono verde real tiene V>=100; sombra fuerte ~60.
+VISION_GREEN_V_MIN_MED = 0
+
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora
 

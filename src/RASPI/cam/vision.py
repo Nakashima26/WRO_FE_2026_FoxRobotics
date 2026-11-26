@@ -353,6 +353,10 @@ class Vision:
     # 0 conos reales perdidos en las 6 runs; en 1005/1064/1150 casi no rechaza.
     RED_GR_MAX = 0.60 if PI5_CAMARA else 0.28   # Pi 5: ver COLOR_RANGES (2026-11-04)
     GREEN_S_MIN_MED = 70
+    # r276: cámara tapada por una señal pegada al lente (imagen casi negra): el ruido de
+    # cuantización a V~28 sale H~30 S>70 y pasa por Green. 0 = apagado; el runtime lo pone
+    # desde config.VISION_GREEN_V_MIN_MED.
+    GREEN_V_MIN_MED = 0
 
     def process_color(self, frame, mask, color_name, bgr=None, hsv=None):
         """Encuentra contornos y devuelve posiciones.
@@ -416,6 +420,9 @@ class Vision:
             if color_name == "Green" and hsv is not None:
                 if sel_m.any() and float(np.median(hsv[y:y + h, x:x + w, 1][sel_m])) < self.GREEN_S_MIN_MED:
                     continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
+                if (self.GREEN_V_MIN_MED and sel_m.any()
+                        and float(np.median(hsv[y:y + h, x:x + w, 2][sel_m])) < self.GREEN_V_MIN_MED):
+                    continue   # imagen oscura / lente tapado (ver GREEN_V_MIN_MED)
 
             # En modo sorpresa se admiten blobs pequeños solo si su altura
             # física es compatible con el bloque bajo. Los normales conservan
