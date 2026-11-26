@@ -14,7 +14,8 @@ from .wro_field import (
 
 
 class ParkVision:
-    def __init__(self):
+    def __init__(self, match_mm=90):
+        self.match_mm = match_mm
         self.samples = (deque(maxlen=12), deque(maxlen=12))
         self.estimate = None
 
@@ -54,7 +55,7 @@ class ParkVision:
             depth = h + (fwd * math.sin(angle) + side * math.cos(angle)) * (1 if direction == "CW" else -1)
             ok = (fwd >= 160) & (fwd <= 720) & (depth >= 35) & (depth <= 190)
             for i, expected in enumerate((far_along - 2 * thickness - gap, far_along - thickness)):
-                selected = ok & (np.abs(wood_along - expected) <= 90)
+                selected = ok & (np.abs(wood_along - expected) <= self.match_mm)
                 x, y = depth[selected], wood_along[selected]
                 if len(x) < 9 or np.ptp(x) < 35:
                     continue

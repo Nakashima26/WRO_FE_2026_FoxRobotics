@@ -366,7 +366,7 @@ class RouteMode:
         self.axis = (0.0, 0.0)
         self.maneuver_loc = None     # pose del visor durante E/G
         self._park_refine = None
-        self._park_vision = ParkVision() if C.ROUTE_PARK_VISION_REF else None
+        self._park_vision = ParkVision(match_mm=135 if C.ROUTE_PARK_OBS_PRIOR else 90) if (C.ROUTE_PARK_VISION_REF or C.ROUTE_PARK_OBS_PRIOR) else None
         self._park_landmark = ParkLandmark() if C.ROUTE_PARK_LANDMARK_REF else None
         self._park_landmark_delta = None
         self._park_observer = None
@@ -2523,7 +2523,11 @@ class RouteMode:
             s += f",pka={self.pka:.0f}"
             if C.ROUTE_PARK_OBS_PRIOR and self._park_observed is not None:
                 s += f",pko={self._park_observed.far_along:.0f}"
-            if self._park_vision is not None and self._park_vision.estimate is not None:
+            if (C.ROUTE_PARK_OBS_PRIOR and self._park_observed is None
+                    and getattr(self, "_tc_max", 0) >= 11
+                    and self._park_vision.estimate is not None):
+                s += f",pko={self._park_vision.estimate:.0f}"
+            if C.ROUTE_PARK_VISION_REF and self._park_vision.estimate is not None:
                 s += f",pkr={self._park_vision.estimate:.0f}"
             if self._park_landmark_delta is not None:
                 s += f",pkl={self._park_landmark_delta:.0f}"
