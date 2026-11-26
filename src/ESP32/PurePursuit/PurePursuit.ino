@@ -1795,6 +1795,7 @@ PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se dec
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
 PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 PARK_AJ float        PARK_SINU_ABORT_ANG        = 15.0f;  // DIRECTO fase0: |gyro| sobre esto → U (s20 derivaba a −22° antes de ventana vencida)
+const unsigned long  PARK_SINU_ABORT_MS         = 300;    // tanto tiempo seguido sobre PARK_SINU_ABORT_ANG antes de abortar a U
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
@@ -7818,9 +7819,14 @@ void loop() {
         // p1Reciente también tras la U (run 181: el poste 2 cayó 108 mm después de pka y abortó 2 mm antes de verlo).
         bool enVentanaPoste2 = !validaPoste2 || p1Reciente || fabsf(errorPoste2) <= ventanaPoste2;
           // DIRECTO chueco: abortar a U antes de gastar la ventana del poste (s20: ang−18@+0.15s, ventana@+1.7s).
-          if (PARK_SINU_FORZAR_U && parkDirecto && parkScanSubFase == 0
+          // orillas312: -15.0 en UNA muestra a 0.16 s de entrar (el carro aun se endereza de la esquina) mandaba a la U;
+          // ahora tiene que seguir chueco PARK_SINU_ABORT_MS seguidos (s20 deriva y sigue chueco: sigue abortando).
+          static unsigned long parkChuecoMs = 0;
+          const bool chueco = PARK_SINU_FORZAR_U && parkDirecto && parkScanSubFase == 0
               && PARK_SINU_ABORT_ANG > 0.0f && parkSinULinea && fabsf(anguloGyro) > PARK_SINU_ABORT_ANG
-              && millis() - parkEntryMs > 150UL) {
+              && millis() - parkEntryMs > 150UL;
+          if (!chueco) parkChuecoMs = 0; else if (parkChuecoMs == 0) parkChuecoMs = millis();
+          if (chueco && millis() - parkChuecoMs >= PARK_SINU_ABORT_MS) {
             parkSinUDec = 2;
             parkDirecto = false;
             parkUturnPendiente = true;
