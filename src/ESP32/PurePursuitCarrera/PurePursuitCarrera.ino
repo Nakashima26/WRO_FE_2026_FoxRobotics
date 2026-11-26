@@ -1178,6 +1178,7 @@ const int           PARK_PWM                  = 105;  // 87 -> 105 2026-11-21 (t
 const float         PARK_BASE_ALPHA           = 0.2f;
 const int           PARK_BASE_N               = 8;
 const int           PARK_CAIDA_CM             = 10;
+const int           PARK_BASE_BAJA_MAX_CM     = 3;    // la base del escaneo no baja por lecturas mas abajo que esto (rampa de la madera)
 const bool          PARK_TOF_INVALIDO_POSTE   = true;   // fase 0: ToF exterior inválido (-1) = poste (ver ESTACIONANDO)
 // (PARK_CAIDA_MIN_CM=8 quitado 2026-09-15: descartaba el poste cuando el carro pasa
 //  pegado, orillas959 dio 7,5. La lectura se clasifica como ESTACIONANDO_PUNTA y usa
@@ -7748,7 +7749,9 @@ void loop() {
         } else {
           parkCaidaCnt    = 0;
           parkCaidaHuecos = 0;
-          if (lecturaValida) {
+          // orillas310: a 7 cm/s el flanco de la madera baja de 28 a 12 cm en rampa y la base lo seguia (caida nunca
+          // llegaba a 10): ya lista, la base solo sigue lecturas a <= PARK_BASE_BAJA_MAX_CM por debajo de ella.
+          if (lecturaValida && (!baseLista || extRaw >= (long)(parkBase - PARK_BASE_BAJA_MAX_CM))) {
             parkBase = (parkBaseN == 0)
                        ? (float)extRaw
                        : parkBase + PARK_BASE_ALPHA * ((float)extRaw - parkBase);
