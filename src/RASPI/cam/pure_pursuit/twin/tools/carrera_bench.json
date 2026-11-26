@@ -1,5 +1,6 @@
 {
   "pi": {
+    "ROUTE_L1_COALESCE_UPLOAD": true,
     "DIGITAL_MAP_RECHECK_COLOR": true,
     "PARK_FORCE_INICIO": true,
     "ROUTE_PARK_FRONT_REF": true,
