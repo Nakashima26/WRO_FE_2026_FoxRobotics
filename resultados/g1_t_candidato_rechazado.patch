@@ -1,0 +1,50 @@
+diff --git a/src/ESP32/PurePursuitCarrera/PurePursuitCarrera.ino b/src/ESP32/PurePursuitCarrera/PurePursuitCarrera.ino
+index a4669af..9380bbb 100644
+--- a/src/ESP32/PurePursuitCarrera/PurePursuitCarrera.ino
++++ b/src/ESP32/PurePursuitCarrera/PurePursuitCarrera.ino
+@@ -1815,7 +1815,7 @@ PARK_AJ float        PARK_REV_DF_CM              = 25.0f;   // el sonar frontal
+ PARK_AJ float        PARK_REV_H0                 = 400.0f;
+ PARK_AJ int          PARK_REV_AVANCE_PWM         = 110;
+ PARK_AJ int          PARK_PL_THLANE              = 1;       // 1 = theta del plan sale del rumbo del carril (tapete) en vez del rumbo de pared por sonar
+-PARK_AJ int          PARK_PL_ARC1_PWM           = 130;     // PWM del arco EXT del tramo 1 mientras th < 0.4*T1
++PARK_AJ int          PARK_PL_ARC1_PWM           = 150;     // PWM del arco EXT del tramo 1 mientras th < 0.4*T1
+ PARK_AJ int          PARK_PL_RECTA_PWM           = 130;     // PWM de la recta lejos del final
+ PARK_AJ float        PARK_PL_RECTA_FRENA_MM      = 60.0f;   // a esta distancia del final de la recta vuelve a PARK_PL_PWM_REV
+ PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reversa EXT hasta T1, luego RECTA a T1 hasta que el arco INT (radio RI) a T2 deje el eje a HEND (con 53 grados RI~85)
+@@ -1844,7 +1844,7 @@ PARK_AJ int          PARK_PL_ATASCO_PASO         = 20;
+ PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
+ PARK_AJ float        PARK_PL_CIEGO_MM            = 40.0f;   // zigzag adelante sin lectura del ToF frontal: tope del tramo (2026-11-23)
+ PARK_AJ int          PARK_PL_AVANCE_MS           = 900;     // tramo sin cambio de ángulo (BNO) ni encoder por esto -> se corta (2026-11-23)
+-PARK_AJ int          PARK_PL_PAUSA_MS            = 220;     // parado con el volante girando antes de cada tramo nuevo
++PARK_AJ int          PARK_PL_PAUSA_MS            = 100;     // parado con el volante girando antes de cada tramo nuevo
+ PARK_AJ float        PARK_PL_Z1_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
+ PARK_AJ float        PARK_PL_Z2_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
+ PARK_AJ float        PARK_PL_Z3_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
+@@ -2191,7 +2191,7 @@ const int MOTOR_MAX = 155;
+ // carga. Síntoma: una pausa corta al empezar la reversa y luego un jalón. Si lo
+ // ves, sube _MIN a 70 (y entonces _MS puede quedarse en 250).
+ const unsigned long MOTOR_REV_RAMPA_MS   = 300;  // 0 = apagar la rampa
+-const int           MOTOR_REV_RAMPA_MIN  = 55;   // PWM de arranque de la rampa
++const int           MOTOR_REV_RAMPA_MIN  = 70;   // PWM de arranque de la rampa
+ int           motorDirActual = 0;   // 0 = coast/parado, +1 adelante, -1 reversa
+ unsigned long motorDirMs     = 0;   // instante del último cambio de dirección
+ 
+diff --git a/src/RASPI/cam/pure_pursuit/twin/tools/carrera_bench.json b/src/RASPI/cam/pure_pursuit/twin/tools/carrera_bench.json
+index 651fae1..a36a3df 100644
+--- a/src/RASPI/cam/pure_pursuit/twin/tools/carrera_bench.json
++++ b/src/RASPI/cam/pure_pursuit/twin/tools/carrera_bench.json
+@@ -168,10 +168,12 @@
+     "INICIO_REINT_ECO": "40",
+     "RUTA_LOOKAHEAD_L23_MM": "340.0f",
+     "PARK_PL_W_DET_U": "155.0f",
+-    "PARK_PL_PAUSA_MS": "220",
++    "PARK_PL_PAUSA_MS": "100",
+     "PARK_PL_WF_U": "58.0f",
+     "PARK_U_B2_WIN_MM": "110.0f",
+     "PARK_D_B2_WIN_MM": "120.0f",
+-    "PARK_PL_WF_DIRECT_NEAR": "63.0f"
++    "PARK_PL_WF_DIRECT_NEAR": "63.0f",
++    "PARK_PL_ARC1_PWM": "150",
++    "MOTOR_REV_RAMPA_MIN": "70"
+   }
+ }
