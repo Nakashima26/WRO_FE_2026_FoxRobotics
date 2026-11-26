@@ -509,6 +509,12 @@ class Sim:
             for key, value in saved_cfg.items():
                 setattr(C, key, value)
             raise
+        jit = float(os.environ.get("TWIN_SIGN_JITTER_MM", 0) or 0)
+        if jit > 0:   # señales fuera de su asiento oficial (real orillas276/280); mismo sorteo para base y candidato
+            from dataclasses import replace
+            jr = np.random.default_rng([self.seed, 11])
+            field = replace(field, signs=[replace(s, x=s.x + float(jr.uniform(-jit, jit)), y=s.y + float(jr.uniform(-jit, jit)))
+                                          for s in field.signs])
         if self.ruta_seed:
             field.start_x, field.start_y, field.start_heading = self.ruta_seed["true"]
         seed_rec = {} if self.log_dir and not self.ruta_seed and getattr(C, "ROUTE_FOLLOW", False) else None

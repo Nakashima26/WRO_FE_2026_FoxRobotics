@@ -1721,6 +1721,13 @@ ROUTE_UNSEEN_MAX_TC = 4
 DIGITAL_MAP_CONFIRM_VOTES = 3
 DIGITAL_MAP_CONFIRM_DIST_MM = 160.0
 DIGITAL_MAP_CONFIRM_LEAD = 2
+# Lata que se ve repetida y ningún asiento explica (bloque movido, pose corrida >160 mm, la carta la descarta): se pasa al
+# planificador como obstáculo suelto (ring_route extra) con su regla de lado por color (orillas276/280).
+DIGITAL_MAP_LOOSE = False
+DIGITAL_MAP_LOOSE_VOTES = 3          # votos mínimos del grupo
+DIGITAL_MAP_LOOSE_GAP_MM = 250.0     # radio del grupo
+DIGITAL_MAP_LOOSE_MAX_RAY_MM = 1000.0   # solo detecciones cercanas (el error de rango crece con la distancia)
+DIGITAL_MAP_LOOSE_SEAT_MM = 320.0    # si un asiento confirmado del mismo color está a menos, el grupo sobra
 DIGITAL_MAP_RECHECK_COLOR = False  # exigir evidencia cercana y unívoca para rectificar un asiento
 # Arranque ciego (start_fix.py): el cajón puede estar en cualquier punto de la
 # recta de salida (pegado a la pared exterior). Se arranca suponiéndolo lo más

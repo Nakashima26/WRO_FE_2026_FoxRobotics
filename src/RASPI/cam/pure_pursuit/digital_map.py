@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import math
+import statistics
 
 import cv2
 import numpy as np
@@ -184,6 +185,9 @@ class DigitalMap:
         self._od: float | None = None
         self._tc = 0
         self._votes: dict[tuple[str, str], dict[str, int]] = {}
+        self.vote_log: list | None = None   # diagnóstico offline (replay)
+        # Detecciones repetidas que ningún asiento explica (DIGITAL_MAP_LOOSE): grupos {c, pts, xy, on}.
+        self._loose: list[dict] = []
         self._row_obs: dict[tuple[str, str, str], list[float]] = {}
         # (recta, color) -> [(along, lateral)] de cada detección: col_candidates (columna medio vista).
         self._col_obs: dict[tuple[str, str], list[tuple[float, float]]] = {}
@@ -500,6 +504,7 @@ class DigitalMap:
         self._live = []
         if not feet:
             return
+        vlog = self.vote_log
         if self._deferred is not None:
             self._deferred.append((list(feet), self.pose_xy, self._view_heading, self._orange_y,
                                    self.section, self._tc, self.in_stall))
@@ -522,6 +527,8 @@ class DigitalMap:
             lat = (bx - C.ROBOT_BEV_X) * C.MM_PER_PX
             fwd = (C.ROBOT_BEV_Y - by) * C.MM_PER_PX
             if fwd < 80.0 or fwd > 2200.0 or abs(lat) > 1400.0:
+                if vlog is not None:
+                    vlog.append((color, "fwd_lat_out", fwd, lat))
                 continue
             # Hoja -> eje trasero, y del pie al centro de la lata (sobre el
             # rayo de la cámara). Sin esto la lata caía ~1 fila más cerca.
@@ -548,6 +555,8 @@ class DigitalMap:
                 fa, fr = self._section_frame(wx, wy, sec)
                 ranked.append((math.hypot(fa - sa, fr - sr), sec, sid, fr, sr, fa, sa))
             if not ranked:
+                if vlog is not None:
+                    vlog.append((color, "no_ranked", wx, wy, past, self._orange_y, by))
                 continue
             ranked.sort(key=lambda t: t[0])
             near = [
@@ -555,6 +564,9 @@ class DigitalMap:
                 if c[0] <= 320.0 and self._seat_ok(c[1], c[2], color, wx, wy)
             ]
             if not near:
+                if vlog is not None:
+                    vlog.append((color, "near_empty", wx, wy, past, [(round(c[0]), c[1], c[2], self._seat_ok(c[1], c[2], color, wx, wy)) for c in ranked[:3]]))
+                self._note_loose(wx, wy, color, ray)
                 continue
             dist, sec, sid, fr, sr, fa, sa = near[0]
             if len(near) > 1 and near[1][0] - dist < 80.0:
@@ -592,7 +604,11 @@ class DigitalMap:
                 side = max(-260.0, min(260.0, side))
                 self._live.append((sec, sa, side))
             self._pull_known(wx, wy, color)
+            if dist > float(getattr(C, "DIGITAL_MAP_CONFIRM_DIST_MM", 160.0)) and not weak:
+                self._note_loose(wx, wy, color, ray)
             key = (sec, sid)
+            if vlog is not None:
+                vlog.append((color, "vote", round(wx), round(wy), sec, sid, round(dist), weak, past))
             incumbent = self.confirmed.get(key)
             if protect_color and incumbent is not None and incumbent != color:
                 # La cinta, las cartas y el pegado por color pueden ocultar
@@ -626,6 +642,38 @@ class DigitalMap:
                 self._latched[sec] = (sa, side)
             elif side < prev[1]:
                 self._latched[sec] = (prev[0], side)
+
+    def _note_loose(self, wx: float, wy: float, color: str, ray: float) -> None:
+        """Voto de una lata que no encaja en ningún asiento (error de pose, bloque fuera de su lugar)."""
+        if not getattr(C, "DIGITAL_MAP_LOOSE", False) or abs(self._yaw_step) > 3.0 or ray > float(getattr(C, "DIGITAL_MAP_LOOSE_MAX_RAY_MM", 1000.0)):
+            return
+        gap = float(getattr(C, "DIGITAL_MAP_LOOSE_GAP_MM", 200.0))
+        cl = next((c for c in self._loose if c["c"] == color and math.hypot(wx - c["xy"][0], wy - c["xy"][1]) <= gap), None)
+        if cl is None:
+            cl = {"c": color, "pts": [], "xy": (wx, wy), "on": None}
+            self._loose.append(cl)
+        pts = cl["pts"]
+        pts.append((wx, wy))
+        del pts[:-12]
+        cl["xy"] = (statistics.median(p[0] for p in pts), statistics.median(p[1] for p in pts))
+        if len(pts) >= int(getattr(C, "DIGITAL_MAP_LOOSE_VOTES", 3)) and (
+                cl["on"] is None or math.hypot(cl["xy"][0] - cl["on"][0], cl["xy"][1] - cl["on"][1]) > 100.0):
+            cl["on"] = cl["xy"]
+            print(f"[DMAP] suelta {color} ({cl['xy'][0]:.0f},{cl['xy'][1]:.0f}) n={len(pts)}", flush=True)
+
+    def loose_extra(self) -> list[tuple[float, float, str]]:
+        """Obstáculos sueltos [(x, y, color)] para el planificador (ring_route.plan extra); sin los que un asiento confirmado ya explica."""
+        out = []
+        tol = float(getattr(C, "DIGITAL_MAP_LOOSE_SEAT_MM", 320.0))
+        for cl in self._loose:
+            if cl["on"] is None:
+                continue
+            x, y = cl["on"]
+            if any(col == cl["c"] and math.hypot(x - sx, y - sy) < tol
+                   for (sc, sd), col in self.confirmed.items() for sx, sy in (self._seat_xy(sc, sd),)):
+                continue
+            out.append((round(x / 25.0) * 25.0, round(y / 25.0) * 25.0, cl["c"]))
+        return out
 
     def row_candidates(self, sec: str, sid: str, color: str, tol_mm: float) -> list[str]:
         """Asientos de la columna de sid cuya fila queda a <= tol_mm de la mediana lateral observada

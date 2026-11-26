@@ -1083,6 +1083,11 @@ class RouteMode:
                 # Sigue siendo obstáculo: se planea por el lado de la pared (rojo=derecha en CCW, verde=izquierda en CW).
                 lado = "Red" if dm.direction == "CCW" else "Green"
                 plan_seats = {k: (lado if k[0] == dm.parking and pk <= _al(k[1]) < pk + far_mm else v) for k, v in plan_seats.items()}
+        if getattr(C, "DIGITAL_MAP_LOOSE", False) and getattr(dm, "loose_extra", None):
+            loose = dm.loose_extra()
+            if loose:
+                extra = list(extra or ()) + loose
+                extra_key = (extra_key, tuple(loose))
         key = (dm.direction, dm.parking, self.park_w, self.shift,
                tuple(sorted(plan_seats.items())), tuple(sorted(plan_unknown)), extra_key, hug)
         if key != self.key and key != self._job_key:
