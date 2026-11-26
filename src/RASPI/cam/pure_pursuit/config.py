@@ -1934,6 +1934,7 @@ ROUTE_LAP2_PROFILE_TC_MAX = 8   # perfil de pursuit (curvatura vista desde el lo
 ROUTE_FINAL_W = 20.0
 ROUTE_FINAL_DROP_FAR = 0   # mm: en el final (hug) las señales de la recta del cajón entre pk y pk+esto se planean por el lado de la pared; 0 = apagado
 
+LOC_L23_PAIR_SINGLE_MM = None  # rescata un solo eco si coincide con su distancia esperada
 LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas que no suman el ancho (tc3..11)
 
 # N20: freno selectivo en curva de vuelta 1 junto a una señal. Opt-in.

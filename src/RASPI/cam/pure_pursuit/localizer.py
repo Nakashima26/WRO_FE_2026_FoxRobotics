@@ -424,6 +424,7 @@ class Localizer:
         race_tc = _ack_num(ack, "tc") if tol is not None else None
         race = shifts is None and race_tc is not None and -1 <= race_tc < 12
         pair_bad = False
+        pair_keep = None
         pair_tol = getattr(C, "LOC_L23_PAIR_TOL_MM", None)
         tc = _ack_num(ack, "tc") if pair_tol is not None else None
         if tc is not None and 3 <= tc < 12:
@@ -439,8 +440,16 @@ class Localizer:
                 if pair_bad:
                     print(f"[LOC] par lateral incompatible medido={zl+zr:.0f} "
                           f"esperado={el+er:.0f}", flush=True)
+                    single_tol = C.LOC_L23_PAIR_SINGLE_MM
+                    if single_tol is not None and shifts is None:
+                        left_ok = abs(zl - el) <= single_tol
+                        right_ok = abs(zr - er) <= single_tol
+                        if left_ok != right_ok:
+                            pair_keep = "tL" if left_ok else "tR"
         for key, mname, scale, kind in _SENSORS:
-            if pair_bad and key in ("tL", "tR"):
+            if pair_bad and key in ("tL", "tR") and key != pair_keep:
+                self.n_rej += 1
+                self._rej.pop(key, None)
                 continue
             if kind == "us" and sin_us:
                 continue   # dL/dR/dF son los mismos ToF (config.US_DESDE_TOF)
@@ -459,7 +468,8 @@ class Localizer:
                 continue
             mount = C.SENSOR_MOUNTS[mname]
             smax = getattr(C, "LOC_TOF_SIGN_MAX_MM", None)
-            if (smax is not None and kind == "tof" and key in ("tL", "tR") and self.anchor_segs is not None
+            if (key != pair_keep and smax is not None and kind == "tof"
+                    and key in ("tL", "tR") and self.anchor_segs is not None
                     and not shifts and z <= float(smax)):
                 zs = self._sign_cone(self.x, mount)
                 if zs <= float(smax):
@@ -532,6 +542,10 @@ class Localizer:
                 # (cajón mal fijado: la pose va ~40 cm corrida y el gate tiraba justo la lectura
                 # que la arreglaba), se abre la P y se acepta.
                 n_re = getattr(C, "LOC_REANCHOR_N", None)
+                if key == pair_keep:
+                    self._rej.pop(key, None)
+                    self.n_rej += 1
+                    continue
                 hist = self._rej.setdefault(key, [])
                 hist.append(nu)
                 del hist[:-int(n_re or 1)]
