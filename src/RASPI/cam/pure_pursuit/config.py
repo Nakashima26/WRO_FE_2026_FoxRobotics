@@ -1939,3 +1939,13 @@ LOC_L23_PAIR_TOL_MM = None  # opt-in: descarta lecturas ToF laterales opuestas q
 # N20: freno selectivo en curva de vuelta 1 junto a una señal. Opt-in.
 # selective: conservar el freno cerca del cajon o de la fila X al salir de curva; fuera rigen other_mm y other_pwm.
 ROUTE_L1_CORNER_SIGN = None   # {pwm, mm, radius_mm, unk_only}: tope en curvas cerradas cerca de señales (unk_only: solo asientos sin resolver)
+
+# Correcciones visuales de ruta. Sigmas conservadores de arranque.
+LOC_CAM_WALL = False
+LOC_CAM_SIGN = False
+LOC_CAM_EVERY_N = 4
+LOC_CAM_WALL_SIGMA_MM = 30.0
+LOC_CAM_WALL_SIGMA_DEG = 3.0
+LOC_CAM_SIGN_SIGMA_MM = 45.0
+LOC_CAM_SIGN_SIGMA_DEG = 5.0
+LOC_CAM_YAW_WALK_DEG = 1.2  # sigma adicional por raíz de metro

@@ -574,6 +574,7 @@ class PPRuntime:
                                 round(math.degrees(float(P[2, 2]) ** 0.5), 2)],
                          "last": {k: list(v) for k, v in dict(loc.last).items()},
                          "used": int(loc.n_used), "rej": int(loc.n_rej),
+                         "cam": [loc.n_cam_wall, loc.n_cam_sign],
                          "fixed": bool(rm.fixed), "shift": float(rm.shift or 0.0),
                          "park_w": float(rm.park_w) if rm.park_w is not None else None}
             pts = self._shown_line()
@@ -582,7 +583,7 @@ class PPRuntime:
                 st["route"] = [[round(float(px)), round(float(py))] for px, py in pts[::step]]
         return st
 
-    def _route_step(self, armed: bool, frame=None, orange=None, feet=()):
+    def _route_step(self, armed: bool, frame=None, orange=None, feet=(), *, camera_frame=None):
         """(obs, sufijo V2, línea de subida) del modo ruta (route_mode.RouteMode)."""
         if not getattr(C, "ROUTE_FOLLOW", False):
             return None, "", None
@@ -600,7 +601,8 @@ class PPRuntime:
         self._rmode.orange = orange
         self._rmode.bev_hsv = getattr(self, "_bev_hsv_route", None)
         self._bev_hsv_route = None
-        return self._rmode.step(self.digital, self._prev_estado, getattr(self, "_prev_ack", None), armed)
+        return self._rmode.step(self.digital, self._prev_estado, getattr(self, "_prev_ack", None), armed,
+                                camera_frame=camera_frame, camera_feet=feet)
 
     # ── Serial ────────────────────────────────────────────────────────────────
 
@@ -2407,7 +2409,9 @@ class PPRuntime:
                       or getattr(C, "SEAT_ROI_LOG", False)
                       or ((C.ROUTE_PARK_VISION_REF or C.ROUTE_PARK_OBS_PRIOR) and armed and self._tc >= 3))
                       else None)
-        _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame, line_info["Orange"], new_obstacles)
+        _route_steer, _route_suffix, _route_line = self._route_step(
+            armed, _roi_frame, line_info["Orange"], new_obstacles,
+            camera_frame=frame if (C.LOC_CAM_WALL or C.LOC_CAM_SIGN) else None)
         self._route_steering = _route_steer is not None
         self._sin_naranja = (self._route_steering and getattr(self._rmode, "fixed", False)
                              and len({sec for (sec, _s) in self.digital.confirmed}) >= 4)

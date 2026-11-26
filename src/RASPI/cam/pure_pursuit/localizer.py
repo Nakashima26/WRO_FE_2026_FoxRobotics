@@ -132,6 +132,7 @@ class Localizer:
         self.anchor_segs = None          # señales reales (DigitalMap.confirmed) como referencia del ToF lateral
         self._anchor_key = None
         self.n_sign = 0
+        self.n_cam_wall = self.n_cam_sign = 0
 
     def set_map(self, seats: dict, unknown, parking: str | None, park_w: float | None = None) -> None:
         """Señales conocidas + asientos sin resolver (tapan el rayo igual)."""
@@ -157,6 +158,88 @@ class Localizer:
         a, b, k = build_segments(seats, None)
         m = k == _SIGN
         self.anchor_segs = (a[m], b[m], k[m])
+
+    def _camera_match(self, candidates, noise, gate):
+        """Asocia por innovación normalizada y descarta alternativas cercanas."""
+        matches = []
+        for innovation, jacobian in candidates:
+            cross = self.P @ jacobian.T
+            cov = jacobian @ cross + noise
+            solved = np.linalg.solve(cov, innovation)
+            score = float(innovation @ solved)
+            if score <= gate:
+                matches.append((score, innovation, jacobian, cross, cov))
+        matches.sort(key=lambda match: match[0])
+        if not matches or (len(matches) > 1 and matches[1][0] - matches[0][0] < 4):
+            return False
+        _, innovation, jacobian, cross, cov = matches[0]
+        gain = np.linalg.solve(cov, cross.T).T
+        delta = gain @ innovation
+        # Una asociación visual aislada no debe saltar a otra trayectoria.
+        gain /= max(1.0, math.hypot(*delta[:2]) / 30.0,
+                    abs(delta[2]) / math.radians(1.0))
+        self.x += gain @ innovation
+        residual = np.eye(3) - gain @ jacobian
+        self.P = residual @ self.P @ residual.T + gain @ noise @ gain.T
+        return True
+
+    def update_camera(self, walls, signs, confirmed):
+        """Fusiona a lo sumo una pared y una lata, en la pose del último ACK."""
+        used_wall = used_sign = False
+        if walls and C.LOC_CAM_WALL:
+            a, b, kinds = self.segs
+            # Las normales apuntan de la pista hacia la superficie negra.
+            edges = b[:8] - a[:8]
+            normals = edges[:, ::-1] * [1, -1]
+            normals /= np.linalg.norm(normals, axis=1)[:, None]
+            normals[kinds[:8] == _ISLAND] *= -1
+            noise = np.diag([C.LOC_CAM_WALL_SIGMA_MM ** 2,
+                             math.radians(C.LOC_CAM_WALL_SIGMA_DEG) ** 2])
+            th = self.x[2]
+            rotation = np.array([[math.cos(th), math.sin(th)],
+                                 [-math.sin(th), math.cos(th)]])
+            for distance, angle, endpoints in walls:
+                world = endpoints @ rotation.T + self.x[:2]
+                candidates = []
+                for start, edge, normal in zip(a[:8], edges, normals):
+                    expected = float((start - self.x[:2]) @ normal)
+                    err_angle = math.remainder(angle - math.atan2(*normal) + th, math.tau)
+                    err_distance = distance - expected
+                    if expected <= 0 or abs(err_distance) > 180 or abs(err_angle) > math.radians(15):
+                        continue
+                    along = (world - start) @ edge / (edge @ edge)
+                    if along.min() < -0.06 or along.max() > 1.06:
+                        continue
+                    H = np.array([[-normal[0], -normal[1], 0], [0, 0, -1]])
+                    candidates.append((np.array([err_distance, err_angle]), H))
+                if self._camera_match(candidates, noise, 9.21):
+                    used_wall = True
+                    break
+
+        if signs and C.LOC_CAM_SIGN:
+            noise = np.diag([C.LOC_CAM_SIGN_SIGMA_MM ** 2,
+                             math.radians(C.LOC_CAM_SIGN_SIGMA_DEG) ** 2])
+            candidates = []
+            for (section, seat), color in confirmed.items():
+                if seat not in SEATS:
+                    continue
+                dx, dy = section_to_world(section, *SEATS[seat]) - self.x[:2]
+                expected = math.hypot(dx, dy)
+                bearing = math.remainder(math.atan2(dx, dy) - self.x[2], math.tau)
+                if expected < 50 or abs(bearing) > math.radians(75):
+                    continue
+                H = np.array([[-dx / expected, -dy / expected, 0],
+                              [-dy / expected**2, dx / expected**2, -1]])
+                for distance, angle, observed_color in signs:
+                    if observed_color != color:
+                        continue
+                    delta = math.remainder(angle - bearing, math.tau)
+                    if abs(delta) <= math.radians(18) and abs(distance - expected) <= 180:
+                        candidates.append((np.array([distance - expected, delta]), H))
+            used_sign = self._camera_match(candidates, noise, 9.21)
+        self.n_cam_wall += used_wall
+        self.n_cam_sign += used_sign
+        return used_wall, used_sign
 
     def _sign_cone(self, state, mount) -> float:
         """Distancia a la cara de señal más cercana dentro del cono del ToF (el VL53 devuelve lo más cercano)."""
@@ -285,6 +368,8 @@ class Localizer:
         if q_lin is not None:
             q_xy += float(q_lin) * ds
         q_th = (math.radians(0.6) * ds / 1000.0) ** 2 + (math.radians(0.01) * dyaw) ** 2 + math.radians(0.01) ** 2
+        if C.LOC_CAM_WALL:
+            q_th += math.radians(C.LOC_CAM_YAW_WALK_DEG) ** 2 * ds / 1000.0
         # Error de rumbo -> error de posición al avanzar: w = R(θ+yaw0)·Δp,
         # ∂wx/∂θ = wy, ∂wy/∂θ = -wx.
         wx = dpx * fx + dpy * lx

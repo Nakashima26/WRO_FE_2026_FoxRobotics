@@ -709,7 +709,7 @@ class RouteMode:
             print(f"[PARKREF ToF] along={observed.far_along} passes={observed.passes}", flush=True)
 
     # ── paso por frame ────────────────────────────────────────────────────
-    def step(self, dm, est: str | None, ack: str | None, armed: bool):
+    def step(self, dm, est: str | None, ack: str | None, armed: bool, *, camera_frame=None, camera_feet=()):
         """(obs normalizado o None, sufijo del V2, línea de subida o None)."""
         self._step_frame += 1
         if C.ROUTE_MOTOR_CURVE_LIVE:
@@ -786,6 +786,14 @@ class RouteMode:
             self.loc.set_anchors(dm.confirmed)   # solo lo que el mapa confirmó: los fantasmas de fila no anclan
         self.loc.update(ack, correct=(est in ("S", "C", "R") and ack_est in ("S", "C", "R") and not quieto),
                         shifts=shifts)
+        if ((C.LOC_CAM_WALL or C.LOC_CAM_SIGN) and self.fixed and self.loc.odom is not None
+                and ack_est in ("S", "C", "R") and camera_frame is not None
+                and self.bev.is_calibrated and self._step_frame % max(1, C.LOC_CAM_EVERY_N) == 0):
+            from .camera_localization import sign_observations, wall_edges
+
+            walls = wall_edges(camera_frame, self.bev) if C.LOC_CAM_WALL else ()
+            signs = sign_observations(camera_feet) if C.LOC_CAM_SIGN else ()
+            self.loc.update_camera(walls, signs, dm.confirmed)
         pose = self.loc.pose() if self.loc.odom is not None else (dm.pose_xy[0], dm.pose_xy[1], float(dm.heading))
         if self.loc.odom is not None:
             self._sync_map(dm, ack, pose)
