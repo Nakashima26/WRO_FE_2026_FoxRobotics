@@ -85,3 +85,31 @@ def test_line_vote_ignores_unseen_or_dead_reckoned():
         rm = _rm(o)
         rm._line_vote(_Dm(), pose)
         assert rm._line_d == []
+
+
+class _DmCCW:
+    direction = "CCW"
+
+
+def _vote_at(pose, fwd):
+    by = float(C.ROBOT_BEV_Y) - (fwd - float(C.BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM)) / C.MM_PER_PX
+    rm = _rm({"seen": True, "line": (1.0, 0.0, 0.0, by)})
+    rm.axis = W.w_axis("W")
+    rm._line_vote(_DmCCW(), pose)
+    return rm._line_d
+
+
+def test_line_vote_prefers_tape_inside_rule_range(monkeypatch):
+    """orillas284/289: la cinta de la otra esquina (δ≈+265..+298, cajón imposible) ganaba por cercanía."""
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_PIX", False, raising=False)
+    monkeypatch.setattr(C, "ROUTE_FIX_FWD_ADD_MM", 0.0, raising=False)
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 300.0, raising=False)
+    cases = [((-946, 218, 95.9), 575, -441), ((-900, 213, 92.9), 480, -551),   # 284 (azul -573)
+             ((-886, 227, 93.3), 339, -790), ((-818, 225, 92.4), 300, -744),   # 289
+             ((-868, 195, 95.2), 404, -599)]                                   # 288 (limpia)
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_SEG_TOL_MM", None, raising=False)
+    assert _vote_at(*cases[0][:2])[0] > 200          # antes: la cinta equivocada
+    monkeypatch.setattr(C, "ROUTE_FIX_LINE_SEG_TOL_MM", 500.0, raising=False)
+    for pose, fwd, want in cases:
+        got = _vote_at(pose, fwd)
+        assert len(got) == 1 and abs(got[0] - want) <= 3, (pose, got, want)
