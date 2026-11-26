@@ -16,6 +16,9 @@ struct PoseSample { double t, x, y, h; };
 static constexpr size_t kHistoryCapacity = 20000; // Python deque(maxlen=20000).
 static std::array<PoseSample, kHistoryCapacity> g_history;
 static size_t g_history_next = 0, g_history_count = 0;
+static double g_scrub_inicio = -1.0;  // >=0: scrub_coeff durante INICIO (TWIN_SCRUB_INICIO)
+extern "C" int sil_fw_inicio_fase();
+extern "C" void sil_set_scrub_inicio(double c) { g_scrub_inicio = c; }
 extern "C" void sil_set_native_vehicle(void *step, double *state, double *params,
                                        double *encoder, sil_advance_cb_t collision) {
   g_vehicle_step = reinterpret_cast<vehicle_step_t>(step);
@@ -40,6 +43,8 @@ extern "C" void sil_native_advance(uint64_t us, uint64_t now_us, const double *a
   s[11] = a[0]; s[12] = a[1]; s[13] = a[2];
   double t = now_us / 1e6, remaining = us / 1e6;
   volatile double exponent = 2.0; // CPython float ** 2 uses libm pow.
+  double scrub0 = g_vehicle_params[22];
+  if (g_scrub_inicio >= 0.0 && sil_fw_inicio_fase() >= 1) g_vehicle_params[22] = g_scrub_inicio;
   while (remaining > 1e-12) {
     double sub = std::min(remaining, 0.001); remaining -= sub;
     double h0 = s[2], v0 = s[3]; s[10] = sub;
@@ -61,6 +66,7 @@ extern "C" void sil_native_advance(uint64_t us, uint64_t now_us, const double *a
       if (g_collision_cb) g_collision_cb(0);
     }
   }
+  g_vehicle_params[22] = scrub0;
 }
 
 // Borrowed view: Python reads only while setup/loop is suspended.

@@ -129,7 +129,9 @@ def build(
     # Varios procesos (batch en paralelo) pueden compilar a la vez. En Windows os.replace falla (WinError 5) si otro proceso tiene abierto
     # el destino: cada proceso compila su propia copia de la fuente.
     sil_cpp = _BUILD / f"PurePursuit_sil_{digest}.{os.getpid()}.cpp"
-    sil_cpp.write_text('#include "Arduino.h"\n' + patched, encoding="utf-8")
+    # sil_fw_inicio_fase: el modelo TWIN_SCRUB_INICIO (opt-in) solo aplica el scrub durante INICIO
+    hook = '\nextern "C" int sil_fw_inicio_fase() { return estado == INICIO ? (int)inicioFase : 0; }\n'
+    sil_cpp.write_text('#include "Arduino.h"\n' + patched + hook, encoding="utf-8")
     tmp_out = _BUILD / f"libfw_{digest}.{os.getpid()}.tmp{ext}"
 
     cmd = [
