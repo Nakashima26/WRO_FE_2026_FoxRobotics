@@ -325,7 +325,9 @@ const float RUTA_REFLEJO_MAX_DEG   = 15.0f;
 // Pi callada en modo RUTA (orillas270: el loop de la Pi se trabó 3.7 s, a los 0.8 s la ESP soltó la ruta y el
 // respaldo pared+gyro se fue recto contra la pared E): se sigue la ruta ya cargada con la odometría, con un tope de PWM
 // porque el rv de la Pi (más lento antes de las curvas) ya no se actualiza. 0 = comportamiento viejo (respaldo).
-const int   RUTA_SOLA_PWM          = 120;
+// 2026-11-25 (orillas281/282): 120 en la escala de mando del N30 son ~280 mm/s; el lazo frenaba en corto (pw 25)
+// desde ~1.3 m/s para llegar ahí. 180 = ~710 mm/s.
+const int   RUTA_SOLA_PWM          = 180;
 // wallPanic (empujón fijo con un lateral < WALL_PANIC_CM = 18 cm) también en modo RUTA. La ruta pasa los conos a propósito
 // a 7-14 cm: en orillas268/271 se activaba 33-37 % del tiempo en S, peleando contra la ruta (servo cambiando de lado
 // cada ~0.5 s). false = en las 3 vueltas solo el reflejo de ToF (RUTA_REFLEJO_MM) como red; tras la última esquina
@@ -336,7 +338,7 @@ const float RUTA_LOOKAHEAD_L23_MM = 340.0f;   // >0: lookahead propio en vueltas
 // Subviraje reactivo (vueltas 1-3): volante casi a tope Y el error de seguimiento propio (pose del ESP a la ruta) pasa de
 // RUTA_SUB_CTE_MM y sigue creciendo -> tope de PWM RUTA_SUB_PWM hasta que deja de crecer. 0 = apagado.
 const float RUTA_SUB_CTE_MM     = 60.0f;
-const int   RUTA_SUB_PWM        = 120;
+const int   RUTA_SUB_PWM        = 180;     // 120 -> 180 (2026-11-25): 120 = ~280 mm/s, frenón en seco (orillas282)
 const float RUTA_SUB_SAT        = 0.5f;    // fraccion de RUEDA_TOPE_DEG
 const float RUTA_SUB_RISE_MM    = 4.0f;    // crecimiento minimo del error en RUTA_SUB_VENT_MS
 const unsigned long RUTA_SUB_VENT_MS = 100;
@@ -344,7 +346,9 @@ const unsigned long RUTA_SUB_HOLD_MS = 150;
 // Lejos de la ruta: tope de PWM sin importar el volante (orillas272: al salir de la esquina NE la ruta se movió 640 mm
 // por un rojo recién visto en N/T3, el carro quedó 100-220 mm fuera apuntando a la pared N con pw ~200 y no alcanzó a
 // girar; RUTA_SUB_* no actuó porque el volante no iba saturado). 0 = apagado.
-const float RUTA_LEJOS_CTE_MM   = 90.0f;
+// 2026-11-25: apagado. Con las correcciones del localizador (70-170 mm) el cte pasaba de 90 a cada rato y el tope 110
+// (~250 mm/s) hacía frenar en seco ~1 vez/s: de 3 % a 10-14 % del tiempo con pw < 40 (orillas275-282 vs 250-271).
+const float RUTA_LEJOS_CTE_MM   = 0.0f;
 const int   RUTA_LEJOS_PWM      = 110;
 const unsigned long RUTA_LEJOS_HOLD_MS = 300;
 int rutaSubCap = -1;                       // tope vigente (-1 = ninguno)
@@ -744,6 +748,11 @@ const float LAZO_KP_FRENO          = 0.35f;   // PWM por mm/s (escala N20, se mu
 const float LAZO_FRENO_LOCK_MMS    = 600.0f;
 const int   LAZO_FRENO_PWM_MIN_ALTO = 25;     // piso de PWM frenando arriba de LOCK
 int lazoFrenando = 0;                         // 1 mientras el lazo frena (ACK fr=)
+// Rampa de bajada de la velocidad pedida en las vueltas (tc 1..11, modo Pi, fuera de INICIO/park), mm/s². orillas282:
+// cada tope de PWM que entraba de golpe (110-120 = ~250 mm/s) dejaba e ~ -1000 mm/s y el freno en corto (pw 25) bajaba
+// 1.3 m/s -> 0.4 m/s en ~80 ms (~10 m/s²), ~1 vez por segundo. 3000 = ROUTE_PROFILE_A_BRAKE de la Pi: el perfil de
+// curvas no cambia, solo los escalones. 0 = como antes.
+const float LAZO_DECEL_MMS2        = 3000.0f;
 const float LAZO_V_TAU_S     = 0.05f;   // filtro de la velocidad del encoder
 float encVelMmS = 0.0f;                 // velocidad medida (mm/s, con signo)
 float lazoI = 0.0f;
@@ -2419,6 +2428,14 @@ int lazoVelocidad(int pwm) {
   float vTope = (LAZO_V_MAX_L1 > 0.0f && turnsCompleted < 4 && estado != INICIO) ? LAZO_V_MAX_L1 : LAZO_V_MAX;   // vuelta 1 propia; 0 = como LAZO_V_MAX
   if (!sinTope && vTope > 0.0f && vObj > vTope) vObj = vTope;
   if (motorCurveClosedLoop(dir)) vObj = min(vObj, motorCurveSpeed(MOTOR_CURVE_N - 1));
+  {
+    // Rampa de bajada de v* en las vueltas (ver LAZO_DECEL_MMS2): un tope que baja de golpe ya no frena en corto.
+    static float vObjR = 0.0f;
+    bool enVueltas = LAZO_DECEL_MMS2 > 0.0f && dir > 0 && piPurePursuit && turnsCompleted >= 1 &&
+                     turnsCompleted < TURNS_PER_RACE && estado != INICIO && estado != ESTACIONANDO && estado != ESTACIONANDO_PUNTA;
+    if (enVueltas && vObj < vObjR && dt > 0.0f) vObj = max(vObj, vObjR - LAZO_DECEL_MMS2 * dt);
+    vObjR = enVueltas ? vObj : max(vObj, v);
+  }
   float ff = motorCurveClosedLoop(dir) ? motorCurvePwmFor(vObj) : vObj / km + pm;
   float g  = LAZO_K_FWD / km;                       // KP/KI afinados con el N20: misma ganancia en mm/s
   float e = vObj - v;

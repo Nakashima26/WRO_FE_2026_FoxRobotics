@@ -1662,7 +1662,8 @@ ROUTE_UPLOAD_STEP_MM = 40.0   # separación de puntos de la ruta subida al ESP (
 ROUTE_UPLOAD_KEEP_MM = 40.0   # plan nuevo a <= esto (mm, toda la vuelta) de la ruta que va subiendo: no reinicia la subida (orillas273). None = siempre reinicia
 # Mientras sube: si la ruta nueva se aparta > NEAR_DIFF de la del ESP en los próximos NEAR_MM, tope NEAR_PWM
 # de golpe (sin ROUTE_UPLOAD_RAMP_PWM): la vieja va contra algo cerca (orillas273 N/T1). None = apagado.
-ROUTE_UPLOAD_NEAR_MM = 400.0
+# 2026-11-25: apagado. El tope 0 paraba el carro en seco 4 veces en la vuelta 1 de orillas282 (rv=0 a 2.2/4.5/7.2/9.2 s).
+ROUTE_UPLOAD_NEAR_MM = None
 ROUTE_UPLOAD_NEAR_DIFF_MM = 120.0
 ROUTE_UPLOAD_NEAR_PWM = 0
 ROUTE_UPLOAD_LINES = 1        # líneas de subida de ruta por frame (>1 necesita baud > 115200 en Pi y ESP)
