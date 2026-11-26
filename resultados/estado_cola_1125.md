@@ -32,3 +32,17 @@ Nada se trabó en el banco: las tandas siguieron corriendo y terminando bien. Lo
 2. **l1s_post_v2_base**: misma rama grok/t/l1s_post_v2 (476d9fc1) y mismo env **sin ROUTE_SEAT_POSTERIOR**, 384 carreras. Es la base A/B de l1s_post_v2 (l1s_base428 es otro commit, ae0f25ed, y de 288 carreras).
 
 Nada más en cola. No toqué main ni borré nada.
+
+
+## Actualización 21:19 PST (Tijuana) — cola vacía
+- vis_base: DONE, VÁLIDA (512 s / 384). 371/384 ok, media 36.79. Subida en resultados/vis_base.md.
+- l1s_post_v2_base: DONE, VÁLIDA (503 s / 384). 372/384 ok, media 36.79. Subida en resultados/l1s_post_v2_base.md.
+- Ya no queda nada en cola ni corriendo en el banco.
+
+### Lectura rápida de las A/B (mismo tipo: carrera completa, 384 carreras, mismo env)
+- **vis_isla = vis_base, idénticas**: mismo 371/384, misma media 36.79 y la misma lista de fallas. Parece que ROUTE_VIEW_ISLAND no cambia nada en el twin. Revisa si el flag se lee o si ese camino llega a ejecutarse.
+- **vis_yaw3 = vis_ambos, idénticas**: las dos 372/384, media 36.80. Frente a vis_base dan +1 ok y +0.01 s de media, con otro set de fallas. No hay mejora clara en la media.
+- **l1s_post_v2 vs l1s_post_v2_base**: con ROUTE_SEAT_POSTERIOR las fallas suben de 12 a 21 (363 vs 372 ok). La media baja 0.16 s (36.63 vs 36.79) y la vuelta 1 también (12.27 vs 12.37 s en n1-8). Como las fallas suben, **no pasa la regla de aceptación**.
+
+### Corrección sobre el retraso de 18:22
+Lo que pude ver: los resultados de 18:24 a 19:14 se quedaron en pend/ sin subirse hasta las 21:01. Además, fila_base428 tomó el lock a las 19:14, pero recién empezó a correr carreras a las ~20:54: estuvo ~1 h 40 min esperando su chequeo de "máquina quieta" mientras tenía el lock, así que la cola estuvo parada ese tiempo. No sé con certeza por qué tardó tanto ese chequeo. La carga a las 19:14 era 6.6 y no había procesos de banco ajenos. Esa tanda ya está cancelada.
