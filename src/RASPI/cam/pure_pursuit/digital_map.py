@@ -46,6 +46,7 @@ _REAR_MOUNT_MM = -C.SENSOR_MOUNTS["tof_rear"][1]    # ToF trasero, detrás del e
 _BEV_AHEAD_MM = float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0))
 _VOTE_MAX_DEG = float(getattr(C, "DIGITAL_MAP_VOTE_MAX_BEARING_DEG", 90.0))
 _VOTE_MISALIGN_DEG = float(getattr(C, "DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG", 25.0))
+_ROW_OBS_ALIGNED_ONLY = bool(getattr(C, "DIGITAL_MAP_ROW_OBS_ALIGNED_ONLY", False))
 _VOTE_TAN_MAX = math.tan(math.radians(_VOTE_MAX_DEG)) if _VOTE_MAX_DEG < 89.0 else float("inf")
 _CAM_AHEAD_MM = float(getattr(C, "CAMERA_FWD_MM", 140.0))  # cámara, desde el eje trasero
 # El pie de la lata es la cara que mira a la cámara; el centro queda detrás.
@@ -575,8 +576,10 @@ class DigitalMap:
             # Fila observada (coordenada lateral de la recta) antes de pegarla a un asiento:
             # route_mode la usa para saber qué filas de la columna son posibles (señal medio vista).
             obs = self._row_obs.setdefault((sec, _COL[sid], color), [])
-            obs.append(fr)
-            del obs[:-30]
+            if not (weak and _ROW_OBS_ALIGNED_ONLY):
+                # vista cruzada saliendo de la esquina corre la fila ~200 mm: fantasma T1/T3 que mandaba la ruta a la pared (orillas315)
+                obs.append(fr)
+                del obs[:-30]
             cobs = self._col_obs.setdefault((sec, color), [])
             cobs.append((fa, fr))
             del cobs[:-200]
