@@ -148,6 +148,8 @@ class MotorParams:
     scrub_coeff: float = 0.12
     # Perfil opcional de avance, con una corrección suave en PWM alto.
     forward_curve: tuple[tuple[float, float], ...] = ()
+    # TWIN_REV_CURVA_REAL: (PWM, mm/s) de la reversa a PWM bajo (parking); pasada la última, sigue con pendiente k_rev.
+    reverse_curve: tuple[tuple[float, float], ...] = ()
     high_pwm_knee: float = 205.0
     high_pwm_gain_mm_s_per_pwm2: float = 0.0
     forward_accel_tau_s: float | None = None
@@ -210,6 +212,12 @@ class MotorParams:
             if self.pwm0_rev is not None:
                 self.pwm0_rev /= f
             _prov("motor.v_batt", "medido", f"TWIN_VBAT={vb} V: k x{f:.3f}, pwm0 /{f:.3f}")
+
+        if os.environ.get("TWIN_REV_CURVA_REAL") == "1" or os.environ.get("TWIN_REAL2") == "1":   # TWIN_REAL2 = paquete real2 (reversa + scrub INICIO)
+            # real2: reversa en el estacionamiento (orillas235-271, od vs pw, mediana por PWM): ~75 mm/s a 50, ~110-120 de 60 a
+            # 90 (el carro repta), 145 a 110; el gemelo daba k_rev*(pw-37.6) = 217 a 80. Sin escalar por V: es lo medido en pista.
+            self.reverse_curve = ((35.0, 0.0), (45.0, 50.0), (50.0, 75.0), (60.0, 105.0), (80.0, 118.0), (100.0, 138.0), (110.0, 148.0))
+            _prov("motor.reverse_curve", "medido", "real2: orillas235-271 fase E, od/dt por PWM")
 
         if os.environ.get("TWIN_MOTOR_CURVA_REAL") == "1":
             self.forward_curve = forward_curve(float(vb) if vb else 12.0)
@@ -493,6 +501,15 @@ def max_wheel_deg(steering: SteeringParams) -> float:
     w_min = wheel_deg_from_servo(steering.servo_min_deg, steering)
     w_max = wheel_deg_from_servo(steering.servo_max_deg, steering)
     return max(abs(w_min), abs(w_max))
+
+
+def reverse_speed_mm_s(pwm: float, motor: MotorParams) -> float:
+    if motor.reverse_curve:
+        t = motor.reverse_curve
+        if pwm <= t[-1][0]:
+            return table_wheel_deg(pwm, t)
+        return t[-1][1] + motor.k_rev_mm_s_per_pwm * (pwm - t[-1][0])
+    return motor.k_rev_mm_s_per_pwm * (pwm - motor.pwm0_rev)
 
 
 def forward_speed_mm_s(pwm: float, motor: MotorParams) -> float:

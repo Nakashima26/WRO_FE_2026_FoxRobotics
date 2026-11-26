@@ -9,6 +9,7 @@ from .battery import BatteryDrive
 from .params import (
     TwinParams,
     forward_speed_mm_s,
+    reverse_speed_mm_s,
     max_wheel_deg,
     wheel_deg_from_servo,
 )
@@ -158,7 +159,7 @@ class Vehicle:
                 v_target = 0.0
             else:
                 if direction < 0 and mot.pwm0_rev is not None:
-                    v = mot.k_rev_mm_s_per_pwm * (drive_pwm - mot.pwm0_rev)
+                    v = reverse_speed_mm_s(drive_pwm, mot)
                 elif direction > 0:
                     v = forward_speed_mm_s(drive_pwm, mot)
                 else:

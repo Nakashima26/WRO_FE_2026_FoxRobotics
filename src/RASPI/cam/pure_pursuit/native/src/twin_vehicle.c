@@ -10,7 +10,8 @@
  * 30..34: wheelbase, lateral acceleration L/R, right/left table lengths
  * 35..: interleaved servo units / wheel degrees, right table then left table,
  *       followed by breakaway base/turn PWM, forward acceleration tau/limit,
- *       high PWM knee/gain, and the length and pairs of the PWM/speed table.
+ *       high PWM knee/gain, and the length and pairs of the PWM/speed table,
+ *       then the length and pairs of the reverse PWM/speed table (empty = linear k_rev).
  */
 static double (*volatile py_sin)(double)=sin;
 static double (*volatile py_cos)(double)=cos;
@@ -42,6 +43,8 @@ FOX_API void fox_twin_vehicle(double *s,const double *p){
  }else{
   double vt=0;
   if(dir!=0){double v=(dir<0&&p[17])?p[18]*(pwm-p[19]):p[20]*(pwm-p[11]);
+   if(dir<0&&p[17]){const double *rv=motor_load+7+2*(int)motor_load[6];int rvn=(int)rv[0];
+    if(rvn>0){const double *rt2=rv+1;v=pwm<=rt2[2*(rvn-1)]?table(pwm,rt2,rvn):rt2[2*rvn-1]+p[18]*(pwm-rt2[2*(rvn-1)]);}}
    if(dir>0 && motor_load[6]){
     v=table(pwm,motor_load+7,(int)motor_load[6]);
    }else if(dir>0 && motor_load[5] && pwm>motor_load[4]){

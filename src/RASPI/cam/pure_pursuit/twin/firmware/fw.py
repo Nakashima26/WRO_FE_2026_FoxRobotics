@@ -174,7 +174,7 @@ class FirmwareSIL:
         lib.sil_drain_history.restype = ctypes.c_size_t
         # ctypes releases the GIL during firmware execution. The kernel accesses
         # only these instance-owned buffers; callbacks reacquire the GIL normally.
-        sc = os.environ.get("TWIN_SCRUB_INICIO")   # opt-in: scrub solo durante INICIO (ini2)
+        sc = os.environ.get("TWIN_SCRUB_INICIO") or ("0.8" if os.environ.get("TWIN_REAL2") == "1" else None)   # opt-in: scrub solo durante INICIO (ini2; TWIN_REAL2 = 0.8, INICIO real 2.1-2.4 s)
         lib.sil_set_scrub_inicio.argtypes = [ctypes.c_double]
         lib.sil_set_scrub_inicio(float(sc) if sc else -1.0)
         lib.sil_set_native_vehicle(vehicle._fn, vehicle._state, vehicle._p, e, cb)

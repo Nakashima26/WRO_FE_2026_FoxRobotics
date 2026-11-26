@@ -496,7 +496,12 @@ class Sim:
         cam_jitter = float(os.environ.get("TWIN_CAM_JITTER_MM", self.params.camera.jitter_mm))
         cam_jit_tau = float(os.environ.get("TWIN_CAM_JITTER_TAU_S", self.params.camera.jitter_tau_s))
         cam_jit = np.zeros(2)
-        field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
+        field = self.field_override
+        if field is None:
+            from pure_pursuit.twin.field_spec import field_from_env   # TWIN_FIELD_JSON: acomodo de una corrida real
+            field = field_from_env(self.seed, self.start)
+        if field is None:
+            field = randomize(self.seed, start=self.start, park_pos=self.park_pos)
         try:
             if self.surprise is not None:
                 from ..wro_field import with_surprise

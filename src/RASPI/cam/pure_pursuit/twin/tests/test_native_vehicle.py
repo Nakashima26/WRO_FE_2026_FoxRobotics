@@ -6,7 +6,7 @@ from pure_pursuit.twin.params import TwinParams, steady_speed_mm_s
 from pure_pursuit.twin.vehicle import Vehicle
 from pure_pursuit.twin.native_vehicle import NativeVehicle, _FIELDS
 
-@pytest.mark.parametrize('variant', range(4))
+@pytest.mark.parametrize('variant', range(5))
 def test_native_vehicle_exact(variant):
     p=TwinParams()
     if variant == 1:
@@ -15,6 +15,8 @@ def test_native_vehicle_exact(variant):
         p.motor=dataclasses.replace(p.motor,pwm0_rev=25,k_rev_mm_s_per_pwm=3,a_max_rev_mm_s2=800,coast_decel_mm_s2=300)
     elif variant == 3:
         p.motor=dataclasses.replace(p.motor,a_lat_left_mm_s2=300,a_lat_right_mm_s2=200,brake_lock_speed_mm_s=20)
+    elif variant == 4:
+        p.motor=dataclasses.replace(p.motor,reverse_curve=((35.0,0.0),(60.0,105.0),(110.0,148.0)))
     a=Vehicle(p,12,-50,27,v=700)
     b=NativeVehicle(p,12,-50,27,v=700)
     rng=random.Random(42)
