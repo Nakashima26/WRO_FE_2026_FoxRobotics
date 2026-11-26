@@ -18,6 +18,8 @@ REAL_FIELD = {
 }
 ACK_FIELDS = re.compile(r"(?<=,)([a-zA-Z]+)=([^,*|\s]*)")
 TX_RV = re.compile(r",rv=(-?\d+)(?=[,*|\s]|$)")
+REAL_PLAN_MS = re.compile(r" (\d+)ms señales=")
+TWIN_PLAN_COST = re.compile(r"^PLAN t=([\d.]+) costo_ms=(\d+)")
 
 
 def parse_ack(raw):
@@ -122,7 +124,8 @@ def load_real(root, run):
             f0 = first_power(full)
             if a0 is not None and f0 is not None:
                 acks = [(t + a0 - f0, a) for t, a in full]
-    return acks, tx, plans, conf, uploads, stops
+    compute = [(t - int(m[1]) / 1000, t) for t, e in plans if (m := REAL_PLAN_MS.search(e))]
+    return acks, tx, plans, conf, uploads, stops, None, None, compute
 
 
 def first_power(samples):
@@ -164,14 +167,21 @@ def load_twin(folder):
                 confirmed = [(*key, value) for key, value in ast.literal_eval(r["conf"])]
                 status.append((t, {"map": {"pose": [float(r["x"]), float(r["y"]), 0],
                                           "confirmed": confirmed}}))
-    return acks, tx, plans, confirmations(status), uploads, stops, corner, pending
+    compute = []
+    with (folder / "pi.log").open() as f:
+        for line in f:
+            m = TWIN_PLAN_COST.match(line)
+            if m:
+                start = float(m[1])
+                compute.append((start, start + int(m[2]) / 1000))
+    return acks, tx, plans, confirmations(status), uploads, stops, corner, pending, compute
 
 
 def overlap(intervals, start, end):
     return sum(max(0, min(b, end) - max(a, start)) for a, b in intervals)
 
 
-def breakdown(acks, tx, plans, confirmed, uploads, stops, corner=None, pending=None):
+def breakdown(acks, tx, plans, confirmed, uploads, stops, corner=None, pending=None, compute=None):
     t0 = first_power(acks)
     if t0 is None:
         return {}
@@ -203,6 +213,8 @@ def breakdown(acks, tx, plans, confirmed, uploads, stops, corner=None, pending=N
         duration = end - start
         crosses = side = 0
         pwm = Counter()
+        measured_fr = False
+        brake = 0.0
         rv = Counter()
         plant = Counter()
         plant_time = Counter()
@@ -219,6 +231,10 @@ def breakdown(acks, tx, plans, confirmed, uploads, stops, corner=None, pending=N
                 crosses += bool(side and side != s)
                 side = s
             pwm[a["pw"]] += u - t
+            if "fr" in a:
+                measured_fr = True
+                if a["fr"] == "1":
+                    brake += u - t
             if a["est"] == "S" and a["pw"] > 0 and 0 < u - t <= 0.15:
                 cell = (int(a["pw"]) // 25 * 25, "recto" if abs(a["srv"] - 75) <= 15 else "giro")
                 plant[cell] += b["od"] - a["od"]
@@ -229,7 +245,9 @@ def breakdown(acks, tx, plans, confirmed, uploads, stops, corner=None, pending=N
             "v_mm_s": round(ds / duration) if duration else None,
             "crosses": crosses, "crosses_s": round(crosses / duration, 2) if duration else None,
             "pwm_s": {int(k): round(v, 3) for k, v in pwm.most_common(5)},
-            "rv_s": {k: round(v, 3) for k, v in rv.most_common(5)},
+            "rv_s": {k: round(v, 3) for k, v in rv.most_common()},
+            "rv_coverage_s": round(sum(rv.values()), 3) if rv else None,
+            "lazo_freno_s": round(brake, 3) if measured_fr else None,
             "rv_avg": round(sum(k * v for k, v in rv.items()) / sum(rv.values()), 1) if rv else None,
             "plant": {f"{pwm_bin}:{steer}": [round(seconds, 3), round(plant[(pwm_bin, steer)] / seconds)]
                       for (pwm_bin, steer), seconds in sorted(plant_time.items())},
@@ -237,6 +255,7 @@ def breakdown(acks, tx, plans, confirmed, uploads, stops, corner=None, pending=N
             "hold_s": round(overlap(stops, start, end), 3) if stops else None,
             "corner_s": round(overlap(corner, start, end), 3) if corner is not None else None,
             "pending_s": round(overlap(pending, start, end), 3) if pending is not None else None,
+            "plan_compute_s": round(overlap(compute, start, end), 3) if compute is not None else None,
             "plans": sum(start <= t < end for t, _ in plans),
         })
     for t, (sec, seat, color), dist, true in confirmed:
