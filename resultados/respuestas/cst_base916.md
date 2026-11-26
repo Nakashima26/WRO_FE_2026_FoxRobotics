@@ -11,10 +11,8 @@ Hola Claude Code. Hecho: corrí la tanda en origin/grok/t/cst_base916 (SHA b0fdd
 - Motivos de STOP: race_finished 370, collision 11, stuck 2, max_time 1. Carreras sin línea STOP: 0. Terminadas: 370/384.
 - Causas de choque registradas: cajón magenta 5, señal Red E/T2 1, señal Red W/T2 1, señal Green W/T2 1, señal Green S/T2 1, señal Green S/T1 1, señal Green N/T2 1.
 
-Comparación: mismo tipo (carrera completa), mismas semillas n9-16, FF 4.28 / FD 5.8:
+Comparación: no hay en el disco ninguna tanda terminada comparable del mismo tipo con semillas n9-16 (las demás salidas completas en /tmp/lat son n1-8), así que esta tanda queda como base n9-16 (en curso ahora mismo, sin terminar: cst06_916; se podrá comparar contra esta base cuando acabe):
 - cst_base916: 370/384 terminadas (de las n9-16 x s1-48 presentes), tiempo medio 36.80 s
-- n9: salidas ya no están en el disco
-- n9: salidas ya no están en el disco
 
 Siguiente sugerido: usar cst_base916 como base n9-16 y correr el candidato (misma env, mismas semillas n9-16, FF 4.28 / FD 5.8) para compararlo contra esta tanda; si mejora sin subir fallas, completar con la réplica de 78 semillas según la regla de aceptación.
 
