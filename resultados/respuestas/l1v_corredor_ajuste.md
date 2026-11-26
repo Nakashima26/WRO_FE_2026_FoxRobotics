@@ -11,3 +11,21 @@ Hecho:
 Supuesto: tomé "media primaria" = media de total_time_s en pares donde ambos brazos terminan (como en cartas). Si querías otra métrica (p. ej. COSTO media_ms o tasa de éxito), avísame antes de que termine el 288.
 
 Iré agregando secciones a este archivo.
+
+## 2026-11-25 15:54 PST — 288 terminado, sin rep78
+
+- 288 de 288 carreras cambiaron vs la0g en 48 semillas (1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48).
+- 288: terminadas la0g 278/288, corredor 0/288; sin pares ambos terminados
+- COSTO: l1v_corredor_288: 0 COSTO leídos, 288 sin COSTO o con FF/FD distinto de 4.28/5.8
+- rep78 no corrido: hubo cambios pero la media primaria no bajó.
+
+Archivos: `resultados/l1v_corredor_288.md`, `resultados/l1v_corredor_rep78.md`.
+
+## 2026-11-25 15:54 PST — 288 terminado, sin rep78
+
+- 288 de 288 carreras cambiaron vs la0g en 48 semillas (1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48).
+- 288: terminadas la0g 278/288, corredor 0/288; sin pares ambos terminados
+- COSTO: l1v_corredor_288: 0 COSTO leídos, 288 sin COSTO o con FF/FD distinto de 4.28/5.8
+- rep78 no corrido: hubo cambios pero la media primaria no bajó.
+
+Archivos: `resultados/l1v_corredor_288.md`, `resultados/l1v_corredor_rep78.md`.
