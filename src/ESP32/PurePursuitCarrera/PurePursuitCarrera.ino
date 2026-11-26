@@ -161,7 +161,7 @@ float KdWall = 1.35;
 // ya se sabe el sentido de giro de la pista, el wall PID mantiene esta distancia
 // fija a la pared INTERIOR (la del lado hacia donde gira). Menos "hunting" y
 // línea más corta en rectas anchas; además la pared interior no "desaparece" en
-// las esquinas (esa es la exterior), así que el PID no se clava. 
+// las esquinas (esa es la exterior), así que el PID no se clava.
 const float WALL_HOLD_CM = 28.0;
 
 // El error de UNA sola pared tiene ~la mitad de ganancia geométrica que
@@ -7850,7 +7850,13 @@ void loop() {
             Serial.print("PARK: DIRECTO chueco ang="); Serial.print(anguloGyro, 1); Serial.println(" -> U");
             break;
           }
-        if (validaPoste2 && !p1Reciente && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
+        // El primer poste confirmado da un origen local: espera su
+        // ventana odométrica incluso si el mapa absoluto ya quedó atrás.
+        const bool esperaDesdePoste1 = parkDirecto && PARK_D_P1_ODOM_MM > 0
+                                    && parkScanSubFase >= 1 && parkP1Sonar && parkOdomPoste1 >= 0
+                                    && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM - 100;
+        if (validaPoste2 && !p1Reciente && !esperaDesdePoste1
+            && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
           parkRecuperarEscaneo("POSTE 2 fuera de ventana");
           break;
         }
@@ -8884,6 +8890,18 @@ void loop() {
         // corta la pose: la esquina de la nariz toca la madera antes de que el ToF frontal la vea (gemelo
         // 34/48 sin este corte vs 44/48).
         if (!fin && i >= 1 && cerca && (!zz || cercaTof || parkPlanDir > 0)) { fin = true; why = "HOLGURA"; }
+        if (!fin && zz && parkPlanDir > 0 && encVelMmS > 0.0f && clr > PARK_PL_M_MM) {
+          // Al cortar potencia, la nariz todavía barre un arco hacia la madera.
+          const float yaw = th * DEG_TO_RAD;
+          const float radius = parkPlanSgn * PARK_PL_RI;
+          const float coast = encVelMmS * PARK_PL_FRENTE_LAG_S;
+          const float finYaw = yaw - coast / radius;
+          const float finW = pw + radius * (sinf(yaw) - sinf(finYaw));
+          const float finH = ph + radius * (cosf(finYaw) - cosf(yaw));
+          if (parkPlanHolgura(finW, finH, finYaw * RAD_TO_DEG) <= PARK_PL_M_MM) {
+            fin = true; why = "COAST";
+          }
+        }
         if (!fin && zz && parkPlanDir > 0 && (distF_filtrada <= 0 || distF_filtrada >= 100) && mm >= PARK_PL_CIEGO_MM) { fin = true; why = "CIEGO"; }
         {   // Avance por tramo con BNO + encoder: si en PARK_PL_AVANCE_MS ni el ángulo ni el encoder cambian
             // (el anti-atasco de setMotorTope ya empujó), se corta el tramo y el siguiente va al revés.
