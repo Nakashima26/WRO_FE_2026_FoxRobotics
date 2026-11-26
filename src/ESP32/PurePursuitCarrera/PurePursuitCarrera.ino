@@ -13,7 +13,7 @@ struct LogPi : public Print {
     l[n++] = c;
     if (c != '\n') return 1;
     Serial.write(l, n);
-    if (!corta && n > 4 && !memcmp(l, "PARK", 4)) {
+    if (!corta && n > 4 && (!memcmp(l, "PARK", 4) || !memcmp(l, "INICIO", 6))) {
       unsigned long t = millis();
       if (t - ventMs >= 1000UL) { ventMs = t; ventB = 0; }
       if (ventB + n <= 3000) { Serial2.write(l, n); ventB += n; }
@@ -6371,6 +6371,8 @@ void loop() {
         logPi.print(" ang="); logPi.println(anguloGyro, 1);
         if (inicioFase == 2 && deltaIni < (float)(INICIO_ANG_ADENTRO_DEG - INICIO_OVERSHOOT_DEG)) {
           inicioFase   = 1;                       // vuelve a tope hasta ~90°
+          // ya va girando: la inercia de un swing nuevo (overshoot 28) no existe; con 62 se quedaba a ~70 y el dF<15 veia el verde -> contravuelta encima (orillas312-314)
+          inicioTarde  = INICIO_TARDE_OVERSHOOT_DEG >= 0;
           inicioFaseMs = millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS;
         }
       }
