@@ -1607,6 +1607,14 @@ class RouteMode:
             kmax > float(tight), float(getattr(C, "ROUTE_PROFILE_A_LAT_TIGHT_MM_S2", 1500.0)), a_lat)
         v_c = np.where(kmax < 1e-9, v_max,
                        np.clip(np.sqrt(a_c / np.maximum(kmax, 1e-12)), v_min, v_max))
+        grip = getattr(C, "ROUTE_PROFILE_GRIP_A_LAT_MM_S2", None)
+        grip_on = False
+        if grip is not None and not l23:
+            # El piso de la vuelta 1 ganaba a la curva: R 170 a ~790 mm/s pide ~3600 mm/s² con agarre medido
+            # 2400-2750 (orillas315: 1.1 m/s saliendo del esquive, derrapó a la pared). Aquí la curva baja del piso.
+            v_g = np.sqrt(float(grip) / np.maximum(kmax, 1e-12))
+            grip_on = bool(np.any(v_g < v_c))
+            v_c = np.minimum(v_c, v_g)
         v_c_curve = v_c
         if signs is not None and len(signs):
             # Cerca de una señal: velocidad base (la frenada de arriba llega a ella a base).
@@ -1752,6 +1760,8 @@ class RouteMode:
             lo = min(floor, int(getattr(C, "ROUTE_PROFILE_BRAKE_FLOOR_PWM", 60)))
         if tight_on:
             lo = min(lo, int(getattr(C, "ROUTE_PROFILE_SIGN_TIGHT_PWM", 110)))
+        if grip_on:
+            lo = min(lo, int(getattr(C, "ROUTE_PROFILE_BRAKE_FLOOR_PWM", 60)))
         pwm = v_allow / K + pwm0
         return int(round(min(max(pwm, lo), top)))
 
@@ -2554,4 +2564,4 @@ class RouteMode:
             lines.append(f"RTP,{i},{pts}")
         lines.append(f"RTE,{n}")
         return lines
-
+

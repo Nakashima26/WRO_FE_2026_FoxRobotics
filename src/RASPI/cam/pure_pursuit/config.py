@@ -1529,6 +1529,7 @@ ROUTE_PROFILE = False                 # perfil de velocidad por curvatura (recta
 ROUTE_PROFILE_BASE_PWM = 155          # piso: velocidad de curva de hoy
 ROUTE_PROFILE_MAX_PWM = 255           # techo en recta
 ROUTE_PROFILE_A_LAT_MM_S2 = 1500.0    # aceleración lateral máxima
+ROUTE_PROFILE_GRIP_A_LAT_MM_S2 = None   # fuera de vueltas 2-3: la curva puede bajar del piso (MIN/L1_MIN_PWM) hasta sqrt(esto/κ); None = el piso manda
 ROUTE_PROFILE_A_BRAKE_MM_S2 = 600.0   # desaceleración disponible para frenar antes de una curva
 ROUTE_PROFILE_LATENCY_S = 0.25        # adelanto por latencia Pi->ESP->motor
 ROUTE_PROFILE_HORIZON_MM = 1500.0     # cuánto mirar hacia adelante
