@@ -1497,6 +1497,7 @@ ROUTE_HALF_ROW_TOL_MM = 150.0
 # saliendo de la esquina). Replays reales 48/50/52: 20° deja todo igual y arregla E/X2; 25° no basta.
 DIGITAL_MAP_VOTE_MAX_BEARING_DEG = 20.0
 DIGITAL_MAP_VOTE_SIDE_MISALIGN_DEG = 25.0   # ...solo si además el rumbo difiere de su recta más que esto
+DIGITAL_MAP_ROW_OBS_ALIGNED_ONLY = False   # la fila observada (row_candidates) solo con vistas alineadas a su recta (orillas315)
 DIGITAL_MAP_LINE_ALONG_FIX = False   # apagado: en el gemelo la medida se va de ~0 a -180 mm al acercarse a la cinta (sesgo de proyección), 2/6 semillas chocan
 DIGITAL_MAP_LINE_FIX_MATCH_MM = 300.0   # distancia media máx. de la cinta vista al segmento de la cinta de verdad
 DIGITAL_MAP_LINE_FIX_MAX_MM = 300.0     # corrección máx. aceptada (la de orillas50 era ~300)
