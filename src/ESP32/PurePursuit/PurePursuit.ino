@@ -5194,7 +5194,7 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
           && campoPi(line, ",pko=", v)) {
         const float observada = campoFloat(v);
         const float atraso = rutaPka - observada;
-        if (atraso >= 90.0f && atraso <= 260.0f) rutaPka = observada;
+        if (atraso >= 100.0f && atraso <= 260.0f) rutaPka = observada;
       }
       if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0;
     }

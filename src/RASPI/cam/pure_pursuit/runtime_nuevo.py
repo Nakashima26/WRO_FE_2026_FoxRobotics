@@ -592,7 +592,7 @@ class PPRuntime:
         self._rmode.frame = frame
         self._rmode.color_ranges = getattr(self.vision, "color_ranges", None)
         self._rmode.bev = self.bev
-        if C.ROUTE_PARK_VISION_REF and armed and self._tc >= 3:
+        if (C.ROUTE_PARK_VISION_REF or C.ROUTE_PARK_OBS_PRIOR) and armed and self._tc >= 3:
             self._rmode.park_mask = _park_pink(frame)[1]
         if C.ROUTE_PARK_LANDMARK_REF:
             self._rmode.park_feet = feet
@@ -2404,7 +2404,7 @@ class PPRuntime:
         # Frame sin anotar (detect_on dibuja sobre una copia), solo si se usa la ROI
         _roi_frame = (frame if frame is not None and (getattr(C, "ROUTE_SEAT_ROI", False)
                       or getattr(C, "SEAT_ROI_LOG", False)
-                      or (C.ROUTE_PARK_VISION_REF and armed and self._tc >= 3))
+                      or ((C.ROUTE_PARK_VISION_REF or C.ROUTE_PARK_OBS_PRIOR) and armed and self._tc >= 3))
                       else None)
         _route_steer, _route_suffix, _route_line = self._route_step(armed, _roi_frame, line_info["Orange"], new_obstacles)
         self._route_steering = _route_steer is not None
