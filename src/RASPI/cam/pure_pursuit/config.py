@@ -1604,7 +1604,6 @@ ROUTE_FIX_LINE_TOF_LR = None
 ROUTE_FIX_LINE_TOF_MIN_INFORM = 3
 # Holgura (mm) del δ de un voto de la cinta más allá del rango del cajón; fuera de eso se busca otra esquina.
 ROUTE_FIX_LINE_RANGE_MARGIN_MM = 150.0
-ROUTE_FIX_LINE_SEG_TOL_MM = None   # mm: el voto por recta solo con cinta cuyo tramo real contiene el punto corrido δ, y gana la de menor exceso sobre el rango del cajón (orillas284/289); None = la más cercana
 ROUTE_PARK_OBS_PRIOR = False  # Corrige pka al cierre de carrera si las observaciones lo contradicen.
 ROUTE_PARK_REFINE = False  # Solo Pi: refina pka con las dos maderas vistas por el ToF exterior.
 ROUTE_PARK_GEOM_EXT = 0  # Pi+ESP opt-in (g_geom): manda pge=1 para que el ESP, si iba a hacer la U, se pegue a la pared exterior pasado el cajon y lo busque en reversa con el sonar. 0 apagado, 1 solo con senal de entrada verde.

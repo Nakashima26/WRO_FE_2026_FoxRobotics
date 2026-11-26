@@ -1925,33 +1925,16 @@ class RouteMode:
         # +166..+192 y la NE a 1.4 m -565 -> isla).
         mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
         lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
-        # 2026-11-26 (orillas284/289, choque en la recta del cajón): con la holgura de 300 la cinta de la OTRA
-        # esquina (δ +260..+298, cajón en w0≈1960, imposible) quedaba dentro y ganaba por estar ~300 mm más
-        # cerca; la buena (-441..-790, la azul votó -573) perdía. Con esto: el punto corrido δ tiene que caer
-        # sobre el tramo real de la cinta (±seg_tol) y gana la de menor exceso sobre el rango del reglamento;
-        # la distancia solo desempata.
-        seg_tol = getattr(C, "ROUTE_FIX_LINE_SEG_TOL_MM", None)
-        s_lo, s_hi = (0.0, span) if dm.direction == "CW" else (-span, 0.0)
         best = None
         for (sx, sy), (ex, ey) in orange_segments():
-            u = np.array([ex - sx, ey - sy], dtype=float)
-            seg_len = float(np.linalg.norm(u)); u /= seg_len
+            u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
             n = np.array([-u[1], u[0]])
             if abs(n @ a) < 0.3:
                 continue
             d = (n @ np.array([sx, sy]) - n @ p) / (n @ a)
             dist = math.hypot(sx - p[0], sy - p[1])
-            if not lo <= d <= hi:
-                continue
-            if seg_tol is None:
-                key = (0.0, dist)
-            else:
-                t = float((p + d * a - np.array([sx, sy])) @ u)
-                if not -float(seg_tol) <= t <= seg_len + float(seg_tol):
-                    continue
-                key = (max(0.0, s_lo - d, d - s_hi), dist)
-            if best is None or key < best[1]:
-                best = (float(d), key)
+            if lo <= d <= hi and (best is None or dist < best[1]):
+                best = (float(d), dist)
         if best is not None:
             if self._line_vote_append(best[0], "recta"):
                 print(f"[FIXVOTE] recta d={best[0]:+.0f} fwd={fwd:.0f} by={by:.1f} pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.1f})", flush=True)
