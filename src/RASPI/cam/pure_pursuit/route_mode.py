@@ -315,6 +315,25 @@ def pix_line_delta(pix, pose, axis, direction, fwd_add: float = 0.0):
     return dmed + bias, f"n={c}/{tot} largo={sp:.0f} dh={dh:+.0f}"
 
 
+def _segment_hits_square(ax: float, ay: float, bx: float, by: float, half: float) -> bool:
+    """True si el segmento A-B cruza el cuadrado |x|,|y| <= half (Liang-Barsky)."""
+    t0, t1 = 0.0, 1.0
+    dx, dy = bx - ax, by - ay
+    for p, q in ((-dx, ax + half), (dx, half - ax), (-dy, ay + half), (dy, half - ay)):
+        if p == 0.0:
+            if q < 0.0:
+                return False
+            continue
+        r = q / p
+        if p < 0.0:
+            t0 = max(t0, r)
+        else:
+            t1 = min(t1, r)
+        if t0 > t1:
+            return False
+    return True
+
+
 class RouteMode:
     def __init__(self) -> None:
         if getattr(C, "ROUTE_WARM", False):
@@ -442,6 +461,15 @@ class RouteMode:
     def _update_views(self, conf, empty, pose) -> None:
         """Cuenta frames con cada asiento sin resolver a buena vista de la cámara."""
         x, y, hd = pose
+        # Carltron: un "no está" solo cuenta si el asiento debía verse. Girando rápido la cámara
+        # llega tarde/barrida y la detección no alcanza a votar: esos frames no suman vacío.
+        prev_hd, self._views_hd = getattr(self, "_views_hd", None), hd
+        yaw_max = getattr(C, "ROUTE_VIEW_YAW_MAX_DEG", None)
+        if (yaw_max is not None and prev_hd is not None
+                and abs((hd - prev_hd + 180.0) % 360.0 - 180.0) > float(yaw_max)):
+            self.visible = set()
+            return
+        isla = bool(getattr(C, "ROUTE_VIEW_ISLAND", False))
         h = math.radians(hd)
         fx, fy = math.sin(h), math.cos(h)
         cam_fwd = float(getattr(C, "CAMERA_FWD_MM", 140.0))
@@ -471,6 +499,8 @@ class RouteMode:
                 if 0.0 < t < 1.0 and abs(ex * dy - ey * dx) / max(dist, 1.0) < 60.0:
                     hidden = True
                     break
+            if not hidden and isla and _segment_hits_square(cx, cy, sx, sy, INNER_HALF_MM):
+                hidden = True   # la isla tapa el asiento (esquina interior al girar)
             if hidden:
                 continue
             self.visible.add(key)
