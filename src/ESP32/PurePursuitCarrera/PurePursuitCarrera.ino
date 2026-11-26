@@ -2221,6 +2221,7 @@ const int   WALL_PANIC_CM   = 18;
 // 4/8/12) — ver el bloque de wallPanic. Ponlo igual a WALL_PANIC_CM para
 // desactivar la guardia sin borrar nada.
 const int   WALL_PANIC_EXT_CM = 30;
+const int   WALL_PANIC_EXT_FINAL_CM = 22;   // recta del cajon (giro 12): bajo el objetivo del escaneo (~28) para no pelear con el pegado de la ruta (orillas300/310/312: dR 14 -> panic 30 -> S de +-40 grados -> chueco)
 const float WALL_PANIC_GAIN = 2.4f;
 const int   WALL_PANIC_DEB  = 2;
 int contadorPanicL = 0, contadorPanicR = 0;
@@ -5617,8 +5618,9 @@ void controlPID(long distL, long distR) {
     // propósito: ahí el carro acaba de salir del cajón y estar cerca es normal.
     bool rectaCajon = (turnsCompleted == 4 || turnsCompleted == 8 || turnsCompleted == 12);
     bool extEsIzq   = !direccionIzquierda;   // giro a la DER => exterior a la IZQ
-    int panicL = (rectaCajon &&  extEsIzq) ? WALL_PANIC_EXT_CM : WALL_PANIC_CM;
-    int panicR = (rectaCajon && !extEsIzq) ? WALL_PANIC_EXT_CM : WALL_PANIC_CM;
+    int panicExt = (turnsCompleted == 12) ? WALL_PANIC_EXT_FINAL_CM : WALL_PANIC_EXT_CM;
+    int panicL = (rectaCajon &&  extEsIzq) ? panicExt : WALL_PANIC_CM;
+    int panicR = (rectaCajon && !extEsIzq) ? panicExt : WALL_PANIC_CM;
     contadorPanicL = (distL > 0 && distL < panicL) ? min(contadorPanicL + 1, WALL_PANIC_DEB) : 0;
     contadorPanicR = (distR > 0 && distR < panicR) ? min(contadorPanicR + 1, WALL_PANIC_DEB) : 0;
     // No dejes que wallPanic pelee contra un esquive ACTIVO de la Pi: el lateral
