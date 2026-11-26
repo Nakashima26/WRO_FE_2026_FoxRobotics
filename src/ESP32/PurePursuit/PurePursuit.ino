@@ -1,3 +1,26 @@
+#if !defined(FOX_SIL)
+// Log USB por lineas enteras (un write por linea). Las que empiezan con "PARK" tambien van a la Pi: el runtime guarda
+// toda linea no-ACK en el _tele.jsonl (campo "esp"). Tope de bytes por segundo para no ahogar el ACK.
+struct LogPi : public Print {
+  uint8_t l[256]; size_t n = 0; bool corta = false; unsigned long ventMs = 0; size_t ventB = 0;
+  size_t write(uint8_t c) override {
+    if (n == sizeof(l)) { Serial.write(l, n); n = 0; corta = true; }
+    l[n++] = c;
+    if (c != '\n') return 1;
+    Serial.write(l, n);
+    if (!corta && n > 4 && !memcmp(l, "PARK", 4)) {
+      unsigned long t = millis();
+      if (t - ventMs >= 1000UL) { ventMs = t; ventB = 0; }
+      if (ventB + n <= 3000) { Serial2.write(l, n); ventB += n; }
+    }
+    n = 0; corta = false;
+    return 1;
+  }
+};
+static LogPi logPi;
+#else
+#define logPi Serial
+#endif
 /*
  * PurePursuit.ino — WRO Future Engineers
  * Firmware ESP32 con soporte de protocolo V2 (Pure Pursuit desde Raspberry Pi).
@@ -2675,8 +2698,8 @@ void entrarGiroRapido(long distL, long distR) {
   integralGyro  = 0; prevErrorGyro = 0;
   piPurePursuit = false;
   estado        = GIRO_RAPIDO;
-  Serial.print("-> GIRO_RAPIDO dir="); Serial.print(maniobraGirarDerGr ? "DER" : "IZQ");
-  Serial.print(" obj="); Serial.println(grObjetivo, 1);
+  logPi.print("-> GIRO_RAPIDO dir="); logPi.print(maniobraGirarDerGr ? "DER" : "IZQ");
+  logPi.print(" obj="); logPi.println(grObjetivo, 1);
 }
 
 void actualizarOdometria() {
@@ -2880,7 +2903,7 @@ static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
   if (!dev.init()) {
     // De vuelta a reset: si se queda despierto ocupa 0x29 y el siguiente que se arranque choca con él.
     digitalWrite(xshut, LOW);
-    Serial.print("ToF "); Serial.print(nombre); Serial.println(" fail"); return false;
+    logPi.print("ToF "); logPi.print(nombre); logPi.println(" fail"); return false;
   }
   dev.setAddress(addr);
   const bool usaShort = corto && TOF_LAT_TRAS_SHORT;
@@ -2888,7 +2911,7 @@ static bool initUnToF(VL53L1X &dev, int xshut, uint8_t addr, const char *nombre,
   dev.setDistanceMode(usaShort ? VL53L1X::Short : VL53L1X::Long);
   if (usaShort && roi > 0) dev.setROISize(roi, roi);
   if (!dev.setMeasurementTimingBudget((uint32_t)ms * 1000UL)) {
-    Serial.print("ToF "); Serial.print(nombre); Serial.println(" presupuesto rechazado");
+    logPi.print("ToF "); logPi.print(nombre); logPi.println(" presupuesto rechazado");
   }
   dev.startContinuous(ms);
   return true;
@@ -3003,8 +3026,8 @@ void leerToF() {
       if (i2cContesta(TOF_ADDR[i]))   tofEstado[i] = 'd';
       else if (i2cContesta(0x29))     tofEstado[i] = 'z';
       else                            tofEstado[i] = 'n';
-      Serial.print("ToF "); Serial.print(TOF_NOM[i]); Serial.print(" sin datos: ");
-      Serial.println(tofEstado[i]);
+      logPi.print("ToF "); logPi.print(TOF_NOM[i]); logPi.print(" sin datos: ");
+      logPi.println(tofEstado[i]);
       hayCaido = true;
     }
   }
@@ -3055,13 +3078,13 @@ void decidirManiobra(long distL, long distR) {
   // incrusta en fase 1): retrocede recto primero (ver FWD_REARMA_CM). Con
   // FWD_REARMA_CM = 0, comportamiento viejo: pivote en REVERSA.
   if (!maniobraReversa && distF_filtrada > 0 && distF_filtrada <= FWD_MIN_FRONT_CM) {
-    Serial.print("[HUG] FORWARD sin espacio (dF="); Serial.print((long)distF_filtrada);
+    logPi.print("[HUG] FORWARD sin espacio (dF="); logPi.print((long)distF_filtrada);
     if (FWD_REARMA_CM > 0) {
       maniobraRetrocedeAntes = true;
-      Serial.println(") -> retrocede recto y arco FORWARD");
+      logPi.println(") -> retrocede recto y arco FORWARD");
     } else {
       maniobraReversa = true;
-      Serial.println(") -> REVERSE");
+      logPi.println(") -> REVERSE");
     }
   }
 
@@ -3230,17 +3253,17 @@ void finalizarPark(const char *motivo) {
   parkFase     = 7;
   parkFinMotivo = motivo;
   raceFinished = true;
-  Serial.println("==================================================");
-  Serial.print  ("  ESTACIONAMIENTO PARALELO (10 pts) TERMINADO: ");
-  Serial.println(motivo);
-  Serial.print  ("  Heading final vs recta: "); Serial.print(anguloGyro, 2); Serial.println(" deg");
-  Serial.print  ("  Base pared="); Serial.print(parkBase, 1);
-  Serial.print  ("  Caida lectura="); Serial.println(parkCaidaLectura);
-  Serial.print  ("  dL="); Serial.print(distL_filtrada);
-  Serial.print  (" dR="); Serial.print(distR_filtrada);
-  Serial.print  (" dF="); Serial.println(distF_filtrada);
-  Serial.println("  RACE FINISHED -> STOP");
-  Serial.println("==================================================");
+  logPi.println("==================================================");
+  logPi.print  ("  ESTACIONAMIENTO PARALELO (10 pts) TERMINADO: ");
+  logPi.println(motivo);
+  logPi.print  ("  Heading final vs recta: "); logPi.print(anguloGyro, 2); logPi.println(" deg");
+  logPi.print  ("  Base pared="); logPi.print(parkBase, 1);
+  logPi.print  ("  Caida lectura="); logPi.println(parkCaidaLectura);
+  logPi.print  ("  dL="); logPi.print(distL_filtrada);
+  logPi.print  (" dR="); logPi.print(distR_filtrada);
+  logPi.print  (" dF="); logPi.println(distF_filtrada);
+  logPi.println("  RACE FINISHED -> STOP");
+  logPi.println("==================================================");
 }
 
 // Cierre del plan con centrado longitudinal (fase 43); si no aplica, cierra ya.
@@ -3285,7 +3308,7 @@ void tofLatConoPark() {
     lat[i]->setROISize(TOF_LAT_ROI_PARK, TOF_LAT_ROI_PARK);
     lat[i]->startContinuous(TOF_LAT_TRAS_MS);
   }
-  Serial.println("ToF laterales: ROI de parking");
+  logPi.println("ToF laterales: ROI de parking");
 #endif
 }
 
@@ -3358,9 +3381,9 @@ void silPreParkSeed() {
   poseYf = (float)sil_param("pp_y", 0.0);
   poseX  = (long)lroundf(poseXf);
   poseY  = (long)lroundf(poseYf);
-  Serial.print("SIL pre_park: pose=("); Serial.print(poseXf, 0); Serial.print(",");
-  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
-  Serial.print(" ang="); Serial.println(anguloGyro, 1);
+  logPi.print("SIL pre_park: pose=("); logPi.print(poseXf, 0); logPi.print(",");
+  logPi.print(poseYf, 0); logPi.print(") yaw="); logPi.print(anguloTotal, 1);
+  logPi.print(" ang="); logPi.println(anguloGyro, 1);
 }
 
 // Harness del twin (sim.py ruta_seed, solo SIL): arranca en modo RUTA en la recta
@@ -3386,9 +3409,9 @@ void silRutaSeed() {
     parkUturnOdom0     = (long)sil_param("rp_od12", (double)odomMm);
     contadorEsquina13  = 0;
   }
-  Serial.print("SIL ruta_seed: pose=("); Serial.print(poseXf, 0); Serial.print(",");
-  Serial.print(poseYf, 0); Serial.print(") yaw="); Serial.print(anguloTotal, 1);
-  Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.print(" od="); Serial.println(odomMm);
+  logPi.print("SIL ruta_seed: pose=("); logPi.print(poseXf, 0); logPi.print(",");
+  logPi.print(poseYf, 0); logPi.print(") yaw="); logPi.print(anguloTotal, 1);
+  logPi.print(" ang="); logPi.print(anguloGyro, 1); logPi.print(" od="); logPi.println(odomMm);
 }
 #endif
 
@@ -3408,19 +3431,19 @@ void iniciarEstacionando() {
     parkRumboRef = anguloGyro;
     parkFase     = 2;
     parkFaseMs   = millis(); parkOdom0 = odomMm;
-    Serial.println("-> TEST DIRECTO: Iniciando en posicion de lanzamiento para reversa");
+    logPi.println("-> TEST DIRECTO: Iniciando en posicion de lanzamiento para reversa");
   } else if (PARK_TEST_MANO) {
     motorCoast();
     escribirServo(centroServo);
-    Serial.println("-> TEST A MANO: Motor apagado, empuja el carro para ver deteccion y angulos");
+    logPi.println("-> TEST A MANO: Motor apagado, empuja el carro para ver deteccion y angulos");
   }
 
-  Serial.println("==================================================");
-  Serial.print("-> ESTACIONANDO EN PARALELO (10 pts): sigo pared ");
-  Serial.print(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
-  Serial.print(" a "); Serial.print(PARK_PARED_CM, 0); Serial.print(" cm");
-  Serial.println(PARK_TEST_MANO ? " (PRUEBA A MANO, motor apagado)" : "");
-  Serial.println("==================================================");
+  logPi.println("==================================================");
+  logPi.print("-> ESTACIONANDO EN PARALELO (10 pts): sigo pared ");
+  logPi.print(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+  logPi.print(" a "); logPi.print(PARK_PARED_CM, 0); logPi.print(" cm");
+  logPi.println(PARK_TEST_MANO ? " (PRUEBA A MANO, motor apagado)" : "");
+  logPi.println("==================================================");
 }
 
 void iniciarEstacionandoRetorno() {
@@ -3434,10 +3457,10 @@ void iniciarEstacionandoRetorno() {
   parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorCoast();
   escribirServo(PARK_RETORNO_AVANCE_MS > 0 ? centroServo : (parkParedEsIzquierda ? SERVO_MAX_DEG : SERVO_MIN_DEG));
-  Serial.println("==================================================");
-  Serial.print("-> MEDIA VUELTA (giro 13), luego paralelo. Pared del regreso: ");
-  Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
-  Serial.println("==================================================");
+  logPi.println("==================================================");
+  logPi.print("-> MEDIA VUELTA (giro 13), luego paralelo. Pared del regreso: ");
+  logPi.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+  logPi.println("==================================================");
 }
 
 // T15b2 (PARK_PARALELO_USA_UTURN): tras la vuelta 12, U de 180° EN LA RECTA
@@ -3457,10 +3480,10 @@ void iniciarEstacionandoParaleloUturn() {
   parkFaseMs       = millis(); parkOdom0 = odomMm;
   motorAdelante();
   escribirServo(centroServo);
-  Serial.println("==================================================");
-  Serial.print("-> MEDIA VUELTA (giro 13): U de 180 (de PUNTA), luego paralelo. Pared del regreso: ");
-  Serial.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
-  Serial.println("==================================================");
+  logPi.println("==================================================");
+  logPi.print("-> MEDIA VUELTA (giro 13): U de 180 (de PUNTA), luego paralelo. Pared del regreso: ");
+  logPi.println(parkParedEsIzquierda ? "IZQUIERDA" : "DERECHA");
+  logPi.println("==================================================");
 }
 
 void iniciarParkBuscando() {
@@ -3468,14 +3491,14 @@ void iniciarParkBuscando() {
   // escaneo tiene toda la recta (y no se come el cooldownGiro de 3 s del gate de
   // SIGUIENDO, que a ~30 cm/s son ~90 cm). Ver PARK_ESPERA_PI.
   if (!PARK_ESPERA_PI) {
-    Serial.println("-> Recta final: ESCANEO DE CAJON YA (sin esperar a la Pi)");
+    logPi.println("-> Recta final: ESCANEO DE CAJON YA (sin esperar a la Pi)");
     iniciarEstacionando();
     return;
   }
   parkBuscando        = true;
   parkBuscandoEntryMs = millis();
   estado              = SIGUIENDO;
-  Serial.println("-> Recta final: BUSCANDO ESTACIONAMIENTO MAGENTA");
+  logPi.println("-> Recta final: BUSCANDO ESTACIONAMIENTO MAGENTA");
 }
 
 // Fase 0 desde cero: base del sonar, timers de armado/timeout y contadores.
@@ -3498,9 +3521,9 @@ void arrancarSeguirPunta() {
   puntaMuros        = 0;
   puntaEnPoste      = false;
   puntaHueco        = false;
-  Serial.print("PUNTA fase 0: sigo pared ");
-  Serial.print(puntaParedIzq ? "IZQUIERDA" : "DERECHA");
-  Serial.print(" a "); Serial.print(PARK_PUNTA_PARED_CM, 0); Serial.println(" cm");
+  logPi.print("PUNTA fase 0: sigo pared ");
+  logPi.print(puntaParedIzq ? "IZQUIERDA" : "DERECHA");
+  logPi.print(" a "); logPi.print(PARK_PUNTA_PARED_CM, 0); logPi.println(" cm");
 }
 
 // retorno=false: estaciona de frente tras el giro 12 (fase 0 directo).
@@ -3514,12 +3537,12 @@ void iniciarEstacionandoPunta(bool retorno) {
   puntaRosaVisto = false;
   puntaRetorno   = retorno;
   puntaParedIzq  = paredCajonEsIzq(retorno);
-  Serial.println("==================================================");
-  Serial.print("-> ESTACIONANDO DE PUNTA");
-  Serial.print(retorno ? " (media vuelta, pared del regreso " : " (de frente, pared ");
-  Serial.print(puntaParedIzq ? "IZQUIERDA)" : "DERECHA)");
-  Serial.println(PARK_TEST_MANO ? " PRUEBA A MANO, motor apagado" : "");
-  Serial.println("==================================================");
+  logPi.println("==================================================");
+  logPi.print("-> ESTACIONANDO DE PUNTA");
+  logPi.print(retorno ? " (media vuelta, pared del regreso " : " (de frente, pared ");
+  logPi.print(puntaParedIzq ? "IZQUIERDA)" : "DERECHA)");
+  logPi.println(PARK_TEST_MANO ? " PRUEBA A MANO, motor apagado" : "");
+  logPi.println("==================================================");
   if (retorno) {
     motorAdelante();
     escribirServo(centroServo);
@@ -3528,7 +3551,7 @@ void iniciarEstacionandoPunta(bool retorno) {
     puntaServoU     = 0;
     puntaFase       = 20;
     puntaFaseMs     = millis();
-    Serial.println("PUNTA fase 20: U por encoder, sin reversa");
+    logPi.println("PUNTA fase 20: U por encoder, sin reversa");
   } else {
     motorAdelante();
     escribirServo(centroServo);
@@ -3567,11 +3590,11 @@ float rutaErrCarrilDeg(); float rutaExtTapeteCm(); void rutaPoseTapete(float &x,
 // No se entra al plan a ciegas. Sin haber visto la madera de adelante, primero se retrocede recto por el carril hasta verla (fase 42).
 void parkRevCaeAU(const char *why) {
   if (parkFase == 41) {
-    Serial.print("PARK REV: "); Serial.print(why); Serial.println(" -> retrocede a buscar la madera");
+    logPi.print("PARK REV: "); logPi.print(why); logPi.println(" -> retrocede a buscar la madera");
     parkFase = 42; parkFaseMs = millis(); parkOdom0 = odomMm; parkRevBase = 0.0f; parkRevDrop = 0; parkRevEnMadera = false;
     return;
   }
-  Serial.print("PARK REV: "); Serial.print(why); Serial.println(" -> U");
+  logPi.print("PARK REV: "); logPi.print(why); logPi.println(" -> U");
   parkRevModo = false; parkUturnPendiente = false; parkUturnDisparoOdom = -1;
   anguloGyro = rutaErrCarrilDeg() + parkRevGyroOff;
   iniciarEstacionamiento(true);
@@ -3631,8 +3654,8 @@ void vigilarSinU() {
     parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;
     parkRevBase = 0.0f; parkRevDrop = 0; parkRevAnc = false; parkRevModo = true;
     motorAdelante();
-    Serial.print("PARK REV: sigo recto, pka="); Serial.print(rutaPka, 0); Serial.print(" along="); Serial.print(along, 0);
-    Serial.print(" h="); Serial.println(parkDetHSon, 0);
+    logPi.print("PARK REV: sigo recto, pka="); logPi.print(rutaPka, 0); logPi.print(" along="); logPi.print(along, 0);
+    logPi.print(" h="); logPi.println(parkDetHSon, 0);
     return;
   }
   if (!sinUActivo() && parkSinUDec == 2) return;
@@ -3654,7 +3677,7 @@ void vigilarSinU() {
     parkSinUDec = lin ? 1 : 2;
     parkGeomVeniaLejos = PARK_GEOM_ROJO && !lin && extCm >= PARK_PARED_CM + 17.0f;  // sync no-llega +17
     parkRevDir = !lin && PARK_REV_DIR;
-    Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
+    logPi.print("PARK decision cajon al inicio: "); logPi.print(lin ? "DIRECTO" : "CON U"); logPi.print(" ext="); logPi.print(rutaExtTapeteCm(), 1); logPi.print(" err="); logPi.print(rutaErrCarrilDeg(), 1); logPi.print(" along="); logPi.print(along, 0); logPi.print(" pka="); logPi.println(rutaPka, 0);
     if (!lin) return;
   }
   float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
@@ -3668,14 +3691,14 @@ void vigilarSinU() {
     // Sync park_legado: cajón mid-recta no pasa por "cajón al inicio"; latch si venía lejos.
     // +18 fallaba n2/s39: print(,0) redondea 40.6→41 pero 40.6<41.
     if (PARK_GEOM_ROJO && extCm >= PARK_PARED_CM + 17.0f) parkGeomVeniaLejos = true;
-    Serial.print("PARK: no llega en linea (ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 0); Serial.print(" along="); Serial.print(along, 0); Serial.println(") -> U"); return;
+    logPi.print("PARK: no llega en linea (ext="); logPi.print(rutaExtTapeteCm(), 0); logPi.print(" err="); logPi.print(rutaErrCarrilDeg(), 0); logPi.print(" along="); logPi.print(along, 0); logPi.println(") -> U"); return;
   }
   // Lejos de la pared (paso por adentro, senal cerca del cajon): el escaneo con seguidor de pared no ancla bien desde ahi; reversa en S.
-  if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; Serial.print("PARK: lejos de la pared ext="); Serial.print(rutaExtTapeteCm(), 0); Serial.println(" -> reversa en S"); return; }
+  if (!enLinea && PARK_REV_DIR && !isnan(rutaPka) && rutaExtTapeteCm() > PARK_REV_EXT_CM) { parkRevDir = true; logPi.print("PARK: lejos de la pared ext="); logPi.print(rutaExtTapeteCm(), 0); logPi.println(" -> reversa en S"); return; }
   parkUturnPendiente = false;
   parkDirecto = true;
   turnsCompleted = TURNS_PER_RACE;
-  Serial.print("PARK sin U: along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
+  logPi.print("PARK sin U: along="); logPi.print(along, 0); logPi.print(" pka="); logPi.println(rutaPka, 0);
   iniciarEstacionamiento(false);
   anguloGyro = rutaErrCarrilDeg();   // 0 = paralelo al carril, como tras la U
 }
@@ -3695,7 +3718,7 @@ static void parkIniciarGeom(float errorCarril, bool acercar) {
 }
 
 static void parkRecuperarEscaneo(const char *motivo) {
-  Serial.print("PARK escaneo sin entrada: "); Serial.println(motivo);
+  logPi.print("PARK escaneo sin entrada: "); logPi.println(motivo);
   if (parkDirecto && piRuta && rutaTfOk && rutaSecSalida >= 0) {
     if (PARK_GEOM_RESCATE && isfinite(rutaPka)
         && alongSalidaMm() >= rutaPka + PARK_GEOM_DET_MM) {
@@ -3770,8 +3793,8 @@ bool vigilarGeomExt(float along, long distF) {
   const bool acercar = (rojoFar && lejos && along < 420.0f)
                     || (pgeEff && ext > PARK_PARED_CM + PARK_LEJOS_CM && along < 420.0f);  // s26@501+f45 pegaba al fondo
   parkIniciarGeom(err, acercar);
-  Serial.print(rojo ? "PARK GEOM ROJO: toma el mando, along=" : "PARK GEOM: pared exterior sin U, along="); Serial.print(along, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
-  Serial.print(" ext="); Serial.print(ext, 1); Serial.print(" err="); Serial.print(err, 1); Serial.print(" v="); Serial.println(encVelMmS, 0);
+  logPi.print(rojo ? "PARK GEOM ROJO: toma el mando, along=" : "PARK GEOM: pared exterior sin U, along="); logPi.print(along, 0); logPi.print(" pka="); logPi.print(rutaPka, 0);
+  logPi.print(" ext="); logPi.print(ext, 1); logPi.print(" err="); logPi.print(err, 1); logPi.print(" v="); logPi.println(encVelMmS, 0);
   return true;
 }
 
@@ -3808,11 +3831,11 @@ void vigilarUturn(long distL, long distR, long distF) {
     if (!fondoR && PARK_UTURN_RUTA_ANG_MAX > 0 && fabs(anguloGyro) > (float)PARK_UTURN_RUTA_ANG_MAX) return;
     parkUturnDisparoOdom = -1;
     parkUturnPendiente = false;
-    Serial.print("PARK U por pose: along="); Serial.print(along, 0);
-    Serial.print(" ang="); Serial.println(anguloGyro, 1);
+    logPi.print("PARK U por pose: along="); logPi.print(along, 0);
+    logPi.print(" ang="); logPi.println(anguloGyro, 1);
     iniciarEstacionamiento(true);
     parkRumboGiro0 = anguloGyro - rutaErrCarrilDeg();   // la U y el alejarse miden contra el carril, no contra el rumbo girado de la ruta
-    Serial.print("PARK U carril ref="); Serial.println(parkRumboGiro0, 1);
+    logPi.print("PARK U carril ref="); logPi.println(parkRumboGiro0, 1);
     return;
   }
   bool paredFrente = (distF > 0 && distF < FRONT_ESQUINA_MAX);
@@ -3855,14 +3878,14 @@ void finalizarPunta(const char *motivo) {
   escribirServo(centroServo);
   puntaFase    = 6;
   raceFinished = true;
-  Serial.println("==================================================");
-  Serial.print  ("  ESTACIONANDO DE PUNTA terminado: ");
-  Serial.println(motivo);
-  Serial.print  ("  ang="); Serial.print(anguloGyro, 1);
-  Serial.print  (" girado="); Serial.print(anguloGyro - puntaRumboArco0, 1);
-  Serial.print  (" base="); Serial.print(puntaBase, 1);
-  Serial.print  (" caida="); Serial.println(puntaCaidaLectura);
-  Serial.println("==================================================");
+  logPi.println("==================================================");
+  logPi.print  ("  ESTACIONANDO DE PUNTA terminado: ");
+  logPi.println(motivo);
+  logPi.print  ("  ang="); logPi.print(anguloGyro, 1);
+  logPi.print  (" girado="); logPi.print(anguloGyro - puntaRumboArco0, 1);
+  logPi.print  (" base="); logPi.print(puntaBase, 1);
+  logPi.print  (" caida="); logPi.println(puntaCaidaLectura);
+  logPi.println("==================================================");
 }
 
 // Arranca el regreso al área de salida. Se llama al completar la última vuelta
@@ -3871,13 +3894,13 @@ void finalizarPunta(const char *motivo) {
 void iniciarTerminando() {
   estado            = TERMINANDO;
   terminandoEntryMs = millis();
-  Serial.print("-> TERMINANDO ");
-  Serial.print(turnsCompleted);
-  Serial.print("/");
-  Serial.print(TURNS_PER_RACE);
-  Serial.print(" (");
-  Serial.print(TERMINANDO_MS);
-  Serial.println(" ms hacia el area de salida)");
+  logPi.print("-> TERMINANDO ");
+  logPi.print(turnsCompleted);
+  logPi.print("/");
+  logPi.print(TURNS_PER_RACE);
+  logPi.print(" (");
+  logPi.print(TERMINANDO_MS);
+  logPi.println(" ms hacia el area de salida)");
 }
 
 // Cierre de MANIOBRA / GIRO_RAPIDO: bookkeeping compartido (sin coast/backoff/settle).
@@ -3891,8 +3914,8 @@ void completarTurnoObstaculos() {
   integralWall = 0; prevErrorWall = 0;
   integralGyro = 0; prevErrorGyro = 0;
   if (esManiobra13() && MANIOBRA_13_CUADRAR_MS > 0) {
-    Serial.print("MANIOBRA 13: cuadrado contra la pared, residual descartado=");
-    Serial.println(anguloGyro - maniobraIdealRot, 1);
+    logPi.print("MANIOBRA 13: cuadrado contra la pared, residual descartado=");
+    logPi.println(anguloGyro - maniobraIdealRot, 1);
     anguloGyro = 0.0f;
   } else if (piRuta) {
     // Modo RUTA: residual entero (sin tope), la cuenta alcanza al giro real y la Pi suma 90 exactos por tc.
@@ -3919,10 +3942,10 @@ void completarTurnoObstaculos() {
       contadorEsquina13  = 0;
     }
   }
-  Serial.print("MANIOBRA completada ");
-  Serial.print(turnsCompleted);
-  Serial.print("/");
-  Serial.println(TURNS_PER_RACE);
+  logPi.print("MANIOBRA completada ");
+  logPi.print(turnsCompleted);
+  logPi.print("/");
+  logPi.println(TURNS_PER_RACE);
 }
 
 // Cierre de MANIOBRA: endereza, deja el puente en adelante, resetea ángulos
@@ -3968,10 +3991,10 @@ void finalizarInicio() {
   timeStart      = millis();   // el grace de arranque cuenta desde acá
   inicioFase     = -1;
   estado         = SIGUIENDO;
-  Serial.print("INICIO completado -> SIGUIENDO  ang=");
-  Serial.print(anguloGyro, 1);
-  Serial.print(" dirPista=");
-  Serial.println(!primerGiro ? "?" : (direccionIzquierda ? "IZQ" : "DER"));
+  logPi.print("INICIO completado -> SIGUIENDO  ang=");
+  logPi.print(anguloGyro, 1);
+  logPi.print(" dirPista=");
+  logPi.println(!primerGiro ? "?" : (direccionIzquierda ? "IZQ" : "DER"));
 }
 
 // ── Heading-hold en REVERSA (fase 4 de la MANIOBRA) ──────────────────────────
@@ -4439,7 +4462,7 @@ static bool parkUContinua(long ext) {
   parkFaseMs = millis();
   parkOdom0 = odomMm;
   escribirServo(parkServoU);
-  Serial.print("PARK U continua rueda="); Serial.println(mejorRueda, 1);
+  logPi.print("PARK U continua rueda="); logPi.println(mejorRueda, 1);
   return true;
 }
 
@@ -4558,8 +4581,8 @@ static void parkPlFusionPared(float sign) {
     parkDetAlong += signAlong * (newW - w);  // conserva el ancla longitudinal
   }
   if (PARK_PL_REF_PARED & 2) parkRumboRef += sign * innovationTheta * 0.25f;
-  Serial.print("PARK ref pared dh="); Serial.print(innovationH, 1);
-  Serial.print(" dth="); Serial.println(innovationTheta, 2);
+  logPi.print("PARK ref pared dh="); logPi.print(innovationH, 1);
+  logPi.print(" dth="); logPi.println(innovationTheta, 2);
 }
 
 PARK_AJ bool PARK_PL_REF_FRENTE = false;
@@ -4618,7 +4641,7 @@ static void parkPlFusionFrente() {
   if (fabsf(innovation) < 8.0f || fabsf(innovation) > 32.0f) return;
   // Prior de ~6 mm RMS. El frontal mas el mapa se ponderan a ~20 mm.
   parkDetAlong -= sign * 0.08f * innovation;
-  Serial.print("PARK ref frente dw="); Serial.println(innovation, 1);
+  logPi.print("PARK ref frente dw="); logPi.println(innovation, 1);
 }
 
 static float parkPlHitMin, parkPlHitMax, parkPlSampleAlong;
@@ -4664,8 +4687,8 @@ static void parkPlAnclaMadera() {
   const float delta = measuredW - w;
   if (fabsf(delta) < 12.0f || fabsf(delta) > 95.0f) return;
   parkDetAlong -= (parkDirecto ? 1.0f : -1.0f) * delta;
-  Serial.print("PARK ancla ToF lateral delta=");
-  Serial.println(delta, 1);
+  logPi.print("PARK ancla ToF lateral delta=");
+  logPi.println(delta, 1);
 }
 
 static void parkPlZzReancla(float th) {
@@ -4683,7 +4706,7 @@ static void parkPlZzReancla(float th) {
   const float delta = measuredW - w;
   if (fabsf(delta) < 8.0f || fabsf(delta) > 55.0f) return;
   parkDetAlong -= (parkDirecto ? 1.0f : -1.0f) * delta;
-  Serial.print("PARK zz ancla delta="); Serial.println(delta, 1);
+  logPi.print("PARK zz ancla delta="); logPi.println(delta, 1);
 }
 #endif
 
@@ -5037,8 +5060,8 @@ void parseRuta(const String &line) {
   }
   if (line.startsWith("RTE,")) {
     int n = line.substring(4).toInt();
-    Serial.print("RTE n="); Serial.print(n); Serial.print(" carga="); Serial.print(rutaCarga);
-    Serial.print(" recib="); Serial.println(rutaRecib);
+    logPi.print("RTE n="); logPi.print(n); logPi.print(" carga="); logPi.print(rutaCarga);
+    logPi.print(" recib="); logPi.println(rutaRecib);
     rutaUltRte = n;
     if (n == rutaCarga && rutaRecib == n && n >= 10) {
       // Doble buffer: hasta aquí el ESP siguió la ruta anterior completa.
@@ -5453,8 +5476,8 @@ void procesarLineaPi(String &line) {
   else if (line.startsWith("RT")) lineasRT++;
   else {
     lineasOtras++;
-    Serial.print("PI? len="); Serial.print(line.length()); Serial.print(" ");
-    Serial.println(line.substring(0, 60));
+    logPi.print("PI? len="); logPi.print(line.length()); logPi.print(" ");
+    logPi.println(line.substring(0, 60));
   }
   parsePiMessage(line);
 }
@@ -5706,12 +5729,12 @@ void controlPID(long distL, long distR) {
     escribirServo(servoRecup);
     setMotor(velocidadMotor);
 
-    Serial.print(estado == CRUCERO ? " | Mode:CRUCERO"
+    logPi.print(estado == CRUCERO ? " | Mode:CRUCERO"
                  : (estado == SIGUIENDO ? " | Mode:SIG-GYRO" : " | Mode:RECUPERANDO"));
-    Serial.print(" | ErrGyro:"); Serial.print(errorGyroRecup);
-    Serial.print(" | Wall:");    Serial.print(wallCorr);
-    Serial.print(" | Vis:");     Serial.print(visCorr);
-    Serial.print(" | Servo:");   Serial.print(servoRecup);
+    logPi.print(" | ErrGyro:"); logPi.print(errorGyroRecup);
+    logPi.print(" | Wall:");    logPi.print(wallCorr);
+    logPi.print(" | Vis:");     logPi.print(visCorr);
+    logPi.print(" | Servo:");   logPi.print(servoRecup);
     return;
 
   } else if (piPurePursuit) {
@@ -5726,7 +5749,7 @@ void controlPID(long distL, long distR) {
       } else {
         setMotor(rutaVel >= 0 ? min(rutaVel, velocidadMotor) : velocidadMotor);
       }
-      Serial.print(" | Mode:RUTA-PI"); Serial.print(" | Servo:"); Serial.print(servoAngle);
+      logPi.print(" | Mode:RUTA-PI"); logPi.print(" | Servo:"); logPi.print(servoAngle);
       return;
     }
     if (rutaSteer(ruedaDeg)) {
@@ -5745,8 +5768,8 @@ void controlPID(long distL, long distR) {
         if (rutaSola) vm = min(vm, RUTA_SOLA_PWM);
         setMotor(vm);
       }
-      Serial.print(" | Mode:RUTA i="); Serial.print(rutaI);
-      Serial.print(" | Servo:");  Serial.print(servoAngle);
+      logPi.print(" | Mode:RUTA i="); logPi.print(rutaI);
+      logPi.print(" | Servo:");  logPi.print(servoAngle);
       return;
     }
     // ── Modo Pure Pursuit ────────────────────────────────────────────────────
@@ -5773,9 +5796,9 @@ void controlPID(long distL, long distR) {
     setMotor(velocidadMotor);
 
     // ── Debug UART ────────────────────────────────────────────────────────────
-    Serial.print(" | Mode:PP");
-    Serial.print(" | Steer:");  Serial.print(steerDeg);
-    Serial.print(" | Servo:");  Serial.print(servoAngle);
+    logPi.print(" | Mode:PP");
+    logPi.print(" | Steer:");  logPi.print(steerDeg);
+    logPi.print(" | Servo:");  logPi.print(servoAngle);
     return;
 
   } else {
@@ -5792,15 +5815,15 @@ void controlPID(long distL, long distR) {
   setMotor(velocidadMotor);
 
   // ── Debug UART ────────────────────────────────────────────────────────────
-  Serial.print(" | Mode:");
-  Serial.print(!rondaObstaculos ? "ABIERTA"
+  logPi.print(" | Mode:");
+  logPi.print(!rondaObstaculos ? "ABIERTA"
                : (piPurePursuit ? "PP" : (piAlive ? "V1" : "FALLBACK")));
-  Serial.print(" | Wall:");   Serial.print(outputWall);
-  Serial.print(" | eWall:");  Serial.print(errorWall);
-  Serial.print(esquinaInminente ? "(esq)" : (wallHold ? "(hold)" : "(center)"));
-  Serial.print(" | Gyro:");   Serial.print(outputGyro);
-  Serial.print(" | Vis:");    Serial.print(outputVision);
-  Serial.print(" | Servo:");  Serial.print(centroServo + (int)outputFinal);
+  logPi.print(" | Wall:");   logPi.print(outputWall);
+  logPi.print(" | eWall:");  logPi.print(errorWall);
+  logPi.print(esquinaInminente ? "(esq)" : (wallHold ? "(hold)" : "(center)"));
+  logPi.print(" | Gyro:");   logPi.print(outputGyro);
+  logPi.print(" | Vis:");    logPi.print(outputVision);
+  logPi.print(" | Servo:");  logPi.print(centroServo + (int)outputFinal);
 }
 
 
@@ -5827,7 +5850,7 @@ void terminando(long distL, long distR) {
     raceFinished = true;
     setMotor(0);
     if (!piRuta) escribirServo(centroServo);   // Modo RUTA: el servo lo sigue llevando la ruta hasta parar (ver loop)
-    Serial.println("TERMINANDO completado -> STOP");
+    logPi.println("TERMINANDO completado -> STOP");
   }
 }
 
@@ -5897,10 +5920,10 @@ void setup() {
   mpu.calcGyroOffsets(true);
 
   float oz = mpu.getGyroZoffset();
-  Serial.print("Offset Z: ");
-  Serial.println(oz);
+  logPi.print("Offset Z: ");
+  logPi.println(oz);
   gyroScale = (abs(oz) > 7.0) ? 2.0 : 1.0;
-  Serial.println(gyroScale == 2.0 ? "Offset sucio → /2" : "Offset limpio");
+  logPi.println(gyroScale == 2.0 ? "Offset sucio → /2" : "Offset limpio");
 #endif
 
   pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
@@ -5927,7 +5950,7 @@ void setup() {
   anguloObjetivo = 0;
 
 #if FOX_ENCODER && !defined(FOX_SIL)
-  if (!iniciarEncoder()) Serial.println("ENCODER: PCNT no arrancó (odometría en 0)");
+  if (!iniciarEncoder()) logPi.println("ENCODER: PCNT no arrancó (odometría en 0)");
   encCountPrev = leerEncoder();
 #endif
 #if FOX_ENCODER && defined(FOX_SIL)
@@ -5941,7 +5964,7 @@ void setup() {
   // Esperar READY de la Pi (igual que Controller_PI.ino). Bloquea SIN timeout:
   // loop() siempre arranca con piReadyReceived = true.
   tofCalCargar();
-  Serial.println("Esperando READY desde Pi...");
+  logPi.println("Esperando READY desde Pi...");
   piReadyReceived = false;
 #if FOX_BNO && !defined(FOX_SIL)
   if (GYRO_ZUPT) {
@@ -5970,13 +5993,13 @@ void setup() {
       if (millis() - usbMs >= 500) {
         usbMs = millis();
         int32_t c = leerEncoder();
-        Serial.print("BANCO enc="); Serial.print(c);
-        Serial.print(" mm="); Serial.print((float)c / ENC_CUENTAS_POR_MM, 1);
+        logPi.print("BANCO enc="); logPi.print(c);
+        logPi.print(" mm="); logPi.print((float)c / ENC_CUENTAS_POR_MM, 1);
 #if FOX_TOF
-        Serial.print(" L="); Serial.print(tofMm[0]); Serial.print(" R="); Serial.print(tofMm[1]);
-        Serial.print(" B="); Serial.print(tofMm[2]); Serial.print(" F="); Serial.print(tofMm[3]);
+        logPi.print(" L="); logPi.print(tofMm[0]); logPi.print(" R="); logPi.print(tofMm[1]);
+        logPi.print(" B="); logPi.print(tofMm[2]); logPi.print(" F="); logPi.print(tofMm[3]);
 #endif
-        Serial.println();
+        logPi.println();
       }
     }
 #endif
@@ -5995,7 +6018,7 @@ void setup() {
         piReadyReceived = true;
         timeStart = millis();
         readyMs   = millis();
-        Serial.println("Recibido READY. Esperando primer V2...");
+        logPi.println("Recibido READY. Esperando primer V2...");
       }
     }
 #if FOX_BNO && FOX_ENCODER && !defined(FOX_SIL)
@@ -6004,8 +6027,8 @@ void setup() {
         if (bnoYawValid && millis() - bnoLastMs <= 150) {
           gyroBiasDps = gyroZuptFit.estimate();
         }
-        Serial.print("[ZUPT] bias_dps=");
-        Serial.println(gyroBiasDps, 3);
+        logPi.print("[ZUPT] bias_dps=");
+        logPi.println(gyroBiasDps, 3);
       } else {
         delay(10);
         continue;
@@ -6014,7 +6037,7 @@ void setup() {
 #endif
     delay(50);
   }
-  Serial.println("Sistema listo (PurePursuit)");
+  logPi.println("Sistema listo (PurePursuit)");
 #if FOX_BNO && !defined(FOX_SIL)
   // Se abre al final de setup: con el buffer grande no se pierden paquetes RVC mientras loop() se tarda.
   if (!GYRO_ZUPT) {
@@ -6077,7 +6100,7 @@ void loop() {
   if (!piFirstV2Received && (millis() - readyMs) < FIRST_V2_TIMEOUT_MS) {
     escribirServo(centroServo);
     setMotor(0);
-    Serial.println(" | Estado:WAIT_FIRST_V2");
+    logPi.println(" | Estado:WAIT_FIRST_V2");
     delay(10);
     return;
   }
@@ -6097,8 +6120,8 @@ void loop() {
     } else {
       escribirServo(centroServo);
     }
-    Serial.print(" | TERMINADO giros="); Serial.print(turnsCompleted);
-    Serial.print("/"); Serial.println(TURNS_PER_RACE);
+    logPi.print(" | TERMINADO giros="); logPi.print(turnsCompleted);
+    logPi.print("/"); logPi.println(TURNS_PER_RACE);
     delay(20);
     return;
   }
@@ -6122,7 +6145,7 @@ void loop() {
     // MODO_CONTINUO ignora los arranques de PRUEBA de estacionamiento, pero NO la
     // maniobra de salida del cajón (INICIO): esa es del arranque, no del final.
     if (MODO_CONTINUO) {
-      Serial.println("-> MODO CONTINUO: sin estacionamiento ni parada");
+      logPi.println("-> MODO CONTINUO: sin estacionamiento ni parada");
     }
     // Las pruebas arrancan en el modo que diga PARK_MODO (punta o paralelo).
     bool pruebaPark = !MODO_CONTINUO && PARK_MODO != PARK_NINGUNO;
@@ -6137,7 +6160,7 @@ void loop() {
     } else if (rondaObstaculos && piInicioEstacionamiento) {
       estado     = INICIO;
       inicioFase = -1;
-      Serial.println("-> INICIO (rosa mayoritario: salir del estacionamiento)");
+      logPi.println("-> INICIO (rosa mayoritario: salir del estacionamiento)");
     }
   }
 
@@ -6271,14 +6294,14 @@ void loop() {
         // loop el chequeo de ángulo corría cada ~100 ms y la fase 1 se pasaba ~25°).
         escribirServo(inicioGirarDer ? SERVO_MIN_DEG : SERVO_MAX_DEG);
         delay(100);
-        Serial.print("INICIO fase 1 SWING salida=");
-        Serial.print(inicioGirarDer ? "DER" : "IZQ");
-        Serial.print(" dL="); Serial.print(dL0);
-        Serial.print(" dR="); Serial.print(dR0);
-        Serial.print(" cajonPared=");
-        Serial.print(cajonParedEsIzquierda ? "IZQ" : "DER");
-        Serial.print(" dirPista=");
-        Serial.println(!primerGiro ? "?(ambiguo)" : (direccionIzquierda ? "IZQ" : "DER"));
+        logPi.print("INICIO fase 1 SWING salida=");
+        logPi.print(inicioGirarDer ? "DER" : "IZQ");
+        logPi.print(" dL="); logPi.print(dL0);
+        logPi.print(" dR="); logPi.print(dR0);
+        logPi.print(" cajonPared=");
+        logPi.print(cajonParedEsIzquierda ? "IZQ" : "DER");
+        logPi.print(" dirPista=");
+        logPi.println(!primerGiro ? "?(ambiguo)" : (direccionIzquierda ? "IZQ" : "DER"));
         break;
       }
 
@@ -6296,13 +6319,13 @@ void loop() {
         inicioFase      = inicioTarde ? 1 : 2;
         inicioFaseMs    = inicioTarde ? millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS : millis();
         inicioOdomRecto = odomMmF;
-        Serial.print("INICIO isal=2 TARDE: vuelve al recto ang="); Serial.println(anguloGyro, 1);
+        logPi.print("INICIO isal=2 TARDE: vuelve al recto ang="); logPi.println(anguloGyro, 1);
         break;
       }
       if (inicioFase <= 2 && piSalida == 2 && !inicioAdentro) {
         inicioAdentro = true;
-        Serial.print("INICIO isal=2 (adentro) en fase "); Serial.print(inicioFase);
-        Serial.print(" ang="); Serial.println(anguloGyro, 1);
+        logPi.print("INICIO isal=2 (adentro) en fase "); logPi.print(inicioFase);
+        logPi.print(" ang="); logPi.println(anguloGyro, 1);
         if (inicioFase == 2 && deltaIni < (float)(INICIO_ANG_ADENTRO_DEG - INICIO_OVERSHOOT_DEG)) {
           inicioFase   = 1;                       // vuelve a tope hasta ~90°
           inicioFaseMs = millis() - INICIO_RAMP_MS - INICIO_SERVO_ESPERA_MS;
@@ -6327,7 +6350,7 @@ void loop() {
           inicioFase      = 11;
           inicioFaseMs    = millis();
           inicioOdomRecto = odomMmF;
-          Serial.print("INICIO fase 1: reversa de correccion ang="); Serial.println(anguloGyro, 1);
+          logPi.print("INICIO fase 1: reversa de correccion ang="); logPi.println(anguloGyro, 1);
           break;
         }
         if (swingListo || swingTimeout) {
@@ -6335,7 +6358,7 @@ void loop() {
           inicioFase      = 2;
           inicioFaseMs    = millis();
           inicioOdomRecto = odomMmF;
-          if (swingTimeout) Serial.println("INICIO fase 1: timeout de swing");
+          if (swingTimeout) logPi.println("INICIO fase 1: timeout de swing");
         }
         break;
       }
@@ -6390,11 +6413,11 @@ void loop() {
                       || (inicioAdentro && distF > 0 && distF < INICIO_RECTO_DF_MIN_CM);
           fin = (latPred >= objetivo) || tope;
           if (fin) {
-            Serial.print("INICIO fase 2 fin: lat="); Serial.print(lat, 0);
-            Serial.print(" pred="); Serial.print(latPred, 0);
-            Serial.print(" obj="); Serial.print(objetivo, 0);
-            Serial.print(" ang="); Serial.print(anguloGyro, 1);
-            Serial.print(" dF="); Serial.println(distF);
+            logPi.print("INICIO fase 2 fin: lat="); logPi.print(lat, 0);
+            logPi.print(" pred="); logPi.print(latPred, 0);
+            logPi.print(" obj="); logPi.print(objetivo, 0);
+            logPi.print(" ang="); logPi.print(anguloGyro, 1);
+            logPi.print(" dF="); logPi.println(distF);
           }
         }
         if (fin) {
@@ -6428,9 +6451,9 @@ void loop() {
         bool alineado = (deltaIni <= angFin);
         bool timeout  = (millis() - inicioFaseMs >= INICIO_CONTRA_TIMEOUT_MS);
         if (alineado || timeout) {
-          Serial.print("INICIO fase 3 fin: pico="); Serial.print(inicioAngPico, 1);
-          Serial.print(" ang="); Serial.print(anguloGyro, 1);
-          Serial.print(" lat="); Serial.println(fabs(poseYf - inicioY0), 0);
+          logPi.print("INICIO fase 3 fin: pico="); logPi.print(inicioAngPico, 1);
+          logPi.print(" ang="); logPi.print(anguloGyro, 1);
+          logPi.print(" lat="); logPi.println(fabs(poseYf - inicioY0), 0);
           escribirServo(centroServo);
           if (INICIO_REVERSA || !INICIO_SETTLE_MOTOR) motorCoast();
           inicioFaseMs = millis();
@@ -6442,7 +6465,7 @@ void loop() {
             inicioSettleSampMs  = millis();
             inicioSettleQuieto  = 0;
           }
-          if (timeout) Serial.println("INICIO fase 3: timeout de contravuelta");
+          if (timeout) logPi.println("INICIO fase 3: timeout de contravuelta");
         }
         break;
       }
@@ -6473,8 +6496,8 @@ void loop() {
         bool enCero  = (deltaIni <= INICIO_REV_CORR_TOL_DEG);
         bool tCorrig = (millis() - inicioFaseMs >= INICIO_REV_CORR_TIMEOUT_MS);
         if (enCero || tCorrig) {
-          Serial.print("INICIO fase 5 fin: ang="); Serial.print(anguloGyro, 1);
-          Serial.println(tCorrig && !enCero ? " (timeout)" : "");
+          logPi.print("INICIO fase 5 fin: ang="); logPi.print(anguloGyro, 1);
+          logPi.println(tCorrig && !enCero ? " (timeout)" : "");
           motorCoast();
           escribirServo(centroServo);
           inicioFase   = 7;
@@ -6495,7 +6518,7 @@ void loop() {
           lastRevHoldMs = millis();
           inicioFase    = 8;
           inicioFaseMs  = millis();
-          Serial.print("INICIO fase 8 REVERSA RECTA: ang="); Serial.println(anguloGyro, 1);
+          logPi.print("INICIO fase 8 REVERSA RECTA: ang="); logPi.println(anguloGyro, 1);
         }
         break;
       }
@@ -6607,7 +6630,7 @@ void loop() {
         if (anguloGyro * sgPi >= GIRO_PI_CUENTA_DEG) {
           maniobraGirarDer = !direccionIzquierda;
           maniobraIdealRot = sgPi * (float)AngGiro;
-          Serial.print("-> GIRO PI contado ang="); Serial.println(anguloGyro, 1);
+          logPi.print("-> GIRO PI contado ang="); logPi.println(anguloGyro, 1);
           completarTurnoObstaculos();
           break;
         }
@@ -6640,9 +6663,9 @@ void loop() {
             bool piParkReady = (piPark == 2);
             if (piParkReady || timeoutPark) {
               if (timeoutPark && !piParkReady) {
-                Serial.println("-> PARK BUSCANDO: Disparo por TIMEOUT (Pi no vio cajon)");
+                logPi.println("-> PARK BUSCANDO: Disparo por TIMEOUT (Pi no vio cajon)");
               } else {
-                Serial.println("-> PARK BUSCANDO: Disparo por Pi (cajon alineado)");
+                logPi.println("-> PARK BUSCANDO: Disparo por Pi (cajon alineado)");
               }
               iniciarEstacionando();
             }
@@ -6652,7 +6675,7 @@ void loop() {
             contadorFront++;
             if (contadorFront >= esquinaDebounce) {
               entrarCrucero();
-              Serial.println("-> CRUCERO");
+              logPi.println("-> CRUCERO");
             }
           } else {
             contadorFront = 0;
@@ -6677,8 +6700,8 @@ void loop() {
             }
             piPurePursuit = false;   // suspender PP durante el giro
             if (giroForzado && !giroNormal)
-              Serial.println("Giro 1 FORZADO (pared de enfrente)");
-            Serial.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
+              logPi.println("Giro 1 FORZADO (pared de enfrente)");
+            logPi.println(direccionIzquierda ? "Giro izquierda" : "Giro derecha");
           }
         }
       }
@@ -6764,10 +6787,10 @@ void loop() {
           iniciarTerminando();
         }
 
-        Serial.print("Giro completado ");
-        Serial.print(turnsCompleted);
-        Serial.print("/");
-        Serial.println(TURNS_PER_RACE);
+        logPi.print("Giro completado ");
+        logPi.print(turnsCompleted);
+        logPi.print("/");
+        logPi.println(TURNS_PER_RACE);
       }
       break;
     }
@@ -7007,7 +7030,7 @@ void loop() {
         bool _fueSucioGr = giroSucioArmado;
         entrarGiroRapido(distL, distR);
         resetVigilanciaEsquina();
-        if (_fueSucioGr) Serial.println(" GIRO_RAPIDO SUCIO");
+        if (_fueSucioGr) logPi.println(" GIRO_RAPIDO SUCIO");
         break;
       }
       // Pegado a la exterior (que es como llega el giro rápido) la MANIOBRA de
@@ -7032,12 +7055,12 @@ void loop() {
         maniobraFase  = -1;              // MANIOBRA hará el phase-init
         piPurePursuit = false;
         estado        = MANIOBRA;
-        Serial.print("-> MANIOBRA dir="); Serial.print(maniobraGirarDer ? "DER" : "IZQ");
-        Serial.print(maniobraReversa ? " REVERSA" : " FORWARD");
-        Serial.print(" distExt="); Serial.print(maniobraDistExt);
-        Serial.print(" distF=");   Serial.print(distF);
-        Serial.print(_fueSucio ? " SUCIO" : "");
-        Serial.println(cruceroLargo ? " TIMEOUT" : "");
+        logPi.print("-> MANIOBRA dir="); logPi.print(maniobraGirarDer ? "DER" : "IZQ");
+        logPi.print(maniobraReversa ? " REVERSA" : " FORWARD");
+        logPi.print(" distExt="); logPi.print(maniobraDistExt);
+        logPi.print(" distF=");   logPi.print(distF);
+        logPi.print(_fueSucio ? " SUCIO" : "");
+        logPi.println(cruceroLargo ? " TIMEOUT" : "");
       }
       break;
     }
@@ -7069,9 +7092,9 @@ void loop() {
         maniobraIdealRot = grObjetivo;
         maniobraGirarDer  = maniobraGirarDerGr;
         completarTurnoObstaculos();
-        Serial.print("GIRO_RAPIDO completada");
-        if (grTimeout) Serial.print(" TIMEOUT");
-        Serial.println();
+        logPi.print("GIRO_RAPIDO completada");
+        if (grTimeout) logPi.print(" TIMEOUT");
+        logPi.println();
       }
       break;
     }
@@ -7170,9 +7193,9 @@ void loop() {
         bool espacio = (distF_filtrada >= FWD_REARMA_CM);
         bool tout    = (millis() - maniobraFaseMs >= FWD_REARMA_TIMEOUT_MS);
         if (espacio || tout) {
-          Serial.print("MANIOBRA: reversa recta hecha dF="); Serial.print((long)distF_filtrada);
-          Serial.print(" ang="); Serial.print(anguloGyro, 1);
-          Serial.println(tout && !espacio ? " (TIMEOUT) -> arco FORWARD" : " -> arco FORWARD");
+          logPi.print("MANIOBRA: reversa recta hecha dF="); logPi.print((long)distF_filtrada);
+          logPi.print(" ang="); logPi.print(anguloGyro, 1);
+          logPi.println(tout && !espacio ? " (TIMEOUT) -> arco FORWARD" : " -> arco FORWARD");
           motorCoast();
           escribirServo(centroServo);
           maniobraFase   = 3;
@@ -7191,17 +7214,17 @@ void loop() {
                                      maniobraAtoroAng, maniobraAtoroMs);
           if (tout || atorado) {
             float falta = fabs(maniobraIdealRot - anguloGyro);
-            Serial.print("MANIOBRA: pivote REV "); Serial.print(atorado ? "ATORADO" : "TIMEOUT");
-            Serial.print(" ang="); Serial.print(anguloGyro, 1);
-            Serial.print(" falta="); Serial.print(falta, 1);
+            logPi.print("MANIOBRA: pivote REV "); logPi.print(atorado ? "ATORADO" : "TIMEOUT");
+            logPi.print(" ang="); logPi.print(anguloGyro, 1);
+            logPi.print(" falta="); logPi.print(falta, 1);
             motorCoast();
             escribirServo(centroServo);
             maniobraFaseMs = millis();
             if (falta <= MANIOBRA_PIVOTE_ACEPTA_DEG) {
-              Serial.println(" -> se acepta");
+              logPi.println(" -> se acepta");
               maniobraFase = 2;
             } else {
-              Serial.println(" -> freno -> forward");
+              logPi.println(" -> freno -> forward");
               maniobraReversa = false;
               maniobraFase    = 3;
             }
@@ -7272,8 +7295,8 @@ void loop() {
             lastRevHoldMs = millis();
             maniobraFase        = 4;
             if (esManiobra13()) {
-              Serial.print("MANIOBRA 13: retroceso a la pared del lote distExt=");
-              Serial.println(maniobraDistExt);
+              logPi.print("MANIOBRA 13: retroceso a la pared del lote distExt=");
+              logPi.println(maniobraDistExt);
             }
           } else {
             iniciarSettleManiobra();      // esperar a que deje de rotar -> cierra
@@ -7442,15 +7465,15 @@ void loop() {
         if ((lejos || tope) && (PARK_UTURN_ENDEREZA == 0 || (restCorto && PARK_UTURN_ENDEREZA_REST_TOL == 0)
                                 || (PARK_UTURN_ENDEREZA == 2 && parkRecorridoMm() < 30.0f))) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 24: U sin enderezar (lat="); Serial.print(lateral, 1);
-          Serial.print(" ang="); Serial.print(anguloGyro - parkRumboGiro0, 1); Serial.println(")");
+          logPi.print("PARK fase 24: U sin enderezar (lat="); logPi.print(lateral, 1);
+          logPi.print(" ang="); logPi.print(anguloGyro - parkRumboGiro0, 1); logPi.println(")");
           break;
         }
         if (lejos || tope) {
           parkFase = 27; parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 27: ENDEREZA antes de la U (ext="); Serial.print(extAhoraP);
-          Serial.print(" lat="); Serial.print(lateral, 1);
-          Serial.println(tope ? " TOPE)" : ")");
+          logPi.print("PARK fase 27: ENDEREZA antes de la U (ext="); logPi.print(extAhoraP);
+          logPi.print(" lat="); logPi.print(lateral, 1);
+          logPi.println(tope ? " TOPE)" : ")");
           break;
         }
         motorAdelante();
@@ -7469,7 +7492,7 @@ void loop() {
         float tolEnd = (restCorto27 && PARK_UTURN_ENDEREZA_REST_TOL > 0) ? (float)PARK_UTURN_ENDEREZA_REST_TOL : 5.0f;
         if (fabs(anguloGyro - parkRumboGiro0) <= tolEnd || millis() - parkFaseMs >= 1500) {
           parkFase = 24; parkServoU = 0; parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 24: U tras alejarse (ang="); Serial.print(anguloGyro, 1); Serial.println(")");
+          logPi.print("PARK fase 24: U tras alejarse (ang="); logPi.print(anguloGyro, 1); logPi.println(")");
         }
         break;
       }
@@ -7503,8 +7526,8 @@ void loop() {
           float delta = atan(RUTA_BATALLA_MM / radio) * 180.0f / 3.14159265f;
           delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
           parkServoU = rutaServo(uturnIzqP ? -delta : delta);
-          Serial.print("PARK U servo="); Serial.print(parkServoU);
-          Serial.print(" ext="); Serial.println(extAhoraP);
+          logPi.print("PARK U servo="); logPi.print(parkServoU);
+          logPi.print(" ext="); logPi.println(extAhoraP);
         }
         escribirServo(parkServoU);
         motorAdelante();
@@ -7517,8 +7540,8 @@ void loop() {
             // sin coast: el carro ya va en el sentido del escaneo
             escribirServo(centroServo);
             anguloGyro -= haciaAhoraP * 180.0f;
-            Serial.print("PARK: U sin settle girado="); Serial.print(girado, 1);
-            Serial.print(" ang="); Serial.println(anguloGyro, 1);
+            logPi.print("PARK: U sin settle girado="); logPi.print(girado, 1);
+            logPi.print(" ang="); logPi.println(anguloGyro, 1);
             resetParkScan();
             break;
           }
@@ -7528,8 +7551,8 @@ void loop() {
           parkFaseMs       = millis();
           parkSettleSampMs = millis();
           parkSettleQuieto = 0;
-          Serial.print("PARK fase 25: U girado="); Serial.print(girado, 1);
-          Serial.println(tout ? " (TIMEOUT)" : "");
+          logPi.print("PARK fase 25: U girado="); logPi.print(girado, 1);
+          logPi.println(tout ? " (TIMEOUT)" : "");
         }
         break;
       }
@@ -7550,8 +7573,8 @@ void loop() {
           bool  uturnIzqP   = !parkParedEsIzquierda;
           float haciaAhoraP = uturnIzqP ? 1.0f : -1.0f;
           anguloGyro -= haciaAhoraP * 180.0f;
-          Serial.print("PARK: rumbo de regreso (U de 180) ang="); Serial.println(anguloGyro, 1);
-          Serial.println("PARK: busco cajon en el regreso (paralelo, via U)");
+          logPi.print("PARK: rumbo de regreso (U de 180) ang="); logPi.println(anguloGyro, 1);
+          logPi.println("PARK: busco cajon en el regreso (paralelo, via U)");
           resetParkScan();
         }
         break;
@@ -7586,8 +7609,8 @@ void loop() {
           parkFaseMs       = millis(); parkOdom0 = odomMm;
           parkSettleSampMs = millis();
           parkSettleQuieto = 0;
-          Serial.print("PARK fase 21: media vuelta girado="); Serial.print(girado, 1);
-          Serial.println(tout ? " TIMEOUT" : "");
+          logPi.print("PARK fase 21: media vuelta girado="); logPi.print(girado, 1);
+          logPi.println(tout ? " TIMEOUT" : "");
         }
         break;
       }
@@ -7604,7 +7627,7 @@ void loop() {
         bool quieto = (parkSettleQuieto >= MANIOBRA_SETTLE_QUIETO_N) && (tS >= MANIOBRA_FRENO_MS);
         if (quieto || tS >= PARK_RETORNO_SETTLE_MAX_MS) {
           anguloGyro -= haciaPared * 90.0f;
-          Serial.print("PARK: rumbo de regreso ang="); Serial.println(anguloGyro, 1);
+          logPi.print("PARK: rumbo de regreso ang="); logPi.println(anguloGyro, 1);
           unsigned long revMs = parkParedEsIzquierda ? PARK_RETORNO_REV_CCW_MS : PARK_RETORNO_REV_CW_MS;
           if (revMs > 0) {
             motorReversa();
@@ -7613,7 +7636,7 @@ void loop() {
             parkFase      = 22;
             parkFaseMs    = millis(); parkOdom0 = odomMm;
           } else {
-            Serial.println("PARK: busco cajon en el regreso (paralelo)");
+            logPi.println("PARK: busco cajon en el regreso (paralelo)");
             resetParkScan();
           }
         }
@@ -7664,7 +7687,7 @@ void loop() {
         motorCoast();
         escribirServo(centroServo);
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
-          Serial.println("PARK: busco cajon en el regreso (paralelo)");
+          logPi.println("PARK: busco cajon en el regreso (paralelo)");
           resetParkScan();
         }
         break;
@@ -7694,8 +7717,8 @@ void loop() {
         if (lecturaAlta) {
           if (++parkAltasCnt >= (rebaseInicial ? 5 : PARK_PUNTA_ALTO_REBASE_N)) {
             // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
-            Serial.print("PARK: re-base alto "); Serial.print(parkBase, 1);
-            Serial.print(" -> "); Serial.println(extRaw);
+            logPi.print("PARK: re-base alto "); logPi.print(parkBase, 1);
+            logPi.print(" -> "); logPi.println(extRaw);
             parkBase     = (float)extRaw;
             parkAltasCnt = 0;
             lecturaAlta  = false;
@@ -7719,8 +7742,8 @@ void loop() {
           parkCaidaHuecos = 0;
           if (parkCaidaCnt > PARK_REBASE_N) {
             // Duró demasiado para un poste de 2 cm: el carro se acercó a la pared
-            Serial.print("PARK: re-base "); Serial.print(parkBase, 1);
-            Serial.print(" -> "); Serial.println(extRaw);
+            logPi.print("PARK: re-base "); logPi.print(parkBase, 1);
+            logPi.print(" -> "); logPi.println(extRaw);
             parkBase     = (float)max(extRaw, 3L);
             parkCaidaCnt = 0;
           }
@@ -7825,7 +7848,7 @@ void loop() {
             parkUturnDisparoOdom = -1;
             contadorEsquina13 = 0;
             estado = SIGUIENDO;
-            Serial.print("PARK: DIRECTO chueco ang="); Serial.print(anguloGyro, 1); Serial.println(" -> U");
+            logPi.print("PARK: DIRECTO chueco ang="); logPi.print(anguloGyro, 1); logPi.println(" -> U");
             break;
           }
         // El primer poste confirmado da un origen local: espera su
@@ -7851,7 +7874,7 @@ void loop() {
           const bool ecoRasante = posteSintetico || extRaw > PARK_POSTE2_EXT_MAX_CM;
           if (!PARK_SCAN_ARRIVAL_COMP || !ecoRasante ||
               alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM) {
-            Serial.print("PARK: madera de adelante por pose (along="); Serial.print(alongSalidaMm(), 0); Serial.println(")");
+            logPi.print("PARK: madera de adelante por pose (along="); logPi.print(alongSalidaMm(), 0); logPi.println(")");
             parkDetPorPose = true;
             parkScanSubFase  = 2;
             parkHuecoEntryMs = millis();
@@ -7862,7 +7885,7 @@ void loop() {
             || (parkOdomLastBajada >= 0 && odomMm - parkOdomLastBajada >= 200.0f);
         if (!parkDirecto && validaPoste2 && enVentanaPoste2 && sepPoste2Ok && regresoPoseOk && parkScanSubFase < 2
             && bajada && armada && posteConfirmado) {
-          Serial.println("PARK: segundo poste de regreso por pose");
+          logPi.println("PARK: segundo poste de regreso por pose");
           parkScanSubFase  = 2;
           parkHuecoEntryMs = millis();
           parkPoste1Ms     = 0;
@@ -7877,11 +7900,11 @@ void loop() {
                              || fabsf(alongSalidaMm() - p1Previsto) <= 0.5f * ventanaPoste2;
           if (bajada && !armada && parkCaidaCnt == PARK_CAIDA_N) {
             parkIgnAlong = alongSalidaMm(); parkIgnOk = true;
-            Serial.print("PARK: bajada IGNORADA (no armada: base=");
-            Serial.print(baseLista ? 1 : 0);
-            Serial.print(" rosa="); Serial.print(parkRosaVisto ? 1 : 0);
-            Serial.print(" ang="); Serial.print(anguloGyro, 1);
-            Serial.println(")");
+            logPi.print("PARK: bajada IGNORADA (no armada: base=");
+            logPi.print(baseLista ? 1 : 0);
+            logPi.print(" rosa="); logPi.print(parkRosaVisto ? 1 : 0);
+            logPi.print(" ang="); logPi.print(anguloGyro, 1);
+            logPi.println(")");
           }
           // El poste mide 2 cm: a la salida de la U (PWM 200) cabe entero antes
           // de PARK_ARMADO_MS. Si se tira, el poste 2 queda como poste 1.
@@ -7896,10 +7919,10 @@ void loop() {
             parkOdomPoste1   = odomMm;
             // Tras la U, un ToF inválido puede marcar el hueco, pero no anclar la odometría.
             parkP1Sonar      = parkDirecto || !posteSintetico;
-            Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
-            Serial.print(" ext="); Serial.print(extRaw);
-            Serial.print(" ang="); Serial.print(anguloGyro, 1);
-            Serial.print(" rosa="); Serial.println(parkRosaVisto ? 1 : 0);
+            logPi.print("PARK: POSTE 1 DETECTADO! base="); logPi.print(parkBase, 1);
+            logPi.print(" ext="); logPi.print(extRaw);
+            logPi.print(" ang="); logPi.print(anguloGyro, 1);
+            logPi.print(" rosa="); logPi.println(parkRosaVisto ? 1 : 0);
 
             // Avanza a subfase 1 (espera hueco tras poste 1)
             parkScanSubFase = 1;
@@ -7917,7 +7940,7 @@ void loop() {
               parkOdomPoste1   = odomMm;
               parkP1Sonar      = false;
               parkBajadaPre    = false;
-              Serial.println("PARK: poste 1 pasó antes del armado — hueco");
+              logPi.println("PARK: poste 1 pasó antes del armado — hueco");
             }
           } else {
             parkGapCnt = 0;
@@ -7935,8 +7958,8 @@ void loop() {
               parkScanSubFase  = 2;
               parkCaidaCnt     = 0;
               parkHuecoEntryMs = millis();
-              Serial.print("PARK: HUECO DE CAJON (33cm) alcanzado en t=");
-              Serial.println(millis() - parkEntryMs);
+              logPi.print("PARK: HUECO DE CAJON (33cm) alcanzado en t=");
+              logPi.println(millis() - parkEntryMs);
             }
           } else {
             parkGapCnt = 0;
@@ -7970,11 +7993,11 @@ void loop() {
             if (enVentanaPoste2) {
               poste2Detect = true;
               parkPoste2Pose = 1;
-              Serial.print("PARK: POSTE 2 POR ODOMETRIA (+"); Serial.print(odomMm - parkOdomPoste1); Serial.println(" mm tras el poste 1)");
+              logPi.print("PARK: POSTE 2 POR ODOMETRIA (+"); logPi.print(odomMm - parkOdomPoste1); logPi.println(" mm tras el poste 1)");
             } else {
               // El cruce odométrico ya ocurrió fuera del cajón. Esperar un eco válido.
               parkOdomPoste1 = -1;
-              Serial.println("PARK: estimación odométrica del poste 2 fuera de ventana");
+              logPi.println("PARK: estimación odométrica del poste 2 fuera de ventana");
             }
           }
 
@@ -7991,15 +8014,15 @@ void loop() {
               if (dt > 0.2f) {
                 float v = PARK_POSTE_SEP_CM / dt;
                 parkVelCmS = (v >= PARK_VEL_MIN_CM_S && v <= PARK_VEL_MAX_CM_S) ? v : 0.0f;
-                Serial.print("PARK vel medida="); Serial.print(v, 1);
-                Serial.println(parkVelCmS > 0.0f ? " cm/s" : " cm/s (FUERA DE BANDA, se ignora)");
+                logPi.print("PARK vel medida="); logPi.print(v, 1);
+                logPi.println(parkVelCmS > 0.0f ? " cm/s" : " cm/s (FUERA DE BANDA, se ignora)");
               }
             }
-            Serial.print("PARK: 2a PARED / POSTE 2 (sonar caida tHueco=");
-            Serial.print(tHueco);
-            Serial.print("ms ext="); Serial.print(extRaw);
-            Serial.print(" base="); Serial.print(parkBase, 1);
-            Serial.println(")");
+            logPi.print("PARK: 2a PARED / POSTE 2 (sonar caida tHueco=");
+            logPi.print(tHueco);
+            logPi.print("ms ext="); logPi.print(extRaw);
+            logPi.print(" base="); logPi.print(parkBase, 1);
+            logPi.println(")");
 
             // TODA la maniobra de reversa se alinea contra esto. Tomar el
             // anguloGyro del instante hornea la chuecura: en la 1057 se
@@ -8013,7 +8036,7 @@ void loop() {
               if (fabsf(sepE) > PARK_POSTE2_SEP_TOL_MM) {
                 sepE = constrain(sepE, -100.0f, 100.0f);
                 parkDetAlong += sepE;   // en la U el along tambien crece al avanzar (con signo -1 n4 s45 pasaba de 86 a 155 mm de error)
-                Serial.print("PARK poste 2 separacion anomala: ancla "); Serial.println(sepE, 0);
+                logPi.print("PARK poste 2 separacion anomala: ancla "); logPi.println(sepE, 0);
               }
             }
             // Anclado por pose tras una bajada ignorada (aun no armada) justo antes: esa bajada ya era el poste 2, el armado llego tarde.
@@ -8022,27 +8045,27 @@ void loop() {
             parkDetTh = isnan(parkThCarril()) ? 0.0f : constrain(parkThCarril(), -25.0f, 25.0f);
             // altura del eje por el sonar (va 68 mm al costado y 64 adelante del eje, el haz sale inclinado theta)
             { float tr = PARK_PL_TILT_H ? parkDetTh * 0.0174533f : 0.0f; parkDetHSon = (parkBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr); }
-            Serial.print("PARK anclaje along="); Serial.print(parkDetAlong, 0); Serial.print(" pka="); Serial.print(rutaPka, 0);
-            Serial.print(" h="); Serial.println(parkDetHSon, 0);
-            Serial.print("PARK ref="); Serial.print(parkRumboRef, 1);
-            Serial.print(parkTrimListo ? " (PARED" : " (gyro");
-            Serial.print(" ang="); Serial.print(anguloGyro, 1); Serial.println(")");
+            logPi.print("PARK anclaje along="); logPi.print(parkDetAlong, 0); logPi.print(" pka="); logPi.print(rutaPka, 0);
+            logPi.print(" h="); logPi.println(parkDetHSon, 0);
+            logPi.print("PARK ref="); logPi.print(parkRumboRef, 1);
+            logPi.print(parkTrimListo ? " (PARED" : " (gyro");
+            logPi.print(" ang="); logPi.print(anguloGyro, 1); logPi.println(")");
             if (PARK_TEST_MANO) {
               parkFase = 10;
-              Serial.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
+              logPi.println("PARK MANO: 2a pared -> servo externo, empuja el carro");
             } else if (PARK_MODO == PARK_PARALELO_REV) {
               parkFase   = 30;
               parkFaseMs = millis(); parkOdom0 = odomMm;
-              Serial.println("PARK fase 30: ajuste tras el poste 2 (PARK_REV_AJUSTE_MM)");
+              logPi.println("PARK fase 30: ajuste tras el poste 2 (PARK_REV_AJUSTE_MM)");
             } else {
               parkFase   = 1;
               parkFaseMs = millis(); parkOdom0 = odomMm;
-              Serial.println("PARK fase 1: avance extra tras el poste 2 (PARK_POSTE2_*)");
+              logPi.println("PARK fase 1: avance extra tras el poste 2 (PARK_POSTE2_*)");
             }
             break;
           } else if (tHueco >= PARK_HUECO_TIMEOUT_MS && (tHueco - PARK_HUECO_TIMEOUT_MS) < 40) {
-            Serial.print("PARK: hueco largo sin 2a pared (t=");
-            Serial.print(tHueco); Serial.println("ms) — sigo buscando, no reverseo");
+            logPi.print("PARK: hueco largo sin 2a pared (t=");
+            logPi.print(tHueco); logPi.println("ms) — sigo buscando, no reverseo");
           }
         }
 
@@ -8123,11 +8146,11 @@ void loop() {
         }
 
         if (logEsteLoop) {
-          Serial.print(" | PARK f=0 sub="); Serial.print(parkScanSubFase);
-          Serial.print(" ext="); Serial.print(extRaw);
-          Serial.print(" base="); Serial.print(parkBase, 1);
-          Serial.print(" caida="); Serial.print(parkCaidaCnt);
-          Serial.print(" arm="); Serial.print(armada ? 1 : 0);
+          logPi.print(" | PARK f=0 sub="); logPi.print(parkScanSubFase);
+          logPi.print(" ext="); logPi.print(extRaw);
+          logPi.print(" base="); logPi.print(parkBase, 1);
+          logPi.print(" caida="); logPi.print(parkCaidaCnt);
+          logPi.print(" arm="); logPi.print(armada ? 1 : 0);
         }
         break;
       }
@@ -8166,8 +8189,8 @@ void loop() {
         float avanceMm = PARK_POSTE2_MM
                        + ((parkBase > 5.0f) ? (parkBase - PARK_POSTE2_REF_CM) * PARK_POSTE2_MM_POR_CM : 0.0f);
         if (parkFinTramo(avanceMm, (unsigned long)espera)) {
-          Serial.print("PARK fase 1 fin: avance="); Serial.print(parkRecorridoMm(), 0);
-          Serial.print("mm t="); Serial.println(millis() - parkFaseMs);
+          logPi.print("PARK fase 1 fin: avance="); logPi.print(parkRecorridoMm(), 0);
+          logPi.print("mm t="); logPi.println(millis() - parkFaseMs);
           motorCoast();
           // 2026-10-04: NO pre-colocar FULL EXTERNO aquí. El carro todavía
           // trae inercia hacia adelante (coast, no frenado); con las ruedas
@@ -8204,11 +8227,11 @@ void loop() {
           }
           parkFase   = 2;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 2: COAST (ext=");
-          Serial.print(extRaw);
-          Serial.print(" base="); Serial.print(parkBaseLlegada, 1);
-          Serial.print(" ang="); Serial.print(anguloGyro, 1);
-          Serial.println(") -> reversa FULL EXTERNO");
+          logPi.print("PARK fase 2: COAST (ext=");
+          logPi.print(extRaw);
+          logPi.print(" base="); logPi.print(parkBaseLlegada, 1);
+          logPi.print(" ang="); logPi.print(anguloGyro, 1);
+          logPi.println(") -> reversa FULL EXTERNO");
         }
         break;
       }
@@ -8227,8 +8250,8 @@ void loop() {
         setMotor(avanza ? PARK_PWM : PARK_REV_PWM);
         if (!avanza && parkAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 30: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 31 ya");
+          logPi.print("PARK fase 30: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 31 ya");
           parkFase   = 31;
           parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
@@ -8238,8 +8261,8 @@ void loop() {
           escribirServo(centroServo);
           parkFase   = 31;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 31: COAST tras ajuste ("); Serial.print(PARK_REV_AJUSTE_MM, 0);
-          Serial.println("mm)");
+          logPi.print("PARK fase 31: COAST tras ajuste ("); logPi.print(PARK_REV_AJUSTE_MM, 0);
+          logPi.println("mm)");
         }
         break;
       }
@@ -8253,8 +8276,8 @@ void loop() {
           escribirServo(servoHaciaPared);
           parkFase   = 32;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 32: REV SWING A FULL EXTERNO hasta 90deg (ref=");
-          Serial.print(parkRumboRef, 1); Serial.println(")");
+          logPi.print("PARK fase 32: REV SWING A FULL EXTERNO hasta 90deg (ref=");
+          logPi.print(parkRumboRef, 1); logPi.println(")");
         }
         break;
       }
@@ -8266,8 +8289,8 @@ void loop() {
         setMotor(PARK_REV_PWM);
         if (parkRevAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 32: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 35");
+          logPi.print("PARK fase 32: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 35");
           parkFase   = 35;
           parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
@@ -8278,9 +8301,9 @@ void loop() {
         if (swingListo || swingTimeout) {
           parkFase   = 33;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 33: REV recta hasta distB<="); Serial.print(PARK_REV_B_CM, 0);
-          Serial.print("cm (swing="); Serial.print(swingMag, 1);
-          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+          logPi.print("PARK fase 33: REV recta hasta distB<="); logPi.print(PARK_REV_B_CM, 0);
+          logPi.print("cm (swing="); logPi.print(swingMag, 1);
+          logPi.println(swingTimeout ? " TIMEOUT)" : ")");
         }
         break;
       }
@@ -8295,8 +8318,8 @@ void loop() {
         setMotor(PARK_REV_PWM);
         if (parkRevAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 33: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 35");
+          logPi.print("PARK fase 33: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 35");
           parkFase   = 35;
           parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
@@ -8308,9 +8331,9 @@ void loop() {
           escribirServo(servoHaciaPared);
           parkFase   = 34;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 34: REV SWING C FULL EXTERNO hasta 180deg (distB=");
-          Serial.print(distB_filtrada, 1);
-          Serial.println(tofListo ? ")" : mmTope ? " TOPE mm)" : " TIMEOUT)");
+          logPi.print("PARK fase 34: REV SWING C FULL EXTERNO hasta 180deg (distB=");
+          logPi.print(distB_filtrada, 1);
+          logPi.println(tofListo ? ")" : mmTope ? " TOPE mm)" : " TIMEOUT)");
         }
         break;
       }
@@ -8323,8 +8346,8 @@ void loop() {
         setMotor(PARK_REV_PWM);
         if (parkRevAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 34: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 35");
+          logPi.print("PARK fase 34: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 35");
           parkFase   = 35;
           parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
@@ -8338,8 +8361,8 @@ void loop() {
           parkCenterCnt = 0;
           parkFase   = 35;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 35: COAST -> pasadas (swing="); Serial.print(swingMag, 1);
-          Serial.println(swingTimeout ? " TIMEOUT)" : ")");
+          logPi.print("PARK fase 35: COAST -> pasadas (swing="); logPi.print(swingMag, 1);
+          logPi.println(swingTimeout ? " TIMEOUT)" : ")");
         }
         break;
       }
@@ -8353,7 +8376,7 @@ void loop() {
           parkCenterCnt = 0;
           parkFase   = 36;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.println("PARK fase 36: ACOMODO ADELANTE (rumbo = parkRumboRef+180)");
+          logPi.println("PARK fase 36: ACOMODO ADELANTE (rumbo = parkRumboRef+180)");
         }
         break;
       }
@@ -8377,7 +8400,7 @@ void loop() {
           } else {
             parkFase   = 37;
             parkFaseMs = millis(); parkOdom0 = odomMm;
-            Serial.print("PARK fase 38: COAST -> REV final (dif="); Serial.print(dif, 1); Serial.println(")");
+            logPi.print("PARK fase 38: COAST -> REV final (dif="); logPi.print(dif, 1); logPi.println(")");
           }
         }
         break;
@@ -8394,7 +8417,7 @@ void loop() {
           motorReversa();
           parkFase   = 38;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.println("PARK fase 38: REV final (rumbo = parkRumboRef+180)");
+          logPi.println("PARK fase 38: REV final (rumbo = parkRumboRef+180)");
         }
         break;
       }
@@ -8415,15 +8438,15 @@ void loop() {
         bool  atrasPegadoF = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
         bool  timeout      = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
         if (frenteOk || alineado || pegado || atrasPegadoF || timeout) {
-          Serial.print("PARK fase 38 fin: dif="); Serial.print(dif, 1);
-          Serial.print(" dF="); Serial.print(distF_filtrada);
-          Serial.print(" ext="); Serial.print(extRaw);
-          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          logPi.print("PARK fase 38 fin: dif="); logPi.print(dif, 1);
+          logPi.print(" dF="); logPi.print(distF_filtrada);
+          logPi.print(" ext="); logPi.print(extRaw);
+          logPi.print(" distB="); logPi.println(distB_filtrada, 1);
           if (!alineado && !pegado && parkCiclos < PARK_REV_CICLOS_MAX) {
             parkCiclos++;
             motorCoast(); escribirServo(centroServo);
-            Serial.print("PARK ciclo "); Serial.print(parkCiclos);
-            Serial.println(": no derecho todavia (REV) -> fase 35 de nuevo");
+            logPi.print("PARK ciclo "); logPi.print(parkCiclos);
+            logPi.println(": no derecho todavia (REV) -> fase 35 de nuevo");
             parkFase   = 35;
             parkFaseMs = millis(); parkOdom0 = odomMm;
           } else {
@@ -8443,7 +8466,7 @@ void loop() {
         const float rumbo = rutaErrCarrilDeg();
         if (fabsf(errorCm) <= 10.0f && fabsf(rumbo) <= PARK_GEOM_ANG_DEG) {
           parkFase = 44; parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK GEOM ROJO: alineado, ext="); Serial.println(errorCm + PARK_PARED_CM, 1);
+          logPi.print("PARK GEOM ROJO: alineado, ext="); logPi.println(errorCm + PARK_PARED_CM, 1);
         } else if (millis() - parkFaseMs > 3000UL || alongSalidaMm() > 1100.0f
                    || (distF_filtrada > 0 && distF_filtrada <= PARK_UTURN_DF_FORZAR_CM)) {
           parkGeomModo = false;
@@ -8463,7 +8486,7 @@ void loop() {
         servoRumboPark(0.0f);                             // todavia va hacia adelante: paralelo al carril
         setMotor(PARK_GEOM_FRENO_PWM);
         if (encVelMmS <= PARK_GEOM_V_REV || millis() - parkFaseMs > 1500) {
-          Serial.print("PARK GEOM: frenado v="); Serial.print(encVelMmS, 0); Serial.print(" along="); Serial.print(alongSalidaMm(), 0); Serial.println(" -> busco la madera en reversa");
+          logPi.print("PARK GEOM: frenado v="); logPi.print(encVelMmS, 0); logPi.print(" along="); logPi.print(alongSalidaMm(), 0); logPi.println(" -> busco la madera en reversa");
           parkGeomAnclaSec = -1;
           parkFase = 42; parkFaseMs = millis(); parkOdom0 = odomMm; parkRevBase = 0.0f; parkRevDrop = 0; parkRevEnMadera = false;
         }
@@ -8486,7 +8509,7 @@ void loop() {
               float tr = parkDetTh * 0.0174533f;
               parkDetHSon = (parkRevBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr);
               parkRevAnc = true;
-              Serial.print("PARK REV: madera de adelante por sonar along="); Serial.print(parkDetAlong, 0); Serial.print(" ext="); Serial.print(extRaw); Serial.print(" base="); Serial.println(parkRevBase, 0);
+              logPi.print("PARK REV: madera de adelante por sonar along="); logPi.print(parkDetAlong, 0); logPi.print(" ext="); logPi.print(extRaw); logPi.print(" base="); logPi.println(parkRevBase, 0);
               parkPlanPose(pw, ph);
             }
           } else { parkRevDrop = 0; parkRevBase += 0.5f * ((float)extRaw - parkRevBase); }
@@ -8502,7 +8525,7 @@ void loop() {
         bool senalAdelante = distF_filtrada > 0 && distF_filtrada <= PARK_REV_DF_CM && fabsf(parkThCarril()) <= 12.0f && millis() - parkFaseMs > 300;   // la senal de la entrada del cuadrante esta delante del cajon
         if (!parkRevAnc && (pw >= wStop + PARK_REV_SIN_ANCLA_MM || senalAdelante || millis() - parkFaseMs > 6000)) { parkRevCaeAU(senalAdelante ? "senal adelante" : "sin ver la madera"); break; }
         if (parkRevAnc && (pw >= wStop || senalAdelante || millis() - parkFaseMs > 6000)) {
-          Serial.print("PARK REV fin avance w="); Serial.print(pw, 0); Serial.print(" h="); Serial.println(ph, 0);
+          logPi.print("PARK REV fin avance w="); logPi.print(pw, 0); logPi.print(" h="); logPi.println(ph, 0);
           motorCoast(); escribirServo(centroServo);
           parkFase = 2; parkFaseMs = millis(); parkOdom0 = odomMm;
         }
@@ -8566,7 +8589,7 @@ void loop() {
                                - (borde == 1 ? 0.0f : 20.0f);
             }
             parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET);
-            Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" hp="); Serial.print(parkDetHPose, 0); Serial.print(" v="); Serial.print(encVelMmS, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
+            logPi.print("PARK REV: madera de adelante por sonar (reversa) hs="); logPi.print(parkDetHSon, 0); logPi.print(" hp="); logPi.print(parkDetHPose, 0); logPi.print(" v="); logPi.print(encVelMmS, 0); logPi.print(" th="); logPi.print(parkDetTh, 1); logPi.print(" wnom="); logPi.print(wNom, 0); logPi.print(" borde="); logPi.print(borde); logPi.print(" along="); logPi.println(alongSalidaMm(), 0);
             parkRevAnc = true;
             parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;   // con el ancla, de nuevo hacia adelante hasta el w de parada
             motorAdelante();
@@ -8588,7 +8611,7 @@ void loop() {
           // ToF de enfrente si lee (el sonar frontal da ~3 cm menos que el ToF: corrida 1281 cerraba con tF 93 / tB 46 mm)
           float dF = (tofMm[3] > 0 && tofMm[3] < 300) ? tofMm[3] / 10.0f : distF_filtrada;
           float dB = distB_filtrada, err = dF - dB - PARK_PL_CENTRAR_OFF_CM;   // >0: sobra adelante
-          Serial.print("PARK centrar dF="); Serial.print(dF, 1); Serial.print(" dB="); Serial.print(dB, 1);
+          logPi.print("PARK centrar dF="); logPi.print(dF, 1); logPi.print(" dB="); logPi.print(dB, 1);
 #if FOX_TOF
           if (PARK_PL_CENTRAR_HOLGURA && parkDirecto && tofMm[3] > 0 && tofMm[3] < 300
               && fabsf(err) > PARK_PL_CENTRAR_TOL_CM && dF + dB >= 11.0f && dF + dB <= 16.0f) {
@@ -8613,19 +8636,19 @@ void loop() {
               const float dBConservador = min(dB, trasero / 10.0f);
               const float margenCm = min(dF * c - 0.7f, dBConservador * c - PARK_TOF_COLA_CM) - esquinaCm;
               if (hMin >= 10.0f && hMax <= 190.0f && margenCm >= 4.0f) {
-                Serial.println(" -> holgura ToF");
+                logPi.println(" -> holgura ToF");
                 finalizarPark(parkCentrarMotivo); break;
               }
             }
           }
 #endif
           if (dF <= 0.0f || dF > 20.0f || dB <= 0.0f || dB > 20.0f || fabsf(err) <= PARK_PL_CENTRAR_TOL_CM) {
-            Serial.println(" -> ya");
+            logPi.println(" -> ya");
             finalizarPark(parkCentrarMotivo); break;
           }
           parkCentrarDir = err > 0.0f ? 1 : -1; parkCentrarMm = fabsf(err) * 5.0f;   // la mitad, en mm
           parkDespInicio = true; parkDespPico = 0;
-          Serial.print(parkCentrarDir > 0 ? " -> ADELANTE " : " -> REVERSA "); Serial.println(parkCentrarMm, 0);
+          logPi.print(parkCentrarDir > 0 ? " -> ADELANTE " : " -> REVERSA "); logPi.println(parkCentrarMm, 0);
           parkFaseMs = millis(); parkOdom0 = odomMm;
         }
         if (parkCentrarDir > 0) motorAdelante(); else motorReversa();
@@ -8638,8 +8661,8 @@ void loop() {
         if (parkCentrarDir < 0 && ((distB_filtrada > 0.0f && distB_filtrada <= PARK_PL_ATRAS_CM) || (PARK_PL_ATRAS_ESQ && parkColaEsqMm(0.0f) <= PARK_PL_MTOF_MM))) fin = true;
         if (millis() - parkFaseMs >= (unsigned long)PARK_PL_CENTRAR_MS) fin = true;
         if (fin) {
-          Serial.print("PARK centrar fin mm="); Serial.print(parkRecorridoMm(), 0); Serial.print(" dF="); Serial.print(distF_filtrada, 1);
-          Serial.print(" dB="); Serial.println(distB_filtrada, 1);
+          logPi.print("PARK centrar fin mm="); logPi.print(parkRecorridoMm(), 0); logPi.print(" dF="); logPi.print(distF_filtrada, 1);
+          logPi.print(" dB="); logPi.println(distB_filtrada, 1);
           finalizarPark(parkCentrarMotivo);
         }
         break;
@@ -8669,7 +8692,7 @@ void loop() {
             const float delta = alongSalidaMm() - rutaPkr + 284.0f - w;
             if (fabsf(delta) >= 8.0f && fabsf(delta) <= 55.0f) {
               parkDetAlong -= 0.25f * delta;
-              Serial.print("PARK ref BEV dw="); Serial.println(delta, 1);
+              logPi.print("PARK ref BEV dw="); logPi.println(delta, 1);
             }
           }
           if (parkDirecto && parkGeomModo && isfinite(rutaPkl) && fabsf(rutaPkl) <= 45.0f
@@ -8679,14 +8702,14 @@ void loop() {
             const float delta = alongSalidaMm() + rutaPkl - rutaPka + 284.0f - w;
             if (fabsf(delta) >= 8.0f && fabsf(delta) <= 28.0f) {
               parkDetAlong -= 0.20f * delta;
-              Serial.print("PARK ref señal dw="); Serial.println(delta, 1);
+              logPi.print("PARK ref señal dw="); logPi.println(delta, 1);
             }
           }
           parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
-          Serial.print(" d="); Serial.print(parkBaseLlegada, 1); Serial.println(")");
+          logPi.print("PARK fase 40: PLAN de entrada (ref="); logPi.print(parkRumboRef, 1);
+          logPi.print(" d="); logPi.print(parkBaseLlegada, 1); logPi.println(")");
           break;
         }
         if (millis() - parkFaseMs >= MANIOBRA_FRENO_MS) {
@@ -8694,8 +8717,8 @@ void loop() {
           escribirServo(servoHaciaPared);  // FULL EXTERNO recién con la reversa real
           parkFase   = 3;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase 3: REV SWING FULL EXTERNO hasta 60deg / 1s (ref=");
-          Serial.print(parkRumboRef, 1); Serial.println(")");
+          logPi.print("PARK fase 3: REV SWING FULL EXTERNO hasta 60deg / 1s (ref=");
+          logPi.print(parkRumboRef, 1); logPi.println(")");
         }
         break;
       }
@@ -8741,8 +8764,8 @@ void loop() {
               parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
               if (!parkDirecto && !parkGeomModo && isfinite(rutaPgf) && alongSalidaMm() > rutaPgf - PARK_PL_U_PG_BACK_MM)
                 parkPlanT1 = min(parkPlanT1, PARK_PL_U_PG_TH_MAX);
-              Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);
-              Serial.print(" th1="); Serial.println(t, 1);
+              logPi.print("PARK plan T1 w0="); logPi.print(w0, 0); logPi.print(" h0="); logPi.print(h0, 0);
+              logPi.print(" th1="); logPi.println(t, 1);
             }
             parkDespInicio = true; parkDespPico = 0;
             parkPlanMov = true; parkPlanClrPrev = 1e9f; parkFaseMs = millis(); parkOdom0 = odomMm; parkPlanSgn = (th >= 0.0f) ? 1.0f : -1.0f;
@@ -8750,10 +8773,10 @@ void loop() {
             if (i == 6) parkPlZzReancla(th);
 #endif
             if (parkPlanDir > 0) motorAdelante(); else motorReversa();
-            Serial.print("PARK plan "); Serial.print(parkPlanI + 1);
-            Serial.print(parkPlanDir > 0 ? " ADELANTE " : " REVERSA ");
-            Serial.print(parkPlanSrv == servoHaciaPared ? "EXT" : parkPlanSrv == servoDesdePared ? "INT" : "RECTO");
-            Serial.print(" th="); Serial.println(th, 1);
+            logPi.print("PARK plan "); logPi.print(parkPlanI + 1);
+            logPi.print(parkPlanDir > 0 ? " ADELANTE " : " REVERSA ");
+            logPi.print(parkPlanSrv == servoHaciaPared ? "EXT" : parkPlanSrv == servoDesdePared ? "INT" : "RECTO");
+            logPi.print(" th="); logPi.println(th, 1);
           }
           break;
         }
@@ -8767,7 +8790,7 @@ void loop() {
           if (PARK_PL_ATASCO_MS > 0 && millis() - t0 >= (unsigned long)PARK_PL_ATASCO_MS) {
             if (fabsf(odomMmF - od0) < PARK_PL_ATASCO_MM) {
               extra = min(extra + PARK_PL_ATASCO_PASO, PARK_PL_ATASCO_MAX);
-              Serial.print("PARK atasco: +"); Serial.println(extra);
+              logPi.print("PARK atasco: +"); logPi.println(extra);
             } else {
               extra = 0;
             }
@@ -8893,7 +8916,7 @@ void loop() {
             if (millis() - t0 >= 300UL) {
               float dth = fabsf(th - th0), dod = fabsf(odomMmF - od0);
               if (dth < 0.5f && dod < 4.0f) sinAvance += millis() - t0; else sinAvance = 0;
-              if (dod >= 15.0f && dth < 0.5f && parkPlanSrv != centroServo) Serial.println("PARK plan: encoder avanza pero el BNO no gira (patina?)");
+              if (dod >= 15.0f && dth < 0.5f && parkPlanSrv != centroServo) logPi.println("PARK plan: encoder avanza pero el BNO no gira (patina?)");
               th0 = th; od0 = odomMmF; t0 = millis();
             }
             if (!fin && sinAvance >= (unsigned long)PARK_PL_AVANCE_MS) { fin = true; why = "SIN AVANCE"; }
@@ -8901,11 +8924,11 @@ void loop() {
         if (!fin && tseg >= (i == 0 && PARK_PL_RECTA ? 6000UL : 2500UL)) { fin = true; why = "TIMEOUT"; }
         if (fin) {
           parkPlanWhy = why;
-          Serial.print("PARK plan "); Serial.print(parkPlanI + 1); Serial.print(" fin ("); Serial.print(why);
-          Serial.print(") th="); Serial.print(th, 1); Serial.print(" max="); Serial.print(parkPlanThMax, 1);
-          Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
-          Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
-          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          logPi.print("PARK plan "); logPi.print(parkPlanI + 1); logPi.print(" fin ("); logPi.print(why);
+          logPi.print(") th="); logPi.print(th, 1); logPi.print(" max="); logPi.print(parkPlanThMax, 1);
+          logPi.print(" mm="); logPi.print(mm, 0); logPi.print(" w="); logPi.print(pw, 0); logPi.print(" h="); logPi.print(ph, 0); logPi.print(" clr="); logPi.print(clr, 0);
+          logPi.print(" ext="); logPi.print(extRaw); logPi.print(" dF="); logPi.print(distF_filtrada);
+          logPi.print(" distB="); logPi.println(distB_filtrada, 1);
           parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
@@ -8935,8 +8958,8 @@ void loop() {
         // YA y pasa a corregir hacia ENFRENTE (fase 9), no a terminar.
         if (parkAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 3: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 9");
+          logPi.print("PARK fase 3: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 9");
           parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
         }
@@ -8962,15 +8985,15 @@ void loop() {
           if (parkUsaEncoder()) parkRectoMs = (parkRectoMm > 0.0f) ? 1 : 0;
           parkFase   = (parkRectoMs > 0) ? 14 : 4;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase "); Serial.print(parkFase);
-          Serial.print(parkRectoMs > 0 ? ": RECTO a 60deg " : ": REV FULL EXTERNO (recto 0) ");
-          Serial.print("(swing="); Serial.print(swingMag, 1);
-          Serial.print(swingTimeout ? " TIMEOUT" : "");
-          Serial.print(" d="); Serial.print(parkBaseLlegada, 1);
-          Serial.print(" d0="); Serial.print(PARK_RECTO_D0_CM, 1);
-          Serial.print(" tau="); Serial.print(parkRectoMs);
-          Serial.print("ms recto="); Serial.print(parkRectoMm, 0);
-          Serial.println("mm)");
+          logPi.print("PARK fase "); logPi.print(parkFase);
+          logPi.print(parkRectoMs > 0 ? ": RECTO a 60deg " : ": REV FULL EXTERNO (recto 0) ");
+          logPi.print("(swing="); logPi.print(swingMag, 1);
+          logPi.print(swingTimeout ? " TIMEOUT" : "");
+          logPi.print(" d="); logPi.print(parkBaseLlegada, 1);
+          logPi.print(" d0="); logPi.print(PARK_RECTO_D0_CM, 1);
+          logPi.print(" tau="); logPi.print(parkRectoMs);
+          logPi.print("ms recto="); logPi.print(parkRectoMm, 0);
+          logPi.println("mm)");
         }
         break;
       }
@@ -8986,8 +9009,8 @@ void loop() {
         setMotor(PARK_REV_PWM);
         if (parkAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 14: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 9");
+          logPi.print("PARK fase 14: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 9");
           parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
         }
@@ -8995,7 +9018,7 @@ void loop() {
           escribirServo(servoHaciaPared);
           parkFase   = 4;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.println("PARK fase 4: REV FULL EXTERNO (maniobra base)");
+          logPi.println("PARK fase 4: REV FULL EXTERNO (maniobra base)");
         }
         break;
       }
@@ -9007,8 +9030,8 @@ void loop() {
         setMotor(PARK_REV_PWM);
         if (parkAtrasPegado()) {
           motorCoast(); escribirServo(centroServo);
-          Serial.print("PARK fase 4: ATRAS PEGADO (distB="); Serial.print(distB_filtrada, 1);
-          Serial.println(") -> fase 9");
+          logPi.print("PARK fase 4: ATRAS PEGADO (distB="); logPi.print(distB_filtrada, 1);
+          logPi.println(") -> fase 9");
           parkFase = 9; parkFaseMs = millis(); parkOdom0 = odomMm;
           break;
         }
@@ -9018,8 +9041,8 @@ void loop() {
           // Sin meneo (PARK_WIGGLE_* = 0) se salta directo a la contravuelta.
           parkFase   = meneoInt ? 5 : meneoExt ? 6 : 8;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase "); Serial.print(parkFase);
-          Serial.println(parkFase == 8 ? ": FULL INTERNO hasta heading recta ~ 0 (sin meneo)"
+          logPi.print("PARK fase "); logPi.print(parkFase);
+          logPi.println(parkFase == 8 ? ": FULL INTERNO hasta heading recta ~ 0 (sin meneo)"
                                        : ": meneo");
         }
         break;
@@ -9034,7 +9057,7 @@ void loop() {
           bool meneoExt = parkUsaEncoder() ? (PARK_WIGGLE_EXT_MM > 0.0f) : (PARK_WIGGLE_EXT_MS > 0);
           parkFase   = meneoExt ? 6 : 8;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.print("PARK fase "); Serial.println(parkFase);
+          logPi.print("PARK fase "); logPi.println(parkFase);
         }
         break;
       }
@@ -9047,7 +9070,7 @@ void loop() {
         if (parkFinTramo(PARK_WIGGLE_EXT_MM, PARK_WIGGLE_EXT_MS)) {
           parkFase   = 8;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.println("PARK fase 8: FULL INTERNO hasta heading recta ~ 0");
+          logPi.println("PARK fase 8: FULL INTERNO hasta heading recta ~ 0");
         }
         break;
       }
@@ -9098,23 +9121,23 @@ void loop() {
             escribirServo(centroServo);
             parkFase = 11;
             parkFrenoCola = true;
-            Serial.print("PARK fase 11: FRENO COLA (dif=");
-            Serial.print(difHeading, 1);
-            Serial.print(" distB="); Serial.print(distB_filtrada, 1);
-            Serial.println(")");
+            logPi.print("PARK fase 11: FRENO COLA (dif=");
+            logPi.print(difHeading, 1);
+            logPi.print(" distB="); logPi.print(distB_filtrada, 1);
+            logPi.println(")");
           } else {
             motorCoast();
             escribirServo(centroServo);
             parkFase = 9;
             parkFrenoCola = false;
-            Serial.print("PARK fase 9: COAST -> ENFRENTE (dif=");
-            Serial.print(difHeading, 1);
-            Serial.print(" ext="); Serial.print(extRaw);
-            if (alineado) Serial.print(" ALINEADO");
-            if (pegado)   Serial.print(" PEGADO");
-            if (atorado)  Serial.print(" ATORADO");
-            if (atrasPegado) { Serial.print(" ATRAS PEGADO distB="); Serial.print(distB_filtrada, 1); }
-            Serial.println(timeout ? " TIMEOUT)" : ")");
+            logPi.print("PARK fase 9: COAST -> ENFRENTE (dif=");
+            logPi.print(difHeading, 1);
+            logPi.print(" ext="); logPi.print(extRaw);
+            if (alineado) logPi.print(" ALINEADO");
+            if (pegado)   logPi.print(" PEGADO");
+            if (atorado)  logPi.print(" ATORADO");
+            if (atrasPegado) { logPi.print(" ATRAS PEGADO distB="); logPi.print(distB_filtrada, 1); }
+            logPi.println(timeout ? " TIMEOUT)" : ")");
           }
         }
         break;
@@ -9131,7 +9154,7 @@ void loop() {
           parkFaseMs = millis(); parkOdom0 = odomMm;
           parkColaMm = odomMm;
           parkFrenoCola = false;
-          Serial.println("PARK fase 11: ACOMODO ENFRENTE");
+          logPi.println("PARK fase 11: ACOMODO ENFRENTE");
         }
         break;
       }
@@ -9169,8 +9192,8 @@ void loop() {
           } else {
             parkFase   = 12;
             parkFaseMs = millis(); parkOdom0 = odomMm;
-            Serial.print("PARK fase 12: COAST -> REV a 0 (dif=");
-            Serial.print(dif, 1); Serial.println(")");
+            logPi.print("PARK fase 12: COAST -> REV a 0 (dif=");
+            logPi.print(dif, 1); logPi.println(")");
           }
         }
         break;
@@ -9194,7 +9217,7 @@ void loop() {
           parkFrenoFin = false;
           parkFase   = 13;
           parkFaseMs = millis(); parkOdom0 = odomMm;
-          Serial.println("PARK fase 13: REV hasta heading 0");
+          logPi.println("PARK fase 13: REV hasta heading 0");
         }
         break;
       }
@@ -9246,17 +9269,17 @@ void loop() {
         bool  atrasPegado = (distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_FINAL_CM);
         bool  timeout  = (millis() - parkFaseMs >= PARK_REV_FINAL_TIMEOUT_MS);
         if (frenteOk || alineado || pegado || atrasPegado || timeout) {
-          Serial.print("PARK fase 13 fin: dif="); Serial.print(dif, 1);
-          Serial.print(" dF="); Serial.print(distF_filtrada);
-          Serial.print(" ext="); Serial.print(extRaw);
-          Serial.print(" distB="); Serial.println(distB_filtrada, 1);
+          logPi.print("PARK fase 13 fin: dif="); logPi.print(dif, 1);
+          logPi.print(" dF="); logPi.print(distF_filtrada);
+          logPi.print(" ext="); logPi.print(extRaw);
+          logPi.print(" distB="); logPi.println(distB_filtrada, 1);
           // El tope de lado ya es un punto del cajón; la pasada siguiente solo
           // cierra los últimos grados y vuelve a ver el poste. Atrás y timeout sí.
           if (!alineado && !pegado && parkCiclos < PARK_CICLOS_MAX) {
             parkCiclos++;
             motorCoast(); escribirServo(centroServo);
-            Serial.print("PARK ciclo "); Serial.print(parkCiclos);
-            Serial.println(": no derecho todavia -> fase 9 (ENFRENTE) de nuevo");
+            logPi.print("PARK ciclo "); logPi.print(parkCiclos);
+            logPi.println(": no derecho todavia -> fase 9 (ENFRENTE) de nuevo");
             parkFase   = 9;
             parkFaseMs = millis(); parkOdom0 = odomMm;
           } else if (PARK_FRENO_FIN_TODO || (pegado && dif > 12.0f)) {
@@ -9279,11 +9302,11 @@ void loop() {
         escribirServo(servoHaciaPared);
         if (millis() - parkLogMs >= 200) {
           parkLogMs = millis();
-          Serial.print("PARK MANO ang=");
-          Serial.print(anguloGyro, 1);
-          Serial.print(" dF="); Serial.print(distF_filtrada);
-          Serial.print(" ext="); Serial.print(extRaw);
-          Serial.print(" base="); Serial.println(parkBase, 1);
+          logPi.print("PARK MANO ang=");
+          logPi.print(anguloGyro, 1);
+          logPi.print(" dF="); logPi.print(distF_filtrada);
+          logPi.print(" ext="); logPi.print(extRaw);
+          logPi.print(" base="); logPi.println(parkBase, 1);
         }
         break;
       }
@@ -9319,8 +9342,8 @@ void loop() {
           puntaAltasTot++;
           if (++puntaAltasCnt >= PARK_PUNTA_ALTO_REBASE_N) {
             // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
-            Serial.print("PUNTA: re-base alto "); Serial.print(puntaBase, 1);
-            Serial.print(" -> "); Serial.println(extRaw);
+            logPi.print("PUNTA: re-base alto "); logPi.print(puntaBase, 1);
+            logPi.print(" -> "); logPi.println(extRaw);
             puntaBase     = (float)extRaw;
             puntaAltasCnt = 0;
             lecturaAlta   = false;
@@ -9343,8 +9366,8 @@ void loop() {
           puntaCaidaHuecos = 0;
           if (puntaCaidaCnt > PARK_PUNTA_REBASE_N) {
             // Duró demasiado para un poste de 2 cm: el carro se acercó de verdad.
-            Serial.print("PUNTA: re-base "); Serial.print(puntaBase, 1);
-            Serial.print(" -> "); Serial.println(extRaw);
+            logPi.print("PUNTA: re-base "); logPi.print(puntaBase, 1);
+            logPi.print(" -> "); logPi.println(extRaw);
             puntaBase     = (float)max(extRaw, 3L);
             puntaCaidaCnt = 0;
           }
@@ -9387,18 +9410,18 @@ void loop() {
                       && (puntaRosaVisto || !PARK_PUNTA_REQUIERE_PI || PARK_TEST_MANO);
 
         if (lecturaBaja && puntaCaidaCnt == PARK_PUNTA_CAIDA_N && !armada) {
-          Serial.print("PUNTA: bajada IGNORADA (no armada: base=");
-          Serial.print(baseLista ? 1 : 0);
-          Serial.print(" rosa="); Serial.print(puntaRosaVisto ? 1 : 0);
-          Serial.print(" ang="); Serial.print(anguloGyro, 1);
-          Serial.println(")");
+          logPi.print("PUNTA: bajada IGNORADA (no armada: base=");
+          logPi.print(baseLista ? 1 : 0);
+          logPi.print(" rosa="); logPi.print(puntaRosaVisto ? 1 : 0);
+          logPi.print(" ang="); logPi.print(anguloGyro, 1);
+          logPi.println(")");
         }
 
         if (puntaEnPoste && !lecturaBaja) {
           puntaEnPoste = false;
           puntaHueco   = true;
           puntaOdom0   = odomMm;
-          Serial.println("PUNTA: hueco, avanzo por encoder");
+          logPi.println("PUNTA: hueco, avanzo por encoder");
         }
         // El hueco es el cajón. A los N mm se mete; si aparece el poste de
         // adelante antes, se mete ya para no estrellarlo.
@@ -9407,9 +9430,9 @@ void loop() {
                            && lecturaBaja && puntaCaidaCnt >= PARK_PUNTA_CAIDA_N;
         if (enHueco || posteLejano) {
           puntaRumboRef = anguloGyro;
-          Serial.print(posteLejano ? "PUNTA: poste lejano, me meto ext="
+          logPi.print(posteLejano ? "PUNTA: poste lejano, me meto ext="
                                    : "PUNTA: dentro del hueco mm=");
-          Serial.println(posteLejano ? extRaw : (odomMm - puntaOdom0));
+          logPi.println(posteLejano ? extRaw : (odomMm - puntaOdom0));
           if (PARK_TEST_MANO) {
             puntaRumboArco0 = anguloGyro;
             puntaFase       = 10;
@@ -9425,7 +9448,7 @@ void loop() {
           puntaMuros    = 1;
           puntaEnPoste  = true;
           puntaCaidaCnt = 0;
-          Serial.print("PUNTA: primera pared lectura="); Serial.println(extRaw);
+          logPi.print("PUNTA: primera pared lectura="); logPi.println(extRaw);
         }
 
         if (PARK_TEST_MANO) {
@@ -9453,13 +9476,13 @@ void loop() {
           setMotor(PARK_PUNTA_PWM);
         }
 
-        Serial.print(" | PUNTA f=0 ext="); Serial.print(extRaw);
-        Serial.print(" base=");  Serial.print(puntaBase, 1);
-        Serial.print(" caida="); Serial.print(puntaCaidaCnt);
-        Serial.print(" int=");   Serial.print(PARK_PUNTA_KI_POS * puntaIntPared, 1);
-        Serial.print(" alta=");  Serial.print(lecturaAlta ? 1 : 0);
-        Serial.print(" rosa=");  Serial.print(puntaRosaVisto ? 1 : 0);
-        Serial.print(" arm=");   Serial.print(armada ? 1 : 0);
+        logPi.print(" | PUNTA f=0 ext="); logPi.print(extRaw);
+        logPi.print(" base=");  logPi.print(puntaBase, 1);
+        logPi.print(" caida="); logPi.print(puntaCaidaCnt);
+        logPi.print(" int=");   logPi.print(PARK_PUNTA_KI_POS * puntaIntPared, 1);
+        logPi.print(" alta=");  logPi.print(lecturaAlta ? 1 : 0);
+        logPi.print(" rosa=");  logPi.print(puntaRosaVisto ? 1 : 0);
+        logPi.print(" arm=");   logPi.print(armada ? 1 : 0);
         break;
       }
 
@@ -9489,8 +9512,8 @@ void loop() {
           motorCoast();
           puntaFase   = 3;
           puntaFaseMs = millis();
-          Serial.print("PUNTA fase 3: avance "); Serial.print(odomMm - puntaOdom0);
-          Serial.println(" mm");
+          logPi.print("PUNTA fase 3: avance "); logPi.print(odomMm - puntaOdom0);
+          logPi.println(" mm");
         }
         break;
       }
@@ -9508,7 +9531,7 @@ void loop() {
           puntaDfCnt      = 0;
           puntaFase       = 4;
           puntaFaseMs     = millis();
-          Serial.print("PUNTA fase 4: ARCO desde ang="); Serial.println(anguloGyro, 1);
+          logPi.print("PUNTA fase 4: ARCO desde ang="); logPi.println(anguloGyro, 1);
         }
         break;
       }
@@ -9531,11 +9554,11 @@ void loop() {
           puntaFase   = 5;
           puntaFaseMs = millis();
           puntaOdom0  = odomMm;
-          Serial.print("PUNTA fase 5: ENTRA girado="); Serial.println(girado, 1);
+          logPi.print("PUNTA fase 5: ENTRA girado="); logPi.println(girado, 1);
           break;
         }
-        Serial.print(" | PUNTA f=4 girado="); Serial.print(girado, 1);
-        Serial.print(" dF="); Serial.print(distF_med);
+        logPi.print(" | PUNTA f=4 girado="); logPi.print(girado, 1);
+        logPi.print(" dF="); logPi.print(distF_med);
         break;
       }
 
@@ -9550,7 +9573,7 @@ void loop() {
           finalizarPunta("ENTRA: distancia");
           break;
         }
-        Serial.print(" | PUNTA f=5 dF="); Serial.print(distF_med);
+        logPi.print(" | PUNTA f=5 dF="); logPi.print(distF_med);
         break;
       }
 
@@ -9560,10 +9583,10 @@ void loop() {
         escribirServo(servoTope);
         if (millis() - puntaLogMs >= 200) {
           puntaLogMs = millis();
-          Serial.print("PUNTA MANO girado=");
-          Serial.print((anguloGyro - puntaRumboArco0) * haciaPared, 1);
-          Serial.print(" dF="); Serial.print(distF_med);
-          Serial.print(" ext="); Serial.println(extRaw);
+          logPi.print("PUNTA MANO girado=");
+          logPi.print((anguloGyro - puntaRumboArco0) * haciaPared, 1);
+          logPi.print(" dF="); logPi.print(distF_med);
+          logPi.print(" ext="); logPi.println(extRaw);
         }
         break;
       }
@@ -9583,8 +9606,8 @@ void loop() {
           float delta = atan(RUTA_BATALLA_MM / radio) * 180.0f / 3.14159265f;
           delta = constrain(delta, 19.3f, RUEDA_TOPE_DEG);   // 19.3 = el mínimo de 28 ticks de antes
           puntaServoU = rutaServo(uturnIzq ? -delta : delta);
-          Serial.print("PUNTA U servo="); Serial.print(puntaServoU);
-          Serial.print(" ext="); Serial.println(extAhora);
+          logPi.print("PUNTA U servo="); logPi.print(puntaServoU);
+          logPi.print(" ext="); logPi.println(extAhora);
         }
         escribirServo(puntaServoU);
         motorAdelante();
@@ -9600,11 +9623,11 @@ void loop() {
           puntaFaseMs       = millis();
           puntaSettleSampMs = millis();
           puntaSettleQuieto = 0;
-          Serial.print("PUNTA fase 21: U girado="); Serial.print(girado, 1);
-          Serial.println(tout ? " (TIMEOUT)" : "");
+          logPi.print("PUNTA fase 21: U girado="); logPi.print(girado, 1);
+          logPi.println(tout ? " (TIMEOUT)" : "");
           break;
         }
-        Serial.print(" | PUNTA f=20 girado="); Serial.print(girado, 1);
+        logPi.print(" | PUNTA f=20 girado="); logPi.print(girado, 1);
         break;
       }
 
@@ -9622,7 +9645,7 @@ void loop() {
         if (quieto || tS >= PARK_RETORNO_SETTLE_MAX_MS) {
           // 0° = recta de REGRESO. La U sumó 180° hacia la pared que traíamos.
           anguloGyro -= haciaAhora * 180.0f;
-          Serial.print("PUNTA: rumbo de regreso ang="); Serial.println(anguloGyro, 1);
+          logPi.print("PUNTA: rumbo de regreso ang="); logPi.println(anguloGyro, 1);
           motorAdelante();
           arrancarSeguirPunta();
         }
@@ -9663,29 +9686,29 @@ void loop() {
 
   // ── Log periódico ─────────────────────────────────────────────────────────
   if (logEsteLoop) {
-    Serial.print(" | Estado:");
-    if      (estado == GIRANDO)      Serial.print("GIRANDO");
-    else if (estado == RECUPERANDO)  Serial.print("RECUPERANDO");
-    else if (estado == CRUCERO)      Serial.print("CRUCERO");
-    else if (estado == MANIOBRA)     Serial.print("MANIOBRA");
-    else if (estado == GIRO_RAPIDO) Serial.print("GIRO_RAPIDO");
-    else if (estado == TERMINANDO)   Serial.print("TERMINANDO");
-    else if (estado == ESTACIONANDO) Serial.print("ESTACIONANDO");
-    else if (estado == ESTACIONANDO_PUNTA) Serial.print("ESTACIONANDO_PUNTA");
-    else if (estado == INICIO)       Serial.print("INICIO");
-    else                              Serial.print("SIGUIENDO");
-    Serial.print(" | PP:");       Serial.print(piPurePursuit ? 1 : 0);
-    Serial.print(" | L:");        Serial.print(distL);
-    Serial.print(" | R:");        Serial.print(distR);
-    Serial.print(" | F:"); Serial.print(distF);
-    Serial.print(" | Ang:");      Serial.print(anguloGyro);
-    Serial.print(" | Obj:");      Serial.print(anguloObjetivo);
-    Serial.print(" | obs:");      Serial.print(obsBiasNorm, 3);
-    Serial.print(" | turn:");     Serial.print(turnHint);
-    Serial.print(" | prio:");     Serial.print(piPriority ? 1 : 0);
-    Serial.print(" | mem:");      Serial.print(piMemoryFrames);
-    Serial.print(" | intr:");     Serial.print(piInteriorPass ? 1 : 0);
-    Serial.print(" | giros:");    Serial.print(turnsCompleted);
-    Serial.print("/");            Serial.println(TURNS_PER_RACE);
+    logPi.print(" | Estado:");
+    if      (estado == GIRANDO)      logPi.print("GIRANDO");
+    else if (estado == RECUPERANDO)  logPi.print("RECUPERANDO");
+    else if (estado == CRUCERO)      logPi.print("CRUCERO");
+    else if (estado == MANIOBRA)     logPi.print("MANIOBRA");
+    else if (estado == GIRO_RAPIDO) logPi.print("GIRO_RAPIDO");
+    else if (estado == TERMINANDO)   logPi.print("TERMINANDO");
+    else if (estado == ESTACIONANDO) logPi.print("ESTACIONANDO");
+    else if (estado == ESTACIONANDO_PUNTA) logPi.print("ESTACIONANDO_PUNTA");
+    else if (estado == INICIO)       logPi.print("INICIO");
+    else                              logPi.print("SIGUIENDO");
+    logPi.print(" | PP:");       logPi.print(piPurePursuit ? 1 : 0);
+    logPi.print(" | L:");        logPi.print(distL);
+    logPi.print(" | R:");        logPi.print(distR);
+    logPi.print(" | F:"); logPi.print(distF);
+    logPi.print(" | Ang:");      logPi.print(anguloGyro);
+    logPi.print(" | Obj:");      logPi.print(anguloObjetivo);
+    logPi.print(" | obs:");      logPi.print(obsBiasNorm, 3);
+    logPi.print(" | turn:");     logPi.print(turnHint);
+    logPi.print(" | prio:");     logPi.print(piPriority ? 1 : 0);
+    logPi.print(" | mem:");      logPi.print(piMemoryFrames);
+    logPi.print(" | intr:");     logPi.print(piInteriorPass ? 1 : 0);
+    logPi.print(" | giros:");    logPi.print(turnsCompleted);
+    logPi.print("/");            logPi.println(TURNS_PER_RACE);
   }
 }

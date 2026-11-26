@@ -376,7 +376,8 @@ class SerialLink:
 			for raw in lines:
 				rx = raw.decode("utf-8", errors="ignore").strip()
 				if rx:
-					self._last_rx = rx
+					if not rx.startswith("PARK"):   # log del parking del ESP: va al _tele.jsonl, no es el ACK del ciclo
+						self._last_rx = rx
 					self.recent.append((time.monotonic(), rx))
 					print(f"[SERIAL] RX: {rx}", flush=True)
 
