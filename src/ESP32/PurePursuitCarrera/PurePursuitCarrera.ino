@@ -1947,6 +1947,9 @@ PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: cort
 PARK_AJ float        PARK_PL_ESQ_CM              = 1.5f;    // tramos 1-2: la esquina de la cola calculada con el ToF trasero
 PARK_AJ int          PARK_PL_FRENTE_CM           = 3;   // 4 -> 3 2026-11-23       // sonar frontal: corta el avance del zigzag
 PARK_AJ float        PARK_PL_FRENTE_LAG_S        = 0.25f;    // el corte FRENTE suma v*esto (mm/s*s): la reversa del carro real arranca a tirones y el sonar llega ~0.25 s tarde (orillas79: dF 2-3 cm, tocó la pared de enfrente)
+PARK_AJ float        PARK_PL_COAST_LAG_S         = 0.06f;    // s: inercia real del corte COAST (v*esto); el twin mide ~0.05 s (th baja 2-4 grados tras el corte), 0.25 es el retardo del sonar y sobreestima
+PARK_AJ float        PARK_PL_COAST_MARGEN_MM     = 0.0f;     // mm extra sobre PARK_PL_M_MM en la holgura proyectada tras la inercia (el error de la pose + la inercia real varían)
+PARK_AJ int          PARK_PL_COAST_VCAP_LAG      = 1;        // 1: el tope de velocidad vcap tambien usa PARK_PL_COAST_LAG_S
 PARK_AJ float        PARK_PL_COAST_VMIN          = 90.0f;    // mm/s: piso del tope de velocidad del tramo adelante del zigzag (v_max = (holgura-M)/LAG); abajo de esto se corta
 PARK_AJ float        PARK_PL_FRENTE_LIBRE_CM     = 5.0f;   // zigzag adelante: con mas holgura frontal no corte HOLGURA/cierre huella
 PARK_AJ bool         PARK_PL_ZZ_ANCLA             = false;  // reancla lateral en zigzag; sin probar en el gemelo (apagado igual que el SIL)
@@ -8810,7 +8813,7 @@ void loop() {
           pwm = min(pwm + extra, 255);
         }
         if (PARK_PL_ZZ && parkPlanDir > 0 && parkPlanI >= 2 && parkPlanClrPrev < 1e8f) {   // tope de velocidad: la inercia (v*LAG) cabe en la holgura que queda
-          const float vcap = max(PARK_PL_COAST_VMIN, (parkPlanClrPrev - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S);
+          const float vcap = max(PARK_PL_COAST_VMIN, (parkPlanClrPrev - PARK_PL_M_MM) / (PARK_PL_COAST_VCAP_LAG ? PARK_PL_COAST_LAG_S : PARK_PL_FRENTE_LAG_S));
           while (pwm > LAZO_PWM0_FWD + 2 && vMando((float)pwm, 1) > vcap) pwm--;
         }
         parkArranquePwm = PARK_PL_ARRANQUE_PWM;
@@ -8911,11 +8914,11 @@ void loop() {
           // (ver pwm del plan): solo se corta si ni a esa velocidad cabe la inercia.
           const float yaw = th * DEG_TO_RAD;
           const float radius = parkPlanSgn * PARK_PL_RI;
-          const float coast = min(encVelMmS, max(PARK_PL_COAST_VMIN, (clr - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S)) * PARK_PL_FRENTE_LAG_S;
+          const float coast = min(encVelMmS, max(PARK_PL_COAST_VMIN, (clr - PARK_PL_M_MM) / PARK_PL_COAST_LAG_S)) * PARK_PL_COAST_LAG_S;
           const float finYaw = yaw - coast / radius;
           const float finW = pw + radius * (sinf(yaw) - sinf(finYaw));
           const float finH = ph + radius * (cosf(finYaw) - cosf(yaw));
-          if (parkPlanHolgura(finW, finH, finYaw * RAD_TO_DEG) <= PARK_PL_M_MM) {
+          if (parkPlanHolgura(finW, finH, finYaw * RAD_TO_DEG) <= PARK_PL_M_MM + PARK_PL_COAST_MARGEN_MM) {
             fin = true; why = "COAST";
           }
         }
