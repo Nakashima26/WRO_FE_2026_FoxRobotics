@@ -2388,7 +2388,17 @@ class RouteMode:
         self.n_plans += 1
         self._plan_frame = self._step_frame + 1  # la siguiente llamada ya encuentra la ruta adoptada
         keep = getattr(C, "ROUTE_UPLOAD_KEEP_MM", None)
-        if (keep is not None and self.upload and not hold and not self.hold and self._up_route is not None
+        lines = None
+        same_upload = False
+        if (getattr(C, "ROUTE_L1_COALESCE_UPLOAD", False) and self._tc_max < 4
+                and self.upload and (hold or self.hold) and shift == self.upload_shift):
+            # Si el ESP ya está recibiendo estos mismos puntos, conserva el
+            # progreso de la subida y el ALTO hasta terminarla.
+            lines = self._upload_lines(route, float(C.ROUTE_UPLOAD_STEP_MM))
+            same_upload = lines == self._upload_full
+        if same_upload:
+            hold = hold or self.hold
+        elif (keep is not None and self.upload and not hold and not self.hold and self._up_route is not None
                 and shift == self.upload_shift
                 and np.hypot(route.x[:, None] - self._up_route.x[None, :],
                              route.y[:, None] - self._up_route.y[None, :]).min(axis=1).max() <= float(keep)):
@@ -2397,7 +2407,8 @@ class RouteMode:
             # se termina de subir la que va en camino.
             pass
         else:
-            self.upload = self._upload_lines(route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
+            self.upload = lines if lines is not None else self._upload_lines(
+                route, float(getattr(C, "ROUTE_UPLOAD_STEP_MM", 40.0)))
             self._upload_full = list(self.upload)
             self._rte_n = None
             self._up_route = route

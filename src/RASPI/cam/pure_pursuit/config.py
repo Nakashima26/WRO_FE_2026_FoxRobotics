@@ -1550,6 +1550,7 @@ ROUTE_MANDO_V_255 = None     # N30 (a3647f6): mm/s del ESP a PWM 255 (LAZO_V_255
 ROUTE_MANDO_CODO_PWM = 155   # LAZO_CODO_PWM del ESP
 ROUTE_MANDO_K = 3.82         # LAZO_K_FWD / LAZO_PWM0_FWD: escala con que el ESP lee el rv hasta el codo
 ROUTE_MANDO_PWM0 = 45.5
+ROUTE_L1_COALESCE_UPLOAD = False  # conserva una subida idéntica en curso durante un ALTO de vuelta 1
 ROUTE_L1_UPLOAD_LINES = None  # líneas de subida por cuadro en vuelta 1 (tc<4). None = ROUTE_UPLOAD_LINES
 # Cerca de señal proporcional (estilo Regulated Pure Pursuit): a <= NEAR_MM la velocidad
 # es la de MIN_PWM y sube lineal hasta la base en SIGN_MM. None: escalón a la base.
