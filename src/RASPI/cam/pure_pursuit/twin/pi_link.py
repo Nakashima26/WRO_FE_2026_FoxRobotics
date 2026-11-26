@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 
 from pure_pursuit.twin.firmware.fw import FirmwareSIL
+
+_PARK_PRIOR = re.compile(r",pka=(-?\d+)(?=,|$)")
 
 _UART_US_PER_BYTE = float(os.environ.get("TWIN_PI_UART_US_PER_BYTE", "86.8"))  # 115200 baud
 
@@ -12,8 +15,9 @@ _UART_US_PER_BYTE = float(os.environ.get("TWIN_PI_UART_US_PER_BYTE", "86.8"))  #
 class SimSerialLink:
     """Misma API que wro_runtime.SerialLink para PPRuntime."""
 
-    def __init__(self, fw: FirmwareSIL) -> None:
+    def __init__(self, fw: FirmwareSIL, *, park_prior_error_mm: int = 0) -> None:
         self._fw = fw
+        self._park_prior_error_mm = park_prior_error_mm
         self._pi_now_us: int = 0
         self._pending: list[tuple[int, str]] = []
         self._last_ack: str = ""
@@ -34,6 +38,11 @@ class SimSerialLink:
 
     def send_line(self, line: str) -> None:
         from pure_pursuit import config as C
+        if self._park_prior_error_mm and ",pkc=1" not in line:
+            line = _PARK_PRIOR.sub(
+                lambda match: f",pka={int(match[1]) + self._park_prior_error_mm}",
+                line,
+            )
         if getattr(C, "UART_CHECKSUM", False):   # mismo formato que wro_runtime.con_checksum
             parts = []
             for l in line.split("\n"):

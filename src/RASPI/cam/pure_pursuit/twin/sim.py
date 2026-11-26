@@ -7,6 +7,7 @@ import json
 import copy
 import math
 import os
+import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -580,7 +581,18 @@ class Sim:
             fw.set_param(k, float(v))
         fw.set_param("battery_voltage_v", self.battery_voltage_v if self.battery is None
                      else self.battery.terminal_voltage_v)
-        link = SimSerialLink(fw)
+        # Error longitudinal del prior recibido por el ESP. Campo, pose inicial
+        # y observaciones conservan su geometría. Positivo = cajón antes del prior.
+        prior_setting = os.environ.get("TWIN_PARK_PRIOR_ERR_MM", "").strip().lower()
+        if prior_setting == "real":
+            # Caras proyectadas desde ToF en orillas257–265. Solo un dato CW.
+            samples = (67,) if field.direction == "CW" else (89, 94, 44, 21, 93, 52)
+            prior_error = random.Random(f"{self.seed}-park-prior").choice(samples)
+        else:
+            prior_error = int(prior_setting or 0)
+        if prior_error:
+            print(f"[twin] prior cajón {field.direction}: pka +{prior_error} mm", flush=True)
+        link = SimSerialLink(fw, park_prior_error_mm=prior_error)
 
         # deque(maxlen=...) descarta el extremo viejo en O(1); con list +
         # pop(0) cada descarte movía hasta 20000 punteros (memmove) y era el
