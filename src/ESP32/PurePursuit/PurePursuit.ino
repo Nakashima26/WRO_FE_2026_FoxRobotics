@@ -2223,6 +2223,7 @@ const int   WALL_PANIC_EXT_CM = 30;
 const int   WALL_PANIC_FINAL_CM       = 22;
 const float WALL_PANIC_FINAL_GAIN     = 1.0f;
 const float WALL_PANIC_FINAL_RAMPA_DS = 60.0f;   // grados de servo por segundo al subir
+const bool  WALL_PANIC_FINAL_OFF      = true;    // giro 12 sin panic: con el empujon el carro bailaba de regreso al cajon (orillas324)
 const float WALL_PANIC_GAIN = 2.4f;
 const int   WALL_PANIC_DEB  = 2;
 int contadorPanicL = 0, contadorPanicR = 0;
@@ -5648,6 +5649,7 @@ void controlPID(long distL, long distR) {
       if (fabsf(wallPanic) > fabsf(panicFinalPrev))   // solo la subida va en rampa; soltar es inmediato
         wallPanic = panicFinalPrev + constrain(wallPanic - panicFinalPrev, -paso, paso);
       panicFinalPrev = wallPanic;
+      if (WALL_PANIC_FINAL_OFF) wallPanic = 0.0f;
     } else {
       panicFinalPrev = 0.0f; distExtPrev = 0; extAlejando = false;
     }
