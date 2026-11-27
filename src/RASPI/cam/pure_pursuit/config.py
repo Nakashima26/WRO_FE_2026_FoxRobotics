@@ -1033,6 +1033,10 @@ VISION_LUT = True
 # Un blob Green con V mediana < este valor se descarta. 0 = apagado (comportamiento anterior).
 # El cono verde real tiene V>=100; sombra fuerte ~60.
 VISION_GREEN_V_MIN_MED = 0
+# orillas330 (luz baja): el cono verde real con V 43-49 caía bajo el tope 60 y se perdía (salida del
+# cajón sin isal=2). Ruido de 276: H 33-34; cono real: H 48-51. > 0: el tope de V solo descarta
+# blobs con H mediana <= esto. 0 = descarta todo blob oscuro (como antes).
+VISION_GREEN_DARK_H_MAX = 0
 
 LINE_ORANGE_HSV = [(np.array([7, 85, 140]), np.array([18, 200, 255]))]
 LINE_BLUE_HSV   = [(np.array([120, 30, 5]), np.array([150, 200, 100]))]   # sin usar por ahora

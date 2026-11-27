@@ -357,6 +357,11 @@ class Vision:
     # cuantización a V~28 sale H~30 S>70 y pasa por Green. 0 = apagado; el runtime lo pone
     # desde config.VISION_GREEN_V_MIN_MED.
     GREEN_V_MIN_MED = 0
+    # orillas330 (luz baja): el verde real W/T2 salió con V 43-49 y el tope 60 lo tiró (la salida
+    # del cajón nunca votó isal=2). El ruido de lente tapado (276) es H 33-34 / V 25-32; el cono
+    # real es H 48-51 aun oscuro. Con este valor > 0 el filtro de V solo tira blobs oscuros con H
+    # mediana <= esto. 0 = tira todo blob oscuro (como antes). Lo pone config.VISION_GREEN_DARK_H_MAX.
+    GREEN_DARK_H_MAX = 0
 
     def process_color(self, frame, mask, color_name, bgr=None, hsv=None):
         """Encuentra contornos y devuelve posiciones.
@@ -421,8 +426,10 @@ class Vision:
                 if sel_m.any() and float(np.median(hsv[y:y + h, x:x + w, 1][sel_m])) < self.GREEN_S_MIN_MED:
                     continue   # piso claro / zona quemada (ver GREEN_S_MIN_MED)
                 if (self.GREEN_V_MIN_MED and sel_m.any()
-                        and float(np.median(hsv[y:y + h, x:x + w, 2][sel_m])) < self.GREEN_V_MIN_MED):
-                    continue   # imagen oscura / lente tapado (ver GREEN_V_MIN_MED)
+                        and float(np.median(hsv[y:y + h, x:x + w, 2][sel_m])) < self.GREEN_V_MIN_MED
+                        and (not self.GREEN_DARK_H_MAX
+                             or float(np.median(hsv[y:y + h, x:x + w, 0][sel_m])) <= self.GREEN_DARK_H_MAX)):
+                    continue   # imagen oscura / lente tapado (ver GREEN_V_MIN_MED, GREEN_DARK_H_MAX)
 
             # En modo sorpresa se admiten blobs pequeños solo si su altura
             # física es compatible con el bloque bajo. Los normales conservan
