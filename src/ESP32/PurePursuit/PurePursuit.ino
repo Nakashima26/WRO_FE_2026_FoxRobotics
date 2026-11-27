@@ -1194,7 +1194,7 @@ const float         PARK_KD_RATE              = 0.30f;
 const int           PARK_SERVO_MAX            = 35;
 const int           PARK_PWM                  = 95;
 const float         PARK_BASE_ALPHA           = 0.2f;
-const int           PARK_BASE_N               = 8;
+const int           PARK_BASE_N               = 4;   // 8 -> 4: entra al escaneo a ~1 m/s a 20 cm del poste 1 y con 5 lecturas aun no armaba: se lo saltaba y se estacionaba un cajon adelante (orillas325, 320/322/324)
 const int           PARK_CAIDA_CM             = 10;
 const int           PARK_BASE_BAJA_MAX_CM     = 3;    // la base del escaneo no baja por lecturas mas abajo que esto (rampa de la madera)
 const bool          PARK_TOF_INVALIDO_POSTE   = true;   // fase 0: ToF exterior inválido (-1) = poste (ver ESTACIONANDO)
