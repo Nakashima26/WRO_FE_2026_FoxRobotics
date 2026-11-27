@@ -1021,11 +1021,11 @@ function repFrame() {
   const idx = Math.max(0, Math.min(n - 1, Math.round((REP.tcur - REP.v0) / span * (n - 1))));
   if (idx === REP.frameIdx || REP.frameBusy) return;
   REP.frameIdx = idx; REP.frameBusy = true;
-  const url = `/api/runs/${encodeURIComponent(REP.name)}/frame?i=${idx}`;
+  const name = REP.name, url = `/api/runs/${encodeURIComponent(name)}/frame?i=${idx}`;
   const img = new Image();
   img.onload = img.onerror = () => {
+    if (!REP.on || REP.name !== name) return;   // cuadro de la corrida anterior: no pisar la nueva
     REP.frameBusy = false;
-    if (!REP.on) return;
     $("#rep-frame").src = img.src; $("#hud").src = img.src;
     repFrame();   // por si el tiempo ya avanzó
   };
