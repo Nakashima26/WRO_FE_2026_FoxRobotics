@@ -1377,7 +1377,6 @@ ROUTE_PREDICT_FRAMES = 0.0
 # su odometría a la velocidad del loop. False: el steer lo calcula la Pi.
 ROUTE_ON_ESP = True
 # Localización EKF (localizer.py): odometría + distancias contra el mapa conocido.
-# False: sin correcciones del EKF (ToF/US contra el mapa), solo odometría encoder+gyro (orillas327: saltos de 16 cm llevaban la ruta al verde).
 ROUTE_LOCALIZER = True
 # Vuelta 1 en modo ruta (mapa incompleto, route_mode.py): asientos sin ver =
 # obstáculos sin lado; vacío tras ROUTE_EMPTY_FRAMES frames a buena vista
