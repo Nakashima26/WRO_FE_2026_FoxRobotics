@@ -165,6 +165,8 @@ LOC_TOF_MAX_INC_DEG = 30.0   # twin (ToF sin sesgo oblicuo): 35° 44/48, 30° 43
 # Sobre 235-253 rechaza 7 ecos (-98..-148), entre ellos los dos de los choques. None = apagado.
 LOC_TOF_OBLIQUE_DEG = None
 LOC_TOF_OBLIQUE_MAX_NU_MM = None
+# Más cerca que esto el ToF oblicuo sí se cree: el sesgo es ~1/cos (20 mm a 150 mm), no 90+ (orillas326: tL 150->96 a 27° tirados, chocó con la isla).
+LOC_TOF_OBLIQUE_TRUST_MM = None
 LOC_TOF_SIGN_HALF_DEG = 7.0    # medio cono del ToF (ROI 8); 13.5 era el de ROI 16. Ecos de bloque 162+164: ±7° -> mediana -0 mm, ±13.5° -> +4
 LOC_TOF_SIGN_SIGMA_MM = 15.0   # + 2% de la lectura; la señal mide 50 mm y el cono 27°
 # Opt-in (orillas247): en la esquina vuelta 1 el ToF lateral contra señal/bloque no debe girar la pose ni

@@ -2231,6 +2231,7 @@ const float WALL_PANIC_FINAL_GAIN     = 1.0f;
 const float WALL_PANIC_FINAL_RAMPA_DS = 60.0f;   // grados de servo por segundo al subir
 const bool  WALL_PANIC_FINAL_OFF      = true;    // giro 12 sin panic: con el empujon el carro bailaba de regreso al cajon (orillas324)
 const float WALL_PANIC_GAIN = 2.4f;
+const int   RUTA_VETO_CM    = 10;     // modo ruta: con la pared a menos de esto la ruta no vira hacia ella (orillas326)
 const int   WALL_PANIC_DEB  = 2;
 int contadorPanicL = 0, contadorPanicR = 0;
 
@@ -5666,6 +5667,16 @@ void controlPID(long distL, long distR) {
     }
   }
 
+  // orillas326: con la pose ~10 cm corrida la ruta siguió virando hacia la isla con dL 14->9 cm y el panic
+  // (18 cm x2.4) no le ganó: a menos de RUTA_VETO_CM la ruta no puede virar hacia esa pared.
+  auto rutaVeto = [&](int s) {
+    if (RUTA_VETO_CM <= 0 || !rondaObstaculos || estado == ESTACIONANDO) return s;   // en el cajon el carro va pegado a proposito
+    const int c = centroServo + (int)wallPanic;
+    if (distL > 0 && distL < RUTA_VETO_CM && s > c) return c;
+    if (distR > 0 && distR < RUTA_VETO_CM && s < c) return c;
+    return s;
+  };
+
   // ── Decisión según modo ───────────────────────────────────────────────────
   bool piAlive = (millis() - lastPiMsgMs) <= piTimeoutMs;
   bool rutaSola = !piAlive && RUTA_SOLA_PWM > 0 && rondaObstaculos && piPurePursuit && piRuta && rutaN >= 10 && rutaTfOk
@@ -5787,7 +5798,7 @@ void controlPID(long distL, long distR) {
     float ruedaDeg;
     if (piSteerPi && piRuta && !rutaSola) {
       // ps=1 (ruta nueva subiendo): rueda que calculó la Pi con la ruta nueva, mismo mapeo que la ruta.
-      int servoAngle = constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      int servoAngle = rutaVeto(constrain(rutaServo(piWheelDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG));
       escribirServo(servoAngle);
       if (RUTA_PWM_MAX > 0 && rutaVel >= 0 && velocidadMotor >= MOTOR_MAX) {
         setMotorTope(rutaVel, min(RUTA_PWM_MAX, 255));
@@ -5798,7 +5809,7 @@ void controlPID(long distL, long distR) {
       return;
     }
     if (rutaSteer(ruedaDeg)) {
-      int servoAngle = constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG);
+      int servoAngle = rutaVeto(constrain(rutaServo(ruedaDeg) + (int)wallPanic, SERVO_MIN_DEG, SERVO_MAX_DEG));
       escribirServo(servoAngle);
       // Tope extra de la RUTA solo si la velocidad base no está reducida a propósito
       // (velocidadMotor >= MOTOR_MAX), también en la última sección: con TERMINANDO_MS = 0

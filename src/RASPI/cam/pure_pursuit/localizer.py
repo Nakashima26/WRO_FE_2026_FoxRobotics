@@ -509,7 +509,8 @@ class Localizer:
             obl_deg = getattr(C, "LOC_TOF_OBLIQUE_DEG", None)
             obl_nu = getattr(C, "LOC_TOF_OBLIQUE_MAX_NU_MM", None)
             if (kind == "tof" and obl_deg is not None and obl_nu is not None
-                    and cosi < math.cos(math.radians(float(obl_deg))) and nu < -float(obl_nu)):
+                    and cosi < math.cos(math.radians(float(obl_deg))) and nu < -float(obl_nu)
+                    and z >= float(getattr(C, "LOC_TOF_OBLIQUE_TRUST_MM", 0.0) or 0.0)):
                 self._rej.pop(key, None)
                 self.n_rej += 1
                 continue   # eco oblicuo mucho más corto que lo esperado: no informa la pose (orillas243/252)
