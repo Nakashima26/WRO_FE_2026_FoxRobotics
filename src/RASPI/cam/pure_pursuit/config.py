@@ -182,6 +182,10 @@ LOC_TOF_MAX_MM = {"tL": 650.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
 # LOC_TOF_EXPECT_MAX_MM[key] (si no está, LOC_TOF_MAX_MM[key]).
 LOC_TOF_EXPECT_GATE = True
 LOC_TOF_EXPECT_MAX_MM = {"tL": 700.0}
+# 2026-11-26 (orillas318/319/323, esquina W->S de la vuelta 2): con tF <= 240 y lo esperado <= 240, entre más atrasada
+# iba la pose más tarde entraba el frontal (318: a 9.6 cm de la pared, nu -135). La pared negra el VL53 la lee bien
+# hasta ~40 cm (arriba se queda en ~500). Sigma mínima del frontal (mm); None = 6 + 1 % como los demás.
+LOC_TOF_FRONT_SIGMA_MM = None
 # 2026-11-23 tL 480 -> 650: banco recta 3, real 620 mm lee 560-646 (media ~600, ±40). Con 480 el izquierdo no veía la
 # pared exterior en rectas con señales a la derecha (N/T1-T4 verdes tapan el derecho) y la deriva llegaba entera a la
 # recta 3 (orillas157: tR -84/-112 mm, golpe de volante). Más allá de LOC_TOF_FAR_FROM_MM la sigma crece por mm.
@@ -1630,6 +1634,20 @@ ROUTE_FIX_BLUE_HSV = ((95, 70, 60), (115, 255, 200))
 ROUTE_FIX_BLUE_MIN_AREA = 150
 ROUTE_FIX_BLUE_MIN_PIX = 80
 ROUTE_FIX_BLUE_FAR_MM = 700.0
+# 2026-11-26 (orillas311-323, choques en la esquina W->S de la vuelta 2 con la pose 8-16 cm atrás): la cinta que
+# cruza el carril (azul en CCW, naranja en CW) corrige el AVANCE del localizador en cada recta, no solo en la del
+# arranque (RouteMode._tape_along). False = como antes.
+ROUTE_TAPE_ALONG_FIX = False
+ROUTE_TAPE_ALONG_SHADOW = False    # True con FIX False: calcula y loguea [TAPE] sombra sin mover la pose
+ROUTE_TAPE_ALONG_N = 3              # votos seguidos que deben cuadrar
+ROUTE_TAPE_ALONG_SPAN_MM = 60.0     # rango máximo entre esos votos
+ROUTE_TAPE_ALONG_MAX_MM = 250.0     # resto mayor = otra cinta / falso: no se aplica
+ROUTE_TAPE_ALONG_MIN_MM = 15.0      # resto menor: no se toca la pose
+ROUTE_TAPE_ALONG_SIGMA_MM = 25.0    # sigma de la medida en el EKF
+ROUTE_TAPE_ALONG_MAX_ANG_DEG = 60.0 # rumbo contra el de la recta (la proyección usa el rumbo del BNO; gemelo s3: δ ±10 mm hasta 56°)
+ROUTE_TAPE_ALONG_MAX_DYAW_DEG = 4.0 # |Δyaw| entre ACKs seguidos (~160 °/s a 40 Hz): girando fuerte no se vota
+ROUTE_TAPE_ALONG_LAG_S = 0.0        # edad de la imagen contra el ACK (s); se suma v·lag al resto
+ROUTE_TAPE_ORANGE_HSV = None        # None = LINE_ORANGE_HSV[0] (CW)
 # Localizer: una lectura de distancia que salta más que esto respecto a la anterior del mismo sensor se ignora (eco de transición señal->pared, semilla 32); None = apagado.
 LOC_SENSOR_JUMP_MM = 100.0
 # Reanclaje del localizador: si un mismo ToF da LOC_REANCHOR_N lecturas seguidas fuera del gate de 3σ,

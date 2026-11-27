@@ -224,6 +224,18 @@ class Localizer:
                   f"pose=({self.x[0]:.0f},{self.x[1]:.0f},{math.degrees(self.x[2]):.0f}) tc={_ack_num(ack, 'tc')}",
                   flush=True)
 
+    def along_update(self, axis, r: float, sigma_mm: float) -> np.ndarray:
+        """Medida directa del avance: la pose va `r` mm atrás (r > 0) a lo largo de `axis` (vector unitario).
+        Corrección EKF escalar con H = (ax, ay, 0): reparte con la P actual y la achica (una cinta vista)."""
+        H = np.array([float(axis[0]), float(axis[1]), 0.0])
+        S = float(H @ self.P @ H + sigma_mm * sigma_mm)
+        K = self.P @ H / S
+        dx = K * float(r)
+        self.x = self.x + dx
+        self.P = (np.eye(3) - np.outer(K, H)) @ self.P
+        self.n_used += 1
+        return dx
+
     def shift(self, dx: float, dy: float) -> None:
         """Cambio de marco (arranque ciego resuelto): la pose se corre (dx, dy)."""
         self.x[0] += dx
@@ -504,6 +516,9 @@ class Localizer:
             far0 = getattr(C, "LOC_TOF_FAR_FROM_MM", None)
             if kind == "tof" and far0 is not None and z > float(far0):
                 sig += float(getattr(C, "LOC_TOF_FAR_SIGMA_PER_MM", 0.0)) * (z - float(far0))
+            f_sig = getattr(C, "LOC_TOF_FRONT_SIGMA_MM", None)
+            if key == "tF" and f_sig is not None:
+                sig = max(sig, float(f_sig))
             R = sig * sig
             nu = z - zh
             obl_deg = getattr(C, "LOC_TOF_OBLIQUE_DEG", None)

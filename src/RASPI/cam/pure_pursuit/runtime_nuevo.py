@@ -519,7 +519,9 @@ class PPRuntime:
               "timing": {k: round(v, 1) for k, v in getattr(self, "_timing_ms", {}).items()},
               "tc": getattr(self, "_tc", None), "tpr": getattr(self, "_tpr", None),
               # Regla sorpresa (solo existe del lado de la Pi): el dashboard la muestra junto al firmware.
-              "surprise": bool(getattr(C, "SURPRISE_RULE", False))}
+              "surprise": bool(getattr(C, "SURPRISE_RULE", False)),
+              # n del registro del _bev.bin de este mismo frame: alinea el BEV grabado con el estado offline.
+              "rec_n": int(getattr(self, "record_count", 0) or 0)}
         ack = getattr(self, "_prev_ack", None)
         if ack and ack.startswith("ACK:V2"):
             self._tele_ack = (now, ack)

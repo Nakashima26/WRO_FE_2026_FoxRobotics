@@ -888,6 +888,11 @@ class RouteMode:
               and tc is not None and tc <= 0):
             self._post_blue(dm, ack, pose)
             pose = self.loc.pose()
+        if ((getattr(C, "ROUTE_TAPE_ALONG_FIX", False) or getattr(C, "ROUTE_TAPE_ALONG_SHADOW", False))
+                and self.fixed and tc is not None and ack_est == "S"
+                and (1 <= tc <= 11 or (tc == 0 and self._post_blue_done))):
+            if self._tape_along(dm, ack, pose, int(tc)):
+                pose = self.loc.pose()
         if C.ROUTE_PARK_REFINE and self.fixed and tc is not None and tc <= 11:
             if self._park_refine is None:
                 self._park_refine = ParkRefine(dm.parking, dm.direction, self.park_w)
@@ -1982,6 +1987,120 @@ class RouteMode:
         self._sync_map(dm, ack, self.loc.pose())
         print(f"[ROUTE] cinta azul tras el arranque: pose {r:+.0f} mm (δ pose total {self.shift:+.0f}; "
               f"votos {', '.join(f'{d:+.0f}' for d in self._post_blue_d)})", flush=True)
+
+    def _tape_along(self, dm, ack, pose, tc: int) -> bool:
+        """Avance de la pose con la cinta de la esquina que viene, en CADA recta (no solo la del arranque).
+
+        2026-11-26 (orillas311-323): al final de la recta W de la vuelta 2 la pose iba 8-16 cm atrás de la
+        real (ToF frontal al llegar a la pared) y en la esquina W->S, que con S/T3 rojo deja 96 mm a la pared,
+        el carro giraba tarde y chocaba. En la recta nada mide el avance: los ToF laterales ven paredes paralelas
+        y el frontal solo lee la pared negra a < ~40 cm. La cinta que cruza el carril (azul en CCW, naranja en
+        CW; |n·a| 0.87) es un punto fijo del tapete y se ve desde ~70 cm: con la pose corrida, la mediana de
+        ROUTE_TAPE_ALONG_N votos seguidos es el error de avance, y entra al EKF como medida a lo largo del
+        eje de la recta (sigma ROUTE_TAPE_ALONG_SIGMA_MM)."""
+        from .localizer import _ack_num
+        from .wro_field import _heading
+        od = _ack_num(ack or "", "od")
+        now = time.monotonic()
+        v = 0.0
+        prev = getattr(self, "_tape_od_prev", None)
+        if od is not None and prev is not None and 0.0 < now - prev[1] < 0.3:
+            v = (od - prev[0]) / (now - prev[1])
+        if od is not None:
+            self._tape_od_prev = (od, now)
+        if tc != getattr(self, "_tape_tc", None):
+            self._tape_tc, self._tape_d = tc, []
+        sec = self._section_at(dm.direction, pose[0], pose[1], pose[2])
+        if sec is None:
+            return False
+        hl = _heading(sec, dm.direction)
+        yaw = _ack_num(ack or "", "yaw")
+        py_ = getattr(self, "_tape_yaw_prev", None)
+        self._tape_yaw_prev = yaw
+        if abs((pose[2] - hl + 180.0) % 360.0 - 180.0) > float(getattr(C, "ROUTE_TAPE_ALONG_MAX_ANG_DEG", 60.0)):
+            return False
+        # Girando, la imagen (más vieja que el ACK) quedaría proyectada con otro rumbo.
+        if yaw is None or py_ is None or abs(yaw - py_) > float(getattr(C, "ROUTE_TAPE_ALONG_MAX_DYAW_DEG", 4.0)):
+            return False
+        a = (math.sin(math.radians(hl)), math.cos(math.radians(hl)))
+        cap = float(getattr(C, "ROUTE_TAPE_ALONG_MAX_MM", 250.0))
+        color = "blue" if dm.direction == "CCW" else "orange"
+        res = self._tape_delta(dm, pose, a, color, rng=cap + 100.0)
+        if res is None:
+            return False
+        # La imagen es de hace ROUTE_TAPE_ALONG_LAG_S: con la pose de ahora la cinta cae v·lag más adelante.
+        d = float(res[0]) + v * float(getattr(C, "ROUTE_TAPE_ALONG_LAG_S", 0.0))
+        self._tape_d.append(d)
+        n_min = int(getattr(C, "ROUTE_TAPE_ALONG_N", 3))
+        if len(self._tape_d) < n_min:
+            return False
+        last = self._tape_d[-n_min:]
+        if max(last) - min(last) > float(getattr(C, "ROUTE_TAPE_ALONG_SPAN_MM", 60.0)):
+            return False
+        r = float(np.median(last))
+        votos = ", ".join(f"{x:+.0f}" for x in last)
+        self._tape_d = []
+        if abs(r) > cap:
+            print(f"[TAPE] tc={tc} {sec} {color} resto {r:+.0f} mm > {cap:.0f}, no se aplica (votos {votos})", flush=True)
+            return False
+        if abs(r) < float(getattr(C, "ROUTE_TAPE_ALONG_MIN_MM", 15.0)):
+            return False
+        if not getattr(C, "ROUTE_TAPE_ALONG_FIX", False):
+            # Modo sombra: solo el log, para compararlo con el ToF frontal al llegar a la pared.
+            print(f"[TAPE] sombra tc={tc} {sec} {color} resto {r:+.0f} mm v={v:.0f} n={res[1]} "
+                  f"pose=({pose[0]:.0f},{pose[1]:.0f},{pose[2]:.0f}) (votos {votos})", flush=True)
+            return False
+        dx = self.loc.along_update(a, r, float(getattr(C, "ROUTE_TAPE_ALONG_SIGMA_MM", 25.0)))
+        self._sync_map(dm, ack, self.loc.pose())
+        print(f"[TAPE] tc={tc} {sec} {color} resto {r:+.0f} mm -> pose {dx[0]:+.0f},{dx[1]:+.0f} "
+              f"v={v:.0f} n={res[1]} (votos {votos})", flush=True)
+        return True
+
+    def _tape_delta(self, dm, pose, a, color: str, rng: float):
+        """(δ a lo largo de `a`, n pixeles) de la cinta `color` que cruza el carril en este frame, o None.
+        Igual que _blue_delta, pero con el eje de la recta actual y la pose de ahora."""
+        hsv = getattr(self, "bev_hsv", None)
+        if hsv is None:
+            return None
+        if color == "blue":
+            lo_hsv, hi_hsv = getattr(C, "ROUTE_FIX_BLUE_HSV", ((95, 70, 60), (115, 255, 200)))
+            segs_fn = blue_segments
+        else:
+            lo_hsv, hi_hsv = getattr(C, "ROUTE_TAPE_ORANGE_HSV", None) or C.LINE_ORANGE_HSV[0]
+            segs_fn = orange_segments
+        mk = cv2.inRange(hsv, np.asarray(lo_hsv, np.uint8), np.asarray(hi_hsv, np.uint8))
+        mk = cv2.morphologyEx(mk, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        nc, lab, st, _ = cv2.connectedComponentsWithStats(mk)
+        if nc < 2:
+            return None
+        k = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+        if st[k, cv2.CC_STAT_AREA] < int(getattr(C, "ROUTE_FIX_BLUE_MIN_AREA", 150)):
+            return None
+        ys, xs = np.nonzero(lab == k)
+        fwd = (float(C.ROBOT_BEV_Y) - ys) * C.MM_PER_PX + float(getattr(C, "BEV_ORIGIN_AHEAD_OF_REAR_AXLE_MM", 100.0)) + self._fwd_add(dm)
+        lat = (xs - float(C.ROBOT_BEV_X)) * C.MM_PER_PX
+        sel = fwd <= float(getattr(C, "ROUTE_FIX_BLUE_FAR_MM", 700.0))
+        if int(sel.sum()) < int(getattr(C, "ROUTE_FIX_BLUE_MIN_PIX", 80)):
+            return None
+        fwd, lat = fwd[sel], lat[sel]
+        h = math.radians(pose[2])
+        P = np.column_stack([pose[0] + fwd * math.sin(h) + lat * math.cos(h),
+                             pose[1] + fwd * math.cos(h) - lat * math.sin(h)])
+        c = P.mean(axis=0)
+        av = np.asarray(a, float)
+        best = None
+        for (sx, sy), (ex, ey) in segs_fn():
+            u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
+            n = np.array([-u[1], u[0]])
+            if abs(float(n @ av)) < float(getattr(C, "ROUTE_FIX_PIX_MIN_NA", 0.7)):
+                continue
+            d = float(np.median((float(n @ np.array([sx, sy])) - P @ n) / (n @ av)))
+            dist = math.hypot(sx - c[0], sy - c[1])
+            if -rng <= d <= rng and (best is None or dist < best[1]):
+                best = (d, dist)
+        if best is None:
+            return None
+        return best[0], len(fwd)
 
     def _blue_delta(self, dm, pose, rng=None):
         """(δ, n pixeles, centroide, pose usada) de la cinta azul en este frame, o None."""
