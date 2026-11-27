@@ -1139,7 +1139,7 @@ const int           PARK_GAP_N                = 2;
 const int           PARK_REBASE_N             = 20;
 const int           PARK_PARED_MAX_CM         = 55;
 const unsigned long PARK_ARMADO_MS            = 600;
-const float         PARK_ARMADO_ANG_DEG       = 15.0f;
+const float         PARK_ARMADO_ANG_DEG       = 90.0f;   // 15 -> 90 (apagado): chueco no armaba y no veia los postes; el seguidor lo empareja
 const bool          PARK_REQUIERE_PI          = false;
 const unsigned long PARK_TIMEOUT_MS           = 10000;
 const int           PARK_FRENTE_CM            = 18;
@@ -1747,7 +1747,7 @@ PARK_AJ long         PARK_SINU_CORRE_MM          = 200;
 PARK_AJ float        PARK_SINU_DEC_ANG_DEG       = 14.0f;
 PARK_AJ long         PARK_SINU_DEC_MM            = -560;  // along al que se decide (cajon al inicio): directo si ya va pegado a la pared del cajon
 PARK_AJ long         PARK_UTURN_FONDO_ALONG_MIN  = 300;     // el frontal cerca (DF_FORZAR) solo dispara la U en ruta con along >= esto
-PARK_AJ int          PARK_SINU_FORZAR_U          = 1;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
+PARK_AJ int          PARK_SINU_FORZAR_U          = 0;     // 1: si el escaneo sin U habria que forzarlo (carro lejos de la pared o chueco, lote cerca), hace la U
 bool sinUActivo() { return PARK_SIN_U && parkSinUDec != 2; }
 PARK_AJ int          PARK_SINU_GEOMETRIA         = 1;     // espera alineacion en la ruta mientras quede espacio para el sonar
 PARK_AJ long         PARK_SINU_ADELANTO_MM       = 450;
@@ -3370,10 +3370,10 @@ void vigilarSinU() {
     bool lin = fabsf(extCm - PARK_PARED_CM) <= PARK_SINU_DEC_TOL_CM && fabsf(rumboDeg) <= PARK_SINU_DEC_ANG_DEG
                && (rutaPka - PARK_SINU_B2_OFF_MM - along) >= (float)PARK_SINU_CORRE_MM;   // y queda recta suficiente para armar el sonar antes de la madera
     if (!lin && PARK_SINU_GEOMETRIA && parkCabeAlineacion(along, extCm, rumboDeg)) return;
-    parkSinUDec = lin ? 1 : 2;
+    parkSinUDec = (lin || !PARK_SINU_FORZAR_U) ? 1 : 2;
     parkRevDir = !lin && PARK_REV_DIR;
     Serial.print("PARK decision cajon al inicio: "); Serial.print(lin ? "DIRECTO" : "CON U"); Serial.print(" ext="); Serial.print(rutaExtTapeteCm(), 1); Serial.print(" err="); Serial.print(rutaErrCarrilDeg(), 1); Serial.print(" along="); Serial.print(along, 0); Serial.print(" pka="); Serial.println(rutaPka, 0);
-    if (!lin) return;
+    if (!lin && PARK_SINU_FORZAR_U) return;
   }
   float alongIni = isnan(rutaPka) ? along : rutaPka - PARK_CAJON_LARGO_MM - (float)PARK_SINU_ADELANTO_MM;
   if (along < alongIni || along < (float)PARK_SINU_MIN_MM) return;
