@@ -1927,7 +1927,7 @@ ROUTE_BARRIER_EXTRA_MM = 30.0  # margen extra (mm) de la ruta a las maderas del 
 ROUTE_FINAL_D_MM = 640.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)
 ROUTE_FINAL_LEAD_MM = 1300.0
 ROUTE_FINAL_PWM = None   # tope de rv desde tc >= ROUTE_FINAL_TC (recta del cajón al final); None = sin tope
-ROUTE_PARK_NEAR_PWM = None      # tope de rv a menos de ROUTE_PARK_NEAR_MM de las maderas del cajón (tc>=11) si el cajón queda a la salida de la esquina (pka < ROUTE_PARK_NEAR_PKA_MAX); None = apagado
+ROUTE_PARK_NEAR_PWM = 140       # tope rv cerca del cajon a la salida de la esquina (orillas402/403: rozaba la 1a madera al llegar)
 ROUTE_PARK_NEAR_MM = 900.0
 ROUTE_PARK_NEAR_PKA_MAX = 100.0
 ROUTE_LAP2_PROFILE_TC_MAX = 8   # perfil de pursuit (curvatura vista desde el lookahead) para 4 <= tc < esto; 8 = solo la vuelta 2
