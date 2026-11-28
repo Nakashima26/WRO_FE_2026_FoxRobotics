@@ -8817,12 +8817,12 @@ void loop() {
           const float vcap = max(PARK_PL_COAST_VMIN, (parkPlanClrPrev - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S);
           while (pwm > LAZO_PWM0_FWD + 2 && vMando((float)pwm, 1) > vcap) pwm--;
         }
-        parkArranquePwm = PARK_PL_ARRANQUE_PWM;
         {
           int s = parkPlanRectaOn ? centroServo : parkPlanSrv;
           float f = constrain(fabsf((float)(s - centroServo)) / max(1.0f, fabsf((float)(servoHaciaPared - centroServo))), 0.0f, 1.0f);
           parkPisoMov = (int)lroundf(PARK_PL_PISO_RECTO + f * (PARK_PL_PISO_LOCK - PARK_PL_PISO_RECTO));
         }
+        parkArranquePwm = max(PARK_PL_ARRANQUE_PWM, parkPisoMov);   // volante a tope: con 78 el real no despega (orillas301 se pego y el anti-atasco dio tiron a 206)
         setMotor(pwm);
         parkArranquePwm = 0; parkPisoMov = 0;
         if (th > parkPlanThMax) parkPlanThMax = th;
