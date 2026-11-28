@@ -1884,8 +1884,8 @@ PARK_AJ float        PARK_GEOM_H_OBJ             = 300.0f;  // altura del eje (m
 PARK_AJ float        PARK_GEOM_KH                = 0.15f;   // grados de nariz a la isla por mm de altura de mas, en reversa
 PARK_AJ float        PARK_GEOM_TH_MAX            = 10.0f;
 PARK_AJ float        PARK_GEOM_WSTOP             = 268.0f;  // w de parada antes del plan (el escaneo directo arranca en ~285 tras el coast); 0 = formula de la reversa en S
-PARK_AJ long         PARK_GEOM_BUSCA_MS          = 6000;
-PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 420.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
+PARK_AJ long         PARK_GEOM_BUSCA_MS          = 9000;   // con BUSCA_FIN 560 la parte lenta son ~460 mm a ~80 mm/s
+PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 560.0f;  // sin ver la madera con el eje ya a esto detras de pka: a la U (carro 371 la vio en pka-471; 374 paro en pka-427 sin verla y se estaciono con el ancla)
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
 PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
