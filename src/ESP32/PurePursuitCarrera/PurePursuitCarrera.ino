@@ -3225,6 +3225,13 @@ float parkColaEsqMm(float th) {
   return 10.0f * (dB * cosf(a) - PARK_TOF_COLA_CM - 6.3f * sinf(a)) - fabsf(encVelMmS) * PARK_PL_ATRAS_LAG_S;
 }
 
+// Nariz contra la madera de enfrente medida por el ToF frontal (como parkColaEsqMm; esquina = 6.5 cm*sin). -1 sin lectura.
+float parkNarizEsqMm(float th) {
+  if (tofMm[3] <= 0 || tofMm[3] >= 300) return -1.0f;
+  float a = fabsf(th) * 0.0174533f;
+  return 10.0f * (tofMm[3] / 10.0f * cosf(a) - 0.7f - 6.5f * sinf(a)) - max(encVelMmS, 0.0f) * PARK_PL_FRENTE_LAG_S;
+}
+
 bool parkAtrasPegado() {
   return distB_filtrada > 0.0f && distB_filtrada <= PARK_ATRAS_MIN_CM;
 }
@@ -8882,7 +8889,7 @@ void loop() {
           pwm = min(pwm + extra, 255);
         }
         if (PARK_PL_ZZ && parkPlanDir > 0 && parkPlanI >= 2 && parkPlanClrPrev < 1e8f) {   // tope de velocidad: la inercia (v*LAG) cabe en la holgura que queda
-          const float vcap = max(PARK_PL_COAST_VMIN, (parkPlanClrPrev - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S);
+          const float vcap = max(PARK_PL_COAST_VMIN, (max(parkPlanClrPrev, parkNarizEsqMm(th)) - PARK_PL_M_MM) / PARK_PL_FRENTE_LAG_S);
           while (pwm > LAZO_PWM0_FWD + 2 && vMando((float)pwm, 1) > vcap) pwm--;
         }
         {
@@ -8974,11 +8981,13 @@ void loop() {
         // Adelante a ciegas (ToF frontal sin lectura) el tramo se limita a PARK_PL_CIEGO_MM: gemelo s4 a 37°,
         // el ToF frontal no veía la madera (200 hasta 8 mm) y el tramo largo la chocaba.
         bool zz = (i == 6);
+        // orillas403: el ToF frontal leia 11 cm libres y la pose (~10 mm de error) cortaba cada tramo a ~100 ms.
+        const bool frenteToF = zz && parkPlanDir > 0 && parkNarizEsqMm(th) > PARK_PL_M_MM && clr > 4.0f;
         // Reversa del zigzag: solo el ToF trasero (orillas177: la pose cortaba con 15 cm libres). Adelante sí
         // corta la pose: la esquina de la nariz toca la madera antes de que el ToF frontal la vea (gemelo
         // 34/48 sin este corte vs 44/48).
-        if (!fin && i >= 1 && cerca && (!zz || cercaTof || parkPlanDir > 0)) { fin = true; why = "HOLGURA"; }
-        if (!fin && zz && parkPlanDir > 0 && encVelMmS > 0.0f && clr > PARK_PL_M_MM) {
+        if (!fin && i >= 1 && cerca && (!zz || cercaTof || (parkPlanDir > 0 && !frenteToF))) { fin = true; why = "HOLGURA"; }
+        if (!fin && zz && parkPlanDir > 0 && encVelMmS > 0.0f && clr > PARK_PL_M_MM && !frenteToF) {
           // Al cortar potencia, la nariz todavía barre un arco hacia la madera. El tramo ya va topado a vcap
           // (ver pwm del plan): solo se corta si ni a esa velocidad cabe la inercia.
           const float yaw = th * DEG_TO_RAD;
