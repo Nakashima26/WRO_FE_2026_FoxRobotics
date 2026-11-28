@@ -1618,6 +1618,9 @@ PARK_AJ float        PARK_POSTE2_SEP_MM     = 272.0f;   // separacion nominal us
 PARK_AJ long         PARK_D_P1_ODOM_MM     = 60;    // entrada directa: tras ver el poste 1 no se aborta por ventana de pose hasta POSE_MM+esto de odometria (0 = como antes)
 long          parkOdomPoste1        = -1;     // odomMm en el poste 1 (-1 = sin poste 1)
 bool          parkP1Sonar           = false;  // el poste 1 se vio de verdad con el sonar (no por la via de "paso antes del armado")
+bool          parkP1ComoP2          = false;  // tras la U: el poste 1 visto era la madera de adelante, se ancla ahi (PARK_U_REINTENTO)
+bool          parkUReintento        = false;  // ya se hizo la reversa de reintento tras la U
+float         parkAlongPoste1       = 0.0f;   // along del eje al ver el poste 1
 int           parkPoste2Pose        = 0;      // 1 = el poste 2 salió por odometría (ACK p2o=)
 float         parkVelCmS            = 0.0f;   // velocidad medida entre postes (0 = sin medir)
 float         parkTrimMed[PARK_TRIM_MED_N];   // últimas estimaciones (para la mediana)
@@ -1740,6 +1743,10 @@ PARK_AJ long         PARK_UTURN_PWM             = 160;
 PARK_AJ long         PARK_SCAN_RAPIDO_PWM       = 200;
 PARK_AJ long         PARK_SCAN_U_PWM            = 230;   // tras U 180° (!parkDirecto); 0 = PARK_SCAN_RAPIDO_PWM. No sube escaneo GEOM/directo.
 PARK_AJ long         PARK_SCAN_RAPIDO_MM        = 400;
+PARK_AJ int          PARK_U_REINTENTO           = 1;     // tras la U, si se pasa el cajon (orillas412): el poste 1 visto en la ventana del 2 ancla como poste 2; sin poste, reversa y otro escaneo lento
+PARK_AJ long         PARK_U_REINT_MM            = 450;   // la reversa del reintento para en along = pka + esto (antes de la primera madera de regreso)
+PARK_AJ long         PARK_U_LENTO_MM            = 250;   // tras la U, el escaneo rapido acaba esto antes (orillas412: ~370 mm/s sobre la madera, no la vio)
+PARK_AJ int          PARK_U_PWM_LENTO           = 100;   // PWM del escaneo tras la U fuera del tramo rapido (antes PARK_PUNTA_PWM); 0 = como antes
 const int           PARK_UTURN_DF_FORZAR_CM    = 26;
 // T15b2: reglamento 9.23 — el cambio de sentido solo puede hacerse en la
 // esquina 13 (la que sigue a la recta de salida tras la vuelta 12), no a
@@ -3323,6 +3330,7 @@ void resetParkScan() {
   parkScanSubFase      = 0;
   parkOdomPoste1       = -1;
   parkP1Sonar          = false;
+  parkP1ComoP2         = false;
   parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
@@ -3472,6 +3480,7 @@ void iniciarEstacionandoRetorno() {
 // parkParedEsIzquierda ya fijada a la pared del regreso. Fases 24-25, no
 // pisan las 20-23 (media vuelta vieja).
 void iniciarEstacionandoParaleloUturn() {
+  parkUReintento = false;
   parkDirecto = false;
   estado       = ESTACIONANDO;
   parkBuscando = false;
@@ -7709,6 +7718,20 @@ void loop() {
         break;
       }
 
+      // ── Fase 46: tras la U se paso el cajon sin ver madera: reversa a antes del cajon y escanea otra vez (lento) ──
+      if (parkFase == 46) {
+        motorReversa();
+        setMotor(PARK_REV_BUSCA_PWM);
+        float out = -(PARK_KP_ANG * (parkRumboParalelo() - anguloGyro) - PARK_KD_RATE * gyroRate);   // en reversa el volante va al reves
+        out = constrain(out, (float)-PARK_SERVO_MAX, (float)PARK_SERVO_MAX);
+        escribirServo(constrain(centroServo + (int)out, SERVO_MIN_DEG, SERVO_MAX_DEG));
+        if (alongSalidaMm() >= rutaPka + (float)PARK_U_REINT_MM || millis() - parkFaseMs > 4000UL) {
+          Serial.print("PARK U: reintento, escaneo desde along="); Serial.println(alongSalidaMm(), 0);
+          resetParkScan();
+        }
+        break;
+      }
+
       // ── Fase 0: SEGUIR pared exterior + ESCANEAR cajón ─────────────────────
       if (parkFase == 0) {
         unsigned long tEn = millis() - parkEntryMs;
@@ -7899,8 +7922,20 @@ void loop() {
                                     && odomMm - parkOdomPoste1 < PARK_POSTE2_POSE_MM - 100;
         if (validaPoste2 && !p1Reciente && !esperaDesdePoste1
             && (parkDirecto ? errorPoste2 : -errorPoste2) > ventanaPoste2) {
-          parkRecuperarEscaneo("POSTE 2 fuera de ventana");
-          break;
+          if (!parkDirecto && PARK_U_REINTENTO && parkScanSubFase >= 1 && parkScanSubFase <= 2 && parkP1Sonar && parkOdomPoste1 >= 0
+              && fabsf(parkAlongPoste1 - (rutaPka - offsetPoste2)) <= ventanaPoste2) {
+            // La primera madera de regreso se paso sin verla (orillas412): el "poste 1" era la de adelante.
+            parkP1ComoP2 = true; parkScanSubFase = 2; parkHuecoEntryMs = millis() - PARK_HUECO_MIN_MS;
+            Serial.print("PARK U: el poste 1 era el 2, ancla along="); Serial.println(parkAlongPoste1, 0);
+          } else if (!parkDirecto && PARK_U_REINTENTO && !parkUReintento) {
+            parkUReintento = true;
+            parkFase = 46; parkFaseMs = millis(); parkOdom0 = odomMm;
+            Serial.print("PARK U: me pase sin ver el cajon along="); Serial.print(alongSalidaMm(), 0); Serial.println(" -> reversa y escaneo otra vez");
+            break;
+          } else {
+            parkRecuperarEscaneo("POSTE 2 fuera de ventana");
+            break;
+          }
         }
 
         // Si se perdió la primera madera, una bajada confirmada en la ventana puede anclar la segunda.
@@ -7960,6 +7995,7 @@ void loop() {
             parkOdomPoste1   = odomMm;
             // Tras la U, un ToF inválido puede marcar el hueco, pero no anclar la odometría.
             parkP1Sonar      = parkDirecto || !posteSintetico;
+            parkAlongPoste1  = alongSalidaMm();
             Serial.print("PARK: POSTE 1 DETECTADO! base="); Serial.print(parkBase, 1);
             Serial.print(" ext="); Serial.print(extRaw);
             Serial.print(" ang="); Serial.print(anguloGyro, 1);
@@ -8042,6 +8078,7 @@ void loop() {
             }
           }
 
+          if (parkP1ComoP2) poste2Detect = true;
           // SOLO caída de sónar. La Pi manda park=2 al ver magenta lejos
           // (recta final, ~1 s tras entrar a ESTACIONANDO) y el timeout de
           // hueco disparaba reversa en el trailing del POSTE 1.
@@ -8071,6 +8108,7 @@ void loop() {
             // real. El rumbo paralelo medido es la referencia correcta.
             parkRumboRef = parkTrimListo ? parkTrimMediana() : anguloGyro;
             parkDetAlong = alongSalidaMm(); parkDetHPose = parkHPoseMm();
+            if (parkP1ComoP2) { parkDetAlong = parkAlongPoste1; parkOdomPoste1 = -1; }   // sin correccion por separacion: es la misma madera
             // El ancla del poste 2 se corrige con la separacion odometrica desde el poste 1 (sonar): la real es ~272 mm (twin: sd 38). Una bajada prematura (eco lateral: n1 s28 sep 201, ancla 73 mm adelantada) o el relevo por odometria (+340) dejan el ancla corrida y la cola/nariz pegan en una madera.
             if (parkP1Sonar && parkOdomPoste1 >= 0 && odomMm - parkOdomPoste1 >= 100 && extRaw > PARK_POSTE2_EXT_MAX_CM) {   // con la cara a ext <= 10 el poste 2 es fiable; el que llega tarde/pronto es el poste 1 (bajada rasante, ext 11-17: regreso por U, ancla -65..-89)
               float sepE = PARK_POSTE2_SEP_MM - (float)(odomMm - parkOdomPoste1);
@@ -8178,11 +8216,12 @@ void loop() {
           }
           bool rapido = PARK_SCAN_RAPIDO_PWM > 0 && parkScanSubFase == 0 && rutaTfOk && rutaSecSalida >= 0 && !lejosPared
                         && !isnan(rutaPka)
-                        && (parkDirecto ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno);
+                        && (parkDirecto ? alongSalidaMm() < rutaPka - PARK_CAJON_LARGO_MM - dFreno : alongSalidaMm() > rutaPka + dFreno + (float)PARK_U_LENTO_MM);
           int pwmEsc = PARK_PUNTA_PWM;
           // Sin U: cerca de la madera de adelante, lento, para que el instante en que el sonar la ve fije bien la posicion (error ~ v * 50 ms).
           if (parkDirecto && !isnan(rutaPka) && !rapido && alongSalidaMm() >= rutaPka - PARK_SINU_B2_OFF_MM - (float)PARK_SINU_LENTO_MM)
             pwmEsc = PARK_SINU_PWM_B2;
+          if (!parkDirecto && !rapido && PARK_U_PWM_LENTO > 0) pwmEsc = PARK_U_PWM_LENTO;
           setMotorTope(rapido ? pwmScanRap : pwmEsc, (rapido && PARK_SCAN_TOPE > 0) ? (int)PARK_SCAN_TOPE : MOTOR_MAX);
         }
 
