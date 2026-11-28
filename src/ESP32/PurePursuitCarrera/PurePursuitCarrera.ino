@@ -4766,6 +4766,7 @@ PARK_AJ float PARK_PL_RI_INT_MM = 104.0f;
 PARK_AJ int PARK_PL_RECTA_TB_MM = 105;   // fondo mínimo (ToF trasero crudo, mm) al terminar la recta; 0 = apagado (2026-11-25 orillas254)
 PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;
 PARK_AJ float PARK_PL_ARCO_W_MM = 48.0f;
+PARK_AJ float PARK_PL_T1_MAX = 32.0f;   // tope del T1 (grados). Reales 391/395/409/413 (3.5-3.9 s): EXT hasta 23-30 y el INT tuvo 66-90 mm; 417-428 (7-11 s): T1 34-54, el INT topaba fondo a 23-46 mm y seguian 6-8 tramos de zigzag
 
 static bool parkPlHuellaDentro(float w, float h, float th, float avance) {
   if (fabsf(th) > PARK_PL_TOK) return false;
@@ -8930,7 +8931,7 @@ void loop() {
               // Deja la nariz pasar por fuera de la punta de la segunda madera.
               if (arcoCalibrado) wf = PARK_PL_ARCO_W_MM;
               float t = parkPlanT1Solve(w0, h0, th, wf, hFinal, PARK_PL_RI, rInt);
-              parkPlanT1 = max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f);
+              parkPlanT1 = min(max(t - (h0 > PARK_REV_ALTA_H ? PARK_REV_LEAD_ALTA : PARK_PL_LEAD), 20.0f), PARK_PL_T1_MAX);
               if (!parkDirecto && !parkGeomModo && isfinite(rutaPgf) && alongSalidaMm() > rutaPgf - PARK_PL_U_PG_BACK_MM)
                 parkPlanT1 = min(parkPlanT1, PARK_PL_U_PG_TH_MAX);
               Serial.print("PARK plan T1 w0="); Serial.print(w0, 0); Serial.print(" h0="); Serial.print(h0, 0);

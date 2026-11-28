@@ -20,6 +20,7 @@ class NativeVehicle(Vehicle):
                  m.high_pwm_knee, m.high_pwm_gain_mm_s_per_pwm2, len(m.forward_curve)]
         vals += [x for pair in m.forward_curve for x in pair]
         vals.append(self._reverse_scale_left)
+        vals += [self._fwd_slow_scale_right, self._fwd_slow_scale_left, m.slow_forward_v_mm_s]
         self._p=(ct.c_double*len(vals))(*(0 if x is None else x for x in vals))
         self._fn=get_kernel('fox_twin_vehicle',[ct.c_void_p,ct.c_void_p],None)
         if self._fn is None: raise RuntimeError('native vehicle unavailable')

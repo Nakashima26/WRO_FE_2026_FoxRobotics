@@ -186,6 +186,8 @@ class MotorParams:
     # La escala aproxima la apertura por deslizamiento. Los radios de reversa del N30 siguen pendientes.
     reverse_wheel_scale: float = 0.90
     reverse_radii_mm: tuple[float, float] | None = None  # derecha, izquierda
+    slow_forward_radii_mm: tuple[float, float] | None = None  # derecha, izquierda; adelante a tope despacio (parking)
+    slow_forward_v_mm_s: float = 250.0
     # Tope lateral medido (p8_curva_rapida): arriba de esto la curva se abre (subviraje); None = sin tope.
     # Der (servo 5/20) ~2610-2860, izq (servo 134) ~2400.
     a_lat_right_mm_s2: float | None = 2750.0
@@ -213,6 +215,14 @@ class MotorParams:
                 raise ValueError("TWIN_REV_RADII_MM requiere radios positivos y finitos: der,izq")
             self.reverse_radii_mm = right_mm, left_mm
             _prov("motor.reverse_radii_mm", "medido", f"TWIN_REV_RADII_MM={reverse_radii} (radios al eje trasero)")
+        slow_fwd = os.environ.get("TWIN_FWD_SLOW_RADII_MM")
+        if slow_fwd:
+            # 11-28, 98 corridas reales (tele, fase 40 a tope estable): adelante servo 1 R 145, servo 156 R 172 a 90 mm/s mediana.
+            right_mm, left_mm = (float(value) for value in slow_fwd.split(","))
+            if not all(math.isfinite(radius) and radius > 0 for radius in (right_mm, left_mm)):
+                raise ValueError("TWIN_FWD_SLOW_RADII_MM requiere radios positivos y finitos: der,izq")
+            self.slow_forward_radii_mm = right_mm, left_mm
+            _prov("motor.slow_forward_radii_mm", "medido", f"TWIN_FWD_SLOW_RADII_MM={slow_fwd} (adelante < {self.slow_forward_v_mm_s:.0f} mm/s)")
         if os.environ.get("TWIN_MOTOR_REAL") == "1":
             # Curva efectiva bajo carga: pendiente media de los ACK y recuperación
             # progresiva del extremo medido con el N30 en recta a fondo.

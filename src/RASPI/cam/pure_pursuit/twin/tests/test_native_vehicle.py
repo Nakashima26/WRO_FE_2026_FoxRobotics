@@ -204,3 +204,22 @@ def test_reverse_calibrates_each_lock_independently(monkeypatch, servo_side, rad
                                wheel_servo_deg=servo + backlash)
         step = vehicle.step(0.001, servo, 100, -1)
         assert abs(step.ds_true_mm / math.radians(vehicle.heading_deg)) == pytest.approx(radius)
+
+
+@pytest.mark.parametrize(("servo_side", "radius"), [("right", 145.0), ("left", 172.0)])
+def test_slow_forward_calibrates_each_lock(monkeypatch, servo_side, radius):
+    import math
+
+    monkeypatch.setenv("TWIN_FWD_SLOW_RADII_MM", "145,172")
+    params = TwinParams()
+    steering = params.steering
+    servo = steering.servo_min_deg if servo_side == "right" else steering.servo_max_deg
+    backlash = steering.backlash_deg if servo_side == "right" else -steering.backlash_deg
+    for vehicle_type in (Vehicle, NativeVehicle):
+        vehicle = vehicle_type(params, 0, 0, 0, v=100, servo_deg=servo,
+                               wheel_servo_deg=servo + backlash)
+        step = vehicle.step(0.001, servo, 100, 1)
+        assert abs(step.ds_true_mm / math.radians(vehicle.heading_deg)) == pytest.approx(radius)
+        fast = vehicle_type(params, 0, 0, 0, v=400, servo_deg=servo, wheel_servo_deg=servo + backlash)
+        fast.step(0.001, servo, 200, 1)
+        assert abs(fast.heading_deg) > abs(vehicle.heading_deg) * 3   # rápido sigue con el tope de la tabla

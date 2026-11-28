@@ -57,6 +57,15 @@ class Vehicle:
             left_lock = -wheel_deg_from_servo(steering.servo_max_deg - steering.backlash_deg, steering)
             self._reverse_scale_right = math.degrees(math.atan(wheelbase / right_mm)) / right_lock
             self._reverse_scale_left = math.degrees(math.atan(wheelbase / left_mm)) / left_lock
+        self._fwd_slow_scale_right = self._fwd_slow_scale_left = 1.0
+        if motor.slow_forward_radii_mm is not None:
+            steering = self.params.steering
+            wheelbase = self.params.vehicle.wheelbase_mm
+            right_mm, left_mm = motor.slow_forward_radii_mm
+            right_lock = wheel_deg_from_servo(steering.servo_min_deg + steering.backlash_deg, steering)
+            left_lock = -wheel_deg_from_servo(steering.servo_max_deg - steering.backlash_deg, steering)
+            self._fwd_slow_scale_right = math.degrees(math.atan(wheelbase / right_mm)) / right_lock
+            self._fwd_slow_scale_left = math.degrees(math.atan(wheelbase / left_mm)) / left_lock
         self.last_wheel_deg = wheel_deg_from_servo(self.wheel_lag_deg, self.params.steering)
 
     @property
@@ -215,6 +224,8 @@ class Vehicle:
 
         if vel < 0.0:
             wheel *= self._reverse_scale_right if wheel >= 0.0 else self._reverse_scale_left
+        elif vel < mot.slow_forward_v_mm_s:
+            wheel *= self._fwd_slow_scale_right if wheel >= 0.0 else self._fwd_slow_scale_left
         wh = _radians(wheel)
         if abs(wh) > 1e-9 and abs(veh.wheelbase_mm) > 1e-6:
             yaw_rate_rad = vel / veh.wheelbase_mm * _tan(wh)

@@ -11,7 +11,8 @@
  * 35..: interleaved servo units / wheel degrees, right table then left table,
  *       followed by breakaway base/turn PWM, forward acceleration tau/limit,
  *       high PWM knee/gain, the length and pairs of the PWM/speed table,
- *       and the left reverse steering scale.
+ *       the left reverse steering scale, then the slow-forward right/left
+ *       steering scales and their speed limit.
  */
 static double (*volatile py_sin)(double)=sin;
 static double (*volatile py_cos)(double)=cos;
@@ -61,6 +62,7 @@ FOX_API void fox_twin_vehicle(double *s,const double *p){
   if(spinning){s[6]+=(vt-s[6])*fmin(1.0,dt/p[28]);if(fabs(s[6])<fabs(vel))s[6]=vel;}else s[6]=vel;s[7]=0;
  }
  if(vel<0)wheel*=wheel>=0?p[29]:motor_load[7+2*(int)motor_load[6]];
+ else if(vel<motor_load[10+2*(int)motor_load[6]])wheel*=wheel>=0?motor_load[8+2*(int)motor_load[6]]:motor_load[9+2*(int)motor_load[6]];
  double wh=wheel*(3.14159265358979323846/180.0);
  if(fabs(wh)>1e-9&&fabs(p[30])>1e-6){double yaw=vel/p[30]*tan(wh),alat=yaw>0?p[32]:p[31];
   if(alat&&fabs(vel)>1e-3&&fabs(yaw*vel)>alat)yaw=copysign(alat/fabs(vel),yaw);
