@@ -1894,6 +1894,10 @@ PARK_AJ float        PARK_GEOM_IDA_REL_MM        = -230.0f; // along - pka donde
 PARK_AJ float        PARK_GEOM_IDA_WIN_MM        = 110.0f;
 PARK_AJ float        PARK_GEOM_W_IDA             = 290.0f;  // w (marco de la reversa) en esa bajada: ancla de la reversa 190 + ~100 mm de odometria hasta ella (384-390: 69..166)
 float parkIdaBase = 0.0f; int parkIdaDrop = 0;
+// La altura del ancla de ida sale de la base del sonar a velocidad de ruta: 396-398 erro -75..+70 mm
+// contra el ToF al arrancar el plan (T1 y el arco salen de esa altura: fondo a 42-49 grados). 1 = la mide el ToF lateral al entrar a f40.
+PARK_AJ int   PARK_GEOM_IDA_TOF_H = 1;
+bool parkIdaAncla = false;
 PARK_AJ int          PARK_GEOM_SIN_U             = 1;       // 1 = si la reversa GEOM no halla la madera, ancla con el pka de la Pi y entra (GEOM->U salia ~1/10 en el carro)
 PARK_AJ float        PARK_GEOM_SIN_U_OFS_MM      = -277.0f; // parkDetAlong = pka + esto (carro 366/367: el sonar ancló a pka-259 y pka-295; 368/369 con -168 quedó un cajón adelante)
 PARK_AJ int          PARK_RESCATE_LENTO          = 1;       // 2026-11-27 orillas358: DIRECTO fallido antes de pka+DET -> sigue despacio en el carril (fase 41) en vez de volver a la ruta a 255 y frenar resbalando
@@ -3319,7 +3323,7 @@ void resetParkScan() {
   parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
-  parkIdaBase = 0.0f; parkIdaDrop = 0;
+  parkIdaBase = 0.0f; parkIdaDrop = 0; parkIdaAncla = false;
   parkCaidaCnt         = 0;
   parkCaidaHuecos      = 0;
   parkAltasCnt         = 0;
@@ -7749,7 +7753,7 @@ void loop() {
             Serial.print(" base="); Serial.print(parkIdaBase, 0); Serial.print(" hs="); Serial.println(hs, 0);
             parkSinUDec = 2;
             parkIniciarGeom(rutaErrCarrilDeg(), false);
-            parkDetTh = th; parkDetHSon = hs; parkDetHPose = parkHPoseMm();
+            parkDetTh = th; parkDetHSon = hs; parkDetHPose = parkHPoseMm(); parkIdaAncla = true;
             parkDetAlong = alongSalidaMm() - (PARK_GEOM_W_IDA - PARK_PL_W_DET);
             if (PARK_GEOM_ANCLA_LOCAL) {
               parkGeomAnclaX = poseXf; parkGeomAnclaY = poseYf; parkGeomAnclaTh = rutaTh * DEG_TO_RAD;
@@ -8635,7 +8639,7 @@ void loop() {
               parkGeomAnclaW = 190.0f + PARK_GEOM_W_REV_KH * (parkDetHSon - 300.0f)
                                - (borde == 1 ? 0.0f : 20.0f);
             }
-            parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET);
+            parkDetAlong = alongSalidaMm() - (wNom - PARK_PL_W_DET); parkIdaAncla = false;
             Serial.print("PARK REV: madera de adelante por sonar (reversa) hs="); Serial.print(parkDetHSon, 0); Serial.print(" hp="); Serial.print(parkDetHPose, 0); Serial.print(" v="); Serial.print(encVelMmS, 0); Serial.print(" th="); Serial.print(parkDetTh, 1); Serial.print(" wnom="); Serial.print(wNom, 0); Serial.print(" borde="); Serial.print(borde); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
             parkRevAnc = true;
             parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;   // con el ancla, de nuevo hacia adelante hasta el w de parada
@@ -8738,6 +8742,25 @@ void loop() {
           if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
           if (PARK_PL_REF_PARED) parkPlFusionPared(haciaPared);
           if (parkPlFrenteHabilitado()) parkPlFusionFrente();
+          if (PARK_GEOM_IDA_TOF_H && parkIdaAncla) {
+            // ToF lateral (110.6 mm delante del eje, 35.2 al costado) ya pasada la madera: pared limpia
+            const int side = parkParedEsIzquierda ? 0 : 1;
+            const float theta = -haciaPared * (anguloGyro - parkRumboRef), rad = theta * DEG_TO_RAD;
+            const int range = tofMm[side];
+            bool fresco = true;
+#if !defined(FOX_SIL)
+            fresco = millis() - tofUltimoMs[side] <= 100;
+#endif
+            if (fresco && range >= 190 && range <= 450 && fabsf(theta) <= 10.0f) {
+              float w, h;
+              parkPlanPose(w, h);
+              const float dh = (range + 35.2f) * cosf(rad) - 110.6f * sinf(rad) - h;
+              if (fabsf(dh) <= 120.0f) parkDetHSon += dh;
+              Serial.print("PARK IDA altura ToF r="); Serial.print(range); Serial.print(" th="); Serial.print(theta, 1);
+              Serial.print(" dh="); Serial.print(dh, 0); Serial.print(" hs="); Serial.println(parkDetHSon, 0);
+            }
+            parkIdaAncla = false;
+          }
 #endif
           if (parkGeomModo && parkDirecto && isfinite(rutaPkr) && isfinite(rutaPka)
               && fabsf(rutaPkr - rutaPka) <= 75.0f) {

@@ -184,6 +184,10 @@ class SurpriseInterpreter:
                         saved_color, saved_height = self.seats[seat]
                         if saved_color == color:
                             track.height = saved_height
+                    if candidate == 50 and seat is not None and self.seats.get(seat) == (color, 100):
+                        # La altura no cambia en la carrera y la cima solo se puede perder (sombra/viñeta arriba del
+                        # cuadro): orillas397 midió 51 mm al rojo normal N/T1 en la vuelta 2 y volteó N/T1-T3 a verde.
+                        candidate = None
                     special = self.special_columns.get(column)
                     if special is not None:
                         track.height = special

@@ -175,3 +175,22 @@ def test_lost_foot_uses_existing_obstacle_memory():
         assert not positions['Red'] and not positions['Green']
         retained=memory.update([],0.025,0)
         assert any(o[2]=='Red' for o in retained)
+
+
+def test_seat_seen_normal_is_not_flipped_to_short():
+    """orillas397: rojo normal ya visto a 100 mm; en la vuelta 2 su cima oscura midió 51 mm -> no es especial."""
+    from types import SimpleNamespace
+    from pure_pursuit.wro_field import section_to_world, SEATS
+    p=TwinParams(); cam=CameraModel(p.camera,p); bev,_=cam.build_bev(); field=randomize(1)
+    sx,sy=section_to_world('N',*SEATS['X1'])
+    vision=Vision(open_cam=False); vision.min_contour_area=200
+    dm=SimpleNamespace(direction='CW',pose_xy=(sx-900,sy),_view_heading=90)
+    interpreter=SurpriseInterpreter()
+    field.signs=[Sign(sx,sy,'Green','N','X1',100)]; field.barriers=[]
+    image=cam.render_camera(field,*dm.pose_xy,90); _,positions=vision.detect_on(image)
+    for _ in range(3):interpreter.interpret(positions,bev,image.shape,dm)
+    assert interpreter.seats[('N','X1')]==('Green',100)
+    field.signs=[Sign(sx,sy,'Green','N','X1',50)]
+    image=cam.render_camera(field,*dm.pose_xy,90); _,positions=vision.detect_on(image)
+    for _ in range(6):out=interpreter.interpret(positions,bev,image.shape,dm)
+    assert not out['Red'] and interpreter.seats[('N','X1')]==('Green',100)
