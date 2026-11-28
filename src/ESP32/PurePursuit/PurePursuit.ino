@@ -1884,8 +1884,8 @@ PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la
 PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
 PARK_AJ int          PARK_GEOM_IDA               = 1;       // 2026-11-27 orillas384-390: cajon a la salida de la esquina, el DIRECTO no se arma antes de la madera de adelante; su bajada de ida ancla el GEOM (sin 41->42->41)
-PARK_AJ float        PARK_GEOM_IDA_REL_MM        = -230.0f; // along - pka donde el sonar empieza a ver la madera de ida (real: -219..-243, 388 -158)
-PARK_AJ float        PARK_GEOM_IDA_WIN_MM        = 110.0f;
+PARK_AJ float        PARK_GEOM_IDA_REL_MM        = -225.0f; // along - pka donde el sonar empieza a ver la madera de ida (real: -219..-243, 388 -158)
+PARK_AJ float        PARK_GEOM_IDA_WIN_MM        = 75.0f;   // ventana -300..-150 (gemelo 11-27: bajadas a -310..-323 y -121 estacionaban un cajón antes)
 PARK_AJ float        PARK_GEOM_W_IDA             = 290.0f;  // w (marco de la reversa) en esa bajada: ancla de la reversa 190 + ~100 mm de odometria hasta ella (384-390: 69..166)
 float parkIdaBase = 0.0f; int parkIdaDrop = 0;
 // La altura del ancla de ida sale de la base del sonar a velocidad de ruta: 396-398 erro -75..+70 mm
@@ -1940,7 +1940,7 @@ PARK_AJ float        PARK_PL_Z1_MM               = 150.0f;  // 21.0 -> 150 2026-
 PARK_AJ float        PARK_PL_Z2_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
 PARK_AJ float        PARK_PL_Z3_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
 PARK_AJ float        PARK_PL_Z4_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
-PARK_AJ float        PARK_PL_TOK                 = 6.0f;    // theta final aceptable (grados)
+PARK_AJ float        PARK_PL_TOK                 = 3.0f;    // theta final aceptable (grados)
 PARK_AJ float        PARK_PL_DF_MM               = 150.0f;  // 30 -> 150 2026-11-23 (ver Z1)   // zigzag: largo de cada tramo adelante
 PARK_AJ float        PARK_PL_DR_MM               = 150.0f;   // y atras
 PARK_AJ float        PARK_PL_ATRAS_CM            = 2.0f;    // ToF trasero: corta la reversa del zigzag
