@@ -2511,7 +2511,7 @@ void setMotorTope(int velocidad, int tope) {
     int pedido = velocidad;
     velocidad = lazoVelocidad(velocidad);
     if (parkArranquePwm > 0 && velocidad > 0) {
-      float v = fabsf(encVelMmS);
+      const float v = max(0.0f, (float)motorDirActual * encVelMmS);   // en el sentido pedido: rodando al reves por la inercia del tramo anterior contaba como "ya se mueve" y el piso no entraba (orillas370: pw 31-48 parado al arrancar cada reversa)
       // el piso de movimiento solo mientras no llegue a la velocidad que el plan ya pide: no acelera de mas
       const int slotD = (parkPisoMov >= (PARK_PL_PISO_RECTO + PARK_PL_PISO_LOCK + 1) / 2) ? 1 : 0;
       if (parkDespInicio && v >= 25.0f) {   // despego: aprende con lo que costo
