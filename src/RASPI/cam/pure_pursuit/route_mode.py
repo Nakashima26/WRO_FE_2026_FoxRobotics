@@ -1902,6 +1902,8 @@ class RouteMode:
                             and self.fix is not None and self.fix.n_inform > 0)
                     if not weak:
                         return
+        if getattr(C, "ROUTE_FIX_LINE_FRESH", None) and not o.get("_fresh", True):
+            return   # recta sostenida de frames anteriores (orillas416: votó δ=-923 con la cinta congelada)
         vx, vy, x0, y0 = o["line"]
         if abs(vx) < 1e-6:
             return

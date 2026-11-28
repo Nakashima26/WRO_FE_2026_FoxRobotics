@@ -531,6 +531,7 @@ class OrangeLineTracker:
         self._candidate: dict | None = None
         self._candidate_count = 0
         self._lost_count = 0
+        self._nframe = 0   # frames de update(); `_f` en stable = frame en que se aceptó la línea
         # Dead-reckon de near_y cuando la línea se pierde CERCA de la esquina
         # (ver ORANGE_DR_* en config). `_out` es lo que devolvió update() este
         # frame -- puede ser self.stable (real) o una lectura estimada; classify()
@@ -591,7 +592,10 @@ class OrangeLineTracker:
         la vio), para el voto del cajón en route_mode. El estado sostenido no los trae."""
         self._raw_pix = None
         self._raw_pix_all = None
+        self._nframe += 1
         out = self._update(bev_bgr, bev_hsv, ds_px, in_turn_cooldown)
+        # orillas416: sin lectura que persista, `stable` quedó 1.5 s con la misma recta y el voto del cajón la usó.
+        out = dict(out, _fresh=out.get("_f") == self._nframe)
         if self._raw_pix_all is not None:
             out = dict(out, _pix_all=self._raw_pix_all)
         if self._raw_pix is None:
@@ -748,6 +752,7 @@ class OrangeLineTracker:
             # curva: (px usados, largo en px) -- None = se clasifica con `line`
             "cv": None if cv is None else (cv["npx"], round(cv["t"][1] - cv["t"][0])),
             "_cv": cv,     # para el HUD (las llaves "_" no se imprimen)
+            "_f": self._nframe,
         }
 
     def _smooth_line(self, fitted, w: int):
