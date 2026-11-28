@@ -1889,6 +1889,11 @@ PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 560.0f;  // sin ver la madera
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
 PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
+PARK_AJ int          PARK_GEOM_IDA               = 1;       // 2026-11-27 orillas384-390: cajon a la salida de la esquina, el DIRECTO no se arma antes de la madera de adelante; su bajada de ida ancla el GEOM (sin 41->42->41)
+PARK_AJ float        PARK_GEOM_IDA_REL_MM        = -230.0f; // along - pka donde el sonar empieza a ver la madera de ida (real: -219..-243, 388 -158)
+PARK_AJ float        PARK_GEOM_IDA_WIN_MM        = 110.0f;
+PARK_AJ float        PARK_GEOM_W_IDA             = 290.0f;  // w (marco de la reversa) en esa bajada: ancla de la reversa 190 + ~100 mm de odometria hasta ella (384-390: 69..166)
+float parkIdaBase = 0.0f; int parkIdaDrop = 0;
 PARK_AJ int          PARK_GEOM_SIN_U             = 1;       // 1 = si la reversa GEOM no halla la madera, ancla con el pka de la Pi y entra (GEOM->U salia ~1/10 en el carro)
 PARK_AJ float        PARK_GEOM_SIN_U_OFS_MM      = -277.0f; // parkDetAlong = pka + esto (carro 366/367: el sonar ancló a pka-259 y pka-295; 368/369 con -168 quedó un cajón adelante)
 PARK_AJ int          PARK_RESCATE_LENTO          = 1;       // 2026-11-27 orillas358: DIRECTO fallido antes de pka+DET -> sigue despacio en el carril (fase 41) en vez de volver a la ruta a 255 y frenar resbalando
@@ -3314,6 +3319,7 @@ void resetParkScan() {
   parkPoste2Pose       = 0;
   parkBase             = 0.0f;
   parkBaseN            = 0;
+  parkIdaBase = 0.0f; parkIdaDrop = 0;
   parkCaidaCnt         = 0;
   parkCaidaHuecos      = 0;
   parkAltasCnt         = 0;
@@ -7730,6 +7736,31 @@ void loop() {
                                         && !isnan(rutaPka) && rutaPka < PARK_SINU_PKA_MIN_MM;
         // Una lectura del poste durante el armado puede dejar la base demasiado baja.
         const bool rebaseInicial = scanDirectoInicial && parkBase < 20.0f && extRaw >= 22 && extRaw <= 45;
+        // Base que no baja con la madera (la EMA de arriba se la come cuando el cono la va viendo poco a poco, orillas388).
+        if (PARK_GEOM_IDA && PARK_GEOM_RESCATE && scanDirectoInicial && piRuta && rutaTfOk && rutaSecSalida >= 0 && extRaw >= 1 && extRaw < 150) {
+          const float rel = alongSalidaMm() - rutaPka;
+          if (parkIdaBase <= 0.0f) { if (extRaw >= 15) parkIdaBase = (float)extRaw; }
+          else if ((float)extRaw >= parkIdaBase - 3.0f) { parkIdaBase += 0.3f * ((float)extRaw - parkIdaBase); parkIdaDrop = 0; }
+          else if ((float)extRaw <= parkIdaBase - PARK_REV_CAIDA_CM && fabsf(rel - PARK_GEOM_IDA_REL_MM) <= PARK_GEOM_IDA_WIN_MM
+                   && ++parkIdaDrop >= 2) {
+            const float t = parkThCarril(), th = isnan(t) ? 0.0f : constrain(t, -25.0f, 25.0f), tr = th * 0.0174533f;
+            const float hs = (parkIdaBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr);
+            Serial.print("PARK IDA: madera de adelante por sonar rel="); Serial.print(rel, 0); Serial.print(" ext="); Serial.print(extRaw);
+            Serial.print(" base="); Serial.print(parkIdaBase, 0); Serial.print(" hs="); Serial.println(hs, 0);
+            parkSinUDec = 2;
+            parkIniciarGeom(rutaErrCarrilDeg(), false);
+            parkDetTh = th; parkDetHSon = hs; parkDetHPose = parkHPoseMm();
+            parkDetAlong = alongSalidaMm() - (PARK_GEOM_W_IDA - PARK_PL_W_DET);
+            if (PARK_GEOM_ANCLA_LOCAL) {
+              parkGeomAnclaX = poseXf; parkGeomAnclaY = poseYf; parkGeomAnclaTh = rutaTh * DEG_TO_RAD;
+              parkGeomAnclaSec = rutaSecSalida; parkGeomAnclaW = PARK_GEOM_W_IDA;
+            }
+            parkRevAnc = true;
+            parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;   // ya pasa del w de parada: 41 -> 2 -> plan
+            motorAdelante();
+            break;
+          }
+        }
         if (lecturaAlta) {
           if (++parkAltasCnt >= (rebaseInicial ? 5 : PARK_PUNTA_ALTO_REBASE_N)) {
             // Muchas seguidas y ninguna normal: el carro de verdad se alejó.
