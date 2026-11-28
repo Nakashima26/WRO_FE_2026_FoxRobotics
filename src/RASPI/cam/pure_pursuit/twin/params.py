@@ -97,6 +97,12 @@ class SteeringParams:
         (0.0, 0.0), (13.5, 7.6), (28.5, 15.6), (71.5, 53.0))
 
     def __post_init__(self) -> None:
+        k = float(os.environ.get("TWIN_LEFT_K") or 1.0)
+        if k != 1.0 and self.table_left:
+            # Curvatura real a la izquierda / la de la tabla (orillas360-406, yaw/od vs servo: 0.72-0.80 en servo 80-120).
+            us = sorted({u for u, _ in self.table_left} | {40.0, 50.0, 60.0})
+            self.table_left = tuple((u, math.degrees(math.atan(k * math.tan(math.radians(table_wheel_deg(u, self.table_left))))))
+                                    for u in us)
         _prov("steering.gain_left/right", "supuesto", "pendiente lineal solo para herramientas; el modelo usa las tablas")
         _prov("steering.table_left/right", "medido", "arcos 2026-10-24 (PWM 150, BNO+encoder) + radios en tapete 2026-10-22, centro 75")
         _prov("steering.servo_center_deg", "medido", "2026-10-24: 75 ±0.3 en rectas; 74.5 del ajuste a 4 vueltas (antihorario y horario)")
@@ -105,6 +111,18 @@ class SteeringParams:
         _prov("steering.wheel_max_left/right_deg", "medido", "R min tapete 2026-10-22: izq 134-136 mm (148..156), der 123 mm (servo 1)")
         _prov("steering.slew_deg_per_s", "supuesto", "SG90 datasheet 0.1 s/60°")
         _prov("steering.deadband_deg", "supuesto", "zona muerta del servo; lo de 'correcciones de 1-2 no mueven las llantas' (2026-10-21) es el juego (backlash_deg)")
+        tau = os.environ.get("TWIN_SERVO_TAU")
+        if tau:
+            self.lag_tau_s = float(tau)
+            _prov("steering.lag_tau_s", "supuesto", f"TWIN_SERVO_TAU={tau} (barrido de respuesta del servo)")
+        tope = os.environ.get("TWIN_GIRO_TOPE")
+        if tope:
+            # Tope experimental "der,izq" en grados de bicicleta.
+            der, izq = (float(x) for x in tope.split(","))
+            self.table_right = self.table_right[:-1] + ((self.table_right[-1][0], der),)
+            self.table_left = self.table_left[:-1] + ((self.table_left[-1][0], izq),)
+            self.wheel_max_right_deg, self.wheel_max_left_deg = der, izq
+            _prov("steering.wheel_max_left/right_deg", "supuesto", f"TWIN_GIRO_TOPE={tope} (tope experimental)")
 
 
 @dataclass
@@ -167,6 +185,7 @@ class MotorParams:
     # 2026-10-24, N20, PWM -150: servo 1 -> R 138 mm; servo 156 -> R 162 mm.
     # La escala aproxima la apertura por deslizamiento. Los radios de reversa del N30 siguen pendientes.
     reverse_wheel_scale: float = 0.90
+    reverse_radii_mm: tuple[float, float] | None = None  # derecha, izquierda
     # Tope lateral medido (p8_curva_rapida): arriba de esto la curva se abre (subviraje); None = sin tope.
     # Der (servo 5/20) ~2610-2860, izq (servo 134) ~2400.
     a_lat_right_mm_s2: float | None = 2750.0
@@ -182,6 +201,18 @@ class MotorParams:
         _prov("motor.scrub_coeff", "medido", "calib 2026-10-21 p8_curva: −11% a servo 15, −2% a 40 (PWM 160)")
         _prov("motor.a_lat_left/right_mm_s2", "medido", "calib 2026-10-21 p8_curva_rapida: 2360-2860 mm/s² según servo")
         _prov("motor.a_max_mm_s2", "supuesto", "mu*fracción en eje trasero*g")
+        rws = os.environ.get("TWIN_REV_WHEEL_SCALE")
+        if rws:
+            # 11-25 real 254/255 (N30): reversa a tope R ~16-17 cm; 0.65 da 113/tan(0.65*53°) ≈ 165 mm.
+            self.reverse_wheel_scale = float(rws)
+            _prov("motor.reverse_wheel_scale", "medido", f"TWIN_REV_WHEEL_SCALE={rws} (real R reversa 16-17 cm)")
+        reverse_radii = os.environ.get("TWIN_REV_RADII_MM")
+        if reverse_radii:
+            right_mm, left_mm = (float(value) for value in reverse_radii.split(","))
+            if not all(math.isfinite(radius) and radius > 0 for radius in (right_mm, left_mm)):
+                raise ValueError("TWIN_REV_RADII_MM requiere radios positivos y finitos: der,izq")
+            self.reverse_radii_mm = right_mm, left_mm
+            _prov("motor.reverse_radii_mm", "medido", f"TWIN_REV_RADII_MM={reverse_radii} (radios al eje trasero)")
         if os.environ.get("TWIN_MOTOR_REAL") == "1":
             # Curva efectiva bajo carga: pendiente media de los ACK y recuperación
             # progresiva del extremo medido con el N30 en recta a fondo.

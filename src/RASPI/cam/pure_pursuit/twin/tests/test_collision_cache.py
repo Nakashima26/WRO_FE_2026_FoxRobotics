@@ -115,3 +115,19 @@ def test_collision_world_new_and_custom_dynamic_walls():
         for pose in [(600,650,45),(1000,1000,0),(-1000,-1000,90)]:
             assert W.collision(world,*pose,176,110,35) == reference_collision(world,*pose,176,110,35)
     assert not hasattr(world,"_collision_cache")
+
+
+def test_fox_v2_nose_clears_front_parking_barrier(monkeypatch):
+    monkeypatch.setenv("TWIN_FIELD_DIR", "CCW")
+    monkeypatch.setenv("TWIN_PARK_GAP_MM", "291")
+    field = randomize(20, park_pos="random")
+    world = W.World(field)
+    front_face = max(y for _, y in field.barriers[0])
+    shape = W.fox_v2_footprint(176, 125, 21.8, 113)
+    # Pose del primer contacto del rectángulo en s20 durante INICIO.
+    x, y, heading = -1348.45, front_face + 165.10, 151.926
+    assert W.collision(world, x, y, heading, 176, 125, 21.8) == "cajón magenta"
+    assert W.collision(world, x, y, heading, 176, 125, 21.8, footprint=shape) is None
+    # El morro estrecho todavía detecta un avance directo contra la madera.
+    assert W.collision(world, x, front_face + 150, 180, 176, 125, 21.8,
+                       footprint=shape) == "cajón magenta"

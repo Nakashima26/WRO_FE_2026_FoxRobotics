@@ -46,7 +46,8 @@ def test_sil_native_advance_exact(variant, drain_period):
                                       a_lat_left_mm_s2=300, a_lat_right_mm_s2=200)
     vehicles = [NativeVehicle(p, 12, -50, 27, v=700) for _ in range(2)]
     encoders = [Encoder(p.encoder, np.random.default_rng(42)) for _ in range(2)]
-    firmwares = [FirmwareSIL() for _ in range(2)]
+    defines = {"FOX_ENCODER": "1", "FOX_TOF": "1"}
+    firmwares = [FirmwareSIL(defines=defines) for _ in range(2)]
     from collections import deque
     histories = [deque(maxlen=20000), []]
     collisions = [[], []]
@@ -186,3 +187,20 @@ def test_race_motor_breakaway_and_full_pwm_speed(monkeypatch, vehicle_cls):
     assert reverse.v_wheel == 0
     run(reverse, 150, lock, direction=-1)
     assert reverse.v < -200
+
+
+@pytest.mark.parametrize(("servo_side", "radius"), [("right", 180.0), ("left", 162.0)])
+def test_reverse_calibrates_each_lock_independently(monkeypatch, servo_side, radius):
+    import math
+
+    monkeypatch.setenv("TWIN_GIRO_TOPE", "42.57,40.14")
+    monkeypatch.setenv("TWIN_REV_RADII_MM", "180,162")
+    params = TwinParams()
+    steering = params.steering
+    servo = steering.servo_min_deg if servo_side == "right" else steering.servo_max_deg
+    backlash = steering.backlash_deg if servo_side == "right" else -steering.backlash_deg
+    for vehicle_type in (Vehicle, NativeVehicle):
+        vehicle = vehicle_type(params, 0, 0, 0, v=-100, servo_deg=servo,
+                               wheel_servo_deg=servo + backlash)
+        step = vehicle.step(0.001, servo, 100, -1)
+        assert abs(step.ds_true_mm / math.radians(vehicle.heading_deg)) == pytest.approx(radius)
