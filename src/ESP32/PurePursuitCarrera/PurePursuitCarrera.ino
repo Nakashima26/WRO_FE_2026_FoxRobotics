@@ -1889,6 +1889,8 @@ PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
 PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
+PARK_AJ int          PARK_GEOM_SIN_U             = 1;       // 1 = si la reversa GEOM no halla la madera, ancla con el pka de la Pi y entra (GEOM->U salia ~1/10 en el carro)
+PARK_AJ float        PARK_GEOM_SIN_U_OFS_MM      = -168.0f; // parkDetAlong = pka + esto (gemelo: el sonar en reversa ancla a pka-156..-177 en 7 corridas; el -64 viejo es de antes de W_DET 145)
 PARK_AJ int          PARK_RESCATE_LENTO          = 1;       // 2026-11-27 orillas358: DIRECTO fallido antes de pka+DET -> sigue despacio en el carril (fase 41) en vez de volver a la ruta a 255 y frenar resbalando
 PARK_AJ int          PARK_GEOM_ROJO_PWM          = 155;     // avance durante el acercamiento
 PARK_AJ float        PARK_GEOM_FRENO_S           = 0.30f;   // s: la frenada recorre v*esto antes de arrancar la reversa (n1/s21: 651 mm/s -> ~190 mm)
@@ -8604,7 +8606,14 @@ void loop() {
         }
         bool sinMadera = parkGeomModo ? (alongSalidaMm() < rutaPka - PARK_GEOM_BUSCA_FIN_MM || millis() - parkFaseMs > (unsigned long)PARK_GEOM_BUSCA_MS)
                                       : (pw < PARK_REV_BUSCA_W_MIN || millis() - parkFaseMs > 4000UL);
-        if (sinMadera) { parkRevCaeAU("no encuentro la madera"); }
+        if (sinMadera && PARK_GEOM_SIN_U && parkGeomModo && isfinite(rutaPka)) {
+          // prior de la Pi (+-30 mm) en vez de la U: con el cajon atras la U cruzaba la pista (orillas355/358/364)
+          parkDetAlong = rutaPka + PARK_GEOM_SIN_U_OFS_MM; parkDetHPose = parkHPoseMm(); parkDetHSon = parkDetHPose; parkDetTh = 0.0f;
+          parkRevAnc = true;
+          Serial.print("PARK GEOM: sin madera, ancla con pka="); Serial.print(rutaPka, 0); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
+          parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;
+          motorAdelante();
+        } else if (sinMadera) { parkRevCaeAU("no encuentro la madera"); }
         break;
       }
 
