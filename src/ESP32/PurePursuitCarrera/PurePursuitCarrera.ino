@@ -1889,6 +1889,7 @@ PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
 PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
+PARK_AJ int          PARK_RESCATE_LENTO          = 1;       // 2026-11-27 orillas358: DIRECTO fallido antes de pka+DET -> sigue despacio en el carril (fase 41) en vez de volver a la ruta a 255 y frenar resbalando
 PARK_AJ int          PARK_GEOM_ROJO_PWM          = 155;     // avance durante el acercamiento
 PARK_AJ float        PARK_GEOM_FRENO_S           = 0.30f;   // s: la frenada recorre v*esto antes de arrancar la reversa (n1/s21: 651 mm/s -> ~190 mm)
 PARK_AJ float        PARK_GEOM_DET_MM            = 40.0f;   // ROJO cerca: la reversa debe arrancar al menos en pka + esto (madera nominal pka-105, ±50); si no, la busqueda retrocede lejos de ella
@@ -3353,7 +3354,7 @@ void silPreParkSeed() {
   SIL_AJ(PARK_REV_ATRAS_MIN_CM); SIL_AJ(PARK_REV_B_MAX_MM);
   SIL_AJ(PARK_UTURN_ARRANQUE_MM); SIL_AJ(PARK_UTURN_ESPERA_MM); SIL_AJ(PARK_UTURN_EXT_OBJ_CM);
   SIL_AJ(PARK_UTURN_ALEJAR_CM); SIL_AJ(PARK_UTURN_ALEJAR_ANG); SIL_AJ(PARK_UTURN_ALEJAR_MAX_MM);
-  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
+  SIL_AJ(PARK_UTURN_FONDO_ALONG_MIN);  SIL_AJ(PARK_SINU_FORZAR_U); SIL_AJ(PARK_SINU_ABORT_ANG); SIL_AJ(PARK_RESCATE_LENTO); SIL_AJ(PARK_UTURN_ENDEREZA); SIL_AJ(PARK_UTURN_ENDEREZA_REST_MM); SIL_AJ(PARK_UTURN_ENDEREZA_REST_TOL); SIL_AJ(PARK_UTURN_ALEJAR_PWM); SIL_AJ(PARK_UTURN_PWM); SIL_AJ(PARK_UTURN_SIN_SETTLE); SIL_AJ(PARK_PEGADO_CICLA); SIL_AJ(PARK_UTURN_TOPE); SIL_AJ(PARK_SCAN_TOPE);
   SIL_AJ(PARK_SCAN_RAPIDO_PWM); SIL_AJ(PARK_SCAN_U_PWM); SIL_AJ(PARK_SCAN_RAPIDO_MM); SIL_AJ(PARK_SINU_GEOMETRIA);
   SIL_AJ(PARK_UTURN_RUTA_ALONG_MM); SIL_AJ(PARK_UTURN_RUTA_ANG_MAX); SIL_AJ(PARK_UTURN_RUTA_PKA_MM); SIL_AJ(PARK_UTURN_ADELANTO_MM); SIL_AJ(PARK_UTURN_ADELANTO_EXT_CM);
 #undef SIL_AJ
@@ -3707,6 +3708,15 @@ static void parkRecuperarEscaneo(const char *motivo) {
         && alongSalidaMm() >= rutaPka + PARK_GEOM_DET_MM) {
       parkSinUDec = 2;
       parkIniciarGeom(rutaErrCarrilDeg(), rutaExtTapeteCm() > PARK_PARED_CM + PARK_LEJOS_CM);
+      return;
+    }
+    if (PARK_GEOM_RESCATE && PARK_RESCATE_LENTO && isfinite(rutaPka)) {
+      // Volver a SIGUIENDO acelera la ruta y el GEOM frena resbalando: la odometria pierde la madera (orillas358).
+      parkSinUDec = 2;
+      parkIniciarGeom(rutaErrCarrilDeg(), false);
+      parkFase = 41; parkFaseMs = millis(); parkOdom0 = odomMm;
+      motorAdelante();
+      Serial.println("PARK rescate lento: sigue por el carril (fase 41)");
       return;
     }
     parkSinUDec = 2;
