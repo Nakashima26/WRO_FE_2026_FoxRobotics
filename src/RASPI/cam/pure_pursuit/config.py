@@ -1877,6 +1877,7 @@ MAP_LOG_COST_EVERY_N = 60
 SURPRISE_RULE = False
 SURPRISE_HEIGHT_TOL_MM = 18.0
 SURPRISE_CONFIRM_FRAMES = 3
+SURPRISE_EDGE_PX = 48   # px: sin señal especial (50/150) tan cerca de la orilla del cuadro (orillas413: rojo a x=8 midió 61 mm)
 SURPRISE_MIN_CONTOUR_AREA = 200.0  # la señal de 50 mm debe verse antes que el corte normal de 1000 px
 
 # Opcional: altura esperada de un bloque NORMAL de 100 mm según su pie en BEV.

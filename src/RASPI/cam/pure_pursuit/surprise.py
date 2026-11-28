@@ -173,6 +173,10 @@ class SurpriseInterpreter:
                 supported = image is None or ground_visible(image, box)
                 if candidate in (50, 150) and not supported:
                     candidate = None
+                # orillas413: el rojo normal en la orilla izquierda, girando, midió 61 mm y se manejó como verde.
+                edge = x < C.SURPRISE_EDGE_PX or x+w > shape[1]-C.SURPRISE_EDGE_PX
+                if candidate in (50, 150) and edge:
+                    candidate = None
                 track = None
                 if point is not None:
                     choices = [(math.dist(point, t.point), i, t) for i, t in enumerate(self.tracks)
@@ -199,7 +203,8 @@ class SurpriseInterpreter:
                     special = self.special_columns.get(column)
                     if special is not None:
                         track.height = special
-                        if candidate == 100:
+                        # Un 100 limpio y centrado, confirmado en varios cuadros, deshace un especial mal leído.
+                        if candidate == 100 and (edge or abs(height-100) > 8):
                             candidate = None
                     if candidate is not None and (supported or track.height in (None, candidate)):
                         track.votes = track.votes+1 if candidate == track.candidate else 1
@@ -211,6 +216,8 @@ class SurpriseInterpreter:
                                 print(f"[SURPRISE] visible={color} driving={opposite(color)} "
                                       f"height={candidate} estimate={measured} seat={seat}", flush=True)
                             track.height = candidate
+                            if candidate == 100:
+                                self.special_columns.pop(column, None)
                             if seat is not None:
                                 self.seats[seat] = (color, candidate)
                                 if candidate in (50, 150) and x > 1 and x+w < shape[1]-1:

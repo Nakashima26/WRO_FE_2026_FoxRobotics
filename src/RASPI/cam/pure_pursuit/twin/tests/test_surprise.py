@@ -212,3 +212,42 @@ def test_special_far_from_seat_binds_to_confirmed_seat():
     dm.confirmed={('N','X1'):'Green'}
     for _ in range(3):interpreter.interpret(positions,bev,image.shape,dm)
     assert interpreter.observations[0]['seat']==('N','X1') and interpreter.observations[0]['confirmed_mm']==50
+
+
+def _scene_n_x1(height):
+    from types import SimpleNamespace
+    from pure_pursuit.wro_field import section_to_world, SEATS
+    p=TwinParams(); cam=CameraModel(p.camera,p); bev,_=cam.build_bev(); field=randomize(1)
+    sx,sy=section_to_world('N',*SEATS['X1'])
+    field.signs=[Sign(sx,sy,'Red','N','X1',height)]; field.barriers=[]
+    dm=SimpleNamespace(direction='CW',pose_xy=(sx-900,sy),_view_heading=90,confirmed={})
+    image=cam.render_camera(field,*dm.pose_xy,90); vision=Vision(open_cam=False); vision.min_contour_area=200
+    _,positions=vision.detect_on(image)
+    return bev,image,dm,positions
+
+
+def test_special_at_frame_edge_is_ignored(monkeypatch):
+    """orillas413: rojo normal a x=8, girando, midió 61 mm -> no se vuelve verde."""
+    import pure_pursuit.surprise as S
+    bev,image,dm,positions=_scene_n_x1(100)
+    x,y,w,h=positions['Red'][0]
+    monkeypatch.setattr(S,'estimate_height',lambda *a,**k:61.0)
+    interpreter=SurpriseInterpreter()
+    edge={'Red':[(2,y,w,h)],'Green':[]}
+    for _ in range(5):out=interpreter.interpret(edge,bev,image.shape,dm)
+    assert not out['Green'] and not interpreter.special_columns
+
+
+def test_misread_special_column_recovers_with_clean_normal(monkeypatch):
+    import pure_pursuit.surprise as S
+    bev,image,dm,positions=_scene_n_x1(100)
+    assert C.SURPRISE_EDGE_PX <= positions['Red'][0][0] <= image.shape[1]-C.SURPRISE_EDGE_PX-positions['Red'][0][2]
+    interpreter=SurpriseInterpreter()
+    monkeypatch.setattr(S,'estimate_height',lambda *a,**k:52.0)
+    for _ in range(3):out=interpreter.interpret(positions,bev,image.shape,dm)
+    assert out['Green'] and interpreter.special_columns
+    monkeypatch.setattr(S,'estimate_height',lambda *a,**k:99.0)
+    out=interpreter.interpret(positions,bev,image.shape,dm)
+    assert out['Green']   # un solo cuadro no basta
+    for _ in range(2):out=interpreter.interpret(positions,bev,image.shape,dm)
+    assert out['Red'] and not out['Green'] and not interpreter.special_columns
