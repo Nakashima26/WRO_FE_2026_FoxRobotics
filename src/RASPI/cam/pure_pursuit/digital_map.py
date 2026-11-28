@@ -574,6 +574,13 @@ class DigitalMap:
                 weak = mis > _VOTE_MISALIGN_DEG
             else:
                 weak = False
+            # Lata de la recta siguiente vista de frente desde esta (orillas399-401: el rojo del inicio de N visto
+            # desde E a ~800 mm con el carro aún recto caía 200 mm corto, en N/T1 en vez de N/T3): ahí la fila es
+            # puro rango y el rango lejano es lo que peor mide la cámara real. Cuenta, pero confirma ya girando.
+            nxt = getattr(C, "DIGITAL_MAP_NEXT_ROW_WEAK_DEG", None)
+            if (not weak and nxt is not None and sec != self.section
+                    and abs((self._view_heading - _heading(sec, self.direction) + 180.0) % 360.0 - 180.0) > float(nxt)):
+                weak = True
             # Fila observada (coordenada lateral de la recta) antes de pegarla a un asiento:
             # route_mode la usa para saber qué filas de la columna son posibles (señal medio vista).
             obs = self._row_obs.setdefault((sec, _COL[sid], color), [])

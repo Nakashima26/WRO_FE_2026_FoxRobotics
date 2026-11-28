@@ -1717,6 +1717,7 @@ ROUTE_UNSEEN_MAX_TC = 4
 DIGITAL_MAP_CONFIRM_VOTES = 3
 DIGITAL_MAP_CONFIRM_DIST_MM = 160.0
 DIGITAL_MAP_CONFIRM_LEAD = 2
+DIGITAL_MAP_NEXT_ROW_WEAK_DEG = 60.0  # recta siguiente vista casi de frente: vota sin confirmar fila (orillas399-401)
 DIGITAL_MAP_RECHECK_COLOR = False  # exigir evidencia cercana y unívoca para rectificar un asiento
 # Arranque ciego (start_fix.py): el cajón puede estar en cualquier punto de la
 # recta de salida (pegado a la pared exterior). Se arranca suponiéndolo lo más

@@ -194,3 +194,21 @@ def test_seat_seen_normal_is_not_flipped_to_short():
     image=cam.render_camera(field,*dm.pose_xy,90); _,positions=vision.detect_on(image)
     for _ in range(6):out=interpreter.interpret(positions,bev,image.shape,dm)
     assert not out['Red'] and interpreter.seats[('N','X1')]==('Green',100)
+
+
+def test_special_far_from_seat_binds_to_confirmed_seat():
+    """orillas399-401: el cubo chico se veía a >160 mm de su asiento; se liga al único confirmado de su color cerca."""
+    from types import SimpleNamespace
+    from pure_pursuit.wro_field import section_to_world, SEATS
+    p=TwinParams(); cam=CameraModel(p.camera,p); bev,_=cam.build_bev(); field=randomize(1)
+    sx,sy=section_to_world('N',*SEATS['X1'])
+    field.signs=[Sign(sx-230,sy,'Green','N','X1',50)]; field.barriers=[]
+    vision=Vision(open_cam=False); vision.min_contour_area=200
+    dm=SimpleNamespace(direction='CW',pose_xy=(sx-900,sy),_view_heading=90,confirmed={})
+    image=cam.render_camera(field,*dm.pose_xy,90); _,positions=vision.detect_on(image)
+    interpreter=SurpriseInterpreter()
+    for _ in range(3):interpreter.interpret(positions,bev,image.shape,dm)
+    assert interpreter.observations[0]['seat'] is None
+    dm.confirmed={('N','X1'):'Green'}
+    for _ in range(3):interpreter.interpret(positions,bev,image.shape,dm)
+    assert interpreter.observations[0]['seat']==('N','X1') and interpreter.observations[0]['confirmed_mm']==50

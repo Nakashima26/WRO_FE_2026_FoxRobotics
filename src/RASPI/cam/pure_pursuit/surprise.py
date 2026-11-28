@@ -149,6 +149,14 @@ class SurpriseInterpreter:
                                             for sec in ("N", "E", "S", "W") for sid, sx, sy in _seat_world(sec))
                             if ranked[0][0] < 160 and ranked[1][0]-ranked[0][0] > 40:
                                 seat = ranked[0][1]
+                            else:
+                                # orillas399-401: el cubo chico en la orilla de E caía a >160 mm de su asiento en todas
+                                # las vueltas (seat=None): nunca se volteaba y la ruta lo pasaba como rojo. Si un solo
+                                # asiento ya confirmado con este color visible queda cerca, es esa lata.
+                                near = [k for d, k in ranked if d <= 350
+                                        and getattr(digital, "confirmed", {}).get(k) == color]
+                                if len(near) == 1:
+                                    seat = near[0]
                 column = (seat[0], _COL[seat[1]], color) if seat is not None else None
                 height = estimate_height(bev, box, shape)
                 if height is None and (x <= 1 or x+w >= shape[1]-1):
