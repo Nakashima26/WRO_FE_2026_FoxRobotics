@@ -1702,7 +1702,7 @@ ROUTE_SWAP_DIFF_MM = None   # None: siempre; mm: solo si la ruta nueva se aparta
 ROUTE_UPLOAD_SLOW = True
 # Mientras sube una ruta que cambia (ver ROUTE_UPLOAD_DIFF_MM), el ESP gira con el obs de la Pi
 # (ruta nueva) en vez de su ruta vieja (ps=1 en el V2) y no se aplica ROUTE_UPLOAD_PWM. False: sin cambio.
-ROUTE_UPLOAD_PI_STEER = False
+ROUTE_UPLOAD_PI_STEER = True   # 11-27 orillas408: el ESP siguió 0.7 s la ruta vieja sin el rojo E/T2 (subidas cortadas por replanes); banco 384: 34 vs 36 fallas, −0.32 s
 # Error lateral (mm, odometría) arriba del cual se baja a ROUTE_SLOW_PWM.
 ROUTE_CTE_SLOW_MM = 40.0
 # Frames máximos detenido esperando ver un asiento (luego sigue lento).
