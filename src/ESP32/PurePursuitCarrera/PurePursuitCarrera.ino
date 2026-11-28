@@ -1895,8 +1895,10 @@ PARK_AJ float        PARK_GEOM_IDA_WIN_MM        = 110.0f;
 PARK_AJ float        PARK_GEOM_W_IDA             = 290.0f;  // w (marco de la reversa) en esa bajada: ancla de la reversa 190 + ~100 mm de odometria hasta ella (384-390: 69..166)
 float parkIdaBase = 0.0f; int parkIdaDrop = 0;
 // La altura del ancla de ida sale de la base del sonar a velocidad de ruta: 396-398 erro -75..+70 mm
-// contra el ToF al arrancar el plan (T1 y el arco salen de esa altura: fondo a 42-49 grados). 1 = la mide el ToF lateral al entrar a f40.
-PARK_AJ int   PARK_GEOM_IDA_TOF_H = 1;
+// contra el ToF al arrancar el plan (T1 y el arco salen de esa altura: fondo a 42-49 grados). 1 = la mide el ToF lateral al entrar a f40;
+// 2 = tambien con el ancla de reversa (orillas400: hs 335 contra ToF 264, fondo a 51 y termino a tR 46).
+PARK_AJ int   PARK_GEOM_IDA_TOF_H = 2;
+PARK_AJ float PARK_GEOM_IDA_TH_MAX = 8.0f;   // grados: la ida no ancla girando (orillas399: el reflejo de la madera la giro 20 y hs salio 439)
 bool parkIdaAncla = false;
 PARK_AJ int          PARK_GEOM_SIN_U             = 1;       // 1 = si la reversa GEOM no halla la madera, ancla con el pka de la Pi y entra (GEOM->U salia ~1/10 en el carro)
 PARK_AJ float        PARK_GEOM_SIN_U_OFS_MM      = -277.0f; // parkDetAlong = pka + esto (carro 366/367: el sonar ancló a pka-259 y pka-295; 368/369 con -168 quedó un cajón adelante)
@@ -7746,7 +7748,7 @@ void loop() {
           if (parkIdaBase <= 0.0f) { if (extRaw >= 15) parkIdaBase = (float)extRaw; }
           else if ((float)extRaw >= parkIdaBase - 3.0f) { parkIdaBase += 0.3f * ((float)extRaw - parkIdaBase); parkIdaDrop = 0; }
           else if ((float)extRaw <= parkIdaBase - PARK_REV_CAIDA_CM && fabsf(rel - PARK_GEOM_IDA_REL_MM) <= PARK_GEOM_IDA_WIN_MM
-                   && ++parkIdaDrop >= 2) {
+                   && ++parkIdaDrop >= 2 && !(fabsf(parkThCarril()) > PARK_GEOM_IDA_TH_MAX)) {
             const float t = parkThCarril(), th = isnan(t) ? 0.0f : constrain(t, -25.0f, 25.0f), tr = th * 0.0174533f;
             const float hs = (parkIdaBase * 10.0f + 68.0f) * cosf(tr) - 64.0f * sinf(tr);
             Serial.print("PARK IDA: madera de adelante por sonar rel="); Serial.print(rel, 0); Serial.print(" ext="); Serial.print(extRaw);
@@ -8742,7 +8744,7 @@ void loop() {
           if (PARK_PL_TOF_ANCLA && !parkRevModo) parkPlAnclaMadera();
           if (PARK_PL_REF_PARED) parkPlFusionPared(haciaPared);
           if (parkPlFrenteHabilitado()) parkPlFusionFrente();
-          if (PARK_GEOM_IDA_TOF_H && parkIdaAncla) {
+          if (PARK_GEOM_IDA_TOF_H && (parkIdaAncla || (PARK_GEOM_IDA_TOF_H >= 2 && parkGeomModo && parkDirecto && parkRevAnc))) {
             // ToF lateral (110.6 mm delante del eje, 35.2 al costado) ya pasada la madera: pared limpia
             const int side = parkParedEsIzquierda ? 0 : 1;
             const float theta = -haciaPared * (anguloGyro - parkRumboRef), rad = theta * DEG_TO_RAD;
