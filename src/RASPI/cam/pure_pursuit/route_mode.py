@@ -2169,15 +2169,18 @@ class RouteMode:
         # distinguirlas. Una diferencia de asiento desplaza el mapa 500 mm.
         lo = PARK_W_MIN - self.fix.w0_guess
         hi = PARK_W_MAX - self.fix.w0_guess
-        shifts = [seat_w - w for seat_w in row if lo - SIGN_MM <= seat_w - w <= hi + SIGN_MM]
-        if len(shifts) != 1 or not lo <= shifts[0] <= hi:
+        # La odometría de la salida solo se PASA (patina a tope de volante): la lata puede caer detrás
+        # del cajón más lejano legal (orillas360: W/T2 a +355 mm del rango, mapa vacío y choque).
+        over = float(getattr(C, "ROUTE_FIX_SEAT_ODO_OVER_MM", 0.0) or 0.0)
+        shifts = [seat_w - w for seat_w in row if lo - SIGN_MM <= seat_w - w <= hi + SIGN_MM + over]
+        if len(shifts) != 1 or not lo <= shifts[0] <= hi + over:
             return None
         delta = shifts[0]
         if self._line_d and abs(delta - self._line_median()) > SIGN_MM:
             return None
         if self.fix.n_inform >= 3:
             near = np.abs(self.fix.deltas - delta) <= SIGN_MM
-            if np.max(self.fix.logp[near]) < self.fix.logp.max() - 3.0:
+            if near.any() and np.max(self.fix.logp[near]) < self.fix.logp.max() - 3.0:
                 return None
         print(f"[ROUTE] avance por asiento único: {delta:+.0f} mm", flush=True)
         return delta
@@ -2555,4 +2558,4 @@ class RouteMode:
             lines.append(f"RTP,{i},{pts}")
         lines.append(f"RTE,{n}")
         return lines
-
+
