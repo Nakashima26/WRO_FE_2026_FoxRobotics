@@ -2005,6 +2005,9 @@ class RouteMode:
         a = np.array(self.axis)
         span = PARK_W_MAX - PARK_W_MIN
         mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
+        # La azul es inconfundible: su voto vale aunque la odometría de la salida se haya pasado más que el margen de la naranja
+        # (orillas360/363: ~+355/+430 con margen 300 -> sin voto, arranque forzado al revés, rojo W/T2 fuera del mapa).
+        mg = float(getattr(C, "ROUTE_FIX_BLUE_RANGE_MARGIN_MM", None) or mg)
         lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
         if rng is not None:
             lo, hi = -float(rng), float(rng)   # tras el arranque: el resto es chico, alrededor de 0
