@@ -1923,7 +1923,7 @@ ROUTE_L23_ENTRY_REPLAN_FRAMES = None  # si se indica, aplica el tope solo al lle
 
 # Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
 ROUTE_BARRIER_EXTRA_MM = 30.0  # margen extra (mm) de la ruta a las maderas del cajón en las vueltas (orillas364/367: al salir de la esquina rozaba la punta)
-ROUTE_FINAL_D_MM = 580.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)
+ROUTE_FINAL_D_MM = 640.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)
 ROUTE_FINAL_LEAD_MM = 1300.0
 ROUTE_FINAL_PWM = None   # tope de rv desde tc >= ROUTE_FINAL_TC (recta del cajón al final); None = sin tope
 ROUTE_PARK_NEAR_PWM = None      # tope de rv a menos de ROUTE_PARK_NEAR_MM de las maderas del cajón (tc>=11) si el cajón queda a la salida de la esquina (pka < ROUTE_PARK_NEAR_PKA_MAX); None = apagado
