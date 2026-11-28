@@ -417,7 +417,8 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
     # La malla (O, P) solo depende de sentido, recta de salida y rango de d: paredes,
     # isla, señales y vista se cachean por malla; las maderas del cajón aparte, porque
     # park_w cambia al fijar el arranque (antes eso recalculaba todo: ~45 ms).
-    ckey = gridkey + (parking, park_w)
+    bar_extra = float(getattr(C, "ROUTE_BARRIER_EXTRA_MM", 0.0) or 0.0)
+    ckey = gridkey + (parking, park_w, bar_extra)
     clear = _STATIC_CACHE.get(ckey)
     if clear is None:
         base = _STATIC_CACHE.get(gridkey)
@@ -445,9 +446,9 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
                     sel = np.flatnonzero(np.hypot(P[k][:, None, 0] - near[None, :, 0], P[k][:, None, 1] - near[None, :, 1]).min(1) < r_bar)
                     if len(sel):
                         clear[k][:, sel] = np.minimum(clear[k][:, sel], _rect_dist_pose(
-                            near[:, 0], near[:, 1], xx[k][:, sel], yy[k][:, sel], hd[k][:, sel], shd[k][:, sel], chd[k][:, sel]).min(-1))
+                            near[:, 0], near[:, 1], xx[k][:, sel], yy[k][:, sel], hd[k][:, sel], shd[k][:, sel], chd[k][:, sel]).min(-1) - bar_extra)
                 elif len(near):
-                    clear[k] = np.minimum(clear[k], _rect_dist_pose(near[:, 0], near[:, 1], xx[k], yy[k], hd[k], shd[k], chd[k]).min(-1))
+                    clear[k] = np.minimum(clear[k], _rect_dist_pose(near[:, 0], near[:, 1], xx[k], yy[k], hd[k], shd[k], chd[k]).min(-1) - bar_extra)
         _STATIC_CACHE[ckey] = clear
     clear = clear.copy()
     centers = [(px, py) for px, py, _c in pillars] + extra_centers
