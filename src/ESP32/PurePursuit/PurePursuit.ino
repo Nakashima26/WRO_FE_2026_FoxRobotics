@@ -8980,9 +8980,11 @@ void loop() {
         bool cercaTof = false;
         parkPlanClrPrev = clr;
         // Cola contra la madera de atras medida por el ToF trasero (mas fiel que la pose, que trae ~10 mm de error del anclaje).
-        if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && th <= PARK_PL_TOF_TH_MAX && i >= 1) {
-          float yaw = th * 0.0174533f;
-          float esqMm = 10.0f * (distB_filtrada * cosf(yaw) - PARK_TOF_COLA_CM - 6.3f * sinf(yaw));
+        // orillas428: con th > TOF_TH_MAX (tramo 2 a 62->44 grados) el ToF leia 4 cm y la reversa siguio ~2 s empujando la madera
+        // (anti-atasco hasta pwm 168). Corta a cualquier theta; la proyeccion usa el angulo topado como parkColaEsqMm.
+        if (parkPlanDir < 0 && distB_filtrada > 0.0f && th >= 0.0f && i >= 1) {
+          float yaw = th * 0.0174533f, a = min(th, PARK_PL_TOF_TH_MAX) * 0.0174533f;
+          float esqMm = 10.0f * (distB_filtrada * cosf(a) - PARK_TOF_COLA_CM - 6.3f * sinf(a));
           if (esqMm <= PARK_PL_MTOF_MM) {
             // El eco trasero puede apuntar a la punta de la madera en diagonal.
             // Antes de cortar el arco, proyecta la huella al final del coast
