@@ -1912,10 +1912,11 @@ class RouteMode:
         mg = float(getattr(C, "ROUTE_FIX_LINE_RANGE_MARGIN_MM", 150.0))
         lo, hi = (-mg, span + mg) if dm.direction == "CW" else (-span - mg, mg)
         best = None
+        # 2026-11-27 (orillas357, arranque desde atrás): en CCW la naranja va a ~30° y se ve en la orilla; tomada de frente votó -552 (la azul +230).
         for (sx, sy), (ex, ey) in orange_segments():
             u = np.array([ex - sx, ey - sy], dtype=float); u /= np.linalg.norm(u)
             n = np.array([-u[1], u[0]])
-            if abs(n @ a) < 0.3:
+            if abs(n @ a) < float(getattr(C, "ROUTE_FIX_LINE_MIN_NA", 0.3)):
                 continue
             d = (n @ np.array([sx, sy]) - n @ p) / (n @ a)
             dist = math.hypot(sx - p[0], sy - p[1])
