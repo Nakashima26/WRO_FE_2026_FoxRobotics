@@ -118,13 +118,14 @@ class SurpriseInterpreter:
         self.tracks = []
         self.frame = 0
         self.seats = {}
+        self.special_columns = {}
         self.observations = []
 
     def reset(self):
         self.__init__()
 
     def interpret(self, positions, bev, shape, digital=None, image=None):
-        from .digital_map import feet_world, _seat_world
+        from .digital_map import _COL, feet_world, _seat_world
         self.frame += 1
         self.observations = []
         out = {c: [] for c in positions}
@@ -148,6 +149,7 @@ class SurpriseInterpreter:
                                             for sec in ("N", "E", "S", "W") for sid, sx, sy in _seat_world(sec))
                             if ranked[0][0] < 160 and ranked[1][0]-ranked[0][0] > 40:
                                 seat = ranked[0][1]
+                column = (seat[0], _COL[seat[1]], color) if seat is not None else None
                 height = estimate_height(bev, box, shape)
                 if height is None and (x <= 1 or x+w >= shape[1]-1):
                     partial = estimate_height(bev, box, shape, allow_side_clipped=True)
@@ -182,6 +184,11 @@ class SurpriseInterpreter:
                         saved_color, saved_height = self.seats[seat]
                         if saved_color == color:
                             track.height = saved_height
+                    special = self.special_columns.get(column)
+                    if special is not None:
+                        track.height = special
+                        if candidate == 100:
+                            candidate = None
                     if candidate is not None and (supported or track.height in (None, candidate)):
                         track.votes = track.votes+1 if candidate == track.candidate else 1
                         track.candidate = candidate
@@ -194,6 +201,8 @@ class SurpriseInterpreter:
                             track.height = candidate
                             if seat is not None:
                                 self.seats[seat] = (color, candidate)
+                                if candidate in (50, 150) and x > 1 and x+w < shape[1]-1:
+                                    self.special_columns[column] = candidate
                     else:
                         track.votes = 0
                         track.candidate = None

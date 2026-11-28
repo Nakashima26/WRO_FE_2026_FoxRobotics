@@ -747,7 +747,7 @@ class RouteMode:
                 if None not in odom:
                     self._observe_park_prior(dm, tc, ack, self.loc.pose(ack), odom)
                 if self._park_observed is not None:
-                    return None, f",pka={self.pka:.0f},pko={self._park_observed.far_along:.0f}", None
+                    return None, f",pka={self.pka:.0f},pko={self._park_observed.far_along:.0f},pktof=1", None
             return None, "", None
         if dm.direction is None or dm.in_stall or dm._odom0 is None:
             return None, "", None
@@ -2529,7 +2529,7 @@ class RouteMode:
         if self.fixed and getattr(self, "pka", None) is not None:
             s += f",pka={self.pka:.0f}"
             if C.ROUTE_PARK_OBS_PRIOR and self._park_observed is not None:
-                s += f",pko={self._park_observed.far_along:.0f}"
+                s += f",pko={self._park_observed.far_along:.0f},pktof=1"
             if (C.ROUTE_PARK_OBS_PRIOR and self._park_observed is None
                     and getattr(self, "_tc_max", 0) >= 11
                     and self._park_vision.estimate is not None):

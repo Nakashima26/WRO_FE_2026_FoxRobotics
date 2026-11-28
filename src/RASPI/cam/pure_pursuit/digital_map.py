@@ -678,6 +678,21 @@ class DigitalMap:
                     out[(sec, sid)] = color
         return out
 
+    def correct_special_color(self, seat, visible, driving):
+        """Correct the known sign's color without moving its row."""
+        section, sid = seat
+        for other, column in _COL.items():
+            if column != _COL[sid]:
+                continue
+            key = (section, other)
+            if self.confirmed.get(key) == visible:
+                self.confirmed[key] = driving
+                self._votes[key] = {"Red": 0, "Green": 0}
+                print(f"[DMAP] {section}/{other} {visible} -> {driving} (altura confirmada)", flush=True)
+            bucket = self._votes.get(key)
+            if bucket is not None:
+                bucket[visible] = 0
+
     def _keep_closer_row(self, sec: str, sid: str, color: str) -> None:
         """T1 y T3 son la misma altura, solo cambia la fila. Se queda la más cercana."""
         col = _COL[sid]

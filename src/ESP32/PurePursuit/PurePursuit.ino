@@ -1922,6 +1922,9 @@ PARK_AJ int          PARK_PL_ATASCO_MAX          = 100;
 PARK_AJ float        PARK_PL_CIEGO_MM            = 40.0f;   // zigzag adelante sin lectura del ToF frontal: tope del tramo (2026-11-23)
 PARK_AJ int          PARK_PL_AVANCE_MS           = 900;     // tramo sin cambio de ángulo (BNO) ni encoder por esto -> se corta (2026-11-23)
 PARK_AJ int          PARK_PL_PAUSA_MS            = 120;     // parado con el volante girando antes de cada tramo nuevo
+PARK_AJ float        PARK_PL_PAUSA_MS_GRADO      = 1.7f;    // + ms por grado de volante que cambia (servo 600 grados/s del gemelo): de tope a tope (155) la pausa de 220 arrancaba con las ruedas a medio camino y cada tramo giraba de menos (baile 6-10 tramos, carro 371-379)
+PARK_AJ int          PARK_PL_PAUSA_LAG_MS        = 100;     // margen estimado con el modelo del servo del gemelo
+unsigned long parkPlPausaMs = 0;  // se inicializa al entrar a cada tramo
 PARK_AJ float        PARK_PL_Z1_MM               = 150.0f;  // 21.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF   // zigzag de la busqueda de trayectorias: adelante 14, atras 28, adelante 28, atras 14
 PARK_AJ float        PARK_PL_Z2_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
 PARK_AJ float        PARK_PL_Z3_MM               = 150.0f;  // 42.0 -> 150 2026-11-23: tope de seguridad; el tramo corta por ángulo (BNO) o ToF
@@ -5185,14 +5188,19 @@ void parsePiMessage(String &line) {   // por referencia: el único llamador (rea
     if (MOTOR_CURVE_LIVE && MOTOR_VBAT_ADC_PIN < 0 && campoPi(line, ",bv=", v))
       motorVbatSample(campoFloat(v) / 1000.0f, millis());
     if (campoPi(line, ",pka=", v)) {
-      rutaPka = campoFloat(v) + PARK_PKA_OFS_MM;
+      // Conserva la referencia del escaneo durante la maniobra de estacionamiento.
+      const bool actualizarPka = estado != ESTACIONANDO || parkFase == 0;
+      if (actualizarPka || !isfinite(rutaPka)) rutaPka = campoFloat(v) + PARK_PKA_OFS_MM;
       // pko viene de maderas observadas. Solo corrige un prior tardío con
       // una innovación plausible y antes de decidir la entrada al cajón.
-      if (turnsCompleted >= TURNS_PER_RACE - 1 && (estado != ESTACIONANDO || parkFase == 0)
+      if (turnsCompleted >= TURNS_PER_RACE - 1 && actualizarPka
           && campoPi(line, ",pko=", v)) {
         const float observada = campoFloat(v);
         const float atraso = rutaPka - observada;
-        if (atraso >= 100.0f && atraso <= 260.0f) rutaPka = observada;
+        // La Pi marca los ecos corroborados por separado de la referencia visual.
+        const bool tofCorroborado = campoPi(line, ",pktof=", v) && campoInt(v) == 1;
+        const float minAtraso = tofCorroborado ? 10.0f : 100.0f;
+        if (atraso >= minAtraso && atraso <= 260.0f) rutaPka = observada;
       }
       if (campoPi(line, ",pge=", v)) rutaPge = campoInt(v) != 0;
     }
@@ -8701,7 +8709,7 @@ void loop() {
               Serial.print("PARK ref señal dw="); Serial.println(delta, 1);
             }
           }
-          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
+          parkFase = 40; parkPlanI = 0; parkPlanMov = false; parkPlPausaMs = PARK_PL_PAUSA_MS; parkPlanThMax = 0.0f; parkPlanRectaOn = false; parkPlanExtraMm0 = -1.0f;
           parkPlanT1 = constrain(PARK_PL_T1 + PARK_PL_T1_POR_MM * (parkDetHSon - PARK_PL_H_NOM), PARK_PL_RECTA ? 30.0f : 68.0f, 95.0f);
           parkFaseMs = millis(); parkOdom0 = odomMm;
           Serial.print("PARK fase 40: PLAN de entrada (ref="); Serial.print(parkRumboRef, 1);
@@ -8745,8 +8753,12 @@ void loop() {
             parkPlanSrv = ext ? servoHaciaPared : servoDesdePared;
           }
           motorCoast();
+          if (parkPlanSrv != ultimoServo) {   // el volante cambia: espera a que llegue (la pausa cuenta desde aqui)
+            parkPlPausaMs = max((unsigned long)PARK_PL_PAUSA_MS, (unsigned long)(PARK_PL_PAUSA_LAG_MS + PARK_PL_PAUSA_MS_GRADO * abs(parkPlanSrv - ultimoServo)));
+            parkFaseMs = millis();
+          }
           escribirServo(parkPlanSrv);
-          if (millis() - parkFaseMs >= (unsigned long)PARK_PL_PAUSA_MS) {
+          if (millis() - parkFaseMs >= parkPlPausaMs) {
             if (parkPlanI == 0 && PARK_PL_RECTA && PARK_PL_WF > 0.0f) {
               float w0, h0; parkPlanPose(w0, h0);
               float wf = parkDirecto ? PARK_PL_WF : PARK_PL_WF_U;
@@ -8925,7 +8937,7 @@ void loop() {
           Serial.print(" mm="); Serial.print(mm, 0); Serial.print(" w="); Serial.print(pw, 0); Serial.print(" h="); Serial.print(ph, 0); Serial.print(" clr="); Serial.print(clr, 0);
           Serial.print(" ext="); Serial.print(extRaw); Serial.print(" dF="); Serial.print(distF_filtrada);
           Serial.print(" distB="); Serial.println(distB_filtrada, 1);
-          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkFaseMs = millis(); parkOdom0 = odomMm;
+          parkPlanRectaOn = false; parkPlanI++; parkPlanMov = false; parkPlPausaMs = PARK_PL_PAUSA_MS; parkFaseMs = millis(); parkOdom0 = odomMm;
           motorCoast();
           if ((parkPlanI >= 3 && fabsf(th) <= PARK_PL_TOK) || parkPlanI >= (PARK_PL_ZZ ? 2 : 6) + PARK_PL_LEGS) {
             parkCerrarCentrando(fabsf(th) <= PARK_PL_TOK ? "PLAN completo" : "PLAN legs agotados", th);

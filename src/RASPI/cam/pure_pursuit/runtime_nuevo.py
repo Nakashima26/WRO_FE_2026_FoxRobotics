@@ -1734,6 +1734,12 @@ class PPRuntime:
         surprise_height_scale = {}
         if self.surprise is not None:
             positions = self.surprise.interpret(positions, self.bev, frame.shape, self.digital, image=frame)
+            if armed:
+                for observation in self.surprise.observations:
+                    if (observation["confirmed_mm"] in (50, 150) and observation["position_valid"]
+                            and observation["seat"] is not None):
+                        self.digital.correct_special_color(observation["seat"], observation["visible"],
+                                                           observation["driving"])
             # El LOCK/far-hint usaba h como proximidad suponiendo bloques de
             # 100 mm. Normalizar esa pista; el bbox real sigue intacto para BEV.
             surprise_height_scale = {o["box"]: 100.0/o["confirmed_mm"]
