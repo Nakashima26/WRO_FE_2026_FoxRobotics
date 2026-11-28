@@ -177,6 +177,9 @@ class SurpriseInterpreter:
                 edge = x < C.SURPRISE_EDGE_PX or x+w > shape[1]-C.SURPRISE_EDGE_PX
                 if candidate in (50, 150) and edge:
                     candidate = None
+                # orillas425: a 1.3-1.4 m tres normales (S/T2, N/T1, W/T1) midieron 40-58 mm y se manejaron volteados; de cerca la altura sí sirve.
+                if candidate in (50, 150) and (foot is None or (C.ROBOT_BEV_Y-foot[1])*C.MM_PER_PX > C.SURPRISE_SPECIAL_MAX_MM):
+                    candidate = None
                 track = None
                 if point is not None:
                     choices = [(math.dist(point, t.point), i, t) for i, t in enumerate(self.tracks)
