@@ -67,3 +67,15 @@ def test_close_votes_can_correct_color_once_per_frame(monkeypatch, track):
     assert track.confirmed[key] == "Green"
     track._vote([red])
     assert track.confirmed[key] == "Red"
+
+
+def test_x_seat_released_when_other_color_seen_on_t_seat(monkeypatch, track):
+    """orillas368: el rojo quedó en W/X1 y la carta tiraba el verde de W/T2 para siempre."""
+    monkeypatch.setattr(dm.C, "DIGITAL_MAP_RECHECK_COLOR", False)
+    track._frozen = lambda: True
+    track.confirmed[("W", "X1")] = "Red"
+    green = _observe(track._seat_xy("W", "T2"), "Green", track.pose_xy, track._view_heading)
+    for _ in range(12):
+        track._vote([green])
+    assert ("W", "X1") not in track.confirmed
+    assert track.confirmed.get(("W", "T2")) == "Green"

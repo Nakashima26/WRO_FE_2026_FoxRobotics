@@ -194,6 +194,7 @@ class DigitalMap:
         self._line_fix_hist: list[float] = []
         self.confirmed: dict[tuple[str, str], str] = {}
         self._best: dict[tuple[str, str], float] = {}
+        self._x_conflict: dict[tuple[str, str], int] = {}
         if self.direction:
             if self.blind:
                 self.park_w = PARK_W_MIN if self.direction == "CW" else PARK_W_MAX
@@ -550,6 +551,7 @@ class DigitalMap:
             if not ranked:
                 continue
             ranked.sort(key=lambda t: t[0])
+            self._x_contradicted(ranked[0], color, side)
             near = [
                 c for c in ranked
                 if c[0] <= 320.0 and self._seat_ok(c[1], c[2], color, wx, wy)
@@ -773,6 +775,28 @@ class DigitalMap:
             if sid == "X2" and col == color and s != sec:
                 return True
         return False
+
+    def _x_contradicted(self, top, color: str, side: bool) -> None:
+        """Una X confirmada no admite otra lata en la recta. Si se sigue viendo una lata de otro color
+        de frente sobre un asiento T, la X estaba mal (orillas368: rojo de S/T3 visto de lejos cayó en
+        S/X1, la carta tiraba el verde de S/T4 y lo chocó las 3 vueltas). Se suelta la X aunque esté congelada."""
+        dist, sec, sid = top[0], top[1], top[2]
+        if side or self.in_stall or sec != self.section or sid in ("X1", "X2") or dist > 160.0:
+            return
+        xs = [(sec, x) for x in ("X1", "X2") if self.confirmed.get((sec, x)) not in (None, color)]
+        if not xs:
+            return
+        k = (sec, color)
+        self._x_conflict[k] = self._x_conflict.get(k, 0) + 1
+        if self._x_conflict[k] < int(getattr(C, "DIGITAL_MAP_X_CONFLICT_N", 5)):
+            return
+        self._x_conflict[k] = 0
+        for key in xs:
+            was = self.confirmed.pop(key)
+            self._votes.pop(key, None)
+            self._best.pop(key, None)
+            print(f"[DMAP] {key[0]}/{key[1]} {was} SOLTADA: {color} visto en {sec}/{sid} (la carta no deja X con otra lata)",
+                  flush=True)
 
     def _seat_ok(self, sec: str, sid: str, color: str, wx: float, wy: float) -> bool:
         """Este asiento no rompe la carta de la recta."""
