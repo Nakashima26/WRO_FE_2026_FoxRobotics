@@ -1839,7 +1839,7 @@ PARK_AJ float        PARK_PL_TOF_TH_MAX          = 38.0f;   // el ToF trasero ve
 PARK_AJ float        PARK_PL_MTOF_MM             = 8.0f;    // cola a esto de la madera de atras (ToF): corta la reversa
 PARK_AJ float        PARK_PL_M_MM                = 12.0f;   // un tramo termina si la huella queda a menos de esto de una madera (cen96 91/96 vs 90; rescue s21)
 PARK_AJ float        PARK_PL_T1                  = 45.0f;   // theta1 con la llegada a PARK_PL_H_NOM (el corte va ~2-3 grados adelantado a lo que alcanza)
-PARK_AJ float        PARK_PL_T2                  = 4.0f;
+PARK_AJ float        PARK_PL_T2                  = 14.0f;   // 11-28: el INT para a 14 y una correccion adelante endereza (reales 395/413)
 PARK_AJ float        PARK_PL_HEND                = 85.0f;  // altura del eje al final del tramo 2 (theta T2); el tramo 1 termina donde el arco INT que sigue llega ahi (0 = tramo 1 por theta)
 PARK_AJ float        PARK_PL_U_PG_BACK_MM        = 130.0f; // tras U con pgf: no abrir el arco si along ya paso la senal lejana
 PARK_AJ float        PARK_PL_U_PG_TH_MAX         = 38.0f;  // tope |theta| en tramo 1 del plan si hay pgf
@@ -4762,7 +4762,7 @@ static void parkPlZzReancla(float th) {
 PARK_AJ bool PARK_PL_CIERRE_HUELLA = true;
 PARK_AJ bool PARK_PL_ARCO_CALIBRADO = true;
 // Radio efectivo del contravolante en reversa, incluido el transitorio del servo.
-PARK_AJ float PARK_PL_RI_INT_MM = 104.0f;
+PARK_AJ float PARK_PL_RI_INT_MM = 200.0f;   // 11-28: radio INT efectivo real con el retraso del volante (~190-220 mm, 98 corridas)
 PARK_AJ int PARK_PL_RECTA_TB_MM = 105;   // fondo mínimo (ToF trasero crudo, mm) al terminar la recta; 0 = apagado (2026-11-25 orillas254)
 PARK_AJ float PARK_PL_ARCO_H_MM = 112.0f;
 PARK_AJ float PARK_PL_ARCO_W_MM = 48.0f;
