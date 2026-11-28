@@ -1274,6 +1274,16 @@ class RouteMode:
         fpw = getattr(C, "ROUTE_FINAL_PWM", None)
         if fpw is not None and tc is not None and tc >= int(getattr(C, "ROUTE_FINAL_TC", 11)) and self.fixed:
             self.rv = int(fpw) if self.rv is None else min(self.rv, int(fpw))   # última recta hacia el cajón: tope propio (con el perfil pursuit hasta tc 12 llegaba rápido y chocaba el cajón)
+        npw = getattr(C, "ROUTE_PARK_NEAR_PWM", None)
+        pka = getattr(self, "pka", None)
+        if (npw is not None and tc is not None and tc >= 11 and self.fixed and pka is not None
+                and pka < float(getattr(C, "ROUTE_PARK_NEAR_PKA_MAX", 100.0)) and self.park_w is not None):
+            # Cajón a la salida de la última esquina (orillas384-390): salía a pw ~190 chueco y el escaneo no se armaba.
+            from .wro_field import _barrier_corners
+            pw_ = self.park_w if self._park_refined_w is None else self._park_refined_w
+            d = min(math.hypot(px - x, py - y) for b in _barrier_corners(dm.parking, pw_) for px, py in b)
+            if d < float(getattr(C, "ROUTE_PARK_NEAR_MM", 900.0)):
+                self.rv = int(npw) if self.rv is None else min(self.rv, int(npw))
         if self._prueba_cajon and self.fixed:
             # Prueba de salida (archivo ROUTE_PRUEBA_CAJON_FILE en la Pi): ubicado el
             # cajón se para y reporta la pose cada ~1 s, para medirla con cinta.
