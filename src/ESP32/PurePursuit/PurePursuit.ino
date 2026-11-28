@@ -1849,6 +1849,7 @@ PARK_AJ float        PARK_REV_W_TOMA             = 150.0f;  // toma el mando de 
 PARK_AJ float        PARK_REV_TH1                = 60.0f;   // angulo de la recta de la reversa: fija en que w para (mas h = mas lejos)
 PARK_AJ float        PARK_REV_KH                 = 0.06f;   // grados de rumbo hacia la pared por mm de h sobre PARK_REV_H0
 PARK_AJ float        PARK_REV_CAIDA_CM           = 8.0f;
+PARK_AJ float        PARK_REV_INICIO_MADERA_MM   = -150.0f; // GEOM: con el eje mas adelante que pka+esto, la reversa no puede empezar sobre la madera
 PARK_AJ float        PARK_REV_HMAX               = 950.0f;  // mm de la pared al tomar el mando; mas lejos hace la U
 PARK_AJ float        PARK_REV_DWF                = -8.0f;    // se suma a WF en el plan que viene de la reversa en S
 PARK_AJ float        PARK_REV_SIN_ANCLA_MM       = 120.0f;  // sin ver la madera de ida sigue avanzando esto mas y luego la busca retrocediendo
@@ -4711,7 +4712,23 @@ static void parkPlAnclaMadera() {
   Serial.println(delta, 1);
 }
 
+PARK_AJ bool PARK_PL_ZZ_ANCLA_TB = true;   // tramo adelante del zigzag: ancla el along con el ToF trasero
 static void parkPlZzReancla(float th) {
+  // orillas418: tras la entrada la cola quedo a ~0-14 mm de la madera de atras (tB 42-57 a 25-36 grados) y la pose
+  // creia la nariz pegada a la de enfrente: 4 tramos adelante de 10-16 mm, las reversas sin moverse, legs agotados a 20 grados.
+  if (PARK_PL_ZZ_ANCLA_TB && parkPlanDir > 0 && tofMm[2] > 0 && tofMm[2] < 150 && fabsf(th) <= PARK_PL_TOF_TH_MAX) {
+    float w, h;
+    parkPlanPose(w, h);
+    const float a = fabsf(th) * DEG_TO_RAD;
+    const float gap = tofMm[2] * cosf(a) - 2.2f - 63.0f * sinf(a);          // esquina de la cola a la madera de atras (como parkColaEsqMm)
+    const float measuredW = gap + 21.8f * cosf(a) + 62.5f * sinf(a);       // eje trasero (huella de parkPlanHolgura)
+    const float delta = measuredW - w;
+    if (fabsf(delta) >= 8.0f && fabsf(delta) <= 60.0f) {
+      if (PARK_GEOM_ANCLA_LOCAL && parkGeomModo && parkDirecto && parkGeomAnclaSec >= 0) parkGeomAnclaW += delta;   // GEOM: la pose sale del origen local (parkPlanPose)
+      else parkDetAlong -= (parkDirecto ? 1.0f : -1.0f) * delta;
+      Serial.print("PARK zz ancla ToF trasero delta="); Serial.println(delta, 1);
+    }
+  }
   if (!PARK_PL_ZZ_ANCLA) return;
   parkDetHPose = parkHPoseMm();
   const int side = parkParedEsIzquierda ? 0 : 1;
@@ -8644,7 +8661,12 @@ void loop() {
             if (parkRevEnMadera && ++parkRevDrop >= 2) borde = 2;
             if (!parkRevEnMadera) { parkRevBase = parkRevBase <= 0.0f ? (float)extRaw : parkRevBase + 0.5f * ((float)extRaw - parkRevBase); parkRevDrop = 0; }
           } else if (madera) {
-            if (parkRevBase <= 0.0f) { parkRevEnMadera = true; parkRevDrop = 0; }   // empezo sobre la madera: ancla al salir
+            if (parkRevBase <= 0.0f) {
+              // orillas419: la reversa GEOM empezo en pka+382 con el sonar a 21 cm (la pose esperaba ~30): no era madera,
+              // era la pared mas cerca; al leer 26 cm anclo un borde falso y se estaciono antes del cajon (madera real en pka-309).
+              if (parkGeomModo && isfinite(rutaPka) && alongSalidaMm() > rutaPka + PARK_REV_INICIO_MADERA_MM) parkRevBase = (float)extRaw;
+              else { parkRevEnMadera = true; parkRevDrop = 0; }   // empezo sobre la madera: ancla al salir
+            }
             else if (!parkRevEnMadera && ++parkRevDrop >= 2) borde = 1;
           }
           if (borde) {
