@@ -664,6 +664,10 @@ const int GR_ABORT_CM            = 12;
 // ventana del giro rápido). En SIGUIENDO con prio, si el gyro ya rotó esto hacia
 // el lado de la pista, se cuenta como esquina. 0 = off (carro real).
 const float GIRO_PI_CUENTA_DEG   = 0.0f;
+// orillas421-423: con el verde W/T1 por dentro y el rojo W/T2 por fuera, la ruta cruza en diagonal y el giro no llega a
+// GIRO_PI_CUENTA_DEG hasta 1.2 m despues: tc=12 tarde, pasado el cajon -> U. La ultima esquina tambien se cuenta por la pose.
+const float GIRO_POSE_CUENTA_DEG     = 45.0f;    // giro minimo (con la pose ya en la recta de salida); 0 = off
+const float GIRO_POSE_CUENTA_ALONG_MM = -400.0f; // along de salida (eje) a partir del cual cuenta: pasado el asiento T1/T2 (along -500)
 
 // ── Odometría (Pi) ────────────────────────────────────────────────────────────
 const float ODOM_PWM_K           = 3.5f;
@@ -6673,6 +6677,19 @@ void loop() {
           maniobraGirarDer = !direccionIzquierda;
           maniobraIdealRot = sgPi * (float)AngGiro;
           Serial.print("-> GIRO PI contado ang="); Serial.println(anguloGyro, 1);
+          completarTurnoObstaculos();
+          break;
+        }
+      }
+      if (GIRO_POSE_CUENTA_DEG > 0.0f && piRuta && rondaObstaculos && primerGiro && !parkBuscando && !parkUturnPendiente
+          && turnsCompleted == TURNS_PER_RACE - 1 && isfinite(rutaPka)
+          && (lastTurnTime == 0 || (millis() - lastTurnTime) > GR_GAP_RUTA_MS)) {
+        float sgPi = direccionIzquierda ? 1.0f : -1.0f, x, y;
+        rutaPoseTapete(x, y);
+        if (anguloGyro * sgPi >= GIRO_POSE_CUENTA_DEG && seccionTapete(x, y) == rutaSecSalida && alongSalidaMm() >= GIRO_POSE_CUENTA_ALONG_MM) {
+          maniobraGirarDer = !direccionIzquierda;
+          maniobraIdealRot = sgPi * (float)AngGiro;
+          Serial.print("-> GIRO 12 contado por pose ang="); Serial.print(anguloGyro, 1); Serial.print(" along="); Serial.println(alongSalidaMm(), 0);
           completarTurnoObstaculos();
           break;
         }
