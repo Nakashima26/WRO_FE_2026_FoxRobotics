@@ -1865,7 +1865,7 @@ PARK_AJ int          PARK_GEOM_EXT               = 1;       // 1 = solo con pge=
 PARK_AJ float        PARK_GEOM_PASA_MM           = 150.0f;  // along >= pka + esto para tomar el mando (el sonar ya paso la madera)
 PARK_AJ float        PARK_GEOM_MAX_MM            = 550.0f;  // mas alla de pka + esto ya no (sigue la U): la reversa larga sale mas lenta que la U (6/6 en el gemelo con 600-640)
 PARK_AJ float        PARK_GEOM_TOL_CM            = 12.0f;   // |ext - PARK_PARED_CM| maximo para tomar el mando
-PARK_AJ float        PARK_GEOM_ANG_DEG           = 10.0f;   // |error de carril| maximo para tomar el mando
+PARK_AJ float        PARK_GEOM_ANG_DEG           = 25.0f;   // |error de carril| maximo para tomar el mando (412: la ruta ya giraba al verde S/T1, err 21 -> U y no se estaciono)
 PARK_AJ int          PARK_GEOM_FRENO_PWM         = 160;     // fase 44: reversa para frenar
 PARK_AJ float        PARK_GEOM_V_REV             = 120.0f;  // mm/s: por debajo, a la busqueda en reversa (fase 42)
 PARK_AJ int          PARK_GEOM_BUSCA_PWM         = 100;     // fase 42 en este modo, cerca de la madera
