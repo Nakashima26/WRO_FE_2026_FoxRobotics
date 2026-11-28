@@ -49,6 +49,8 @@ RED_BGR = tuple(int(c) for c in np.round(_RED * (230.0 / 238.0)))
 GREEN_BGR = (44, 214, 68)
 MAGENTA_BGR = (255, 0, 255)
 SKY_BGR = (48, 48, 48)
+if os.environ.get("TWIN_CAM_COLORS") == "real":   # medidos en video 318/321/323 (rep/camara.md)
+    RED_BGR, GREEN_BGR, WALL_BGR = (28, 38, 104), (45, 80, 57), (20, 24, 22)
 
 _PALETTE = np.array(
     [SKY_BGR, FLOOR_BGR, WALL_BGR, RED_BGR, GREEN_BGR, MAGENTA_BGR],

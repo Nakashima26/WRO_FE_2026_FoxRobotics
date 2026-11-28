@@ -28,7 +28,7 @@ from pure_pursuit.twin.sensors import Bno085Heading, Encoder, Gyro, Pose, ToF, U
 from pure_pursuit.twin.battery import BatteryDrive
 from pure_pursuit.twin.vehicle import Vehicle
 from pure_pursuit.twin.world import OUTER_HALF_MM, World, body_corners, collision
-from pure_pursuit.wro_field import randomize
+from pure_pursuit.wro_field import layout_field, randomize
 from vision import Vision
 
 _DEFAULT_CALIB = (
@@ -438,6 +438,13 @@ class Sim:
             park_pos = os.environ.get("FOX_PARK_POS") or cfg.get("park_pos")
         self.park_pos = park_pos
         self.params = params or TwinParams()
+        # TWIN_PARAMS='{"tof.noise_sigma_mm": 15}': calibración contra corridas reales sin tocar params.py.
+        for key, val in json.loads(os.environ.get("TWIN_PARAMS") or "{}").items():
+            grp, name = key.split(".")
+            obj = getattr(self.params, grp)
+            if not hasattr(obj, name):
+                raise KeyError(f"TWIN_PARAMS: {key} no existe")
+            setattr(obj, name, type(getattr(obj, name))(val) if not isinstance(getattr(obj, name), tuple) else tuple(tuple(x) if isinstance(x, list) else x for x in val))
         self.battery = battery
         self.battery_voltage_v = float(os.environ.get("TWIN_VBAT") or 12.0)
         pack_resistance = os.environ.get("TWIN_BATTERY_RESISTANCE_OHM")
@@ -495,8 +502,15 @@ class Sim:
         cam_rng = np.random.default_rng([self.seed, 0 if _ns is None else int(_ns), 7])
         cam_jitter = float(os.environ.get("TWIN_CAM_JITTER_MM", self.params.camera.jitter_mm))
         cam_jit_tau = float(os.environ.get("TWIN_CAM_JITTER_TAU_S", self.params.camera.jitter_tau_s))
+        # Cámara real (orillas318/321): cuadros barridos en las curvas y con grano. TWIN_CAM_EXPOSURE_S = exposición
+        # (desenfoque por movimiento, 3 renders a lo largo de ella); TWIN_CAM_NOISE = sigma del grano (niveles 0-255).
+        cam_exp = float(os.environ.get("TWIN_CAM_EXPOSURE_S") or 0.0)
+        cam_noise = float(os.environ.get("TWIN_CAM_NOISE") or 0.0)
+        cam_sjit = float(os.environ.get("TWIN_CAM_SIGN_JITTER_MM") or 0.0)
         cam_jit = np.zeros(2)
         field = self.field_override if self.field_override is not None else randomize(self.seed, start=self.start, park_pos=self.park_pos)
+        if self.field_override is None and os.environ.get("TWIN_LAYOUT"):
+            field = layout_field(os.environ["TWIN_LAYOUT"], start=self.start)  # pista de una corrida real; la semilla solo cambia el ruido
         try:
             if self.surprise is not None:
                 from ..wro_field import with_surprise
@@ -827,6 +841,9 @@ class Sim:
                 unarmed_left = _UNARMED_FRAMES
                 max_us = int(self.max_time_s * 1e6) + fw.now_us
                 loops = 0
+                loop_e_us = float(os.environ["TWIN_FW_LOOP_E_US"]) if os.environ.get("TWIN_FW_LOOP_E_US") else None
+                loop_base_us = float(self.fw_params.get("loop_overhead_us", 300.0))
+                loop_prev_est = None
                 # Timing breakdown
                 render_s = 0.0
                 pi_s = 0.0
@@ -862,6 +879,10 @@ class Sim:
                             terminado_seen = True
 
                     est = _parse_est(link._last_ack)
+                    if loop_e_us is not None and est != loop_prev_est:
+                        # shortcut: supuesto sin medir (Pi apagada 11-26); medir lpm en est=E del journal
+                        fw.set_param("loop_overhead_us", loop_e_us if est == "E" else loop_base_us)
+                        loop_prev_est = est
                     tc = None
                     tc_s = _parse_ack_field(link._last_ack, "tc")
                     if tc_s is not None:
@@ -945,7 +966,23 @@ class Sim:
                             cam_jit = _a * cam_jit + math.sqrt(1.0 - _a * _a) * cam_rng.normal(0.0, cam_jitter, 2)
                             px, py = px + float(cam_jit[0]), py + float(cam_jit[1])
                         t_render0 = time.perf_counter()
-                        frame = cam.render_camera(field, px, py, ph)
+                        rfield = field
+                        if cam_sjit > 0.0 and field.signs:
+                            # solo lo que ve la cámara; choques y mapa siguen con la lata en su lugar
+                            import dataclasses as _dc
+                            rfield = _dc.replace(field, signs=[_dc.replace(
+                                sg, x=sg.x + float(cam_rng.normal(0.0, cam_sjit)), y=sg.y + float(cam_rng.normal(0.0, cam_sjit)))
+                                for sg in field.signs])
+                        frame = cam.render_camera(rfield, px, py, ph)
+                        if cam_exp > 0.0:
+                            acc = frame.astype(np.float32)
+                            _n = int(os.environ.get("TWIN_CAM_EXPOSURE_N") or 3)
+                            for _i in range(1, _n):
+                                qx, qy, qh = _pose_at(history, max(0.0, t_cam - cam_exp * _i / (_n - 1)))
+                                acc += cam.render_camera(rfield, qx, qy, qh)
+                            frame = (acc / _n).astype(np.uint8)
+                        if cam_noise > 0.0:
+                            frame = np.clip(frame + cam_rng.normal(0.0, cam_noise, frame.shape), 0, 255).astype(np.uint8)
                         render_s += time.perf_counter() - t_render0
                         t_proc0 = time.perf_counter()
                         # El visor pinta imágenes cada N frames: el callback

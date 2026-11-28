@@ -23,6 +23,8 @@ Si ssh falla (timeout), dilo y pide que prendan la Pi; no reintentes en bucle.
 cd /c/001Escul/WRO2026/WRO2026/src/RASPI/cam/pure_pursuit/twin/tools
 PYTHONIOENCODING=utf-8 python resumen_run.py "$S"/orillasNNN_tele.jsonl [--seg] | grep -v "par lateral"
 ```
+**Primero hardware:** si sale `** SENSOR ToF X CAÍDO`, repórtalo en la primera línea del
+reporte (desde qué t y en qué corrida empezó) antes de analizar código; el gemelo nunca lo ve.
 Da: dur/tc/estado final (tc=12 y est=E = completa; `ATORADO` = choque), rumbo del tramo
 recto de INICIO (salida adentro debe quedar ~85-95°), eventos de mapa/plan,
 LOCUPD con |dx| o |dy| ≥ 60 mm, y ventanas con el volante cambiando de lado ≥3 veces/s.

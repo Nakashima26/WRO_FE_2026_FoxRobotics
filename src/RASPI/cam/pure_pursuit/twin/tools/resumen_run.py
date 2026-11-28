@@ -36,6 +36,14 @@ def main(path, seg=False):
     if tcmax < 12 and len(tail) > 10 and len({(a["px"], a["py"]) for a in tail}) <= 2 and tail[-1]["pw"] > 0:
         print("   ** ATORADO al final (pose congelada con pw>0) -> probable choque")
 
+    # Salud de ToF (pre.h y ack.tfh, orden L/R/B/F): 'x' = sensor caído. Va antes que cualquier análisis.
+    salud = [(x["t"] - t0, h) for x in L[1:] for h in ((x.get("s", {}).get("pre") or {}).get("h"),
+                                                       (x.get("s", {}).get("ack") or {}).get("tfh")) if h]
+    for i, nom in enumerate("LRBF"):
+        malos = [t for t, h in salud if len(h.split("/")) == 4 and h.split("/")[i] == "x"]
+        if malos:
+            print(f"   ** SENSOR ToF {nom} CAÍDO en {len(malos)}/{len(salud)} muestras (desde t={malos[0]:.1f}s)")
+
     ini = [(t, a) for t, a, _ in acks if a["est"] == "I"]
     if ini:
         rec = [abs(a["yaw"]) for _, a in ini if a["pw"] > 110 and abs(a["srv"] - 75) <= 50]

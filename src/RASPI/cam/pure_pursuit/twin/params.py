@@ -263,6 +263,7 @@ class BnoParams:
     deriva lenta (~0.5°/min, caminata). La salida se refresca a update_hz.
     """
     scale_error_sigma: float = 0.001
+    scale_bias: float = 0.0   # sesgo fijo del chip (TWIN_PARAMS bno.scale_bias); real 11-26: yaw +3°/vuelta
     drift_walk_deg_per_sqrt_s: float = 0.065   # ~0.5° de desvío en 1 min
     noise_deg: float = 0.15                    # Gauss-Markov lento (no ruido blanco)
     noise_tau_s: float = 0.5
@@ -354,6 +355,10 @@ class ToFParams:
     max_range_mm: float = 4000.0
     noise_sigma_mm: float = 5.0
     noise_rel: float = 0.01
+    # Sesgo oblicuo medido (config LOC_TOF_MAX_INC_DEG: real - rayo central -1/-4/-20/-71 mm a 0-20/20-30/30-40/40-60°).
+    # () = apagado; TWIN_PARAMS tof.oblique_deg / tof.oblique_bias_mm.
+    oblique_deg: tuple[float, ...] = ()
+    oblique_bias_mm: tuple[float, ...] = ()
     sample_period_s: float = 1.0 / 30.0
     # Orden = índice de tofMm[] (0=L 1=R 2=atrás 3=frente). Firmware v2: L/R/atrás
     # en Short (50 Hz, ~1.3 m); frente en Long (30 Hz, 4 m). Sin medir en el carro.

@@ -477,6 +477,42 @@ def randomize(seed: int | None = None, start: str = "centro", park_pos=None) -> 
     )
 
 
+def layout_field(spec: str, start: str = "cajon") -> Field:
+    """Como _layout_field; TWIN_PARK_GAP_MM / TWIN_STALL_TAIL_MM = cajón medido en las corridas reales
+    (tB≈35, tF≈129 al arrancar -> hueco ~295, cola a ~36 de la madera)."""
+    import os
+    g = globals()
+    saved = (g["PARK_GAP_MM"], g["STALL_TAIL_GAP_MM"], g["STALL_SIDE_GAP_MM"])
+    # shortcut: cambia solo la pista del gemelo mientras se arma el Field (la Pi sigue creyendo el valor del
+    # reglamento, como el carro real); si se vuelve permanente, pasar el hueco como argumento.
+    g["PARK_GAP_MM"] = float(os.environ.get("TWIN_PARK_GAP_MM") or saved[0])
+    g["STALL_TAIL_GAP_MM"] = float(os.environ.get("TWIN_STALL_TAIL_MM") or saved[1])
+    g["STALL_SIDE_GAP_MM"] = float(os.environ.get("TWIN_STALL_SIDE_MM") or saved[2])
+    try:
+        return _layout_field(spec, start)
+    finally:
+        g["PARK_GAP_MM"], g["STALL_TAIL_GAP_MM"], g["STALL_SIDE_GAP_MM"] = saved
+
+
+def _layout_field(spec: str, start: str = "cajon") -> Field:
+    """Acomodo fijo de una corrida real: "CCW W 1050 E/T2:R,S/T4:G,..." (sentido, cajón, w0, señales)."""
+    direction, parking, w0, signs_txt = spec.split()
+    park_w = float(w0)
+    signs = []
+    for item in signs_txt.split(","):
+        sec_seat, c = item.split(":")
+        sec, seat = sec_seat.split("/")
+        x, y = section_to_world(sec, *SEATS[seat])
+        signs.append(Sign(x, y, _G if c.upper().startswith("G") else _R, sec, seat))
+    if start == "cajon":
+        sx, sy = stall_start_xy(parking, direction, park_w)
+    else:
+        sx, sy = _start_of(parking)
+    return Field(seed=0, direction=direction, single_section=parking, parking_section=parking, cards={},
+                 signs=signs, barriers=_barrier_corners(parking, park_w), start_x=sx, start_y=sy,
+                 start_heading=_heading(parking, direction), start_mode=start, parking_w=park_w)
+
+
 def surprise_candidates(field: Field) -> list[int]:
     """Índices elegibles: excluye la primera señal por orden de recorrido.
 

@@ -242,7 +242,7 @@ def open_camera(cam_index=0, undistort=True):
 # En la Pi 5 la pared rosa ya no cae en la banda del rojo (H 139) y la cinta se
 # separa por G/R y S. Valores de la Pi 5: S >= 110, RED_GR_MAX 0.60, RED_BR_MAX 0.70.
 # La Pi 4 conserva los suyos.
-PI5_CAMARA = os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp")
+PI5_CAMARA = os.path.isdir("/usr/share/libcamera/ipa/rpi/pisp") or os.environ.get("FOX_PI5_CAMARA") == "1"  # gemelo en Mac: umbrales del carro
 _RED_S_MIN = (110, 110) if PI5_CAMARA else (150, 170)
 COLOR_RANGES = {
     "Red": [(np.array([0, _RED_S_MIN[0], 40]), np.array([5, 255, 200])),

@@ -155,15 +155,17 @@ class ToF:
         # anterior (np.dot de 2 = d0*n0 + d1*n1, round mitad-par), así es idéntico.
         keep = np.flatnonzero((mat_i >= 0) & (dists <= max_mm - 1e-3))
         clusters: dict[tuple[int, int], list[tuple[float, float]]] = {}
+        ccos: dict[tuple[int, int], float] = {}
         if keep.size:
             mk, dk = mat_i[keep], dists[keep]
             dv, nv = dirs[keep], normals[keep]
             cos_inc = np.clip(np.abs(dv[:, 0] * nv[:, 0] + dv[:, 1] * nv[:, 1]), 0.0, 1.0)
             refl = np.array([p.reflectivity.get(world.material_name(int(m)), 0.04) for m in mk])
             signal = refl * cos_inc / (dk * dk)
-            for m, b, d, s in zip(mk.tolist(), np.round(dk / 50.0).astype(np.int64).tolist(),
-                                  dk.tolist(), signal.tolist()):
+            for m, b, d, s, c in zip(mk.tolist(), np.round(dk / 50.0).astype(np.int64).tolist(),
+                                  dk.tolist(), signal.tolist(), cos_inc.tolist()):
                 clusters.setdefault((m, b), []).append((d, s))
+                ccos[(m, b)] = ccos.get((m, b), 0.0) + c * s
 
         if not clusters:
             self._held_mm[sensor_id] = -1
@@ -193,6 +195,9 @@ class ToF:
             mean_d = mean_d + ys[0] - xs[0] if mean_d < xs[0] else (
                 mean_d + ys[-1] - xs[-1] if mean_d > xs[-1] else float(np.interp(mean_d, xs, ys)))
             sigma = p.noise_sigma_mm if near else p.long_noise_sigma_mm
+        if p.oblique_deg and sensor_id in p.short_map_ids:   # sesgo oblicuo medido: el cono ancho lee corto en ángulo
+            inc = math.degrees(math.acos(min(1.0, ccos[best_key] / total_sig)))
+            mean_d += float(np.interp(inc, p.oblique_deg, p.oblique_bias_mm))
         noise = self.rng.normal(0.0, sigma)
         out = mean_d * (1.0 + self.rng.normal(0.0, p.noise_rel)) + noise
         # El firmware tira todo lo que no sea status 0 (-1).
@@ -256,7 +261,7 @@ class Bno085Heading:
     def __init__(self, params: BnoParams, rng: np.random.Generator) -> None:
         self.params = params
         self.rng = rng
-        self._scale = 1.0 + float(rng.normal(0.0, params.scale_error_sigma))
+        self._scale = 1.0 + params.scale_bias + float(rng.normal(0.0, params.scale_error_sigma))
         self._walk = 0.0
         self._yaw_drift_dps = float(os.environ.get("TWIN_YAW_DRIFT_DPS", "0"))
         self._gm = 0.0
@@ -266,6 +271,8 @@ class Bno085Heading:
         self._sample_t = -1e9
         self._out = 0.0                       # lo que ya integró el firmware
         self._last_ms: int | None = None
+        self._lat = float(os.environ.get("TWIN_BNO_LAT_S") or 0.0)
+        self._hist: list[tuple[float, float]] = []
 
     def read(self, heading_deg: float, t: float) -> float:
         p = self.params
@@ -282,7 +289,15 @@ class Bno085Heading:
                 self._walk += self._yaw_drift_dps * dt
                 a = math.exp(-dt / p.noise_tau_s)
                 self._gm = a * self._gm + float(self.rng.normal(0.0, p.noise_deg * math.sqrt(1.0 - a * a)))
-            self._sample = self._yaw_true * self._scale + self._walk + self._gm
+            yt = self._yaw_true
+            if self._lat > 0.0:   # retardo de fusión: yaw de t - lat (interpolado)
+                self._hist.append((t, yt))
+                while len(self._hist) > 2 and self._hist[1][0] <= t - self._lat:
+                    self._hist.pop(0)
+                (t0, y0), (t1, y1) = self._hist[0], self._hist[min(1, len(self._hist) - 1)]
+                tq = t - self._lat
+                yt = y0 if t1 <= t0 or tq <= t0 else y0 + (y1 - y0) * min(1.0, (tq - t0) / (t1 - t0))
+            self._sample = yt * self._scale + self._walk + self._gm
             self._sample_t = t
         ms = int(t * 1000.0)
         if self._last_ms is None:

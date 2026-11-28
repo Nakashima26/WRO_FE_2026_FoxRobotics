@@ -1,4 +1,5 @@
 {
+ "SURPRISE_RULE": true,
  "BAUDRATE": 460800,
  "CENTERLINE_RAMP_PX": 220,
  "CENTERLINE_TOP_Y": 30,
@@ -79,7 +80,13 @@
  "ROUTE_FULL_W_CLEAR": 4.0,
  "ROUTE_GHOST_FALLBACK": true,
  "ROUTE_HARD_CLEAR_MM": 70.0,
- "ROUTE_L1_CORNER_SIGN": {"pwm": 150, "mm": 300.0, "radius_mm": 300.0, "unk_only": true, "planned_clearance_resolved": true},
+ "ROUTE_L1_CORNER_SIGN": {
+  "pwm": 150,
+  "mm": 300.0,
+  "radius_mm": 300.0,
+  "unk_only": true,
+  "planned_clearance_resolved": true
+ },
  "ROUTE_L1_MIN_PWM": 235,
  "ROUTE_L1_UPLOAD_PWM": 255,
  "ROUTE_L23_A_BRAKE_MM_S2": 900,
@@ -134,7 +141,19 @@
  "ROUTE_UPLOAD_RAMP_PWM": 6,
  "ROUTE_GHOST_HOLD_MM": 1500.0,
  "ROUTE_COLUMN_CONFLICT": true,
- "ROUTE_FIX_POSE_MARGIN_MM": 250.0,
+ "ROUTE_FIX_POSE_MARGIN_MM": 500,
+ "ROUTE_FIX_BLUE_HSV": [
+  [
+   95,
+   25,
+   60
+  ],
+  [
+   115,
+   255,
+   200
+  ]
+ ],
  "ROUTE_FIX_BLUE_WAIT": true,
  "ROUTE_UPLOAD_LINES": 2,
  "ROUTE_UPLOAD_STEP_MM": 80.0,
@@ -147,12 +166,21 @@
  "LOC_RACE_TOF_OCCLUSION_MM": 80,
  "LOC_TOF_OBLIQUE_DEG": 25,
  "LOC_TOF_OBLIQUE_MAX_NU_MM": 90,
- "LOC_TOF_MAX_MM": {"tL": 400.0, "tR": 400.0, "tF": 240.0, "tB": 240.0},
- "LOC_TOF_EXPECT_MAX_MM": {"tL": 400.0},
+ "LOC_TOF_MAX_MM": {
+  "tL": 400.0,
+  "tR": 400.0,
+  "tF": 240.0,
+  "tB": 240.0
+ },
+ "LOC_TOF_EXPECT_MAX_MM": {
+  "tL": 400.0
+ },
  "LOC_SIGN_CORNER_TC_MAX": 2,
  "LOC_SIGN_CORNER_MAX_INNOV_MM": 50,
  "LOC_SIGN_CORNER_NO_YAW": true,
- "LOC_SIGN_CORNER_KEYS": ["tL"],
+ "LOC_SIGN_CORNER_KEYS": [
+  "tL"
+ ],
  "LOC_SIGN_CORNER_YAW_NU_MIN": 60,
  "LOC_SIGN_TURN_YAW_DEG": 0.7,
  "ROUTE_FIX_PIX_AT_INICIO": true,
@@ -162,8 +190,10 @@
  "ROUTE_FIX_PIX_BLIND_MAX_HEADING_ALIGNED_DEG": 48,
  "ROUTE_FIX_PIX_BLIND_ALIGNED_MAX_D_MM": 150,
  "ROUTE_FIX_FORCE_MAX_NO_LINE_MM": 120,
- "VISION_GREEN_V_MIN_MED": 60,
+ "VISION_GREEN_V_MIN_MED": 45,
  "ROUTE_PARK_OBS_PRIOR": true,
  "_fuente": "carrera_bench.json",
- "_preset": "ruta_perfil"
+ "_preset": "ruta_perfil",
+ "ROUTE_FIX_SEAT_ODO_OVER_MM": 500,
+ "ROUTE_FIX_BLUE_RANGE_MARGIN_MM": 600
 }

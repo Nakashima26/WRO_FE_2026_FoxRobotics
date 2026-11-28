@@ -256,7 +256,8 @@ class FirmwareSIL:
         if not line.endswith("\n"):
             line += "\n"
         t = self.now_us if arrival_us is None else int(arrival_us)
-        self._lib.sil_serial2_rx_push(line.encode("utf-8"), len(line), ctypes.c_uint64(t))
+        payload = line.encode("utf-8")
+        self._lib.sil_serial2_rx_push(payload, len(payload), ctypes.c_uint64(t))
 
     def pop_serial2_lines(self) -> list[tuple[int, str]]:
         out: list[tuple[int, str]] = []
