@@ -1916,7 +1916,7 @@ PARK_AJ int          PARK_PL_RECTA               = 1;       // 1 = tramo 1: reve
 PARK_AJ float        PARK_PL_RI                  = 85.0f;  // radio efectivo del plan (batalla / tan(53°)); pendiente medir arcos de reversa N30
 PARK_AJ float        PARK_PL_TA_MAX              = 92.0f;
 PARK_AJ float        PARK_PL_T2_PISO             = 12.0f;
-PARK_AJ float        PARK_PL_T1_POR_MM           = 0.0f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM
+PARK_AJ float        PARK_PL_T1_POR_MM           = 0.10f;   // grados mas de theta1 por mm de altura de llegada sobre PARK_PL_H_NOM (orillas404/406: DIRECTO a h 221-250 con T1 45 quedaba adelantado y rozaba la madera; 405 a h 348 perfecto)
 PARK_AJ float        PARK_PL_H_NOM               = 350.0f;
 PARK_AJ float        PARK_PL_T3                  = 25.0f;
 PARK_AJ float        PARK_PL_T4                  = 13.0f;

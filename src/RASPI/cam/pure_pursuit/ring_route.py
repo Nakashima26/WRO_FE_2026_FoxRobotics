@@ -418,6 +418,8 @@ def _plan(direction: str, seats: dict, parking: str | None = None,
     # isla, señales y vista se cachean por malla; las maderas del cajón aparte, porque
     # park_w cambia al fijar el arranque (antes eso recalculaba todo: ~45 ms).
     bar_extra = float(getattr(C, "ROUTE_BARRIER_EXTRA_MM", 0.0) or 0.0)
+    if hug is not None:   # final al cajón: el carro real sale de la esquina 8-10 cm más abierto que el plan (orillas402-406)
+        bar_extra = max(bar_extra, float(getattr(C, "ROUTE_FINAL_BARRIER_EXTRA_MM", 0.0) or 0.0))
     ckey = gridkey + (parking, park_w, bar_extra)
     clear = _STATIC_CACHE.get(ckey)
     if clear is None:

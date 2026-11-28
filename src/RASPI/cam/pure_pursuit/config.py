@@ -175,7 +175,7 @@ LOC_SIGN_CORNER_NO_YAW = None       # True: K[2]=0 en esquina/giro (no corregir 
 LOC_SIGN_CORNER_YAW_NU_MIN = None   # con NO_YAW: solo anula rumbo si |nu| supera este mm (None = siempre)
 LOC_SIGN_CORNER_KEYS = None         # p. ej. ("tL",): gate solo en esos ToF; None = todos los sign/bloque
 LOC_SIGN_TURN_YAW_DEG = None        # |Δyaw| por ACK que cuenta como giro (típ. 0.5–1°)
-LOC_TOF_MAX_MM = {"tL": 650.0, "tR": 450.0, "tF": 240.0, "tB": 240.0}
+LOC_TOF_MAX_MM = {"tL": 650.0, "tR": 450.0, "tF": 400.0, "tB": 240.0}  # tF 240->400 (orillas404: tF 341 a la pared W = pose 11 cm atrás, descartado; giró tarde y pegó en la 1a madera)
 # orillas159 (tL 650): con la pared a >700 el izquierdo se satura y lee 600-645 (esperado 768/793/733 -> 645/622/607),
 # salto falso de 121 mm. orillas160 (tL 600 y esperado <= 600): sin esos saltos pero la recta 3 (pared a 573-690)
 # perdió el izquierdo y el golpe volvió (-88/-90). LOC_TOF_EXPECT_GATE: se descarta si lo esperado pasa de
@@ -1924,6 +1924,7 @@ ROUTE_L23_ENTRY_REPLAN_FRAMES = None  # si se indica, aplica el tope solo al lle
 
 # Final sin U: la ruta pega el carro a la pared del cajon (route_mode: hug). Defaults = los getattr de route_mode.
 ROUTE_BARRIER_EXTRA_MM = 30.0  # margen extra (mm) de la ruta a las maderas del cajón en las vueltas (orillas364/367: al salir de la esquina rozaba la punta)
+ROUTE_FINAL_BARRIER_EXTRA_MM = 0.0  # margen a las maderas en el plan final (hug); 0 = el de las vueltas (orillas404/406: rozaba la 1a madera al salir de la esquina)
 ROUTE_FINAL_D_MM = 640.0       # distancia objetivo a la isla (mm); mas = mas pegado a la pared (640 -> 700: h de llegada al escaneo ~310, el ToF ve mejor las maderas)
 ROUTE_FINAL_LEAD_MM = 1300.0
 ROUTE_FINAL_PWM = None   # tope de rv desde tc >= ROUTE_FINAL_TC (recta del cajón al final); None = sin tope
