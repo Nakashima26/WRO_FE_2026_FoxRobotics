@@ -245,9 +245,25 @@ def test_misread_special_column_recovers_with_clean_normal(monkeypatch):
     interpreter=SurpriseInterpreter()
     monkeypatch.setattr(S,'estimate_height',lambda *a,**k:52.0)
     for _ in range(3):out=interpreter.interpret(positions,bev,image.shape,dm)
+    assert not out['Green'] and not interpreter.special_columns   # caja alta: la forma no es de chico
+    monkeypatch.setattr(C,'SURPRISE_SMALL_HW_MAX',9.0)
+    for _ in range(3):out=interpreter.interpret(positions,bev,image.shape,dm)
     assert out['Green'] and interpreter.special_columns
     monkeypatch.setattr(S,'estimate_height',lambda *a,**k:99.0)
     out=interpreter.interpret(positions,bev,image.shape,dm)
     assert out['Green']   # un solo cuadro no basta
     for _ in range(2):out=interpreter.interpret(positions,bev,image.shape,dm)
     assert out['Red'] and not out['Green'] and not interpreter.special_columns
+
+
+def test_squat_small_at_frame_edge_is_special(monkeypatch):
+    """orillas427: el verde chico pegado a la orilla al salir de la esquina debe confirmarse (caja ~cuadrada)."""
+    import pure_pursuit.surprise as S
+    bev,image,dm,positions=_scene_n_x1(100)
+    x,y,w,h=positions['Red'][0]
+    monkeypatch.setattr(S,'estimate_height',lambda *a,**k:58.0)
+    monkeypatch.setattr(S,'ground_visible',lambda *a,**k:True)
+    interpreter=SurpriseInterpreter()
+    squat={'Red':[(4,y+h-w,w,w)],'Green':[]}
+    for _ in range(4):out=interpreter.interpret(squat,bev,image.shape,dm)
+    assert out['Green']

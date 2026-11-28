@@ -175,7 +175,12 @@ class SurpriseInterpreter:
                     candidate = None
                 # orillas413: el rojo normal en la orilla izquierda, girando, midió 61 mm y se manejó como verde.
                 edge = x < C.SURPRISE_EDGE_PX or x+w > shape[1]-C.SURPRISE_EDGE_PX
-                if candidate in (50, 150) and edge:
+                # orillas427: el verde chico salió de la esquina pegado a la orilla (x<48) y no se confirmó hasta tenerlo encima:
+                # lo golpeó. La forma no depende de la distorsión: el chico se ve ~cuadrado (alto/ancho 0.8-1.1), el normal alto (>=1.4).
+                squat = h <= C.SURPRISE_SMALL_HW_MAX*w
+                if candidate == 50 and not squat:
+                    candidate = None
+                if candidate in (50, 150) and edge and not (candidate == 50 and squat):
                     candidate = None
                 # orillas425: a 1.3-1.4 m tres normales (S/T2, N/T1, W/T1) midieron 40-58 mm y se manejaron volteados; de cerca la altura sí sirve.
                 if candidate in (50, 150) and (foot is None or (C.ROBOT_BEV_Y-foot[1])*C.MM_PER_PX > C.SURPRISE_SPECIAL_MAX_MM):
