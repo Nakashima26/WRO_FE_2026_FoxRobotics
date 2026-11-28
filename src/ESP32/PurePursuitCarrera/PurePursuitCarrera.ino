@@ -1885,12 +1885,12 @@ PARK_AJ float        PARK_GEOM_KH                = 0.15f;   // grados de nariz a
 PARK_AJ float        PARK_GEOM_TH_MAX            = 10.0f;
 PARK_AJ float        PARK_GEOM_WSTOP             = 268.0f;  // w de parada antes del plan (el escaneo directo arranca en ~285 tras el coast); 0 = formula de la reversa en S
 PARK_AJ long         PARK_GEOM_BUSCA_MS          = 6000;
-PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 280.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
+PARK_AJ float        PARK_GEOM_BUSCA_FIN_MM      = 420.0f;  // sin ver la madera con el eje ya a esto detras de pka (la deteccion nominal es en pka - 105): a la U
 PARK_AJ int          PARK_GEOM_PLAN_NORMAL       = 1;       // 1 = el plan de la fase 40 como en el escaneo directo (no el de la reversa en S)
 PARK_AJ int          PARK_GEOM_ROJO              = 1;       // 1 = permite recuperar la banda exterior sin permiso verde (pge=0)
 PARK_AJ int          PARK_GEOM_RESCATE           = 1;       // 1 = solo cuando el DIRECTO ya fallo lejos de la pared (ventana vencida), GEOM en vez de la U; sin pge
 PARK_AJ int          PARK_GEOM_SIN_U             = 1;       // 1 = si la reversa GEOM no halla la madera, ancla con el pka de la Pi y entra (GEOM->U salia ~1/10 en el carro)
-PARK_AJ float        PARK_GEOM_SIN_U_OFS_MM      = -168.0f; // parkDetAlong = pka + esto (gemelo: el sonar en reversa ancla a pka-156..-177 en 7 corridas; el -64 viejo es de antes de W_DET 145)
+PARK_AJ float        PARK_GEOM_SIN_U_OFS_MM      = -277.0f; // parkDetAlong = pka + esto (carro 366/367: el sonar ancló a pka-259 y pka-295; 368/369 con -168 quedó un cajón adelante)
 PARK_AJ int          PARK_RESCATE_LENTO          = 1;       // 2026-11-27 orillas358: DIRECTO fallido antes de pka+DET -> sigue despacio en el carril (fase 41) en vez de volver a la ruta a 255 y frenar resbalando
 PARK_AJ int          PARK_GEOM_ROJO_PWM          = 155;     // avance durante el acercamiento
 PARK_AJ float        PARK_GEOM_FRENO_S           = 0.30f;   // s: la frenada recorre v*esto antes de arrancar la reversa (n1/s21: 651 mm/s -> ~190 mm)
